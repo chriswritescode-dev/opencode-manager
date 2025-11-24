@@ -17,12 +17,12 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    proxy: {
+    proxy: process.env.VITE_API_URL ? {
       '/api': {
-        target: 'http://localhost:8080',
+        target: process.env.VITE_API_URL,
         changeOrigin: true,
       },
-    },
+    } : undefined,
   },
   build: {
     assetsInlineLimit: 4096,

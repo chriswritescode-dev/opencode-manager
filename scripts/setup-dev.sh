@@ -36,7 +36,7 @@ fi
 echo "✅ OpenCode TUI is installed"
 
 # Create workspace directory if it doesn't exist
-WORKSPACE_PATH="${HOME}/.opencode-workspace"
+WORKSPACE_PATH="./workspace"
 if [ ! -d "$WORKSPACE_PATH" ]; then
   echo "📁 Creating workspace directory at $WORKSPACE_PATH..."
   mkdir -p "$WORKSPACE_PATH/repos"
