@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download, Copy, X, Edit3, Save, X as XIcon } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
+import { API_BASE_URL } from '@/constants/api'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001'
+const API_BASE = API_BASE_URL
 
 interface FilePreviewProps {
   file: FileInfo
