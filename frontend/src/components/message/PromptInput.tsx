@@ -495,9 +495,9 @@ export function PromptInput({
             <div className="flex gap-2 items-end">
               <button
                 onClick={handleModeToggle}
-                className={`px-2 py-1 rounded-md text-xs font-medium border ${modeBg} ${modeColor} hover:opacity-80 transition-opacity cursor-pointer`}
+                className={`w-16 px-2 py-1 rounded-md text-xs font-medium border ${modeBg} ${modeColor} hover:opacity-80 transition-opacity cursor-pointer`}
               >
-                {currentMode.toUpperCase()} MODE
+                {currentMode.toUpperCase()} 
               </button>
               {isBashMode && (
                 <div className="px-2 py-1 rounded-md text-xs font-medium border bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400">
