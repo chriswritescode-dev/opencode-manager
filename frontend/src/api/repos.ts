@@ -1,6 +1,7 @@
 import type { Repo } from './types'
+import { API_BASE_URL } from '@/constants/api'
 
-const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:5001'
+const API_BASE = API_BASE_URL
 
 export async function createRepo(
   repoUrl: string,
