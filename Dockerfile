@@ -48,7 +48,7 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5001
 ENV OPENCODE_SERVER_PORT=5551
-ENV DATABASE_PATH=/app/backend/data/opencode.db
+ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
 
 COPY --from=builder /app/backend/dist ./backend/dist
@@ -61,7 +61,7 @@ COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-RUN mkdir -p /workspace /app/backend/data
+RUN mkdir -p /workspace /app/data
 
 EXPOSE 5001
 

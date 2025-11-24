@@ -13,14 +13,14 @@ services:
       - HOST=0.0.0.0
       - PORT=5001
       - OPENCODE_SERVER_PORT=5551
-      - DATABASE_PATH=/app/backend/data/opencode.db
+      - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - DEBUG=true
     volumes:
       - ./backend:/app/backend
       - ./shared:/app/shared
       - opencode-workspace-dev:/workspace
-      - opencode-data-dev:/app/backend/data
+      - opencode-data-dev:/app/data
     restart: unless-stopped
 
   frontend:

@@ -6,7 +6,7 @@ export const ENV = {
   PORT: parseInt(process.env.PORT || '5001'),
   OPENCODE_SERVER_PORT: parseInt(process.env.OPENCODE_SERVER_PORT || '5551'),
   HOST: process.env.HOST || '0.0.0.0',
-  DATABASE_PATH: process.env.DATABASE_PATH || './backend/data/opencode.db',
+  DATABASE_PATH: process.env.DATABASE_PATH || './data/opencode.db',
   WORKSPACE_PATH: process.env.WORKSPACE_PATH || '~/.opencode-workspace',
   PROCESS_START_WAIT_MS: parseInt(process.env.PROCESS_START_WAIT_MS || '2000'),
   PROCESS_VERIFY_WAIT_MS: parseInt(process.env.PROCESS_VERIFY_WAIT_MS || '1000'),

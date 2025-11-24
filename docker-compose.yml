@@ -11,7 +11,7 @@ services:
       - HOST=0.0.0.0
       - PORT=5001
       - OPENCODE_SERVER_PORT=5551
-      - DATABASE_PATH=/app/backend/data/opencode.db
+      - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000
       - PROCESS_VERIFY_WAIT_MS=1000
@@ -24,7 +24,7 @@ services:
       - DEBUG=false
     volumes:
       - opencode-workspace:/workspace
-      - opencode-data:/app/backend/data
+      - opencode-data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5001/api/health"]
