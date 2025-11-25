@@ -24,7 +24,6 @@ interface SessionDetailHeaderProps {
   repoDirectory: string | undefined;
   onFileBrowserOpen: () => void;
   onSettingsOpen: () => void;
-  onShowModelsDialog?: () => void;
 }
 
 export function SessionDetailHeader({
@@ -68,12 +67,12 @@ export function SessionDetailHeader({
               <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
                 {repoName}
               </p>
-<BranchSwitcher
-                  repoId={repoId}
-                  currentBranch={currentBranch}
-                  isWorktree={repo.isWorktree}
-                  repoUrl={repo.repoUrl}
-                />
+              <BranchSwitcher
+                repoId={repoId}
+                currentBranch={currentBranch}
+                isWorktree={repo.isWorktree}
+                repoUrl={repo.repoUrl}
+              />
             </div>
           </div>
         </div>
