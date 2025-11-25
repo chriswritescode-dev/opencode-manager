@@ -4,7 +4,8 @@ import { listRepos, deleteRepo } from "@/api/repos";
 import { DeleteDialog } from "@/components/ui/delete-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Loader2, GitBranch, Search, Trash2 } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Loader2, GitBranch, Search, Trash2, MoreHorizontal } from "lucide-react";
 import { RepoCard } from "./RepoCard";
 
 export function RepoList() {
@@ -141,7 +142,7 @@ export function RepoList() {
             <Button
               onClick={handleSelectAll}
               variant={selectedRepos.size > 0 ? "default" : "outline"}
-              className="whitespace-nowrap"
+              className="whitespace-nowrap hidden md:flex"
             >
               {filteredRepos.every((repo) => selectedRepos.has(repo.id))
                 ? "Deselect All"
@@ -157,15 +158,35 @@ export function RepoList() {
             <Trash2 className="w-4 h-4 mr-2" />
             Delete ({selectedRepos.size})
           </Button>
-          <Button
-            onClick={handleBatchDelete}
-            variant="destructive"
-            disabled={selectedRepos.size === 0}
-            size="icon"
-            className="md:hidden"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                className="md:hidden"
+                disabled={filteredRepos.length === 0}
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {filteredRepos.length > 0 && (
+                <DropdownMenuItem onClick={handleSelectAll}>
+                  {filteredRepos.every((repo) => selectedRepos.has(repo.id))
+                    ? "Deselect All"
+                    : "Select All"}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem 
+                onClick={handleBatchDelete}
+                disabled={selectedRepos.size === 0}
+                className="text-destructive focus:text-destructive"
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete ({selectedRepos.size})
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className="h-[calc(100vh-200px)] overflow-y-auto">
