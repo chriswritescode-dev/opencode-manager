@@ -56,7 +56,7 @@ RUN curl -fsSL https://opencode.ai/install | bash && \
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
-ENV PORT=5001
+ENV PORT=5003
 ENV OPENCODE_SERVER_PORT=5551
 ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
@@ -73,10 +73,10 @@ RUN chmod +x /docker-entrypoint.sh
 
 RUN mkdir -p /workspace /app/data
 
-EXPOSE 5001
+EXPOSE 5003
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-  CMD curl -f http://localhost:5001/api/health || exit 1
+  CMD curl -f http://localhost:5003/api/health || exit 1
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["bun", "backend/dist/index.js"]

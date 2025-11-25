@@ -153,14 +153,17 @@ app.all('/api/opencode/*', async (c) => {
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
 
 if (isProduction) {
-  app.use('/*', async (c, next) => {
-    if (c.req.path.startsWith('/api/')) {
-      return next()
-    }
-    return serveStatic({ root: './frontend/dist' })(c, next)
-  })
+  app.use('/*', serveStatic({ root: './frontend/dist' }))
+  
   app.get('*', async (c) => {
-    return serveStatic({ path: './frontend/dist/index.html' })(c, async () => {})
+    if (c.req.path.startsWith('/api/')) {
+      return c.notFound()
+    }
+    const fs = await import('fs/promises')
+    const path = await import('path')
+    const indexPath = path.join(process.cwd(), 'frontend/dist/index.html')
+    const html = await fs.readFile(indexPath, 'utf-8')
+    return c.html(html)
   })
 } else {
   app.get('/', (c) => {

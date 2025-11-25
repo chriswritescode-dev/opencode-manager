@@ -7,11 +7,11 @@ services:
     container_name: opencode-backend-dev
     command: sh -c "cd /app && bun --watch backend/src/index.ts"
     ports:
-      - "5001:5001"
+      - "5003:5003"
     environment:
       - NODE_ENV=development
       - HOST=0.0.0.0
-      - PORT=5001
+      - PORT=5003
       - OPENCODE_SERVER_PORT=5551
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
@@ -33,7 +33,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_API_URL=http://localhost:5001
+      - VITE_API_URL=http://localhost:5003
     volumes:
       - ./frontend:/app/frontend
       - ./shared:/app/shared
