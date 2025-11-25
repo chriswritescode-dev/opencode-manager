@@ -1,10 +1,11 @@
 import { spawn, execSync } from 'child_process'
 import path from 'path'
 import { logger } from '../utils/logger'
-import { getWorkspacePath, ENV } from '../config'
+import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '../config'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
+const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
@@ -78,7 +79,7 @@ class OpenCodeServerManager {
         env: {
           ...process.env,
           XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
-          OPENCODE_CONFIG: path.join(OPENCODE_SERVER_DIRECTORY, '.config/opencode/opencode.json')
+          OPENCODE_CONFIG: OPENCODE_CONFIG_PATH
         }
       }
     )

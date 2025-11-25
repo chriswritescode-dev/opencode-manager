@@ -7,8 +7,7 @@ import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 import { withTransactionAsync } from '../db/transactions'
-import path from 'path'
-import { getReposPath, getWorkspacePath } from '../config'
+import { getOpenCodeConfigFilePath } from '../config'
 
 export function createRepoRoutes(database: Database) {
   const app = new Hono()
@@ -34,10 +33,10 @@ export function createRepoRoutes(database: Database) {
         const configContent = settingsService.getOpenCodeConfigContent(openCodeConfigName)
         
         if (configContent) {
-          const workingDir = path.join(getReposPath(), repo.localPath)
-          const configPath = `${workingDir}/opencode.json`
-          await writeFileContent(configPath, configContent)
+          const openCodeConfigPath = getOpenCodeConfigFilePath()
+          await writeFileContent(openCodeConfigPath, configContent)
           db.updateRepoConfigName(database, repo.id, openCodeConfigName)
+          logger.info(`Applied config '${openCodeConfigName}' to: ${openCodeConfigPath}`)
         }
       }
       
@@ -138,21 +137,14 @@ export function createRepoRoutes(database: Database) {
         return c.json({ error: `Config '${configName}' not found` }, 404)
       }
       
-      const workingDir = path.join(getReposPath(), repo.localPath)
-      const workspaceConfigPath = `${getWorkspacePath()}/opencode.json`
-      const repoConfigPath = `${workingDir}/opencode.json`
+      const openCodeConfigPath = getOpenCodeConfigFilePath()
       
-      // Write to workspace as main config
-      await writeFileContent(workspaceConfigPath, configContent)
-      
-      // Also write to repo directory for repo-specific usage
-      await writeFileContent(repoConfigPath, configContent)
+      await writeFileContent(openCodeConfigPath, configContent)
       
       db.updateRepoConfigName(database, id, configName)
       
       logger.info(`Switched config for repo ${id} to '${configName}'`)
-      logger.info(`Updated workspace config: ${workspaceConfigPath}`)
-      logger.info(`Updated repo config: ${repoConfigPath}`)
+      logger.info(`Updated OpenCode config: ${openCodeConfigPath}`)
       
       // Restart OpenCode server to pick up new workspace config
       logger.info('Restarting OpenCode server due to workspace config change')

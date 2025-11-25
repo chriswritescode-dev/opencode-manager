@@ -3,11 +3,11 @@ import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import { writeFileContent } from '../services/file-operations'
+import { getOpenCodeConfigFilePath } from '../config'
 import { 
   UserPreferencesSchema, 
   OpenCodeConfigSchema,
-  OpenCodeConfigMetadataSchema,
-  CustomCommandSchema
 } from '../types/settings'
 import { logger } from '../utils/logger'
 
@@ -100,8 +100,12 @@ export function createSettingsRoutes(db: Database) {
       
       const config = settingsService.createOpenCodeConfig(validated, userId)
       
-      // Restart OpenCode server if this is the new default config
       if (validated.isDefault) {
+        const configPath = getOpenCodeConfigFilePath()
+        const configContent = JSON.stringify(config.content, null, 2)
+        await writeFileContent(configPath, configContent)
+        logger.info(`Wrote default config to: ${configPath}`)
+        
         logger.info('Restarting OpenCode server with new default config')
         await opencodeServerManager.stop()
         await opencodeServerManager.start()
@@ -129,8 +133,12 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Config not found' }, 404)
       }
       
-      // Restart OpenCode server if config was set as default
       if (validated.isDefault) {
+        const configPath = getOpenCodeConfigFilePath()
+        const configContent = JSON.stringify(config.content, null, 2)
+        await writeFileContent(configPath, configContent)
+        logger.info(`Wrote default config to: ${configPath}`)
+        
         logger.info('Restarting OpenCode server with updated default config')
         await opencodeServerManager.stop()
         await opencodeServerManager.start()
@@ -172,6 +180,15 @@ export function createSettingsRoutes(db: Database) {
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
       }
+      
+      const configPath = getOpenCodeConfigFilePath()
+      const configContent = JSON.stringify(config.content, null, 2)
+      await writeFileContent(configPath, configContent)
+      logger.info(`Wrote default config '${configName}' to: ${configPath}`)
+      
+      logger.info('Restarting OpenCode server with new default config')
+      await opencodeServerManager.stop()
+      await opencodeServerManager.start()
       
       return c.json(config)
     } catch (error) {
@@ -220,7 +237,7 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Command with this name already exists' }, 409)
       }
       
-      const updatedSettings = settingsService.updateSettings({
+      settingsService.updateSettings({
         customCommands: [...settings.preferences.customCommands, validated]
       }, userId)
       
@@ -254,7 +271,7 @@ export function createSettingsRoutes(db: Database) {
         promptTemplate: validated.promptTemplate
       }
       
-      const updatedSettings = settingsService.updateSettings({
+      settingsService.updateSettings({
         customCommands: updatedCommands
       }, userId)
       
@@ -280,7 +297,7 @@ export function createSettingsRoutes(db: Database) {
       }
       
       const updatedCommands = settings.preferences.customCommands.filter(cmd => cmd.name !== commandName)
-      const updatedSettings = settingsService.updateSettings({
+      settingsService.updateSettings({
         customCommands: updatedCommands
       }, userId)
       

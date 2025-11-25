@@ -9,7 +9,8 @@ import { createHealthRoutes } from './routes/health'
 
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
-import { ensureDirectoryExists } from './services/file-operations'
+import { ensureDirectoryExists, writeFileContent } from './services/file-operations'
+import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { cleanupOrphanedDirectories } from './services/repo'
 import { proxyRequest } from './services/proxy'
@@ -18,6 +19,7 @@ import {
   getWorkspacePath, 
   getReposPath, 
   getConfigPath,
+  getOpenCodeConfigFilePath,
   getDatabasePath,
   ENV
 } from './config'
@@ -35,6 +37,20 @@ app.use('/*', cors({
 
 const db = initializeDatabase(DB_PATH)
 
+async function syncDefaultConfigToDisk(): Promise<void> {
+  const settingsService = new SettingsService(db)
+  const defaultConfig = settingsService.getDefaultOpenCodeConfig()
+  
+  if (defaultConfig) {
+    const configPath = getOpenCodeConfigFilePath()
+    const configContent = JSON.stringify(defaultConfig.content, null, 2)
+    await writeFileContent(configPath, configContent)
+    logger.info(`Synced default config '${defaultConfig.name}' to: ${configPath}`)
+  } else {
+    logger.info('No default OpenCode config found in database')
+  }
+}
+
 try {
   await ensureDirectoryExists(getWorkspacePath())
   await ensureDirectoryExists(getReposPath())
@@ -43,6 +59,8 @@ try {
   
   await cleanupOrphanedDirectories(db)
   logger.info('Orphaned directory cleanup completed')
+  
+  await syncDefaultConfigToDisk()
   
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
