@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
-import { getReposPath } from '../../../shared/src/constants'
+import { getReposPath } from '../config'
 import path from 'path'
 
 export interface RepoRow {

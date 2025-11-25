@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import { 
   UserPreferencesSchema, 
   OpenCodeConfigSchema,
@@ -98,6 +99,14 @@ export function createSettingsRoutes(db: Database) {
       const validated = CreateOpenCodeConfigSchema.parse(body)
       
       const config = settingsService.createOpenCodeConfig(validated, userId)
+      
+      // Restart OpenCode server if this is the new default config
+      if (validated.isDefault) {
+        logger.info('Restarting OpenCode server with new default config')
+        await opencodeServerManager.stop()
+        await opencodeServerManager.start()
+      }
+      
       return c.json(config)
     } catch (error) {
       logger.error('Failed to create OpenCode config:', error)
@@ -118,6 +127,13 @@ export function createSettingsRoutes(db: Database) {
       const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
+      }
+      
+      // Restart OpenCode server if config was set as default
+      if (validated.isDefault) {
+        logger.info('Restarting OpenCode server with updated default config')
+        await opencodeServerManager.stop()
+        await opencodeServerManager.start()
       }
       
       return c.json(config)

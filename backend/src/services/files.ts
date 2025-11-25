@@ -11,8 +11,7 @@ import {
   getFileStats, 
   listDirectory 
 } from './file-operations'
-import { FILE_LIMITS, ALLOWED_MIME_TYPES } from '../../../shared/src/constants'
-import { getReposPath } from '../../../shared/src/constants'
+import { FILE_LIMITS, ALLOWED_MIME_TYPES, getReposPath } from '../config'
 
 const SHARED_WORKSPACE_BASE = getReposPath()
 

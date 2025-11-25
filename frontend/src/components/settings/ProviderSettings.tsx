@@ -9,7 +9,7 @@ import { Loader2, Key, Check, X, Plus } from 'lucide-react'
 import { providerCredentialsApi } from '@/api/providers'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AddProviderDialog } from './AddProviderDialog'
-import { useProviders } from '@/hooks/useProviders'
+import { getProviders } from '@/api/providers'
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -18,7 +18,11 @@ export function ProviderSettings() {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const queryClient = useQueryClient()
 
-  const { data: providers, isLoading: providersLoading } = useProviders()
+  const { data: providers, isLoading: providersLoading } = useQuery({
+    queryKey: ['providers'],
+    queryFn: () => getProviders(),
+    staleTime: 300000,
+  })
 
   const { data: credentialsList, isLoading: credentialsLoading } = useQuery({
     queryKey: ['provider-credentials'],

@@ -39,6 +39,7 @@ export interface Provider {
   env: string[];
   npm?: string;
   models: Record<string, Model>;
+  options?: Record<string, unknown>;
 }
 
 export interface ProviderWithModels {

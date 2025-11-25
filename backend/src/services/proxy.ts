@@ -1,7 +1,7 @@
 import { logger } from '../utils/logger'
 import { ENV } from '../config'
 
-const OPENCODE_SERVER_URL = `http://localhost:${ENV.OPENCODE_SERVER_PORT}`
+const OPENCODE_SERVER_URL = `http://127.0.0.1:${ENV.OPENCODE.PORT}`
 
 export async function proxyRequest(request: Request) {
   const url = new URL(request.url)

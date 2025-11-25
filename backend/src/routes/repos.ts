@@ -4,10 +4,11 @@ import * as db from '../db/queries'
 import * as repoService from '../services/repo'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 import { withTransactionAsync } from '../db/transactions'
 import path from 'path'
-import { getReposPath } from '../../../shared/src/constants'
+import { getReposPath, getWorkspacePath } from '../config'
 
 export function createRepoRoutes(database: Database) {
   const app = new Hono()
@@ -138,12 +139,25 @@ export function createRepoRoutes(database: Database) {
       }
       
       const workingDir = path.join(getReposPath(), repo.localPath)
-      const configPath = `${workingDir}/opencode.json`
+      const workspaceConfigPath = `${getWorkspacePath()}/opencode.json`
+      const repoConfigPath = `${workingDir}/opencode.json`
       
-      await writeFileContent(configPath, configContent)
+      // Write to workspace as main config
+      await writeFileContent(workspaceConfigPath, configContent)
+      
+      // Also write to repo directory for repo-specific usage
+      await writeFileContent(repoConfigPath, configContent)
+      
       db.updateRepoConfigName(database, id, configName)
       
       logger.info(`Switched config for repo ${id} to '${configName}'`)
+      logger.info(`Updated workspace config: ${workspaceConfigPath}`)
+      logger.info(`Updated repo config: ${repoConfigPath}`)
+      
+      // Restart OpenCode server to pick up new workspace config
+      logger.info('Restarting OpenCode server due to workspace config change')
+      await opencodeServerManager.stop()
+      await opencodeServerManager.start()
       
       const updatedRepo = db.getRepoById(database, id)
       return c.json(updatedRepo)

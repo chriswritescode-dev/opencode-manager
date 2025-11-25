@@ -3,15 +3,18 @@
 import { writeFile } from 'fs/promises'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
+import {ENV} from '../backend/src/config'
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const OPENCODE_SERVER_URL = process.env.OPENCODE_SERVER_URL || 'http://localhost:5561'
+
+const OPENCODE_URL = ENV.VITE_API_URL + '/api/opencode'
 
 async function generateOpenAPISpec() {
-  console.log(`📥 Fetching OpenAPI spec from ${OPENCODE_SERVER_URL}/doc...`)
+  console.log(`📥 Fetching OpenAPI spec from ${OPENCODE_URL}/doc`)
   
   try {
-    const response = await fetch(`${OPENCODE_SERVER_URL}/doc`, {
+    const response = await fetch(`${OPENCODE_URL }/doc`, {
       headers: {
         'Accept': 'application/json'
       }

@@ -2,33 +2,18 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { FileTree } from './FileTree'
 import { FileOperations } from './FileOperations'
 import { FilePreview } from './FilePreview'
+import { MobileFilePreviewModal } from './MobileFilePreviewModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
+import { FolderOpen, Upload, RefreshCw } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { API_BASE_URL } from '@/constants/api'
+import { useMobile } from '@/hooks/useMobile'
+import { useFile } from '@/api/files'
 
-const API_BASE = API_BASE_URL
 
-// Hook to detect mobile screens
-const useIsMobile = () => {
-  const [isMobile, setIsMobile] = useState(false)
 
-  useEffect(() => {
-    const checkIsMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-
-    checkIsMobile()
-    window.addEventListener('resize', checkIsMobile)
-
-    return () => window.removeEventListener('resize', checkIsMobile)
-  }, [])
-
-  return isMobile
-}
 
 interface FileBrowserProps {
   basePath?: string
@@ -48,42 +33,31 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
   const [isPreviewModalOpen, setIsPreviewModalOpen] = useState(false)
   
   const dropZoneRef = useRef<HTMLDivElement>(null)
-  const isMobile = useIsMobile()
+  const isMobile = useMobile()
 
-   useEffect(() => {
-     if (initialSelectedFile) {
-       const loadInitialFile = async () => {
-         try {
-           const url = `${API_BASE}/api/files/${initialSelectedFile}`
-           
-           const response = await fetch(url)
-           
-           if (response.ok) {
-             const fileData = await response.json()
-            setSelectedFile(fileData)
-            if (isMobile) {
-              setIsPreviewModalOpen(true)
-            }
-          } else {
-            const errorText = await response.text()
-            console.error('[FileBrowser] Failed to load file:', errorText)
-            setError(`Failed to load file: ${errorText}`)
-          }
-        } catch (err) {
-          console.error('[FileBrowser] Failed to load initial file:', err)
-          setError(err instanceof Error ? err.message : 'Failed to load file')
-        }
-      }
-      loadInitialFile()
+   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
+
+useEffect(() => {
+  if (initialFileData) {
+    setSelectedFile(initialFileData)
+    if (isMobile) {
+      setIsPreviewModalOpen(true)
     }
-  }, [initialSelectedFile, isMobile, basePath])
+  }
+}, [initialFileData, isMobile])
+
+useEffect(() => {
+  if (initialFileError) {
+    setError(initialFileError.message)
+  }
+}, [initialFileError])
 
   const loadFiles = async (path: string) => {
     setLoading(true)
     setError(null)
     
     try {
-      const response = await fetch(`${API_BASE}/api/files/${path}`)
+      const response = await fetch(`${API_BASE_URL}/api/files/${path}`)
       if (!response.ok) {
         throw new Error(`Failed to load files: ${response.statusText}`)
       }
@@ -107,7 +81,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
     // Fetch the full file content when selecting a file
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE}/api/files/${file.path}`)
+      const response = await fetch(`${API_BASE_URL}/api/files/${file.path}`)
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`)
       }
@@ -133,14 +107,6 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
     setSelectedFile(null)
   }
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    e.preventDefault()
-  }
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    e.preventDefault()
-  }
-
   const handleDirectoryClick = (path: string) => {
     loadFiles(path)
   }
@@ -154,7 +120,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
     formData.append('file', files[0])
     
     try {
-      const response = await fetch(`${API_BASE}/api/files/${currentPath}`, {
+      const response = await fetch(`${API_BASE_URL}/api/files/${currentPath}`, {
         method: 'POST',
         body: formData,
       })
@@ -171,7 +137,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
 
   const handleCreateFile = async (name: string, type: 'file' | 'folder') => {
     try {
-      const response = await fetch(`${API_BASE}/api/files/${currentPath}/${name}`, {
+      const response = await fetch(`${API_BASE_URL}/api/files/${currentPath}/${name}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, content: type === 'file' ? '' : undefined }),
@@ -189,7 +155,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
 
   const handleDelete = async (path: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/files/${path}`, {
+      const response = await fetch(`${API_BASE_URL}/api/files/${path}`, {
         method: 'DELETE',
       })
       
@@ -206,7 +172,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
 
   const handleRename = async (oldPath: string, newPath: string) => {
     try {
-      const response = await fetch(`${API_BASE}/api/files/${oldPath}`, {
+      const response = await fetch(`${API_BASE_URL}/api/files/${oldPath}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPath }),
@@ -305,11 +271,11 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
         )}
         
         {/* Mobile: Full width file listing, Desktop: Split view */}
-        <div className="flex-1 flex overflow-hidden">
-          <div className={`${isMobile ? 'w-full' : 'w-1/2'} border-r border-border px-4 flex flex-col`}>
+        <div className="flex-1 flex overflow-hidden min-h-0">
+          <div className={`${isMobile ? 'w-full' : 'w-1/2'} border-r border-border px-4 flex flex-col min-h-0`}>
             <div className="flex items-center gap-2 mb-4 mt-4 flex-shrink-0">
               <Input
-                placeholder="Search files..."
+                placeholder="Search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="flex-1"
@@ -330,7 +296,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
               </div>
             )}
             
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0">
               {loading ? (
                 <div className="flex items-center justify-center h-64">
                   <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
@@ -352,7 +318,7 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
           
           {/* Desktop only: Preview panel */}
           {!isMobile && (
-            <div className="flex-1 pl-4 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0 pb-8">
               {selectedFile && !selectedFile.isDirectory ? (
                 <FilePreview file={selectedFile} />
               ) : (
@@ -365,17 +331,12 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
         </div>
 
 {/* Mobile: File Preview Modal */}
-        {isMobile && selectedFile && !selectedFile.isDirectory && (
-          <Dialog open={isPreviewModalOpen} onOpenChange={(open) => !open && handleCloseModal()}>
-            <DialogContent 
-              className="w-screen h-screen max-w-none max-h-none p-0 bg-background border-0 flex flex-col [&>button:last-child]:hidden"
-            >
-              <div className="flex-1 overflow-hidden min-h-0">
-                <FilePreview file={selectedFile} hideHeader={false} isMobileModal={true} onCloseModal={handleCloseModal} />
-              </div>
-            </DialogContent>
-          </Dialog>
-        )}
+        <MobileFilePreviewModal 
+          isOpen={isMobile && isPreviewModalOpen}
+          onClose={handleCloseModal}
+          file={selectedFile}
+          showFilePreviewHeader={true}
+        />
       </div>
     )
   }
@@ -410,19 +371,6 @@ export function FileBrowser({ basePath = '', onFileSelect, embedded = false, ini
             </Button>
           </div>
           
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="Search files..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="flex-1"
-            />
-            <FileOperations
-onUpload={handleUpload}
-                onCreate={handleCreateFile}
-            />
-          </div>
-          
           {error && (
             <div className="text-sm text-destructive bg-destructive/10 p-2 rounded">
               {error}
@@ -430,12 +378,12 @@ onUpload={handleUpload}
           )}
         </CardHeader>
         
-        <CardContent className="flex-1 flex overflow-hidden">
+        <CardContent className="flex-1 flex overflow-hidden min-h-0">
           {/* Mobile: Full width file listing, Desktop: Split view */}
-          <div className={`${isMobile ? 'w-full' : 'w-1/3'} border-r pr-4 flex flex-col`}>
+          <div className={`${isMobile ? 'w-full' : 'w-1/3'} border-r pr-4 flex flex-col min-h-0`}>
             <div className="flex items-center gap-2 mb-4 flex-shrink-0">
               <Input
-                placeholder="Search files..."
+                placeholder="Search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="flex-1"
@@ -452,7 +400,7 @@ onUpload={handleUpload}
                 <RefreshCw className="w-6 h-6 animate-spin" />
               </div>
             ) : (
-              <div className="flex-1 overflow-y-auto">
+              <div className="flex-1 overflow-y-auto min-h-0">
                 <FileTree
                   files={filteredFiles || []}
                   onFileSelect={handleFileSelect}
@@ -469,7 +417,7 @@ onUpload={handleUpload}
           
           {/* Desktop only: Preview panel */}
           {!isMobile && (
-            <div className="flex-1 pl-4 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto min-h-0 ">
               {selectedFile && !selectedFile.isDirectory ? (
                 <FilePreview file={selectedFile} />
               ) : (
@@ -483,34 +431,11 @@ onUpload={handleUpload}
       </Card>
 
 {/* Mobile: File Preview Modal */}
-      {isMobile && selectedFile && !selectedFile.isDirectory && (
-        <Dialog open={isPreviewModalOpen} onOpenChange={(open) => !open && handleCloseModal()}>
-          <DialogContent 
-            className="w-screen h-screen max-w-none max-h-none p-0 bg-background border-0 flex flex-col"
-            onTouchStart={handleTouchStart}
-            onTouchEnd={handleTouchEnd}
-          >
-            <DialogHeader className="p-4 border-b border-border flex-shrink-0 relative bg-background z-10">
-              <div className="flex justify-center mb-2">
-                <div className="w-8 h-1 bg-muted rounded-full"></div>
-              </div>
-              <DialogTitle className="text-foreground text-lg pr-12">
-                {selectedFile.name}
-              </DialogTitle>
-              <button
-                onClick={handleCloseModal}
-                className="absolute right-4 top-4 p-2 rounded-md hover:bg-muted text-foreground transition-colors touch-manipulation bg-muted border border-border"
-                aria-label="Close modal"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </DialogHeader>
-            <div className="flex-1 overflow-hidden min-h-0">
-              <FilePreview file={selectedFile} hideHeader={true} />
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
+      <MobileFilePreviewModal 
+        isOpen={isMobile && isPreviewModalOpen}
+        onClose={handleCloseModal}
+        file={selectedFile}
+      />
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { FileBrowser } from './FileBrowser'
 import { Button } from '@/components/ui/button'
 import { X } from 'lucide-react'
@@ -12,6 +12,7 @@ interface FileBrowserSheetProps {
 }
 
 export function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, initialSelectedFile }: FileBrowserSheetProps) {
+  const [isEditing, setIsEditing] = useState(false)
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -20,13 +21,19 @@ export function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, ini
       }
     }
 
+    const handleEditModeChange = (event: CustomEvent<{ isEditing: boolean }>) => {
+      setIsEditing(event.detail.isEditing)
+    }
+
     if (isOpen) {
       document.addEventListener('keydown', handleEscape)
+      document.addEventListener('editModeChange', handleEditModeChange as EventListener)
       document.body.style.overflow = 'hidden'
     }
 
     return () => {
       document.removeEventListener('keydown', handleEscape)
+      document.removeEventListener('editModeChange', handleEditModeChange as EventListener)
       document.body.style.overflow = 'unset'
     }
   }, [isOpen, onClose])
@@ -49,14 +56,16 @@ export function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, ini
                 </span>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={onClose}
-              className="text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
-            >
-              <X className="w-5 h-5" />
-            </Button>
+            {!isEditing && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            )}
           </div>
         </div>
 

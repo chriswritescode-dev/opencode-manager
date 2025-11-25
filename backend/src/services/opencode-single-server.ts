@@ -1,11 +1,9 @@
-import { spawn } from 'child_process'
-import { logger } from '../utils/logger'
-import { getWorkspacePath } from '../../../shared/src/constants'
-import { execSync } from 'child_process'
-import { ENV } from '../config'
+import { spawn, execSync } from 'child_process'
 import path from 'path'
+import { logger } from '../utils/logger'
+import { getWorkspacePath, ENV } from '../config'
 
-const OPENCODE_SERVER_PORT = ENV.OPENCODE_SERVER_PORT
+const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
 
 class OpenCodeServerManager {
@@ -29,7 +27,7 @@ class OpenCodeServerManager {
       return
     }
 
-    const isDevelopment = process.env.NODE_ENV !== 'production'
+    const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
     
     const existingProcesses = await this.findProcessesByPort(OPENCODE_SERVER_PORT)
     if (existingProcesses.length > 0) {
@@ -66,29 +64,25 @@ class OpenCodeServerManager {
       }
     }
 
-    logger.info(`Starting OpenCode server on port ${OPENCODE_SERVER_PORT} (${isDevelopment ? 'development' : 'production'} mode)`)
     logger.info(`OpenCode server working directory: ${OPENCODE_SERVER_DIRECTORY}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
     
-    const hostname = isDevelopment ? '0.0.0.0' : '127.0.0.1'
     
     this.serverProcess = spawn(
       'opencode', 
-      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', hostname],
+      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', '127.0.0.1'],
       {
         cwd: OPENCODE_SERVER_DIRECTORY,
         detached: !isDevelopment,
         stdio: isDevelopment ? 'inherit' : 'ignore',
         env: {
           ...process.env,
-          XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state')
+          XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
+          OPENCODE_CONFIG: path.join(OPENCODE_SERVER_DIRECTORY, '.config/opencode/opencode.json')
         }
       }
     )
 
-    if (!isDevelopment) {
-      this.serverProcess.unref()
-    }
     this.serverPid = this.serverProcess.pid
 
     logger.info(`OpenCode server started with PID ${this.serverPid}`)
@@ -131,7 +125,7 @@ class OpenCodeServerManager {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const response = await fetch(`http://localhost:${OPENCODE_SERVER_PORT}/doc`, {
+      const response = await fetch(`http://127.0.0.1:${OPENCODE_SERVER_PORT}/doc`, {
         signal: AbortSignal.timeout(3000)
       })
       return response.ok

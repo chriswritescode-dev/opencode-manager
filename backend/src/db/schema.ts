@@ -53,6 +53,10 @@ export function initializeDatabase(dbPath: string = './data/opencode.db'): Datab
   
   runMigrations(db)
   
+  // Force database file creation by performing a write
+  db.prepare('INSERT OR IGNORE INTO user_preferences (user_id, preferences, updated_at) VALUES (?, ?, ?)')
+    .run('default', '{}', Date.now())
+  
   logger.info('Database initialized successfully')
   
   return db

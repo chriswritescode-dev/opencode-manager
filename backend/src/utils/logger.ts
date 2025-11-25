@@ -1,3 +1,5 @@
+import { ENV } from '../config'
+
 type LogLevel = 'info' | 'warn' | 'error' | 'debug'
 
 class Logger {
@@ -7,7 +9,7 @@ class Logger {
     this.prefix = prefix
   }
 
-  private format(level: LogLevel, message: string, ...args: unknown[]): string {
+  private format(level: LogLevel, message: string): string {
     const timestamp = new Date().toISOString()
     const prefixStr = this.prefix ? `[${this.prefix}] ` : ''
     return `[${timestamp}] [${level.toUpperCase()}] ${prefixStr}${message}`
@@ -26,7 +28,7 @@ class Logger {
   }
 
   debug(message: string, ...args: unknown[]): void {
-    if (process.env.DEBUG) {
+    if (ENV.LOGGING.DEBUG) {
       console.debug(this.format('debug', message), ...args)
     }
   }

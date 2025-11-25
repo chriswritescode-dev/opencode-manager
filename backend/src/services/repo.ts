@@ -5,7 +5,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
-import { getReposPath } from '../../../shared/src/constants'
+import { getReposPath } from '../config'
 import path from 'path'
 
 export async function cloneRepo(

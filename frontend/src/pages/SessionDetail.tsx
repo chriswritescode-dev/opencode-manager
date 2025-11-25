@@ -40,7 +40,7 @@ export function SessionDetail() {
 
   
 
-  const opcodeUrl = repo ? OPENCODE_API_ENDPOINT : null;
+  const opcodeUrl = OPENCODE_API_ENDPOINT;
   
   const repoDirectory = repo?.fullPath;
 

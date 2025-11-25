@@ -9,7 +9,10 @@
     ".": "./src/index.ts",
     "./schemas": "./src/schemas/index.ts",
     "./types": "./src/types/index.ts",
-    "./constants": "./src/constants.ts"
+    "./config": "./src/config/index.ts",
+    "./config/defaults": "./src/config/defaults.ts",
+    "./config/env": "./src/config/env.ts",
+    "./config/client": "./src/config/client.ts"
   },
   "dependencies": {
     "dotenv": "^17.2.3",

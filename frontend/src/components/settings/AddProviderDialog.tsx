@@ -56,7 +56,7 @@ export function AddProviderDialog({ open, onOpenChange }: AddProviderDialogProps
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
-      queryClient.invalidateQueries({ queryKey: ['opencode-providers'] })
+      queryClient.invalidateQueries({ queryKey: ['providers'] })
       handleClose()
     },
   })

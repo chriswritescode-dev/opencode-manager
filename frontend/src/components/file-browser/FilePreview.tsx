@@ -69,6 +69,8 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
         const content = decodeBase64(file.content)
         setEditContent(content)
         setViewMode('edit')
+        const event = new CustomEvent('editModeChange', { detail: { isEditing: true } })
+        window.dispatchEvent(event)
       } catch (err) {
         console.error('Failed to load content for editing:', err)
       }
@@ -89,6 +91,8 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
       }
       
       setViewMode('preview')
+      const editEvent = new CustomEvent('editModeChange', { detail: { isEditing: false } })
+      window.dispatchEvent(editEvent)
       const event = new CustomEvent('fileSaved', { detail: { path: file.path, content: editContent } })
       window.dispatchEvent(event)
     } catch (err) {
@@ -101,6 +105,8 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
   const handleCancel = () => {
     setEditContent('')
     setViewMode('preview')
+    const event = new CustomEvent('editModeChange', { detail: { isEditing: false } })
+    window.dispatchEvent(event)
   }
 
   const isTextFile = file.mimeType?.startsWith('text/') || 
@@ -127,7 +133,7 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
-            className="text-sm bg-muted text-foreground p-4 rounded whitespace-pre-wrap font-mono break-words w-full resize-none focus:outline-none focus:ring-0 border-none block"
+            className="text-[16px] bg-muted text-foreground p-2 rounded whitespace-pre-wrap font-mono break-words w-full resize-none focus:outline-none focus:ring-0 border-none block"
             style={{ minHeight: '95vh' }}
             placeholder="Edit file content..."
             autoFocus
@@ -139,7 +145,7 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
       try {
         const textContent = decodeBase64(file.content)
         return (
-          <pre className="text-sm bg-muted text-foreground p-4 rounded whitespace-pre-wrap font-mono break-words overflow-x-hidden">
+          <pre className="pb-[200px] text-sm bg-muted text-foreground rounded whitespace-pre-wrap font-mono break-words overflow-x-hidden">
             <code>{textContent}</code>
           </pre>
         )
