@@ -2,8 +2,8 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
-import { opencodeServerManager } from '../services/opencode-single-server'
 import { writeFileContent } from '../services/file-operations'
+import { patchOpenCodeConfig } from '../services/proxy'
 import { getOpenCodeConfigFilePath } from '../config'
 import { 
   UserPreferencesSchema, 
@@ -100,15 +100,13 @@ export function createSettingsRoutes(db: Database) {
       
       const config = settingsService.createOpenCodeConfig(validated, userId)
       
-      if (validated.isDefault) {
+      if (config.isDefault) {
         const configPath = getOpenCodeConfigFilePath()
         const configContent = JSON.stringify(config.content, null, 2)
         await writeFileContent(configPath, configContent)
         logger.info(`Wrote default config to: ${configPath}`)
         
-        logger.info('Restarting OpenCode server with new default config')
-        await opencodeServerManager.stop()
-        await opencodeServerManager.start()
+        await patchOpenCodeConfig(config.content)
       }
       
       return c.json(config)
@@ -139,9 +137,7 @@ export function createSettingsRoutes(db: Database) {
         await writeFileContent(configPath, configContent)
         logger.info(`Wrote default config to: ${configPath}`)
         
-        logger.info('Restarting OpenCode server with updated default config')
-        await opencodeServerManager.stop()
-        await opencodeServerManager.start()
+        await patchOpenCodeConfig(config.content)
       }
       
       return c.json(config)
@@ -186,9 +182,7 @@ export function createSettingsRoutes(db: Database) {
       await writeFileContent(configPath, configContent)
       logger.info(`Wrote default config '${configName}' to: ${configPath}`)
       
-      logger.info('Restarting OpenCode server with new default config')
-      await opencodeServerManager.stop()
-      await opencodeServerManager.start()
+      await patchOpenCodeConfig(config.content)
       
       return c.json(config)
     } catch (error) {
