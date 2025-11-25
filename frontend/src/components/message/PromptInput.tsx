@@ -418,7 +418,7 @@ export function PromptInput({
     <div className="border-t border-border bg-background p-2 sm:p-3">
       {isMobile ? (
         <>
-          <div className="mb-2">
+          <div className="">
             <textarea
               ref={textareaRef}
               value={prompt}
@@ -434,7 +434,7 @@ export function PromptInput({
               rows={1}
             />
           </div>
-          <div className="flex gap-2 items-center justify-between  mx-2">
+          <div className="flex gap-2 items-center mx-2">
             <div className="flex gap-2 items-center">
               <button
                 onClick={handleModeToggle}
@@ -452,7 +452,7 @@ export function PromptInput({
                   onClick={onShowModelsDialog}
                   className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer"
                 >
-                  {modelName}
+                  {modelName.length > 20 ? `${modelName.slice(0, 20)}...` : modelName}
                 </button>
               )}
               <DropdownMenu>
@@ -484,7 +484,7 @@ export function PromptInput({
               data-submit-prompt
               onClick={hasActiveStream ? handleStop : handleSubmit}
               disabled={(!prompt.trim() && !hasActiveStream) || disabled}
-              className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-6 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 hasActiveStream
                   ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
                   : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground'
@@ -515,7 +515,7 @@ export function PromptInput({
                   onClick={onShowModelsDialog}
                   className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer"
                 >
-                  {modelName}
+                  {modelName.length > 20 ? `${modelName.slice(0, 20)}...` : modelName}
                 </button>
               )}
             </div>
