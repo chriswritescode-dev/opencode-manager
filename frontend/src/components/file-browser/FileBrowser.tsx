@@ -273,8 +273,8 @@ useEffect(() => {
         )}
         
         {/* Mobile: Full width file listing, Desktop: Split view */}
-        <div className="flex-1 flex overflow-hidden min-h-0">
-          <div className={`${isMobile ? 'w-full' : 'w-1/2'} border-r border-border px-4 flex flex-col min-h-0`}>
+        <div className="flex-1 flex overflow-hidden min-h-0 h-full">
+          <div className={`${isMobile ? 'w-full' : 'w-[30%]'} border-r border-border px-4 flex flex-col min-h-0 h-full`}>
             <div className="flex items-center gap-2 mb-4 mt-4 flex-shrink-0">
               <Input
                 placeholder="Search"
@@ -320,11 +320,11 @@ useEffect(() => {
           
           {/* Desktop only: Preview panel */}
           {!isMobile && (
-            <div className="flex-1 overflow-y-auto min-h-0 pb-8">
+            <div className="flex-1 overflow-y-auto min-h-0 h-full">
               {selectedFile && !selectedFile.isDirectory ? (
                 <FilePreview file={selectedFile} />
               ) : (
-                <div className="flex items-center justify-center h-64 text-muted-foreground">
+                <div className="flex items-center justify-center h-full text-muted-foreground">
                   Select a file to preview
                 </div>
               )}

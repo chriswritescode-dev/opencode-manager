@@ -65,9 +65,9 @@ export function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, ini
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm">
-      <div className="absolute inset-0 bg-background">
+      <div className="absolute inset-0 bg-background flex flex-col">
         {/* Header */}
-        <div className="sticky top-0 z-10 border-b border-border bg-background backdrop-blur-sm px-4 py-1">
+        <div className="flex-shrink-0 border-b border-border bg-background backdrop-blur-sm px-4 py-1">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {(displayPath === '/' || !repoName) && (
@@ -91,7 +91,7 @@ export function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, ini
         </div>
 
         {/* File Browser Content */}
-        <div className="h-[calc(100vh-73px)] overflow-hidden">
+        <div className="flex-1 overflow-hidden min-h-0">
           <FileBrowser 
             basePath={normalizedBasePath}
             embedded={true}

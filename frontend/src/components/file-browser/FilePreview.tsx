@@ -1,9 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Download, X, Edit3, Save, X as XIcon } from 'lucide-react'
+import { Download, X, Edit3, Save, X as XIcon, WrapText } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { API_BASE_URL } from '@/config'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
+import { useMobile } from '@/hooks/useMobile'
 
 const API_BASE = API_BASE_URL
 
@@ -24,10 +25,16 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
   const [isSaving, setIsSaving] = useState(false)
   const [hasVirtualizedChanges, setHasVirtualizedChanges] = useState(false)
   const [highlightedLine, setHighlightedLine] = useState<number | undefined>(initialLineNumber)
+  const [lineWrap, setLineWrap] = useState(false)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const isMobile = useMobile()
   
   const shouldVirtualize = file.size > VIRTUALIZATION_THRESHOLD_BYTES && !file.mimeType?.startsWith('image/')
+  
+  useEffect(() => {
+    setLineWrap(isMobile)
+  }, [isMobile])
 
   useEffect(() => {
     if (initialLineNumber && contentRef.current && !shouldVirtualize) {
@@ -170,6 +177,7 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
           onSave={handleVirtualizedSave}
           className="h-full"
           initialLineNumber={initialLineNumber}
+          lineWrap={lineWrap}
         />
       )
     }
@@ -182,7 +190,9 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
           <textarea
             value={editContent}
             onChange={(e) => setEditContent(e.target.value)}
-            className="text-[16px] bg-muted text-foreground p-2 rounded whitespace-pre-wrap font-mono break-words w-full resize-none focus:outline-none focus:ring-0 border-none block"
+            className={`text-[16px] bg-muted text-foreground p-2 rounded font-mono w-full resize-none focus:outline-none focus:ring-0 border-none block ${
+              lineWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre overflow-x-auto'
+            }`}
             style={{ minHeight: '95vh' }}
             placeholder="Edit file content..."
             autoFocus
@@ -195,7 +205,9 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
         const textContent = decodeBase64(file.content)
         const lines = textContent.split('\n')
         return (
-          <div className="pb-[200px] text-sm bg-muted text-foreground rounded font-mono overflow-x-hidden">
+          <div className={`pb-[200px] text-sm bg-muted text-foreground rounded font-mono ${
+            lineWrap ? 'overflow-x-hidden' : 'overflow-x-auto'
+          }`}>
             {lines.map((line, index) => {
               const lineNum = index + 1
               const isHighlighted = highlightedLine === lineNum
@@ -208,7 +220,9 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
                   <span className="w-12 flex-shrink-0 text-right pr-3 text-muted-foreground select-none border-r border-border/50 text-xs">
                     {lineNum}
                   </span>
-                  <pre className="flex-1 pl-3 whitespace-pre-wrap break-all">
+                  <pre className={`flex-1 pl-3 ${
+                    lineWrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'
+                  }`}>
                     {line || ' '}
                   </pre>
                 </div>
@@ -269,6 +283,18 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
             </div>
             
             <div className="flex items-center gap-1 flex-shrink-0 mt-1">
+              {isTextFile && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setLineWrap(!lineWrap) }} 
+                  className={`h-7 w-7 p-0 ${lineWrap ? 'bg-primary text-primary-foreground' : ''}`}
+                  title={lineWrap ? "Disable line wrap" : "Enable line wrap"}
+                >
+                  <WrapText className="w-3 h-3" />
+                </Button>
+              )}
+              
               {isTextFile && viewMode !== 'edit' && (
                 <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); handleEdit() }} className="h-7 w-7 p-0">
                   <Edit3 className="w-3 h-3" />

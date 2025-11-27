@@ -10,6 +10,7 @@ interface VirtualizedTextViewProps {
   onSave?: () => void
   className?: string
   initialLineNumber?: number
+  lineWrap?: boolean
 }
 
 export interface VirtualizedTextViewHandle {
@@ -17,7 +18,7 @@ export interface VirtualizedTextViewHandle {
 }
 
 const LINE_HEIGHT = 20
-const GUTTER_WIDTH = 60
+const GUTTER_WIDTH = 40
 
 export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, VirtualizedTextViewProps>(function VirtualizedTextView({
   filePath,
@@ -28,6 +29,7 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
   onSave,
   className = '',
   initialLineNumber,
+  lineWrap = false,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
@@ -156,7 +158,9 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
   return (
     <div
       ref={containerRef}
-      className={`relative overflow-auto font-mono text-sm ${className}`}
+      className={`relative font-mono text-sm ${className} ${
+        lineWrap ? 'overflow-x-hidden' : 'overflow-auto'
+      }`}
       onScroll={handleScroll}
       onKeyDown={handleKeyDown}
       style={{ height: '100%' }}
@@ -176,7 +180,7 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
             }}
           >
             <div
-              className="flex-shrink-0 text-right pr-3 text-muted-foreground select-none bg-muted/50 border-r border-border"
+              className="flex-shrink-0 text-center text-muted-foreground select-none bg-muted/50 border-r border-border"
               style={{ width: GUTTER_WIDTH }}
             >
               {lineNum + 1}
@@ -189,12 +193,16 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
                 onChange={(e) => handleLineChange(lineNum, e.target.value)}
                 className={`flex-1 bg-transparent outline-none pl-2 ${
                   isEdited ? 'bg-yellow-500/10' : ''
+                } ${
+                  lineWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
                 }`}
                 style={{ lineHeight: `${lineHeight}px` }}
               />
             ) : (
               <div
-                className="flex-1 pl-2 whitespace-pre overflow-hidden text-ellipsis"
+                className={`flex-1 pl-2 ${
+                  lineWrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre overflow-hidden text-ellipsis'
+                }`}
                 style={{ lineHeight: `${lineHeight}px` }}
               >
                 {content}
