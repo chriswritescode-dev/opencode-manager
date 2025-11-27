@@ -1,10 +1,10 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download, X, Edit3, Save, X as XIcon, WrapText } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { API_BASE_URL } from '@/config'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
-import { useMobile } from '@/hooks/useMobile'
+
 
 const API_BASE = API_BASE_URL
 
@@ -19,22 +19,20 @@ interface FilePreviewProps {
   initialLineNumber?: number
 }
 
-export function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
+export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview')
   const [editContent, setEditContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [hasVirtualizedChanges, setHasVirtualizedChanges] = useState(false)
   const [highlightedLine, setHighlightedLine] = useState<number | undefined>(initialLineNumber)
-  const [lineWrap, setLineWrap] = useState(false)
+  const [lineWrap, setLineWrap] = useState(true)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
-  const isMobile = useMobile()
+  
   
   const shouldVirtualize = file.size > VIRTUALIZATION_THRESHOLD_BYTES && !file.mimeType?.startsWith('image/')
   
-  useEffect(() => {
-    setLineWrap(isMobile)
-  }, [isMobile])
+  
 
   useEffect(() => {
     if (initialLineNumber && contentRef.current && !shouldVirtualize) {
@@ -339,4 +337,4 @@ export function FilePreview({ file, hideHeader = false, isMobileModal = false, o
       </div>
     </div>
   )
-}
+})
