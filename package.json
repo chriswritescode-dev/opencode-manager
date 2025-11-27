@@ -1,6 +1,6 @@
 {
   "name": "opencode-webui",
-  "version": "0.25",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
@@ -20,8 +20,7 @@
     "docker:down": "docker-compose down -v",
     "docker:logs": "docker-compose logs -f",
     "docker:restart": "docker-compose restart",
-    "docker:dev": "docker-compose -f docker-compose.dev.yml up",
-    "docker:dev:down": "docker-compose -f docker-compose.dev.yml down -v"
+    
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
