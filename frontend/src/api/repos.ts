@@ -1,15 +1,13 @@
 import type { Repo } from './types'
 import { API_BASE_URL } from '@/config'
 
-const API_BASE = API_BASE_URL
-
 export async function createRepo(
   repoUrl: string,
   branch?: string,
   openCodeConfigName?: string,
   useWorktree?: boolean
 ): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl, branch, openCodeConfigName, useWorktree }),
@@ -24,7 +22,7 @@ export async function createRepo(
 }
 
 export async function listRepos(): Promise<Repo[]> {
-  const response = await fetch(`${API_BASE}/api/repos`)
+  const response = await fetch(`${API_BASE_URL}/api/repos`)
 
   if (!response.ok) {
     throw new Error('Failed to list repos')
@@ -34,7 +32,7 @@ export async function listRepos(): Promise<Repo[]> {
 }
 
 export async function getRepo(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}`)
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}`)
 
   if (!response.ok) {
     throw new Error('Failed to get repo')
@@ -44,7 +42,7 @@ export async function getRepo(id: number): Promise<Repo> {
 }
 
 export async function deleteRepo(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}`, {
     method: 'DELETE',
   })
 
@@ -54,7 +52,7 @@ export async function deleteRepo(id: number): Promise<void> {
 }
 
 export async function startServer(id: number, openCodeConfigName?: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/server/start`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ openCodeConfigName }),
@@ -68,7 +66,7 @@ export async function startServer(id: number, openCodeConfigName?: string): Prom
 }
 
 export async function stopServer(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/server/stop`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/stop`, {
     method: 'POST',
   })
 
@@ -80,7 +78,7 @@ export async function stopServer(id: number): Promise<Repo> {
 }
 
 export async function pullRepo(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/pull`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/pull`, {
     method: 'POST',
   })
 
@@ -92,7 +90,7 @@ export async function pullRepo(id: number): Promise<Repo> {
 }
 
 export async function getServerLogs(id: number): Promise<string> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/server/logs`)
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/logs`)
 
   if (!response.ok) {
     throw new Error('Failed to get server logs')
@@ -102,7 +100,7 @@ export async function getServerLogs(id: number): Promise<string> {
 }
 
 export async function switchRepoConfig(id: number, configName: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/config/switch`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/config/switch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ configName }),
@@ -117,7 +115,7 @@ export async function switchRepoConfig(id: number, configName: string): Promise<
 }
 
 export async function switchBranch(id: number, branch: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/branch/switch`, {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/switch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ branch }),
@@ -132,7 +130,7 @@ export async function switchBranch(id: number, branch: string): Promise<Repo> {
 }
 
 export async function listBranches(id: number): Promise<{ local: string[], remote: string[], current: string | null }> {
-  const response = await fetch(`${API_BASE}/api/repos/${id}/branches`)
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branches`)
 
   if (!response.ok) {
     throw new Error('Failed to list branches')

@@ -201,7 +201,7 @@ export function FileDiffView({ repoId, filePath, onBack, onOpenFile, isMobile = 
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0 mb-[85px]">
         {diffData.isBinary ? (
           <div className="flex items-center justify-center h-full text-muted-foreground">
             <p className="text-sm">Binary file - cannot display diff</p>

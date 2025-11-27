@@ -65,7 +65,7 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
         className="w-screen h-screen max-w-none max-h-none p-0 bg-background border-0 flex flex-col"
         hideCloseButton
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-between px-4 sm:py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
             <GitBranch className="w-4 h-4 text-blue-400" />
             <h2 className="text-sm font-semibold text-foreground">
