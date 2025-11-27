@@ -2,12 +2,14 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import * as repoService from '../services/repo'
+import * as gitOperations from '../services/git-operations'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 import { withTransactionAsync } from '../db/transactions'
-import { getOpenCodeConfigFilePath } from '@opencode-webui/shared'
+import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-webui/shared'
+import path from 'path'
 
 export function createRepoRoutes(database: Database) {
   const app = new Hono()
@@ -146,7 +148,6 @@ export function createRepoRoutes(database: Database) {
       logger.info(`Switched config for repo ${id} to '${configName}'`)
       logger.info(`Updated OpenCode config: ${openCodeConfigPath}`)
       
-      // Restart OpenCode server to pick up new workspace config
       logger.info('Restarting OpenCode server due to workspace config change')
       await opencodeServerManager.stop()
       await opencodeServerManager.start()
@@ -201,6 +202,50 @@ export function createRepoRoutes(database: Database) {
       return c.json(branches)
     } catch (error: any) {
       logger.error('Failed to list branches:', error)
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.get('/:id/git/status', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = db.getRepoById(database, id)
+      
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+      
+      const repoPath = path.resolve(getReposPath(), repo.localPath)
+      const status = await gitOperations.getGitStatus(repoPath)
+      
+      return c.json(status)
+    } catch (error: any) {
+      logger.error('Failed to get git status:', error)
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.get('/:id/git/diff', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const filePath = c.req.query('path')
+      
+      if (!filePath) {
+        return c.json({ error: 'path query parameter is required' }, 400)
+      }
+      
+      const repo = db.getRepoById(database, id)
+      
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+      
+      const repoPath = path.resolve(getReposPath(), repo.localPath)
+      const diff = await gitOperations.getFileDiff(repoPath, filePath)
+      
+      return c.json(diff)
+    } catch (error: any) {
+      logger.error('Failed to get file diff:', error)
       return c.json({ error: error.message }, 500)
     }
   })
