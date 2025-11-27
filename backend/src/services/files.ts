@@ -1,5 +1,7 @@
 import fs from 'fs/promises'
 import path from 'path'
+import { createReadStream } from 'fs'
+import { createInterface } from 'readline'
 import { logger } from '../utils/logger'
 
 import { 
@@ -12,6 +14,7 @@ import {
   listDirectory 
 } from './file-operations'
 import { FILE_LIMITS, ALLOWED_MIME_TYPES, getReposPath } from '@opencode-webui/shared'
+import type { ChunkedFileInfo, PatchOperation } from '@opencode-webui/shared'
 
 const SHARED_WORKSPACE_BASE = getReposPath()
 
@@ -233,7 +236,7 @@ function validatePath(userPath: string): string {
   return resolved
 }
 
-function getMimeType(filePath: string, content: Uint8Array): string {
+function getMimeType(filePath: string, _content: Uint8Array): string {
   const ext = path.extname(filePath).toLowerCase()
   
   const mimeTypes: Record<string, string> = {
@@ -256,4 +259,123 @@ function getMimeType(filePath: string, content: Uint8Array): string {
   }
   
   return mimeTypes[ext] || 'text/plain'
+}
+
+async function countFileLines(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let lineCount = 0
+    const stream = createReadStream(filePath, { encoding: 'utf8' })
+    const rl = createInterface({ input: stream, crlfDelay: Infinity })
+    
+    rl.on('line', () => { lineCount++ })
+    rl.on('close', () => resolve(lineCount))
+    rl.on('error', reject)
+  })
+}
+
+async function readFileLines(filePath: string, startLine: number, endLine: number): Promise<string[]> {
+  return new Promise((resolve, reject) => {
+    const lines: string[] = []
+    let currentLine = 0
+    const stream = createReadStream(filePath, { encoding: 'utf8' })
+    const rl = createInterface({ input: stream, crlfDelay: Infinity })
+    
+    rl.on('line', (line) => {
+      if (currentLine >= startLine && currentLine < endLine) {
+        lines.push(line)
+      }
+      currentLine++
+      if (currentLine >= endLine) {
+        rl.close()
+        stream.destroy()
+      }
+    })
+    rl.on('close', () => resolve(lines))
+    rl.on('error', reject)
+  })
+}
+
+export async function getFileRange(userPath: string, startLine: number, endLine: number): Promise<ChunkedFileInfo> {
+  const validatedPath = validatePath(userPath)
+  logger.info(`Getting file range for path: ${userPath} lines ${startLine}-${endLine}`)
+  
+  const exists = await fileExists(validatedPath)
+  if (!exists) {
+    throw { message: 'File does not exist', statusCode: 404 }
+  }
+  
+  const stats = await getFileStats(validatedPath)
+  if (stats.isDirectory) {
+    throw { message: 'Path is a directory', statusCode: 400 }
+  }
+  
+  const totalLines = await countFileLines(validatedPath)
+  const clampedEnd = Math.min(endLine, totalLines)
+  const lines = await readFileLines(validatedPath, startLine, clampedEnd)
+  const mimeType = getMimeType(validatedPath, new Uint8Array())
+  
+  return {
+    name: path.basename(validatedPath),
+    path: userPath,
+    isDirectory: false as const,
+    size: stats.size,
+    mimeType,
+    lines,
+    totalLines,
+    startLine,
+    endLine: clampedEnd,
+    hasMore: clampedEnd < totalLines,
+    lastModified: stats.lastModified,
+  }
+}
+
+export async function getFileTotalLines(userPath: string): Promise<number> {
+  const validatedPath = validatePath(userPath)
+  const exists = await fileExists(validatedPath)
+  if (!exists) {
+    throw { message: 'File does not exist', statusCode: 404 }
+  }
+  return countFileLines(validatedPath)
+}
+
+export async function applyFilePatches(userPath: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
+  const validatedPath = validatePath(userPath)
+  logger.info(`Applying ${patches.length} patches to: ${userPath}`)
+  
+  const exists = await fileExists(validatedPath)
+  if (!exists) {
+    throw { message: 'File does not exist', statusCode: 404 }
+  }
+  
+  const content = await fs.readFile(validatedPath, 'utf8')
+  const lines = content.split('\n')
+  
+  const sortedPatches = [...patches].sort((a, b) => b.startLine - a.startLine)
+  
+  for (const patch of sortedPatches) {
+    const { type, startLine, endLine, content: patchContent } = patch
+    
+    switch (type) {
+      case 'replace': {
+        const end = endLine ?? startLine + 1
+        const newLines = patchContent?.split('\n') ?? []
+        lines.splice(startLine, end - startLine, ...newLines)
+        break
+      }
+      case 'insert': {
+        const newLines = patchContent?.split('\n') ?? []
+        lines.splice(startLine, 0, ...newLines)
+        break
+      }
+      case 'delete': {
+        const end = endLine ?? startLine + 1
+        lines.splice(startLine, end - startLine)
+        break
+      }
+    }
+  }
+  
+  await fs.writeFile(validatedPath, lines.join('\n'), 'utf8')
+  
+  return { success: true, totalLines: lines.length }
 }

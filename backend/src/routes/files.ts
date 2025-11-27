@@ -1,11 +1,9 @@
 import { Hono } from 'hono'
-import { serveStatic } from '@hono/node-server/serve-static'
-import * as db from '../db/queries'
 import * as fileService from '../services/files'
 import type { Database } from 'bun:sqlite'
 import { logger } from '../utils/logger'
 
-export function createFileRoutes(database: Database) {
+export function createFileRoutes(_database: Database) {
   const app = new Hono()
 
   app.get('/*', async (c) => {
@@ -13,6 +11,20 @@ export function createFileRoutes(database: Database) {
       const userPath = c.req.path.replace(/^\/api\/files\//, '') || ''
       const download = c.req.query('download') === 'true'
       const raw = c.req.query('raw') === 'true'
+      const startLineParam = c.req.query('startLine')
+      const endLineParam = c.req.query('endLine')
+      
+      if (startLineParam !== undefined && endLineParam !== undefined) {
+        const startLine = parseInt(startLineParam, 10)
+        const endLine = parseInt(endLineParam, 10)
+        
+        if (isNaN(startLine) || isNaN(endLine) || startLine < 0 || endLine < startLine) {
+          return c.json({ error: 'Invalid line range parameters' }, 400)
+        }
+        
+        const result = await fileService.getFileRange(userPath, startLine, endLine)
+        return c.json(result)
+      }
       
       const result = await fileService.getFile(userPath)
       
@@ -92,10 +104,15 @@ export function createFileRoutes(database: Database) {
       const path = c.req.path.replace(/^\/api\/files\//, '') || ''
       const body = await c.req.json()
       
+      if (body.patches && Array.isArray(body.patches)) {
+        const result = await fileService.applyFilePatches(path, body.patches)
+        return c.json(result)
+      }
+      
       const result = await fileService.renameOrMoveFile(path, body)
       return c.json(result)
     } catch (error: any) {
-      logger.error('Failed to rename/move file:', error)
+      logger.error('Failed to patch file:', error)
       return c.json({ error: error.message }, error.statusCode || 500)
     }
   })

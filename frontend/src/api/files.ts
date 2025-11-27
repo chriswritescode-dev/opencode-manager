@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { API_BASE_URL } from '@/config'
-import type { FileInfo } from '@/types/files'
+import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
 
 const API_BASE = API_BASE_URL
 
@@ -20,4 +20,28 @@ export function useFile(path: string | undefined) {
     queryFn: () => path ? fetchFile(path) : Promise.reject(new Error('No file path provided')),
     enabled: !!path,
   })
+}
+
+export async function fetchFileRange(path: string, startLine: number, endLine: number): Promise<ChunkedFileInfo> {
+  const response = await fetch(`${API_BASE}/api/files/${path}?startLine=${startLine}&endLine=${endLine}`)
+  
+  if (!response.ok) {
+    throw new Error(`Failed to load file range: ${response.statusText}`)
+  }
+  
+  return response.json()
+}
+
+export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
+  const response = await fetch(`${API_BASE}/api/files/${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ patches }),
+  })
+  
+  if (!response.ok) {
+    throw new Error(`Failed to apply patches: ${response.statusText}`)
+  }
+  
+  return response.json()
 }

@@ -21,6 +21,10 @@ import {
   CreateFileRequestSchema,
   RenameFileRequestSchema,
   FileUploadResponseSchema,
+  ChunkedFileInfoSchema,
+  FileRangeRequestSchema,
+  PatchOperationSchema,
+  FilePatchRequestSchema,
 } from '../schemas/files'
 import {
   SessionSchema,
@@ -46,6 +50,10 @@ export type FileInfo = z.infer<typeof FileInfoSchema>
 export type CreateFileRequest = z.infer<typeof CreateFileRequestSchema>
 export type RenameFileRequest = z.infer<typeof RenameFileRequestSchema>
 export type FileUploadResponse = z.infer<typeof FileUploadResponseSchema>
+export type ChunkedFileInfo = z.infer<typeof ChunkedFileInfoSchema>
+export type FileRangeRequest = z.infer<typeof FileRangeRequestSchema>
+export type PatchOperation = z.infer<typeof PatchOperationSchema>
+export type FilePatchRequest = z.infer<typeof FilePatchRequestSchema>
 
 export type Session = z.infer<typeof SessionSchema>
 export type Message = z.infer<typeof MessageSchema>

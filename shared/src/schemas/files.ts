@@ -9,6 +9,7 @@ export const FileInfoSchema: z.ZodType<{
   content?: string
   children?: Array<any>
   lastModified: Date
+  totalLines?: number
 }> = z.object({
   name: z.string(),
   path: z.string(),
@@ -18,6 +19,7 @@ export const FileInfoSchema: z.ZodType<{
   content: z.string().optional(),
   children: z.lazy(() => z.array(FileInfoSchema)).optional(),
   lastModified: z.date(),
+  totalLines: z.number().optional(),
 })
 
 export const CreateFileRequestSchema = z.object({
@@ -35,3 +37,35 @@ export const FileUploadResponseSchema = z.object({
   size: z.number(),
   mimeType: z.string(),
 })
+
+export const ChunkedFileInfoSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  isDirectory: z.literal(false),
+  size: z.number(),
+  mimeType: z.string().optional(),
+  lines: z.array(z.string()),
+  totalLines: z.number(),
+  startLine: z.number(),
+  endLine: z.number(),
+  hasMore: z.boolean(),
+  lastModified: z.date(),
+})
+
+export const FileRangeRequestSchema = z.object({
+  startLine: z.number().int().min(0),
+  endLine: z.number().int().min(0),
+})
+
+export const PatchOperationSchema = z.object({
+  type: z.enum(['replace', 'insert', 'delete']),
+  startLine: z.number().int().min(0),
+  endLine: z.number().int().min(0).optional(),
+  content: z.string().optional(),
+})
+
+export const FilePatchRequestSchema = z.object({
+  patches: z.array(PatchOperationSchema),
+})
+
+
