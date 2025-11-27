@@ -40,14 +40,26 @@
   --color-accent-foreground: #111827;
 }
 
+html {
+  background-color: #0a0a0a;
+}
+
+:root:not(.dark) html {
+  background-color: #ffffff;
+}
+
 body {
   background: linear-gradient(to bottom right, #0a0a0a, #0d0d0d, #0a0a0a);
   color: var(--color-foreground);
   transition: background-color 0.3s ease, color 0.3s ease;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 :root:not(.dark) body {
   background: linear-gradient(to bottom right, #ffffff, #f0f0f0, #ffffff);
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Custom animations */

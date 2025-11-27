@@ -4,6 +4,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
+import { useStandalone } from '@/hooks/useStandalone'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { FileSuggestions } from './FileSuggestions'
@@ -76,6 +77,8 @@ export function PromptInput({
     showFileSuggestions,
     directory
   )
+  
+  const isStandalone = useStandalone()
 
   const handleSubmit = () => {
     if (!prompt.trim() || disabled) return
@@ -415,7 +418,7 @@ export function PromptInput({
   
 
   return (
-    <div className="backdrop-blur-md bg-background/90 border border-border rounded-lg p-3 mx-2 mb-2 md:mx-4 md:mb-4 max-w-4xl md:mx-auto">
+    <div className={`backdrop-blur-md bg-background/90 border border-border rounded-lg p-1 md:p-3 mx-2 md:mx-4 md:mb-4 max-w-4xl md:mx-auto ${isStandalone ? 'mb-6' : 'mb-1'}`}>
       
       
       <textarea
@@ -429,7 +432,7 @@ export function PromptInput({
             : "Send a message... (Cmd/Ctrl+Enter)"
         }
         disabled={disabled || hasActiveStream}
-        className={`w-full bg-background px-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none resize-none min-h-[36px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
+        className={`w-full bg-background px-3 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none resize-none min-h-[36px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
           isBashMode 
             ? 'border-purple-500/50 bg-purple-500/5' 
             : ''
@@ -441,7 +444,7 @@ export function PromptInput({
         <div className="flex gap-2 items-center">
           <button
             onClick={handleModeToggle}
-            className={`px-2 py-1 rounded-md text-xs font-medium border ${modeBg} ${modeColor} hover:opacity-80 transition-opacity cursor-pointer`}
+            className={`w-16 px-2 py-1 rounded-md text-xs font-medium border ${modeBg} ${modeColor} hover:opacity-80 transition-opacity cursor-pointer`}
           >
             {currentMode.toUpperCase()} 
           </button>
