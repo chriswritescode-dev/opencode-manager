@@ -62,7 +62,7 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent
-        className="w-screen h-screen max-w-none max-h-none p-0 bg-background border-0 flex flex-col"
+        className="w-screen h-screen max-w-none max-h-none p-0 gap-0 bg-background border-0 flex flex-col"
         hideCloseButton
       >
         <div className="flex items-center justify-between px-4 sm:py-3 border-b border-border flex-shrink-0">
