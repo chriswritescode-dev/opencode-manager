@@ -97,4 +97,9 @@ export const settingsApi = {
       return null
     }
   },
+
+  restartOpenCodeServer: async (): Promise<{ success: boolean; message: string }> => {
+    const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-restart`)
+    return data
+  },
 }

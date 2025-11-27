@@ -120,6 +120,13 @@ class OpenCodeServerManager {
     this.isHealthy = false
   }
 
+  async restart(): Promise<void> {
+    logger.info('Restarting OpenCode server')
+    await this.stop()
+    await new Promise(r => setTimeout(r, 1000))
+    await this.start()
+  }
+
   getPort(): number {
     return OPENCODE_SERVER_PORT
   }

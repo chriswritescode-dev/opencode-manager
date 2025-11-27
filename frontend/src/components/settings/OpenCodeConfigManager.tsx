@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
@@ -13,7 +13,9 @@ import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
 import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
+import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
+import { useMutation } from '@tanstack/react-query'
 
 interface OpenCodeConfig {
   id: number
@@ -30,6 +32,11 @@ export function OpenCodeConfigManager() {
   const [isUpdating, setIsUpdating] = useState(false)
   const [editingConfig, setEditingConfig] = useState<OpenCodeConfig | null>(null)
   const [selectedConfig, setSelectedConfig] = useState<OpenCodeConfig | null>(null)
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    commands: false,
+    agents: false,
+    mcp: false,
+  })
   const [newConfigName, setNewConfigName] = useState('')
   const [newConfigContent, setNewConfigContent] = useState('')
   const [newConfigIsDefault, setNewConfigIsDefault] = useState(false)
@@ -40,6 +47,18 @@ export function OpenCodeConfigManager() {
   const [createError, setCreateError] = useState('')
   const [createErrorLine, setCreateErrorLine] = useState<number | null>(null)
   const createTextareaRef = useRef<HTMLTextAreaElement>(null)
+  
+  const restartServerMutation = useMutation({
+    mutationFn: async () => {
+      return await settingsApi.restartOpenCodeServer()
+    },
+    onSuccess: (data) => {
+      console.log('OpenCode server restarted successfully:', data.message)
+    },
+    onError: (error) => {
+      console.error('Failed to restart OpenCode server:', error)
+    },
+  })
 
   const fetchConfigs = async () => {
     try {
@@ -79,6 +98,13 @@ export function OpenCodeConfigManager() {
   useEffect(() => {
     fetchConfigs()
   }, [])
+
+  useEffect(() => {
+    if (configs.length > 0 && !selectedConfig) {
+      const defaultConfig = configs.find(config => config.isDefault)
+      setSelectedConfig(defaultConfig || configs[0])
+    }
+  }, [configs, selectedConfig])
 
   const createConfig = async () => {
     if (!newConfigName.trim() || !newConfigContent.trim()) return
@@ -212,13 +238,26 @@ export function OpenCodeConfigManager() {
     <div className="space-y-6 overflow-y-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold text-foreground">OpenCode Configurations</h2>
-        <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Config
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => restartServerMutation.mutate()}
+            disabled={restartServerMutation.isPending}
+          >
+            {restartServerMutation.isPending ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <RotateCcw className="h-4 w-4 mr-2" />
+            )}
+            Restart Server
+          </Button>
+<Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="h-4 w-4 mr-2" />
+                New Config
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Create OpenCode Config</DialogTitle>
@@ -290,6 +329,7 @@ export function OpenCodeConfigManager() {
             </div>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
       {configs.length === 0 ? (
@@ -375,12 +415,12 @@ export function OpenCodeConfigManager() {
         isUpdating={isUpdating}
       />
 
-      {/* Commands and Agents Section */}
+      {/* Commands, Agents, and MCP Section */}
       <div className="mt-8 space-y-6">
         <div className="border-t border-border pt-6">
-          <h3 className="text-lg font-semibold mb-4">Configure Commands & Agents</h3>
+          <h3 className="text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
           <p className="text-sm text-muted-foreground mb-6">
-            Add custom commands and agents to your OpenCode configurations. Select a configuration below to edit its commands and agents.
+            Add custom commands, agents, and MCP servers to your OpenCode configurations. Select a configuration below to edit its settings.
           </p>
           
           {configs.length > 0 && (
@@ -407,44 +447,94 @@ export function OpenCodeConfigManager() {
                 </Select>
               </div>
               
-              <div className="space-y-8 pb-20">
+              <div className="flex flex-col gap-4 pb-20">
                 {selectedConfig ? (
                   <>
-                    <div className="bg-card border border-border rounded-lg p-6">
-                      <h4 className="text-md font-medium mb-4">Editing: {selectedConfig.name}</h4>
-                      
-                      <div className="max-h-[60vh] overflow-y-auto">
-                        <CommandsEditor
-                          commands={(selectedConfig.content.command as Record<string, any>) || {}}
-                          onChange={(commands) => {
-                            const updatedContent = {
-                              ...selectedConfig.content,
-                              command: commands
-                            }
-                            updateConfigContent(selectedConfig.name, updatedContent)
-                          }}
-                        />
+                    <div className="bg-card border border-border rounded-lg overflow-hidden">
+                      <button
+                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
+                        onClick={() => setExpandedSections(prev => ({ ...prev, commands: !prev.commands }))}
+                      >
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-sm font-medium">Commands</h4>
+                          <span className="text-xs text-muted-foreground">
+                            {Object.keys(selectedConfig.content.command as Record<string, any> || {}).length} configured
+                          </span>
+                        </div>
+                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
+                      </button>
+                      <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
+                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                          <CommandsEditor
+                            commands={(selectedConfig.content.command as Record<string, any>) || {}}
+                            onChange={(commands) => {
+                              const updatedContent = {
+                                ...selectedConfig.content,
+                                command: commands
+                              }
+                              updateConfigContent(selectedConfig.name, updatedContent)
+                            }}
+                          />
+                        </div>
                       </div>
                     </div>
                     
-                    <div className="bg-card border border-border rounded-lg p-6">
-                      <div className="max-h-[60vh] overflow-y-auto">
-                        <AgentsEditor
-                          agents={(selectedConfig.content.agent as Record<string, any>) || {}}
-                          onChange={(agents) => {
-                            const updatedContent = {
-                              ...selectedConfig.content,
-                              agent: agents
-                            }
-                            updateConfigContent(selectedConfig.name, updatedContent)
-                          }}
-                        />
+                    <div className="bg-card border border-border rounded-lg overflow-hidden">
+                      <button
+                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
+                        onClick={() => setExpandedSections(prev => ({ ...prev, agents: !prev.agents }))}
+                      >
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-sm font-medium">Agents</h4>
+                          <span className="text-xs text-muted-foreground">
+                            {Object.keys(selectedConfig.content.agent as Record<string, any> || {}).length} configured
+                          </span>
+                        </div>
+                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
+                      </button>
+                      <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
+                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                          <AgentsEditor
+                            agents={(selectedConfig.content.agent as Record<string, any>) || {}}
+                            onChange={(agents) => {
+                              const updatedContent = {
+                                ...selectedConfig.content,
+                                agent: agents
+                              }
+                              updateConfigContent(selectedConfig.name, updatedContent)
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="bg-card border border-border rounded-lg overflow-hidden">
+                      <button
+                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
+                        onClick={() => setExpandedSections(prev => ({ ...prev, mcp: !prev.mcp }))}
+                      >
+                        <div className="flex items-center gap-3">
+                          <h4 className="text-sm font-medium">MCP Servers</h4>
+                          <span className="text-xs text-muted-foreground">
+                            {Object.keys((selectedConfig.content.mcp as Record<string, any>) || {}).length} configured
+                          </span>
+                        </div>
+                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
+                      </button>
+                      <div className={`${expandedSections.mcp ? 'block' : 'hidden'} border-t border-border`}>
+                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                          <McpManager
+                            config={selectedConfig}
+                            onUpdate={(content) => updateConfigContent(selectedConfig.name, content)}
+                            onConfigUpdate={updateConfigContent}
+                          />
+                        </div>
                       </div>
                     </div>
                   </>
                 ) : (
                   <div className="bg-card border border-border rounded-lg p-6">
-                    <p className="text-muted-foreground text-center">Select a configuration to edit its commands and agents.</p>
+                    <p className="text-muted-foreground text-center">Select a configuration to edit its commands, agents, and MCP servers.</p>
                   </div>
                 )}
               </div>

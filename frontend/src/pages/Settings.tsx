@@ -11,7 +11,7 @@ export function Settings() {
 
       <div className="max-w-4xl mx-auto p-6">
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-5 mb-8 bg-[#141414] border border-[#262626] p-1">
+          <TabsList className="grid w-full grid-cols-3 mb-8 bg-[#141414] border border-[#262626] p-1">
             <TabsTrigger 
               value="general"
               className="data-[state=active]:bg-blue-800 data-[state=active]:text-white text-zinc-400"
@@ -30,18 +30,6 @@ export function Settings() {
             >
               OpenCode
             </TabsTrigger>
-            <TabsTrigger 
-              value="commands"
-              className="data-[state=active]:bg-blue-800 data-[state=active]:text-white text-zinc-400"
-            >
-              Commands
-            </TabsTrigger>
-            <TabsTrigger 
-              value="agents"
-              className="data-[state=active]:bg-blue-800 data-[state=active]:text-white text-zinc-400"
-            >
-              Agents
-            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="general">
@@ -52,7 +40,7 @@ export function Settings() {
             <KeyboardShortcuts />
           </TabsContent>
 
-          <TabsContent value="opencode">
+<TabsContent value="opencode">
             <OpenCodeConfigManager />
           </TabsContent>
 

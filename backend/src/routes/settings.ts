@@ -10,6 +10,7 @@ import {
   OpenCodeConfigSchema,
 } from '../types/settings'
 import { logger } from '../utils/logger'
+import { opencodeServerManager } from '../services/opencode-single-server'
 
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
@@ -25,6 +26,26 @@ const UpdateOpenCodeConfigSchema = z.object({
   content: OpenCodeConfigSchema,
   isDefault: z.boolean().optional(),
 })
+
+function hasMcpChanged(oldContent: Record<string, unknown>, newContent: Record<string, unknown>): boolean {
+  const oldMcp = oldContent.mcp as Record<string, any> || {}
+  const newMcp = newContent.mcp as Record<string, any> || {}
+  
+  const oldKeys = Object.keys(oldMcp).sort()
+  const newKeys = Object.keys(newMcp).sort()
+  
+  if (JSON.stringify(oldKeys) !== JSON.stringify(newKeys)) {
+    return true
+  }
+  
+  for (const key of oldKeys) {
+    if (JSON.stringify(oldMcp[key]) !== JSON.stringify(newMcp[key])) {
+      return true
+    }
+  }
+  
+  return false
+}
 
 const CreateCustomCommandSchema = z.object({
   name: z.string().min(1).max(255),
@@ -126,6 +147,7 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const validated = UpdateOpenCodeConfigSchema.parse(body)
       
+      const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
       const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
@@ -138,6 +160,11 @@ export function createSettingsRoutes(db: Database) {
         logger.info(`Wrote default config to: ${configPath}`)
         
         await patchOpenCodeConfig(config.content)
+        
+        if (existingConfig && hasMcpChanged(existingConfig.content, config.content)) {
+          logger.info('MCP configuration changed, restarting OpenCode server')
+          await opencodeServerManager.restart()
+        }
       }
       
       return c.json(config)
@@ -204,6 +231,17 @@ export function createSettingsRoutes(db: Database) {
     } catch (error) {
       logger.error('Failed to get default OpenCode config:', error)
       return c.json({ error: 'Failed to get default OpenCode config' }, 500)
+    }
+  })
+
+  app.post('/opencode-restart', async (c) => {
+    try {
+      logger.info('Manual OpenCode server restart requested')
+      await opencodeServerManager.restart()
+      return c.json({ success: true, message: 'OpenCode server restarted successfully' })
+    } catch (error) {
+      logger.error('Failed to restart OpenCode server:', error)
+      return c.json({ error: 'Failed to restart OpenCode server' }, 500)
     }
   })
 

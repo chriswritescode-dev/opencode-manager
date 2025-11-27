@@ -104,6 +104,23 @@ export const useDeleteSession = (opcodeUrl: string | null | undefined, directory
   });
 };
 
+export const useUpdateSession = (opcodeUrl: string | null | undefined, directory?: string) => {
+  const queryClient = useQueryClient();
+  const client = useOpenCodeClient(opcodeUrl, directory);
+
+  return useMutation({
+    mutationFn: async ({ sessionID, title }: { sessionID: string; title: string }) => {
+      if (!client) throw new Error("No client available");
+      return client.updateSession(sessionID, { title });
+    },
+    onSuccess: (_, variables) => {
+      const { sessionID } = variables;
+      queryClient.invalidateQueries({ queryKey: ["opencode", "session", opcodeUrl, sessionID, directory] });
+      queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, directory] });
+    },
+  });
+};
+
 const createOptimisticUserMessage = (
   sessionID: string,
   parts: ContentPart[],

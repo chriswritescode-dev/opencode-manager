@@ -55,6 +55,11 @@ export class OpenCodeClient {
     await this.client.delete(`/session/${sessionID}`)
   }
 
+  async updateSession(sessionID: string, data: { title?: string }) {
+    const response = await this.client.patch(`/session/${sessionID}`, data)
+    return response.data
+  }
+
   async forkSession(sessionID: string, messageID?: string) {
     const response = await this.client.post<SessionResponse>(`/session/${sessionID}/fork`, {
       messageID

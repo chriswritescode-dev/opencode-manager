@@ -9,7 +9,7 @@ import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useMessages, useAbortSession } from "@/hooks/useOpenCode";
+import { useSession, useMessages, useAbortSession, useUpdateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useSettings } from "@/hooks/useSettings";
@@ -52,6 +52,7 @@ export function SessionDetail() {
   const { data: messages } = useMessages(opcodeUrl, sessionId, repoDirectory);
   const { isConnected } = useSSE(opcodeUrl, repoDirectory);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory);
+  const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
 
   useKeyboardShortcuts({
@@ -166,6 +167,12 @@ export function SessionDetail() {
     setSelectedFilePath(pathToOpen)
     setFileBrowserOpen(true)
   };
+
+  const handleSessionTitleUpdate = (newTitle: string) => {
+    if (sessionId) {
+      updateSession.mutate({ sessionID: sessionId, title: newTitle });
+    }
+  };
   
   
   return (
@@ -180,6 +187,7 @@ export function SessionDetail() {
         repoDirectory={repoDirectory}
         onFileBrowserOpen={() => setFileBrowserOpen(true)}
         onSettingsOpen={openSettings}
+        onSessionTitleUpdate={handleSessionTitleUpdate}
       />
 
       <div className="flex-1 overflow-hidden">

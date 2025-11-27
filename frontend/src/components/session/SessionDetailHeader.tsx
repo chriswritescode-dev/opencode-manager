@@ -3,6 +3,7 @@ import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicato
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { Button } from "@/components/ui/button";
 import { Loader2, Settings, FolderOpen } from "lucide-react";
+import { useState } from "react";
 
 interface Repo {
   id: number;
@@ -24,6 +25,7 @@ interface SessionDetailHeaderProps {
   repoDirectory: string | undefined;
   onFileBrowserOpen: () => void;
   onSettingsOpen: () => void;
+  onSessionTitleUpdate: (newTitle: string) => void;
 }
 
 export function SessionDetailHeader({
@@ -36,7 +38,10 @@ export function SessionDetailHeader({
   repoDirectory,
   onFileBrowserOpen,
   onSettingsOpen,
+  onSessionTitleUpdate,
 }: SessionDetailHeaderProps) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(sessionTitle);
 
   if (repo.cloneStatus !== 'ready') {
     return (
@@ -54,15 +59,61 @@ export function SessionDetailHeader({
   const repoName = repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository";
   const currentBranch = repo.currentBranch || "main";
 
+  const handleTitleClick = () => {
+    setIsEditing(true);
+    setEditTitle(sessionTitle);
+  };
+
+  const handleTitleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editTitle.trim() && editTitle !== sessionTitle) {
+      onSessionTitleUpdate(editTitle.trim());
+    }
+    setIsEditing(false);
+  };
+
+  const handleTitleBlur = () => {
+    if (editTitle.trim() && editTitle !== sessionTitle) {
+      onSessionTitleUpdate(editTitle.trim());
+    }
+    setIsEditing(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape') {
+      setEditTitle(sessionTitle);
+      setIsEditing(false);
+    } else if (e.key === 'Enter') {
+      handleTitleSubmit(e);
+    }
+  };
+
   return (
     <div className="sticky top-0 z-10 border-b border-border bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-2 sm:px-4 py-1.5 sm:py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
           <BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
           <div className="min-w-0 flex-1">
-<h1 className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate">
+            {isEditing ? (
+              <form onSubmit={handleTitleSubmit} className="min-w-0">
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  onBlur={handleTitleBlur}
+                  onKeyDown={handleKeyDown}
+                  className="text-xs sm:text-base font-semibold bg-background border border-border rounded px-1 outline-none w-full truncate focus:border-primary sm:max-w-[250px]"
+                  autoFocus
+                />
+              </form>
+            ) : (
+              <h1 
+                className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
+                onClick={handleTitleClick}
+              >
                 {sessionTitle}
               </h1>
+            )}
             <div className="flex items-center gap-2">
               <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
                 {repoName}
