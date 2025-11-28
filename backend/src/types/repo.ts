@@ -7,11 +7,12 @@ export interface Repo extends BaseRepo {
 }
 
 export interface CreateRepoInput {
-  repoUrl: string
+  repoUrl?: string
   localPath: string
   branch?: string
   defaultBranch: string
   cloneStatus: 'cloning' | 'ready' | 'error'
   clonedAt: number
   isWorktree?: boolean
+  isLocal?: boolean
 }

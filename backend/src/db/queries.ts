@@ -5,7 +5,7 @@ import path from 'path'
 
 export interface RepoRow {
   id: number
-  repo_url: string
+  repo_url?: string
   local_path: string
   branch?: string
   default_branch: string
@@ -14,6 +14,7 @@ export interface RepoRow {
   last_pulled?: number
   opencode_config_name?: string
   is_worktree?: number
+  is_local?: number
 }
 
 function rowToRepo(row: RepoRow): Repo {
@@ -29,35 +30,59 @@ function rowToRepo(row: RepoRow): Repo {
     lastPulled: row.last_pulled,
     openCodeConfigName: row.opencode_config_name,
     isWorktree: row.is_worktree ? Boolean(row.is_worktree) : undefined,
+    isLocal: row.is_local ? Boolean(row.is_local) : undefined,
   }
 }
 
 export function createRepo(db: Database, repo: CreateRepoInput): Repo {
-  const stmt = db.prepare(`
-    INSERT OR IGNORE INTO repos (repo_url, local_path, branch, default_branch, clone_status, cloned_at, is_worktree)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `)
+  const normalizedPath = repo.localPath.replace(/\/+$/, '')
   
-  const result = stmt.run(
-    repo.repoUrl,
-    repo.localPath,
-    repo.branch || null,
-    repo.defaultBranch,
-    repo.cloneStatus,
-    repo.clonedAt,
-    repo.isWorktree ? 1 : 0
-  )
+  const existing = repo.isLocal 
+    ? getRepoByLocalPath(db, normalizedPath)
+    : getRepoByUrlAndBranch(db, repo.repoUrl!, repo.branch)
   
-  if (result.changes === 0) {
-    const existing = getRepoByUrlAndBranch(db, repo.repoUrl, repo.branch)
-    if (existing) {
-      return existing
-    }
-    throw new Error('Failed to create repo and no existing repo found')
+  if (existing) {
+    return existing
   }
   
-  const newRepo = getRepoById(db, Number(result.lastInsertRowid))!
-  return newRepo
+  const stmt = db.prepare(`
+    INSERT INTO repos (repo_url, local_path, branch, default_branch, clone_status, cloned_at, is_worktree, is_local)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  
+  try {
+    const result = stmt.run(
+      repo.repoUrl || null,
+      normalizedPath,
+      repo.branch || null,
+      repo.defaultBranch,
+      repo.cloneStatus,
+      repo.clonedAt,
+      repo.isWorktree ? 1 : 0,
+      repo.isLocal ? 1 : 0
+    )
+    
+    const newRepo = getRepoById(db, Number(result.lastInsertRowid))
+    if (!newRepo) {
+      throw new Error(`Failed to retrieve newly created repo with id ${result.lastInsertRowid}`)
+    }
+    return newRepo
+  } catch (error: any) {
+    if (error.message?.includes('UNIQUE constraint failed') || error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      const conflictRepo = repo.isLocal 
+        ? getRepoByLocalPath(db, normalizedPath)
+        : getRepoByUrlAndBranch(db, repo.repoUrl!, repo.branch)
+      
+      if (conflictRepo) {
+        return conflictRepo
+      }
+      
+      const identifier = repo.isLocal ? `path '${normalizedPath}'` : `url '${repo.repoUrl}' branch '${repo.branch || 'default'}'`
+      throw new Error(`Repository with ${identifier} already exists but could not be retrieved. This may indicate database corruption.`)
+    }
+    
+    throw new Error(`Failed to create repository: ${error.message}`)
+  }
 }
 
 export function getRepoById(db: Database, id: number): Repo | null {
@@ -83,6 +108,13 @@ export function getRepoByUrlAndBranch(db: Database, repoUrl: string, branch?: st
   const row = branch 
     ? stmt.get(repoUrl, branch) as RepoRow | undefined
     : stmt.get(repoUrl) as RepoRow | undefined
+  
+  return row ? rowToRepo(row) : null
+}
+
+export function getRepoByLocalPath(db: Database, localPath: string): Repo | null {
+  const stmt = db.prepare('SELECT * FROM repos WHERE local_path = ?')
+  const row = stmt.get(localPath) as RepoRow | undefined
   
   return row ? rowToRepo(row) : null
 }

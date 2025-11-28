@@ -17,18 +17,27 @@ export function createRepoRoutes(database: Database) {
   app.post('/', async (c) => {
     try {
       const body = await c.req.json()
-      const { repoUrl, branch, openCodeConfigName, useWorktree } = body
+      const { repoUrl, localPath, branch, openCodeConfigName, useWorktree } = body
       
-      if (!repoUrl) {
-        return c.json({ error: 'repoUrl is required' }, 400)
+      if (!repoUrl && !localPath) {
+        return c.json({ error: 'Either repoUrl or localPath is required' }, 400)
       }
       
-      const repo = await repoService.cloneRepo(
-        database,
-        repoUrl,
-        branch,
-        useWorktree
-      )
+      let repo
+      if (localPath) {
+        repo = await repoService.initLocalRepo(
+          database,
+          localPath,
+          branch
+        )
+      } else {
+        repo = await repoService.cloneRepo(
+          database,
+          repoUrl!,
+          branch,
+          useWorktree
+        )
+      }
       
       if (openCodeConfigName) {
         const settingsService = new SettingsService(database)

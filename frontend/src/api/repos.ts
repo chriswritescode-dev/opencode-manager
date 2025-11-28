@@ -2,7 +2,8 @@ import type { Repo } from './types'
 import { API_BASE_URL } from '@/config'
 
 export async function createRepo(
-  repoUrl: string,
+  repoUrl?: string,
+  localPath?: string,
   branch?: string,
   openCodeConfigName?: string,
   useWorktree?: boolean
@@ -10,7 +11,7 @@ export async function createRepo(
   const response = await fetch(`${API_BASE_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repoUrl, branch, openCodeConfigName, useWorktree }),
+    body: JSON.stringify({ repoUrl, localPath, branch, openCodeConfigName, useWorktree }),
   })
 
   if (!response.ok) {

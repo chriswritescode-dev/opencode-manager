@@ -11,7 +11,7 @@ export function initializeDatabase(dbPath: string = './data/opencode.db'): Datab
   db.run(`
     CREATE TABLE IF NOT EXISTS repos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      repo_url TEXT NOT NULL,
+      repo_url TEXT,
       local_path TEXT NOT NULL,
       branch TEXT,
       default_branch TEXT,
@@ -20,8 +20,7 @@ export function initializeDatabase(dbPath: string = './data/opencode.db'): Datab
       last_pulled INTEGER,
       opencode_config_name TEXT,
       is_worktree BOOLEAN DEFAULT FALSE,
-      
-      UNIQUE(repo_url, branch)
+      is_local BOOLEAN DEFAULT FALSE
     );
     
     CREATE INDEX IF NOT EXISTS idx_repo_clone_status ON repos(clone_status);

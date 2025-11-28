@@ -7,11 +7,12 @@ import { useState } from "react";
 
 interface Repo {
   id: number;
-  repoUrl: string;
+  repoUrl?: string | null;
   fullPath: string;
   localPath: string;
   currentBranch?: string;
   isWorktree?: boolean;
+  isLocal?: boolean;
   cloneStatus: 'ready' | 'cloning' | 'error';
 }
 
@@ -56,7 +57,7 @@ export function SessionDetailHeader({
     );
   }
 
-  const repoName = repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository";
+  const repoName = repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository";
   const currentBranch = repo.currentBranch || "main";
 
   const handleTitleClick = () => {

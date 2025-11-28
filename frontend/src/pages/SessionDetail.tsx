@@ -7,16 +7,19 @@ import { PromptInput } from "@/components/message/PromptInput";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
+import { PermissionRequestDialog } from "@/components/session/PermissionRequestDialog";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useAbortSession, useUpdateSession } from "@/hooks/useOpenCode";
+import { useSession, useAbortSession, useUpdateSession, useOpenCodeClient } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useSettings } from "@/hooks/useSettings";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
+import { usePermissionRequests } from "@/hooks/usePermissionRequests";
 import { useEffect, useRef, useCallback } from "react";
 import { Loader2 } from "lucide-react";
+import type { PermissionResponse } from "@/api/types";
 
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
@@ -35,9 +38,10 @@ export function SessionDetail() {
     enabled: !!repoId,
   });
 
+const { currentPermission, pendingCount, dismissPermission } = usePermissionRequests();
   
-
   const opcodeUrl = OPENCODE_API_ENDPOINT;
+  const openCodeClient = useOpenCodeClient(opcodeUrl, repo?.fullPath);
   
   const repoDirectory = repo?.fullPath;
 
@@ -106,6 +110,15 @@ export function SessionDetail() {
     setFileBrowserOpen(false)
     setSelectedFilePath(undefined)
   }, []);
+
+  const handlePermissionResponse = useCallback(async (
+    permissionID: string, 
+    permissionSessionID: string, 
+    response: PermissionResponse
+  ) => {
+    if (!openCodeClient) return
+    await openCodeClient.respondToPermission(permissionSessionID, permissionID, response)
+  }, [openCodeClient]);
 
   if (repoLoading || sessionLoading) {
     return (
@@ -215,8 +228,15 @@ export function SessionDetail() {
         isOpen={fileBrowserOpen}
         onClose={handleFileBrowserClose}
         basePath={repo.localPath}
-        repoName={repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository"}
+        repoName={repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}
         initialSelectedFile={selectedFilePath}
+      />
+
+      <PermissionRequestDialog
+        permission={currentPermission}
+        pendingCount={pendingCount}
+        onRespond={handlePermissionResponse}
+        onDismiss={dismissPermission}
       />
     </div>
   );

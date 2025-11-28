@@ -8,6 +8,86 @@ import { SettingsService } from './settings'
 import { getReposPath } from '@opencode-webui/shared'
 import path from 'path'
 
+export async function initLocalRepo(
+  database: Database,
+  localPath: string,
+  branch?: string
+): Promise<Repo> {
+  const normalizedPath = localPath.replace(/\/+$/, '')
+  const fullPath = path.resolve(getReposPath(), normalizedPath)
+  
+  const existing = db.getRepoByLocalPath(database, normalizedPath)
+  if (existing) {
+    logger.info(`Local repo already exists in database: ${normalizedPath}`)
+    return existing
+  }
+  
+  const createRepoInput: CreateRepoInput = {
+    localPath: normalizedPath,
+    branch: branch || undefined,
+    defaultBranch: branch || 'main',
+    cloneStatus: 'cloning',
+    clonedAt: Date.now(),
+    isLocal: true,
+  }
+  
+  let repo: Repo
+  let directoryCreated = false
+  
+  try {
+    repo = db.createRepo(database, createRepoInput)
+    logger.info(`Created database record for local repo: ${normalizedPath} (id: ${repo.id})`)
+  } catch (error: any) {
+    logger.error(`Failed to create database record for local repo: ${normalizedPath}`, error)
+    throw new Error(`Failed to register local repository '${normalizedPath}': ${error.message}`)
+  }
+  
+  try {
+    await ensureDirectoryExists(fullPath)
+    directoryCreated = true
+    logger.info(`Created directory for local repo: ${fullPath}`)
+    
+    logger.info(`Initializing git repository: ${fullPath}`)
+    await executeCommand(['git', 'init'], fullPath)
+    
+    if (branch && branch !== 'main') {
+      await executeCommand(['git', '-C', fullPath, 'checkout', '-b', branch])
+    }
+    
+    const isGitRepo = await executeCommand(['git', '-C', fullPath, 'rev-parse', '--git-dir'])
+      .then(() => true)
+      .catch(() => false)
+    
+    if (!isGitRepo) {
+      throw new Error(`Git initialization failed - directory exists but is not a valid git repository`)
+    }
+    
+    db.updateRepoStatus(database, repo.id, 'ready')
+    logger.info(`Local git repo ready: ${normalizedPath}`)
+    return { ...repo, cloneStatus: 'ready' }
+  } catch (error: any) {
+    logger.error(`Failed to initialize local repo, rolling back: ${normalizedPath}`, error)
+    
+    try {
+      db.deleteRepo(database, repo.id)
+      logger.info(`Rolled back database record for repo id: ${repo.id}`)
+    } catch (dbError: any) {
+      logger.error(`Failed to rollback database record for repo id ${repo.id}:`, dbError)
+    }
+    
+    if (directoryCreated) {
+      try {
+        await executeCommand(['rm', '-rf', normalizedPath], getReposPath())
+        logger.info(`Rolled back directory: ${normalizedPath}`)
+      } catch (fsError: any) {
+        logger.error(`Failed to rollback directory ${normalizedPath}:`, fsError)
+      }
+    }
+    
+    throw new Error(`Failed to initialize local repository '${normalizedPath}': ${error.message}`)
+  }
+}
+
 export async function cloneRepo(
   database: Database,
   repoUrl: string,
@@ -229,13 +309,18 @@ export async function cloneRepo(
 }
 
 export async function getCurrentBranch(repo: Repo): Promise<string | null> {
+  const repoPath = path.resolve(getReposPath(), repo.localPath)
+  
   try {
-    const repoPath = path.resolve(getReposPath(), repo.localPath)
     const currentBranch = await executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
     return currentBranch.trim()
-  } catch (error: any) {
-    logger.warn(`Failed to get current branch for repo ${repo.id}:`, error.message)
-    return null
+  } catch {
+    try {
+      const symbolicRef = await executeCommand(['git', '-C', repoPath, 'symbolic-ref', '--short', 'HEAD'])
+      return symbolicRef.trim()
+    } catch {
+      return repo.branch || repo.defaultBranch || null
+    }
   }
 }
 
@@ -243,15 +328,25 @@ export async function listBranches(repo: Repo): Promise<{ local: string[], remot
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
     
-    await executeCommand(['git', '-C', repoPath, 'fetch', '--all'])
+    if (!repo.isLocal) {
+      await executeCommand(['git', '-C', repoPath, 'fetch', '--all'])
+    }
     
     const localBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '--format=%(refname:short)'])
     const localBranches = localBranchesOutput.trim().split('\n').filter(b => b.trim())
     
-    const remoteBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '-r', '--format=%(refname:short)'])
-    const remoteBranches = remoteBranchesOutput.trim().split('\n')
-      .filter(b => b.trim() && !b.includes('HEAD'))
-      .map(b => b.replace('origin/', ''))
+    let remoteBranches: string[] = []
+    if (!repo.isLocal) {
+      try {
+        const remoteBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '-r', '--format=%(refname:short)'])
+        remoteBranches = remoteBranchesOutput.trim().split('\n')
+          .filter(b => b.trim() && !b.includes('HEAD'))
+          .map(b => b.replace('origin/', ''))
+      } catch (error) {
+        logger.warn(`Failed to get remote branches for repo ${repo.id}:`, error)
+        remoteBranches = []
+      }
+    }
     
     const current = await getCurrentBranch(repo)
     
@@ -321,6 +416,11 @@ export async function pullRepo(database: Database, repoId: number): Promise<void
     throw new Error(`Repo not found: ${repoId}`)
   }
   
+  if (repo.isLocal) {
+    logger.info(`Skipping pull for local repo: ${repo.localPath}`)
+    return
+  }
+  
   try {
     logger.info(`Pulling repo: ${repo.repoUrl}`)
     await executeCommand(['git', '-C', path.resolve(getReposPath(), repo.localPath), 'pull'])
@@ -339,15 +439,17 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     throw new Error(`Repo not found: ${repoId}`)
   }
   
+  const repoIdentifier = repo.repoUrl || repo.localPath
+  
   try {
-    logger.info(`Deleting repo files: ${repo.repoUrl}`)
+    logger.info(`Deleting repo files: ${repoIdentifier}`)
     
     // Extract just the directory name from the localPath
     const dirName = repo.localPath.split('/').pop() || repo.localPath
     const fullPath = path.resolve(getReposPath(), dirName)
     
     // If this is a worktree, properly remove it from git first
-    if (repo.isWorktree && repo.branch) {
+    if (repo.isWorktree && repo.branch && repo.repoUrl) {
       const repoName = extractRepoName(repo.repoUrl)
       const baseRepoPath = path.resolve(getReposPath(), repoName)
       
@@ -391,7 +493,7 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     }
     
     // If this was a worktree, also prune the base repo to clean up any remaining references
-    if (repo.isWorktree && repo.branch) {
+    if (repo.isWorktree && repo.branch && repo.repoUrl) {
       const repoName = extractRepoName(repo.repoUrl)
       const baseRepoPath = path.resolve(getReposPath(), repoName)
       
@@ -404,9 +506,9 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     }
     
     db.deleteRepo(database, repoId)
-    logger.info(`Repo deleted successfully: ${repo.repoUrl}`)
+    logger.info(`Repo deleted successfully: ${repoIdentifier}`)
   } catch (error: any) {
-    logger.error(`Failed to delete repo: ${repo.repoUrl}`, error)
+    logger.error(`Failed to delete repo: ${repoIdentifier}`, error)
     throw error
   }
 }

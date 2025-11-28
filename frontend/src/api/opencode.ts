@@ -111,6 +111,11 @@ export class OpenCodeClient {
     return response.data
   }
 
+  async respondToPermission(sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') {
+    const result = await this.client.post(`/session/${sessionID}/permissions/${permissionID}`, { response })
+    return result.data
+  }
+
   getEventSourceURL() {
     const base = this.baseURL.startsWith('http') 
       ? this.baseURL 

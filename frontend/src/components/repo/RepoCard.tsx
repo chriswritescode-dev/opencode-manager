@@ -8,11 +8,13 @@ import { AddBranchWorkspaceDialog } from "./AddBranchWorkspaceDialog";
 interface RepoCardProps {
   repo: {
     id: number;
-    repoUrl: string;
+    repoUrl?: string | null;
+    localPath?: string;
     branch?: string;
     currentBranch?: string;
     cloneStatus: string;
     isWorktree?: boolean;
+    isLocal?: boolean;
   };
   onDelete: (id: number) => void;
   isDeleting: boolean;
@@ -29,7 +31,9 @@ export function RepoCard({
 }: RepoCardProps) {
   const navigate = useNavigate();
   const [addBranchOpen, setAddBranchOpen] = useState(false);
-  const repoName = repo.repoUrl.split("/").slice(-1)[0].replace(".git", "");
+  const repoName = repo.repoUrl 
+    ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
+    : repo.localPath || "Local Repo";
   const branchToDisplay = repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
 
@@ -115,18 +119,20 @@ export function RepoCard({
               <ExternalLink className="w-4 h-4 mr-2" />
               Open
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={(e) => {
-                e.stopPropagation();
-                setAddBranchOpen(true);
-              }}
-              disabled={!isReady}
-              className="h-10 sm:h-9 w-10 p-0"
-            >
-              <GitBranch className="w-4 h-4" />
-            </Button>
+            {repo.repoUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAddBranchOpen(true);
+                }}
+                disabled={!isReady}
+                className="h-10 sm:h-9 w-10 p-0"
+              >
+                <GitBranch className="w-4 h-4" />
+              </Button>
+            )}
 
             <Button
               size="sm"
@@ -148,11 +154,13 @@ export function RepoCard({
         </div>
       </div>
 
-      <AddBranchWorkspaceDialog
-        open={addBranchOpen}
-        onOpenChange={setAddBranchOpen}
-        repoUrl={repo.repoUrl}
-      />
+      {repo.repoUrl && (
+        <AddBranchWorkspaceDialog
+          open={addBranchOpen}
+          onOpenChange={setAddBranchOpen}
+          repoUrl={repo.repoUrl}
+        />
+      )}
     </div>
   );
 }

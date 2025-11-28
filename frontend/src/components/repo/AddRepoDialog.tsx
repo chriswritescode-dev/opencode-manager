@@ -12,23 +12,33 @@ interface AddRepoDialogProps {
 }
 
 export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
+  const [repoType, setRepoType] = useState<'remote' | 'local'>('remote')
   const [repoUrl, setRepoUrl] = useState('')
+  const [localPath, setLocalPath] = useState('')
   const [branch, setBranch] = useState('')
   const queryClient = useQueryClient()
 
   const mutation = useMutation({
-    mutationFn: () => createRepo(repoUrl, branch || undefined, undefined, false),
+    mutationFn: () => {
+      if (repoType === 'local') {
+        return createRepo(undefined, localPath, branch || undefined, undefined, false)
+      } else {
+        return createRepo(repoUrl, undefined, branch || undefined, undefined, false)
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repos'] })
       setRepoUrl('')
+      setLocalPath('')
       setBranch('')
+      setRepoType('remote')
       onOpenChange(false)
     },
   })
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (repoUrl) {
+    if ((repoType === 'remote' && repoUrl) || (repoType === 'local' && localPath)) {
       mutation.mutate()
     }
   }
@@ -43,15 +53,61 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="space-y-2">
-            <label className="text-sm text-zinc-400">Repository URL</label>
-            <Input
-              placeholder="https://github.com/user/repo.git"
-              value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
-              disabled={mutation.isPending}
-              className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
-            />
+            <label className="text-sm text-zinc-400">Repository Type</label>
+            <div className="flex gap-4">
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="repoType"
+                  value="remote"
+                  checked={repoType === 'remote'}
+                  onChange={(e) => setRepoType(e.target.value as 'remote')}
+                  disabled={mutation.isPending}
+                  className="text-blue-600 bg-[#1a1a1a] border-[#2a2a2a]"
+                />
+                <span className="text-sm text-white">Remote Repository</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="repoType"
+                  value="local"
+                  checked={repoType === 'local'}
+                  onChange={(e) => setRepoType(e.target.value as 'local')}
+                  disabled={mutation.isPending}
+                  className="text-blue-600 bg-[#1a1a1a] border-[#2a2a2a]"
+                />
+                <span className="text-sm text-white">Local Repository</span>
+              </label>
+            </div>
           </div>
+
+          {repoType === 'remote' ? (
+            <div className="space-y-2">
+              <label className="text-sm text-zinc-400">Repository URL</label>
+              <Input
+                placeholder="https://github.com/user/repo.git"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                disabled={mutation.isPending}
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
+              />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <label className="text-sm text-zinc-400">Local Path</label>
+              <Input
+                placeholder="my-local-project"
+                value={localPath}
+                onChange={(e) => setLocalPath(e.target.value)}
+                disabled={mutation.isPending}
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
+              />
+              <p className="text-xs text-zinc-500">
+                Directory name will be created in the repos folder
+              </p>
+            </div>
+          )}
           
           <div className="space-y-2">
             <label className="text-sm text-zinc-400">Branch</label>
@@ -64,21 +120,25 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
             />
             <p className="text-xs text-zinc-500">
               {branch 
-                ? `Clones repository directly to '${branch}' branch`
-                : "Clones repository to default branch"
+                ? repoType === 'remote' 
+                  ? `Clones repository directly to '${branch}' branch`
+                  : `Initializes repository with '${branch}' branch`
+                : repoType === 'remote'
+                  ? "Clones repository to default branch"
+                  : "Initializes repository with 'main' branch"
               }
             </p>
           </div>
           
           <Button 
             type="submit" 
-            disabled={!repoUrl || mutation.isPending}
+            disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || mutation.isPending}
             className="w-full bg-blue-600 hover:bg-blue-700 text-white"
           >
             {mutation.isPending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Cloning...
+                {repoType === 'local' ? 'Initializing...' : 'Cloning...'}
               </>
             ) : (
               'Add Repository'

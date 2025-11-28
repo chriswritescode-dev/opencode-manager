@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
 import type { SSEEvent, MessageListResponse } from '@/api/types'
+import { permissionEvents } from './usePermissionRequests'
 
 export const useSSE = (opcodeUrl: string | null | undefined, directory?: string) => {
   const client = useOpenCodeClient(opcodeUrl, directory)
@@ -231,7 +232,15 @@ case 'message.updated':
         }
 
         case 'permission.updated':
+          if ('id' in event.properties) {
+            permissionEvents.emit({ type: 'add', permission: event.properties })
+          }
+          break
+
         case 'permission.replied':
+          if ('permissionID' in event.properties) {
+            permissionEvents.emit({ type: 'remove', permissionID: event.properties.permissionID })
+          }
           break
 
         case 'todo.updated':

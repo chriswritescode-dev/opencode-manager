@@ -28,7 +28,7 @@ export function AddBranchWorkspaceDialog({
 
   const mutation = useMutation({
     mutationFn: () =>
-      createRepo(repoUrl, branch || undefined, undefined, useWorktree),
+      createRepo(repoUrl, undefined, branch || undefined, undefined, useWorktree),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] });
       setBranch("");

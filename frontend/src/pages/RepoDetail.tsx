@@ -82,8 +82,9 @@ export function RepoDetail() {
     );
   }
 
-  const repoName =
-    repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository";
+  const repoName = repo.repoUrl
+    ? repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
+    : repo.localPath || "Local Repository";
   const branchToDisplay = repo.currentBranch || repo.branch;
   const displayName = branchToDisplay ? `${repoName} (${branchToDisplay})` : repoName;
   const isNotMainBranch = branchToDisplay && branchToDisplay !== repo.defaultBranch;

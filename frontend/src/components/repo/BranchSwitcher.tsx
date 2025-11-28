@@ -18,7 +18,7 @@ interface BranchSwitcherProps {
   repoId: number;
   currentBranch: string;
   isWorktree?: boolean;
-  repoUrl: string;
+  repoUrl?: string | null;
   repoLocalPath?: string;
 }
 
@@ -28,7 +28,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
   const queryClient = useQueryClient();
   const { data: gitStatus } = useGitStatus(repoId);
 
-  const { data: branches } = useQuery({
+  const { data: branches, isLoading: branchesLoading } = useQuery({
     queryKey: ["branches", repoId],
     queryFn: () => listBranches(repoId),
     enabled: !!repoId,
@@ -60,8 +60,12 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="bg-card border-border min-w-[200px]">
-          {branches?.remote && branches.remote.length > 0 ? (
-            branches.remote.map((branch: string) => (
+          {branchesLoading ? (
+            <DropdownMenuItem disabled className="text-muted-foreground">
+              Loading branches...
+            </DropdownMenuItem>
+          ) : branches?.local && branches.local.length > 0 ? (
+            branches.local.map((branch: string) => (
               <DropdownMenuItem
                 key={branch}
                 onClick={() => switchBranchMutation.mutate(branch)}
@@ -77,7 +81,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             ))
           ) : (
             <DropdownMenuItem disabled className="text-muted-foreground">
-              Loading branches...
+              No branches available
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
@@ -95,7 +99,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
               )}
             </div>
           </DropdownMenuItem>
-          {!isWorktree && (
+          {!isWorktree && repoUrl && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
@@ -112,11 +116,13 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AddBranchWorkspaceDialog
-        open={addBranchOpen}
-        onOpenChange={setAddBranchOpen}
-        repoUrl={repoUrl}
-      />
+      {repoUrl && (
+        <AddBranchWorkspaceDialog
+          open={addBranchOpen}
+          onOpenChange={setAddBranchOpen}
+          repoUrl={repoUrl}
+        />
+      )}
 
       <GitChangesSheet
         isOpen={gitChangesOpen}

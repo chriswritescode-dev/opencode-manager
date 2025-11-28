@@ -30,6 +30,10 @@ describe('Database Queries', () => {
         isWorktree: false
       }
 
+      const existingCheckStmt = {
+        get: vi.fn().mockReturnValue(undefined)
+      }
+
       const insertStmt = {
         run: vi.fn().mockReturnValue({ changes: 1, lastInsertRowid: 1 })
       }
@@ -48,6 +52,7 @@ describe('Database Queries', () => {
       }
       
       mockDb.prepare
+        .mockReturnValueOnce(existingCheckStmt)
         .mockReturnValueOnce(insertStmt)
         .mockReturnValueOnce(selectStmt)
 
@@ -61,7 +66,8 @@ describe('Database Queries', () => {
         repo.defaultBranch,
         repo.cloneStatus,
         repo.clonedAt,
-        repo.isWorktree ? 1 : 0
+        repo.isWorktree ? 1 : 0,
+        0
       )
       expect(result.id).toBe(1)
     })
@@ -69,6 +75,7 @@ describe('Database Queries', () => {
 
   describe('getRepoById', () => {
     it('should retrieve repo by ID', () => {
+      const clonedAt = Date.now()
       const repoRow = {
         id: 1,
         repo_url: 'https://github.com/test/repo',
@@ -76,10 +83,11 @@ describe('Database Queries', () => {
         branch: 'main',
         default_branch: 'main',
         clone_status: 'ready',
-        cloned_at: Date.now(),
-        last_pulled: undefined,
-        opencode_config_name: undefined,
-        is_worktree: 0
+        cloned_at: clonedAt,
+        last_pulled: null,
+        opencode_config_name: null,
+        is_worktree: 0,
+        is_local: 0
       }
 
       const stmt = {
@@ -89,14 +97,19 @@ describe('Database Queries', () => {
 
       const result = db.getRepoById(mockDb, 1)
 
-      expect(result).toMatchObject({
+      expect(result).toEqual({
         id: 1,
         repoUrl: 'https://github.com/test/repo',
         localPath: 'repos/test-repo',
+        fullPath: expect.stringContaining('repos/test-repo'),
         branch: 'main',
         defaultBranch: 'main',
         cloneStatus: 'ready',
-        clonedAt: repoRow.cloned_at
+        clonedAt: clonedAt,
+        lastPulled: null,
+        openCodeConfigName: null,
+        isWorktree: undefined,
+        isLocal: undefined
       })
     })
 
