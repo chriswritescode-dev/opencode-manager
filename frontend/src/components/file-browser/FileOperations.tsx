@@ -44,7 +44,7 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
         <Button variant="outline" size="sm" asChild>
           <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-2">
             <Upload className="w-4 h-4" />
-            Upload
+            <span className='hidden sm:inline'>Upload</span>
           </label>
         </Button>
       </div>

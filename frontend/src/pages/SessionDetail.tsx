@@ -31,6 +31,7 @@ export function SessionDetail() {
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -50,7 +51,7 @@ const { currentPermission, pendingCount, dismissPermission } = usePermissionRequ
     sessionId,
     repoDirectory,
   );
-  const { isConnected } = useSSE(opcodeUrl, repoDirectory);
+  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
@@ -111,6 +112,13 @@ const { currentPermission, pendingCount, dismissPermission } = usePermissionRequ
     setSelectedFilePath(undefined)
   }, []);
 
+  const handleScrollToBottom = useCallback(() => {
+    if (messageContainerRef.current) {
+      messageContainerRef.current.scrollTop = messageContainerRef.current.scrollHeight;
+      setShowScrollButton(false);
+    }
+  }, []);
+
   const handlePermissionResponse = useCallback(async (
     permissionID: string, 
     permissionSessionID: string, 
@@ -153,6 +161,7 @@ const { currentPermission, pendingCount, dismissPermission } = usePermissionRequ
         sessionTitle={session.title || "Untitled Session"}
         repoId={repoId}
         isConnected={isConnected}
+        isReconnecting={isReconnecting}
         opcodeUrl={opcodeUrl}
         repoDirectory={repoDirectory}
         onFileBrowserOpen={() => setFileBrowserOpen(true)}
@@ -160,8 +169,8 @@ const { currentPermission, pendingCount, dismissPermission } = usePermissionRequ
         onSessionTitleUpdate={handleSessionTitleUpdate}
       />
 
-      <div className="flex-1 overflow-hidden flex flex-col">
-        <div ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden">
+      <div className="flex-1 overflow-hidden flex flex-col relative">
+        <div ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28">
           {opcodeUrl && repoDirectory && (
             <MessageThread 
               opcodeUrl={opcodeUrl} 
@@ -169,16 +178,19 @@ const { currentPermission, pendingCount, dismissPermission } = usePermissionRequ
               directory={repoDirectory}
               onFileClick={handleFileClick}
               containerRef={messageContainerRef}
+              onScrollStateChange={setShowScrollButton}
             />
           )}
         </div>
         {opcodeUrl && repoDirectory && (
-          <div className="flex-shrink-0">
+          <div className="absolute bottom-0 left-0 right-0 flex justify-center">
             <PromptInput
               opcodeUrl={opcodeUrl}
               directory={repoDirectory}
               sessionID={sessionId}
               disabled={!isConnected}
+              showScrollButton={showScrollButton}
+              onScrollToBottom={handleScrollToBottom}
               onShowModelsDialog={() => setModelDialogOpen(true)}
               onShowSessionsDialog={() => setSessionsDialogOpen(true)}
               onShowHelpDialog={() => {

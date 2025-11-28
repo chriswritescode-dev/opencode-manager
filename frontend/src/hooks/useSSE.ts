@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
 import type { SSEEvent, MessageListResponse } from '@/api/types'
 import { permissionEvents } from './usePermissionRequests'
+
+const MAX_RECONNECT_DELAY = 30000
+const INITIAL_RECONNECT_DELAY = 1000
 
 export const useSSE = (opcodeUrl: string | null | undefined, directory?: string) => {
   const client = useOpenCodeClient(opcodeUrl, directory)
@@ -10,10 +13,37 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
   const eventSourceRef = useRef<EventSource | null>(null)
   const urlRef = useRef<string | null>(null)
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reconnectDelayRef = useRef(INITIAL_RECONNECT_DELAY)
+  const mountedRef = useRef(true)
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isReconnecting, setIsReconnecting] = useState(false)
+
+  const scheduleReconnect = useCallback((connectFn: () => void) => {
+    if (!mountedRef.current) return
+    
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current)
+    }
+    
+    const delay = reconnectDelayRef.current
+    setIsReconnecting(true)
+    
+    reconnectTimeoutRef.current = setTimeout(() => {
+      if (!mountedRef.current) return
+      reconnectDelayRef.current = Math.min(delay * 2, MAX_RECONNECT_DELAY)
+      connectFn()
+    }, delay)
+  }, [])
+
+  const resetReconnectDelay = useCallback(() => {
+    reconnectDelayRef.current = INITIAL_RECONNECT_DELAY
+    setIsReconnecting(false)
+  }, [])
 
   useEffect(() => {
+    mountedRef.current = true
+    
     if (!client) {
       if (eventSourceRef.current) {
         eventSourceRef.current.close()
@@ -35,59 +65,6 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
     }
     
     urlRef.current = eventSourceUrl
-    
-    const connectSSE = () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current)
-        reconnectTimeoutRef.current = null
-      }
-
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close()
-        eventSourceRef.current = null
-      }
-
-      try {
-        const eventSource = new EventSource(eventSourceUrl)
-        eventSourceRef.current = eventSource
-
-        eventSource.onopen = () => {
-          setIsConnected(true)
-          setError(null)
-          queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, directory] })
-          queryClient.invalidateQueries({ queryKey: ['opencode', 'messages', opcodeUrl] })
-        }
-
-        eventSource.onerror = (e) => {
-          console.error('[SSE] Connection error:', e)
-          setIsConnected(false)
-          setError('OpenCode server is not running. Please start the server first.')
-          
-          if (eventSourceRef.current) {
-            eventSourceRef.current.close()
-            eventSourceRef.current = null
-          }
-        }
-
-        eventSource.onmessage = (event) => {
-          try {
-            const data: SSEEvent = JSON.parse(event.data)
-            handleSSEEvent(data)
-          } catch (err) {
-            console.error('Failed to parse SSE event:', err)
-          }
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to connect')
-        setIsConnected(false)
-      }
-    }
-
-    const handleReconnect = () => {
-      if (!eventSourceRef.current || eventSourceRef.current.readyState === EventSource.CLOSED) {
-        connectSSE()
-      }
-    }
 
     const handleSSEEvent = (event: SSEEvent) => {
       switch (event.type) {
@@ -147,7 +124,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           break
         }
 
-case 'message.updated':
+        case 'message.updated':
         case 'messagev2.updated': {
           if (!('info' in event.properties)) break
           
@@ -255,6 +232,68 @@ case 'message.updated':
           break
       }
     }
+    
+    const connectSSE = () => {
+      if (!mountedRef.current) return
+      
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = null
+      }
+
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+      }
+
+      try {
+        const eventSource = new EventSource(eventSourceUrl)
+        eventSourceRef.current = eventSource
+
+        eventSource.onopen = () => {
+          if (!mountedRef.current) return
+          setIsConnected(true)
+          setError(null)
+          resetReconnectDelay()
+          queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, directory] })
+          queryClient.invalidateQueries({ queryKey: ['opencode', 'messages', opcodeUrl] })
+        }
+
+        eventSource.onerror = () => {
+          if (!mountedRef.current) return
+          
+          setIsConnected(false)
+          setError('Connection lost. Reconnecting...')
+          
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close()
+            eventSourceRef.current = null
+          }
+          
+          scheduleReconnect(connectSSE)
+        }
+
+        eventSource.onmessage = (event) => {
+          try {
+            const data: SSEEvent = JSON.parse(event.data)
+            handleSSEEvent(data)
+          } catch (err) {
+            console.error('Failed to parse SSE event:', err)
+          }
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to connect')
+        setIsConnected(false)
+        scheduleReconnect(connectSSE)
+      }
+    }
+
+    const handleReconnect = () => {
+      if (!eventSourceRef.current || eventSourceRef.current.readyState === EventSource.CLOSED) {
+        resetReconnectDelay()
+        connectSSE()
+      }
+    }
 
     connectSSE()
 
@@ -262,6 +301,7 @@ case 'message.updated':
     window.addEventListener('online', handleReconnect)
 
     return () => {
+      mountedRef.current = false
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
       if (reconnectTimeoutRef.current) {
@@ -274,7 +314,7 @@ case 'message.updated':
         setIsConnected(false)
       }
     }
-  }, [client, queryClient])
+  }, [client, queryClient, opcodeUrl, directory, scheduleReconnect, resetReconnectDelay])
 
-  return { isConnected, error }
+  return { isConnected, error, isReconnecting }
 }

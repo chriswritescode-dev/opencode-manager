@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { components } from '@/api/opencode-types'
 import { Copy } from 'lucide-react'
 import { TextPart } from './TextPart'
@@ -33,8 +34,6 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
       return part.snapshot || ''
     case 'agent':
       return `Agent: ${part.name}`
-    case 'step-start':
-      return 'Starting step...'
     case 'step-finish':
       if (allParts) {
         return allParts
@@ -77,7 +76,7 @@ function CopyButton({ content, title, className = "" }: { content: string; title
 
 
 
-export function MessagePart({ part, role, allParts, partIndex, onFileClick }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick }: MessagePartProps) {
   const copyableContent = getCopyableContent(part, allParts)
   
   switch (part.type) {
@@ -116,16 +115,10 @@ export function MessagePart({ part, role, allParts, partIndex, onFileClick }: Me
           <div className="text-sm font-medium text-blue-400">Agent: {part.name}</div>
         </div>
       )
-    case 'step-start':
-      return (
-        <div className="text-xs text-muted-foreground my-1">
-          → Starting step...
-        </div>
-      )
     case 'step-finish':
       return (
         <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
-          <span>✓ Step complete • ${part.cost.toFixed(4)} • {part.tokens.input + part.tokens.output} tokens</span>
+          <span>${part.cost.toFixed(4)} • {part.tokens.input + part.tokens.output} tokens</span>
           <CopyButton content={copyableContent} title="Copy step complete" />
         </div>
       )
@@ -137,10 +130,6 @@ export function MessagePart({ part, role, allParts, partIndex, onFileClick }: Me
         </span>
       )
     default:
-      return (
-        <div className="border border-zinc-800 rounded-lg p-4 my-2 bg-zinc-950">
-          <div className="text-xs text-zinc-500">Unknown part type</div>
-        </div>
-      )
+      return 
   }
-}
+})

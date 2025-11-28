@@ -22,6 +22,7 @@ interface SessionDetailHeaderProps {
   sessionTitle: string;
   repoId: number;
   isConnected: boolean;
+  isReconnecting?: boolean;
   opcodeUrl: string | null;
   repoDirectory: string | undefined;
   onFileBrowserOpen: () => void;
@@ -35,6 +36,7 @@ export function SessionDetailHeader({
   sessionTitle,
   repoId,
   isConnected,
+  isReconnecting,
   opcodeUrl,
   repoDirectory,
   onFileBrowserOpen,
@@ -139,10 +141,16 @@ export function SessionDetailHeader({
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
             <div
-              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`}
+              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
+                isConnected 
+                  ? "bg-green-500" 
+                  : isReconnecting 
+                    ? "bg-yellow-500 animate-pulse" 
+                    : "bg-red-500"
+              }`}
             />
             <span className="text-xs text-muted-foreground hidden sm:inline">
-              {isConnected ? "Connected" : "Disconnected"}
+              {isConnected ? "Connected" : isReconnecting ? "Reconnecting..." : "Disconnected"}
             </span>
           </div>
           <Button

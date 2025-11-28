@@ -1,7 +1,33 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
+import { useUserBash } from '@/stores/userBashStore'
 import { detectFileReferences } from '@/lib/fileReferences'
+import { Copy } from 'lucide-react'
+
+function CopyButton({ content, title, className = "" }: { content: string; title: string; className?: string }) {
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content)
+    } catch (error) {
+      console.error('Failed to copy content:', error)
+    }
+  }
+
+  if (!content.trim()) {
+    return null
+  }
+
+  return (
+    <button
+      onClick={handleCopy}
+      className={`p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground ${className}`}
+      title={title}
+    >
+      <Copy className="w-4 h-4" />
+    </button>
+  )
+}
 
 type ToolPart = components['schemas']['ToolPart']
 
@@ -52,8 +78,20 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
 
 export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
-  const defaultExpanded = preferences?.expandToolCalls ?? false
+  const { userBashCommands } = useUserBash()
+  const outputRef = useRef<HTMLDivElement>(null)
+  const isUserBashCommand = part.tool === 'bash' && 
+    part.state.status === 'completed' &&
+    typeof part.state.input?.command === 'string' &&
+    userBashCommands.has(part.state.input.command)
+  const defaultExpanded = isUserBashCommand || (preferences?.expandToolCalls ?? false)
   const [expanded, setExpanded] = useState(defaultExpanded)
+
+  useEffect(() => {
+    if (part.tool === 'bash' && expanded && outputRef.current) {
+      outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }
+  }, [expanded, part.tool])
 
   const getStatusColor = () => {
     switch (part.state.status) {
@@ -110,6 +148,30 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
   const previewText = getPreviewText()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
 
+  if (isUserBashCommand) {
+    const command = part.state.input.command as string
+    const output = part.state.status === 'completed' ? part.state.output : ''
+    return (
+      <div ref={outputRef} className="my-2">
+        <div className="flex items-center gap-2 text-sm mb-2">
+          <span className="text-green-400">✓</span>
+          <span className="font-medium">$</span>
+          <span className="text-zinc-300">{command}</span>
+          {part.state.status === 'completed' && part.state.time && (
+            <span className="text-muted-foreground text-xs ml-auto">
+              {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
+            </span>
+          )}
+        </div>
+        <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
+             onClick={() => navigator.clipboard.writeText(output)}
+             title="Click to copy output">
+          {output}
+        </pre>
+      </div>
+    )
+  }
+
   return (
     <div className="border border-border rounded-lg overflow-hidden my-2">
       <button
@@ -138,7 +200,7 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
       </button>
 
       {expanded && (
-        <div className="bg-card p-4 space-y-2">
+        <div className="bg-card space-y-2">
           {part.state.status === 'running' && (
             <div className="text-sm">
               <div className="text-zinc-400 mb-1">Input:</div>
@@ -148,14 +210,31 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
 
           {part.state.status === 'completed' && (
             <>
-              <div className="text-sm">
-                <div className="text-zinc-400 mb-1">Input:</div>
-                <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-              </div>
-              <div className="text-sm">
+              {part.tool === 'bash' ? (
+                <div className="text-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="text-zinc-400">Command:</div>
+                    <CopyButton 
+                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''} 
+                      title="Copy command" 
+                    />
+                  </div>
+                  <div className="bg-accent p-2 rounded text-xs overflow-x-auto">
+                    <span className="text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm">
+                  <div className="text-zinc-400 mb-1">Input:</div>
+                  <ClickableJson json={part.state.input} onFileClick={onFileClick} />
+                </div>
+              )}
+              <div className="text-sm" ref={outputRef}>
                 <div className="text-zinc-400 mb-1">Output:</div>
-                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap">
-                  {part.state.output}
+                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
+                     onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
+                     title="Click to copy output">
+                  {part.state.status === 'completed' ? part.state.output : ''}
                 </pre>
               </div>
               {part.state.time && (

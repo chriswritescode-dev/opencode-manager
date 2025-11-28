@@ -5,6 +5,8 @@ import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
 import { useStandalone } from '@/hooks/useStandalone'
+import { useUserBash } from '@/stores/userBashStore'
+import { ChevronDown } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { FileSuggestions } from './FileSuggestions'
@@ -26,6 +28,8 @@ interface PromptInputProps {
   directory?: string
   sessionID: string
   disabled?: boolean
+  showScrollButton?: boolean
+  onScrollToBottom?: () => void
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
@@ -35,7 +39,9 @@ export function PromptInput({
   opcodeUrl,
   directory,
   sessionID, 
-  disabled, 
+  disabled,
+  showScrollButton,
+  onScrollToBottom,
   onShowSessionsDialog,
   onShowModelsDialog,
   onShowHelpDialog
@@ -79,12 +85,14 @@ export function PromptInput({
   )
   
   const isStandalone = useStandalone()
+  const { addUserBashCommand } = useUserBash()
 
   const handleSubmit = () => {
     if (!prompt.trim() || disabled) return
 
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
+      addUserBashCommand(command)
       sendShell.mutate({
         sessionID,
         command,
@@ -418,7 +426,7 @@ export function PromptInput({
   
 
   return (
-    <div className={`backdrop-blur-md bg-background/90 border border-border rounded-lg p-1 md:p-3 mx-2 md:mx-4 md:mb-4 max-w-4xl md:mx-auto pb-safe ${isStandalone ? 'mb-6' : 'mb-2'}`}>
+    <div className={`backdrop-blur-md bg-background opacity-95 border border-border rounded-lg p-2 md:p-3 mx-2 md:mx-4 md:mb-4 w-full max-w-4xl pb-safe ${isStandalone ? 'mb-6' : 'mb-2'}`}>
       
       
       <textarea
@@ -428,43 +436,40 @@ export function PromptInput({
         onKeyDown={handleKeyDown}
         placeholder={
           isBashMode 
-            ? "Enter bash command... (Esc to exit)" 
-            : "Send a message... (Cmd/Ctrl+Enter)"
+            ? "Enter bash command..." 
+            : "Send a message..."
         }
         disabled={disabled || hasActiveStream}
-        className={`w-full bg-background px-3 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none resize-none min-h-[36px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
+        className={`w-full bg-background/90 px-2 md:px-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-black resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
           isBashMode 
-            ? 'border-purple-500/50 bg-purple-500/5' 
+            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-black' 
             : ''
         }`}
         rows={1}
       />
       
-      <div className="flex gap-2 items-center justify-between">
-        <div className="flex gap-2 items-center">
+      <div className="flex gap-1.5 md:gap-2 items-center justify-between mb-1">
+        <div className="flex gap-1.5 md:gap-2 items-center">
           <button
             onClick={handleModeToggle}
-            className={`w-16 px-2 py-1 rounded-md text-xs font-medium border ${modeBg} ${modeColor} hover:opacity-80 transition-opacity cursor-pointer`}
+            className={`px-2 py-1 rounded-md text-xs font-medium border w-14 ${
+              isBashMode 
+                ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400' 
+                : `${modeBg} ${modeColor}`
+            } hover:opacity-80 transition-opacity cursor-pointer`}
           >
-            {currentMode.toUpperCase()} 
+            {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
-          {isBashMode && (
-            <div className="px-2 py-1 rounded-md text-xs font-medium border bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400">
-              BASH MODE
-            </div>
-          )}
-          {modelName && (
-            <button
-              onClick={onShowModelsDialog}
-              className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer"
-            >
-              {modelName.length > 20 ? `${modelName.slice(0, 20)}...` : modelName}
-            </button>
-          )}
+          <button
+            onClick={onShowModelsDialog}
+            className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
+          >
+            {modelName.length > 12 ? modelName.substring(0, 10) + '...' : modelName || 'Select model'}
+          </button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="w-6 h-6 rounded-full border-2 border-foreground text-foreground hover:bg-foreground hover:text-background transition-colors flex items-center justify-center text-sm font-medium"
+                className="w-6 h-6 rounded-full border-2 border-foreground text-foreground hover:bg-foreground hover:text-background transition-colors flex items-center justify-center text-sm font-medium flex-shrink-0"
                 title="Help"
               >
                 ?
@@ -486,19 +491,30 @@ export function PromptInput({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <button
-          data-submit-prompt
-          onClick={hasActiveStream ? handleStop : handleSubmit}
-          disabled={(!prompt.trim() && !hasActiveStream) || disabled}
-          className={`px-6 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-            hasActiveStream
-              ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
-              : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground'
-          }`}
-          title={hasActiveStream ? 'Stop' : 'Send'}
-        >
-          {hasActiveStream ? 'Stop' : 'Send'}
-        </button>
+        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+          {showScrollButton && (
+            <button
+              onClick={onScrollToBottom}
+              className="p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors"
+              title="Scroll to bottom"
+            >
+              <ChevronDown className="w-4 h-4" />
+            </button>
+          )}
+          <button
+            data-submit-prompt
+            onClick={hasActiveStream ? handleStop : handleSubmit}
+            disabled={(!prompt.trim() && !hasActiveStream) || disabled}
+            className={`px-5 md:px-6 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              hasActiveStream
+                ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
+                : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground'
+            }`}
+            title={hasActiveStream ? 'Stop' : 'Send'}
+          >
+            {hasActiveStream ? 'Stop' : 'Send'}
+          </button>
+        </div>
       </div>
       
       <CommandSuggestions
