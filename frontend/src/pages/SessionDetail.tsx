@@ -133,7 +133,7 @@ export function SessionDetail() {
   
   
   return (
-    <div className="h-screen bg-gradient-to-br from-background via-background to-background flex flex-col">
+    <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
       <SessionDetailHeader
         repo={repo}
         sessionId={sessionId}
@@ -147,8 +147,8 @@ export function SessionDetail() {
         onSessionTitleUpdate={handleSessionTitleUpdate}
       />
 
-      <div className="flex-1 overflow-hidden relative">
-        <div ref={messageContainerRef} className="h-full overflow-y-auto pb-32">
+      <div className="flex-1 overflow-hidden flex flex-col">
+        <div ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden">
           {opcodeUrl && repoDirectory && (
             <MessageThread 
               opcodeUrl={opcodeUrl} 
@@ -160,20 +160,18 @@ export function SessionDetail() {
           )}
         </div>
         {opcodeUrl && repoDirectory && (
-          <div className="absolute bottom-0 left-0 right-0 pointer-events-none">
-            <div className="pointer-events-auto">
-              <PromptInput
-                opcodeUrl={opcodeUrl}
-                directory={repoDirectory}
-                sessionID={sessionId}
-                disabled={!isConnected}
-                onShowModelsDialog={() => setModelDialogOpen(true)}
-                onShowSessionsDialog={() => setSessionsDialogOpen(true)}
-                onShowHelpDialog={() => {
-                  openSettings()
-                }}
-              />
-            </div>
+          <div className="flex-shrink-0">
+            <PromptInput
+              opcodeUrl={opcodeUrl}
+              directory={repoDirectory}
+              sessionID={sessionId}
+              disabled={!isConnected}
+              onShowModelsDialog={() => setModelDialogOpen(true)}
+              onShowSessionsDialog={() => setSessionsDialogOpen(true)}
+              onShowHelpDialog={() => {
+                openSettings()
+              }}
+            />
           </div>
         )}
       </div>

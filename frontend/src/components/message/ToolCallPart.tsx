@@ -114,7 +114,7 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
     <div className="border border-border rounded-lg overflow-hidden my-2">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm"
+        className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm min-w-0"
       >
         <span className={getStatusColor()}>{getStatusIcon()}</span>
         <span className="font-medium">{part.tool}</span>

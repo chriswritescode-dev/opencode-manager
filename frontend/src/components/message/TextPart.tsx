@@ -73,7 +73,7 @@ export function TextPart({ part }: TextPartProps) {
   }
 
   return (
-    <div className="prose prose-invert prose-enhanced max-w-none text-foreground">
+    <div className="prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, rehypeRaw]}

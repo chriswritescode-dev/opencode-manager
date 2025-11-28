@@ -98,7 +98,7 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
   }
 
   return (
-    <div className="flex flex-col space-y-2 p-4">
+    <div className="flex flex-col space-y-2 p-4 overflow-x-hidden">
       {messages.map((msg) => {
         const streaming = isMessageStreaming(msg)
         const thinking = isMessageThinking(msg)

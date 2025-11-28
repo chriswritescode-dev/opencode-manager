@@ -54,12 +54,24 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
   min-height: 100vh;
   min-height: 100dvh;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
+}
+
+#root {
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
 }
 
 :root:not(.dark) body {
   background: linear-gradient(to bottom right, #ffffff, #f0f0f0, #ffffff);
   min-height: 100vh;
   min-height: 100dvh;
+  overflow: hidden;
+  position: fixed;
+  width: 100%;
 }
 
 /* Custom animations */
@@ -123,6 +135,8 @@ body {
 
 .prose-enhanced {
   line-height: 1.7;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 .prose-enhanced p {
@@ -211,4 +225,8 @@ body {
 
 .prose-enhanced :last-child {
   margin-bottom: 0;
+}
+
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }

@@ -418,7 +418,7 @@ export function PromptInput({
   
 
   return (
-    <div className={`backdrop-blur-md bg-background/90 border border-border rounded-lg p-1 md:p-3 mx-2 md:mx-4 md:mb-4 max-w-4xl md:mx-auto ${isStandalone ? 'mb-6' : 'mb-1'}`}>
+    <div className={`backdrop-blur-md bg-background/90 border border-border rounded-lg p-1 md:p-3 mx-2 md:mx-4 md:mb-4 max-w-4xl md:mx-auto pb-safe ${isStandalone ? 'mb-6' : 'mb-2'}`}>
       
       
       <textarea
