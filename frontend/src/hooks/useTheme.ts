@@ -1,8 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useSettings } from './useSettings'
 
 export function useTheme() {
   const { preferences } = useSettings()
+  const [currentTheme, setCurrentTheme] = useState<'light' | 'dark'>('dark')
 
   useEffect(() => {
     const theme = preferences?.theme || 'dark'
@@ -11,8 +12,10 @@ export function useTheme() {
     const applyTheme = (isDark: boolean) => {
       if (isDark) {
         root.classList.add('dark')
+        setCurrentTheme('dark')
       } else {
         root.classList.remove('dark')
+        setCurrentTheme('light')
       }
     }
 
@@ -27,4 +30,6 @@ export function useTheme() {
       applyTheme(theme === 'dark')
     }
   }, [preferences?.theme])
+
+  return currentTheme
 }

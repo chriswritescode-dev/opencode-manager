@@ -2,6 +2,7 @@ import { Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BackButton } from "@/components/ui/back-button";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
+import { useTheme } from "@/hooks/useTheme";
 import type { ReactNode } from "react";
 
 interface HeaderProps {
@@ -12,6 +13,7 @@ interface HeaderProps {
 
 export function Header({ title, backTo, action }: HeaderProps) {
   const { open: openSettings } = useSettingsDialog();
+  const theme = useTheme();
 
   return (
     <header className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-background border-b border-border backdrop-blur-sm">
@@ -19,9 +21,19 @@ export function Header({ title, backTo, action }: HeaderProps) {
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-4">
             {backTo && <BackButton to={backTo} />}
-            <h1 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate">
-              {title}
-            </h1>
+            <div className="flex items-center gap-2">
+              {title === "OpenCode" ? (
+                <img 
+                  src={theme === 'light' ? "/opencode-wordmark-light.svg" : "/opencode-wordmark-dark.svg"} 
+                  alt="OpenCode" 
+                  className="h-6 w-auto sm:h-8"
+                />
+              ) : (
+                <h1 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate">
+                  {title}
+                </h1>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {action && <div>{action}</div>}
