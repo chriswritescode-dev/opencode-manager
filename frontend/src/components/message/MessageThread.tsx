@@ -42,6 +42,12 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
   const hasInitialScrolledRef = useRef(false)
   const scrollRAFRef = useRef<number | null>(null)
   const lastScrollTimeRef = useRef(0)
+
+  useEffect(() => {
+    hasInitialScrolledRef.current = false
+    userScrolledUpRef.current = false
+    lastMessageCountRef.current = 0
+  }, [sessionID])
   
   const scrollToBottom = useCallback((force = false) => {
     if (!containerRef?.current) return

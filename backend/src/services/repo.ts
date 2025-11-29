@@ -8,6 +8,33 @@ import { SettingsService } from './settings'
 import { getReposPath } from '@opencode-webui/shared'
 import path from 'path'
 
+async function hasCommits(repoPath: string): Promise<boolean> {
+  try {
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', 'HEAD'])
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function safeGetCurrentBranch(repoPath: string): Promise<string | null> {
+  try {
+    const repoHasCommits = await hasCommits(repoPath)
+    if (!repoHasCommits) {
+      try {
+        const symbolicRef = await executeCommand(['git', '-C', repoPath, 'symbolic-ref', '--short', 'HEAD'])
+        return symbolicRef.trim()
+      } catch {
+        return null
+      }
+    }
+    const currentBranch = await executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
+    return currentBranch.trim()
+  } catch {
+    return null
+  }
+}
+
 export async function initLocalRepo(
   database: Database,
   localPath: string,
@@ -310,18 +337,8 @@ export async function cloneRepo(
 
 export async function getCurrentBranch(repo: Repo): Promise<string | null> {
   const repoPath = path.resolve(getReposPath(), repo.localPath)
-  
-  try {
-    const currentBranch = await executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
-    return currentBranch.trim()
-  } catch {
-    try {
-      const symbolicRef = await executeCommand(['git', '-C', repoPath, 'symbolic-ref', '--short', 'HEAD'])
-      return symbolicRef.trim()
-    } catch {
-      return repo.branch || repo.defaultBranch || null
-    }
-  }
+  const branch = await safeGetCurrentBranch(repoPath)
+  return branch || repo.branch || repo.defaultBranch || null
 }
 
 export async function listBranches(repo: Repo): Promise<{ local: string[], remote: string[], current: string | null }> {
@@ -609,45 +626,39 @@ async function cleanupStaleWorktree(baseRepoPath: string, worktreePath: string):
 }
 
 async function isBranchCheckedOutInMainWorktree(baseRepoPath: string, branch: string): Promise<boolean> {
-  try {
-    const currentBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
-    return currentBranch.trim() === branch
-  } catch {
-    return false
-  }
+  const currentBranch = await safeGetCurrentBranch(baseRepoPath)
+  return currentBranch === branch
 }
 
 async function getAvailableBranchForWorktree(baseRepoPath: string, targetBranch: string): Promise<string> {
-  try {
-    const currentBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
-    const trimmedCurrent = currentBranch.trim()
-    
-    if (trimmedCurrent === targetBranch) {
-      logger.info(`Branch '${targetBranch}' is currently checked out in main worktree`)
-      
-      const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD']).then(ref => ref.trim()).catch(() => 'main')
-      const cleanDefaultBranch = defaultBranch.replace('origin/', '')
-      
-      if (cleanDefaultBranch !== trimmedCurrent) {
-        logger.info(`Switching to '${cleanDefaultBranch}' to free up '${targetBranch}' for worktree`)
-        await executeCommand(['git', '-C', baseRepoPath, 'checkout', cleanDefaultBranch])
-        return targetBranch
-      } else {
-        logger.warn(`Cannot free up branch '${targetBranch}' - it's the default branch`)
-        return `${targetBranch}-worktree-${Date.now()}`
-      }
-    }
-    
+  const currentBranch = await safeGetCurrentBranch(baseRepoPath)
+  
+  if (!currentBranch) {
     return targetBranch
-  } catch (error: any) {
-    logger.warn(`Failed to determine available branch: ${error.message}`)
-    return `${targetBranch}-worktree-${Date.now()}`
   }
+  
+  if (currentBranch === targetBranch) {
+    logger.info(`Branch '${targetBranch}' is currently checked out in main worktree`)
+    
+    const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD']).then(ref => ref.trim()).catch(() => 'main')
+    const cleanDefaultBranch = defaultBranch.replace('origin/', '')
+    
+    if (cleanDefaultBranch !== currentBranch) {
+      logger.info(`Switching to '${cleanDefaultBranch}' to free up '${targetBranch}' for worktree`)
+      await executeCommand(['git', '-C', baseRepoPath, 'checkout', cleanDefaultBranch])
+      return targetBranch
+    } else {
+      logger.warn(`Cannot free up branch '${targetBranch}' - it's the default branch`)
+      return `${targetBranch}-worktree-${Date.now()}`
+    }
+  }
+  
+  return targetBranch
 }
 
 async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string): Promise<void> {
-  const currentBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'HEAD'])
-  if (currentBranch.trim() === branch) {
+  const currentBranch = await safeGetCurrentBranch(baseRepoPath)
+  if (currentBranch === branch) {
     logger.info(`Branch '${branch}' is checked out in main repo, switching away...`)
     const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'])
       .then(ref => ref.trim().replace('origin/', ''))

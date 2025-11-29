@@ -2,6 +2,15 @@ import { executeCommand } from '../utils/process'
 import { logger } from '../utils/logger'
 import path from 'path'
 
+async function hasCommits(repoPath: string): Promise<boolean> {
+  try {
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', 'HEAD'])
+    return true
+  } catch {
+    return false
+  }
+}
+
 export type GitFileStatusType = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'copied'
 
 export interface GitFileStatus {
@@ -170,7 +179,12 @@ export async function getFileDiff(repoPath: string, filePath: string): Promise<F
       }
     } else {
       try {
-        diff = await executeCommand(['git', '-C', fullRepoPath, 'diff', 'HEAD', '--', filePath])
+        const repoHasCommits = await hasCommits(fullRepoPath)
+        if (repoHasCommits) {
+          diff = await executeCommand(['git', '-C', fullRepoPath, 'diff', 'HEAD', '--', filePath])
+        } else {
+          diff = `New file (no commits yet): ${filePath}`
+        }
       } catch (error: any) {
         logger.warn(`Failed to get diff for ${filePath}:`, error.message)
         diff = null
