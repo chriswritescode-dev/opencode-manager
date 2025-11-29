@@ -36,10 +36,14 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
   const { data: messages, isLoading, error } = useMessages(opcodeUrl, sessionID, directory)
   const userScrolledUpRef = useRef(false)
   const hasInitialScrolledRef = useRef(false)
+  const lastMessageCountRef = useRef(0)
+  const isFollowingRef = useRef(true)
 
   useEffect(() => {
     hasInitialScrolledRef.current = false
     userScrolledUpRef.current = false
+    lastMessageCountRef.current = 0
+    isFollowingRef.current = true
   }, [sessionID])
   
   const scrollToBottom = useCallback(() => {
@@ -57,6 +61,11 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
     const handleScroll = () => {
       const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       const isScrolledUp = distanceFromBottom > SCROLL_THRESHOLD
+      
+      if (isScrolledUp) {
+        isFollowingRef.current = false
+      }
+      
       if (userScrolledUpRef.current !== isScrolledUp) {
         userScrolledUpRef.current = isScrolledUp
         onScrollStateChange?.(isScrolledUp)
@@ -70,8 +79,26 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
   useEffect(() => {
     if (!containerRef?.current || !messages) return
 
-    if (!hasInitialScrolledRef.current && messages.length > 0) {
+    const currentCount = messages.length
+    const prevCount = lastMessageCountRef.current
+    lastMessageCountRef.current = currentCount
+
+    if (!hasInitialScrolledRef.current && currentCount > 0) {
       hasInitialScrolledRef.current = true
+      scrollToBottom()
+      return
+    }
+
+    if (currentCount > prevCount) {
+      const newMessage = messages[currentCount - 1]
+      if (newMessage?.info.role === 'user') {
+        isFollowingRef.current = true
+        scrollToBottom()
+        return
+      }
+    }
+
+    if (isFollowingRef.current) {
       scrollToBottom()
     }
   }, [messages, containerRef, scrollToBottom])
