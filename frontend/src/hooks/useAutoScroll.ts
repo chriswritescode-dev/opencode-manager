@@ -1,7 +1,5 @@
 import { useRef, useEffect, useCallback } from 'react'
 
-const SCROLL_THRESHOLD = 100
-
 interface MessageInfo {
   role: string
 }
@@ -27,23 +25,24 @@ export function useAutoScroll<T extends Message>({
   sessionId,
   onScrollStateChange
 }: UseAutoScrollOptions<T>): UseAutoScrollReturn {
-  const isFollowingRef = useRef(true)
   const lastMessageCountRef = useRef(0)
   const hasInitialScrolledRef = useRef(false)
-  const isProgrammaticScrollRef = useRef(false)
+  const userDisengagedRef = useRef(false)
+  const lastScrollTopRef = useRef(0)
 
   const scrollToBottom = useCallback(() => {
     if (!containerRef?.current) return
-    isProgrammaticScrollRef.current = true
+    userDisengagedRef.current = false
     containerRef.current.scrollTop = containerRef.current.scrollHeight
-    isFollowingRef.current = true
+    lastScrollTopRef.current = containerRef.current.scrollTop
     onScrollStateChange?.(false)
   }, [containerRef, onScrollStateChange])
 
   useEffect(() => {
-    isFollowingRef.current = true
     lastMessageCountRef.current = 0
     hasInitialScrolledRef.current = false
+    userDisengagedRef.current = false
+    lastScrollTopRef.current = 0
   }, [sessionId])
 
   useEffect(() => {
@@ -51,21 +50,28 @@ export function useAutoScroll<T extends Message>({
     
     const container = containerRef.current
     
-    const handleScroll = () => {
-      if (isProgrammaticScrollRef.current) {
-        isProgrammaticScrollRef.current = false
-        return
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) {
+        userDisengagedRef.current = true
+        onScrollStateChange?.(true)
       }
-      
-      isFollowingRef.current = false
-      
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      const isScrolledUp = distanceFromBottom > SCROLL_THRESHOLD
-      onScrollStateChange?.(isScrolledUp)
+    }
+
+    const handleTouchMove = () => {
+      const currentScrollTop = container.scrollTop
+      if (currentScrollTop < lastScrollTopRef.current) {
+        userDisengagedRef.current = true
+        onScrollStateChange?.(true)
+      }
+      lastScrollTopRef.current = currentScrollTop
     }
     
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
+    container.addEventListener('wheel', handleWheel, { passive: true })
+    container.addEventListener('touchmove', handleTouchMove, { passive: true })
+    return () => {
+      container.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('touchmove', handleTouchMove)
+    }
   }, [containerRef, onScrollStateChange])
 
   useEffect(() => {
@@ -84,13 +90,12 @@ export function useAutoScroll<T extends Message>({
     if (currentCount > prevCount) {
       const newMessage = messages[currentCount - 1]
       if (newMessage?.info.role === 'user') {
-        isFollowingRef.current = true
         scrollToBottom()
         return
       }
     }
 
-    if (isFollowingRef.current) {
+    if (!userDisengagedRef.current) {
       scrollToBottom()
     }
   }, [messages, containerRef, scrollToBottom])

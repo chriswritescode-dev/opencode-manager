@@ -49,7 +49,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
 
   return (
     <div className="relative">
-      <pre className={`bg-accent p-4 rounded-lg overflow-x-auto border border-border my-4 ${className || ''}`} {...props}>
+      <pre className={`bg-accent p-1 rounded-lg overflow-x-auto border border-border my-4 ${className || ''}`} {...props}>
         {children}
       </pre>
       <button
@@ -73,7 +73,7 @@ export function TextPart({ part }: TextPartProps) {
   }
 
   return (
-    <div className="prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words">
+    <div className="prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, rehypeRaw]}
@@ -101,16 +101,19 @@ export function TextPart({ part }: TextPartProps) {
             )
           },
           p({ children }) {
-            return <p className="text-foreground">{children}</p>
+            return <p className="text-foreground my-0.5 md:my-1">{children}</p>
           },
           strong({ children }) {
             return <strong className="font-semibold text-foreground">{children}</strong>
           },
           ul({ children }) {
-            return <ul className="list-disc text-foreground">{children}</ul>
+            return <ul className="list-disc text-foreground my-0.5 md:my-1">{children}</ul>
           },
           ol({ children }) {
-            return <ol className="list-decimal text-foreground">{children}</ol>
+            return <ol className="list-decimal text-foreground my-0.5 md:my-1">{children}</ol>
+          },
+          li({ children }) {
+            return <li className="text-foreground my-0.5 md:my-1">{children}</li>
           }
         }}
       >
