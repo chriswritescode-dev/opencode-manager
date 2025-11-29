@@ -1,6 +1,5 @@
 import { memo, useRef, useEffect, useCallback } from 'react'
 import { useMessages } from '@/hooks/useOpenCode'
-import { useSettings } from '@/hooks/useSettings'
 import { MessagePart } from './MessagePart'
 import type { MessageWithParts } from '@/api/types'
 
@@ -31,50 +30,23 @@ const isMessageThinking = (msg: MessageWithParts): boolean => {
   return msg.parts.length === 0 && isMessageStreaming(msg)
 }
 
-const SCROLL_THRESHOLD = 150
-const SCROLL_DEBOUNCE_MS = 50
+const SCROLL_THRESHOLD = 100
 
 export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID, directory, onFileClick, containerRef, onScrollStateChange }: MessageThreadProps) {
   const { data: messages, isLoading, error } = useMessages(opcodeUrl, sessionID, directory)
-  const { preferences } = useSettings()
-  const lastMessageCountRef = useRef(0)
   const userScrolledUpRef = useRef(false)
   const hasInitialScrolledRef = useRef(false)
-  const scrollRAFRef = useRef<number | null>(null)
-  const lastScrollTimeRef = useRef(0)
 
   useEffect(() => {
     hasInitialScrolledRef.current = false
     userScrolledUpRef.current = false
-    lastMessageCountRef.current = 0
-    lastScrollTimeRef.current = 0
-    if (scrollRAFRef.current) {
-      cancelAnimationFrame(scrollRAFRef.current)
-      scrollRAFRef.current = null
-    }
   }, [sessionID])
   
-  const scrollToBottom = useCallback((force = false) => {
+  const scrollToBottom = useCallback(() => {
     if (!containerRef?.current) return
-    
-    const now = Date.now()
-    if (!force && now - lastScrollTimeRef.current < SCROLL_DEBOUNCE_MS) {
-      return
-    }
-    lastScrollTimeRef.current = now
-    
-    if (scrollRAFRef.current) {
-      cancelAnimationFrame(scrollRAFRef.current)
-    }
-    
-    scrollRAFRef.current = requestAnimationFrame(() => {
-      if (containerRef?.current) {
-        containerRef.current.scrollTop = containerRef.current.scrollHeight
-        userScrolledUpRef.current = false
-        onScrollStateChange?.(false)
-      }
-      scrollRAFRef.current = null
-    })
+    containerRef.current.scrollTop = containerRef.current.scrollHeight
+    userScrolledUpRef.current = false
+    onScrollStateChange?.(false)
   }, [containerRef, onScrollStateChange])
 
   useEffect(() => {
@@ -98,42 +70,11 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
   useEffect(() => {
     if (!containerRef?.current || !messages) return
 
-    const currentMessageCount = messages.length
-    const previousMessageCount = lastMessageCountRef.current
-
-    if (!hasInitialScrolledRef.current && currentMessageCount > 0) {
+    if (!hasInitialScrolledRef.current && messages.length > 0) {
       hasInitialScrolledRef.current = true
-      scrollToBottom(true)
-      lastMessageCountRef.current = currentMessageCount
-      return
-    }
-
-    const messageAdded = currentMessageCount > previousMessageCount
-    lastMessageCountRef.current = currentMessageCount
-
-    const lastMessage = messages[messages.length - 1]
-    const isUserMessage = lastMessage?.info.role === 'user'
-
-    if (messageAdded && isUserMessage) {
-      userScrolledUpRef.current = false
-      scrollToBottom(true)
-      return
-    }
-
-    if (!preferences?.autoScroll) return
-
-    if (!userScrolledUpRef.current) {
       scrollToBottom()
     }
-  }, [messages, preferences?.autoScroll, containerRef, scrollToBottom])
-
-  useEffect(() => {
-    return () => {
-      if (scrollRAFRef.current) {
-        cancelAnimationFrame(scrollRAFRef.current)
-      }
-    }
-  }, [])
+  }, [messages, containerRef, scrollToBottom])
 
   if (isLoading) {
     return (

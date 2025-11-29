@@ -170,7 +170,7 @@ const { currentPermission, pendingCount, dismissPermission } = usePermissionRequ
       />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28 overscroll-contain touch-pan-y">
+        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28 overscroll-contain">
           {opcodeUrl && repoDirectory && (
             <MessageThread 
               opcodeUrl={opcodeUrl} 
