@@ -1,5 +1,6 @@
-import { memo, useRef, useEffect, useCallback } from 'react'
+import { memo, useRef, useEffect } from 'react'
 import { useMessages } from '@/hooks/useOpenCode'
+import { useAutoScroll } from '@/hooks/useAutoScroll'
 import { MessagePart } from './MessagePart'
 import type { MessageWithParts } from '@/api/types'
 
@@ -30,52 +31,22 @@ const isMessageThinking = (msg: MessageWithParts): boolean => {
   return msg.parts.length === 0 && isMessageStreaming(msg)
 }
 
-const SCROLL_THRESHOLD = 100
-
 export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID, directory, onFileClick, containerRef, onScrollStateChange }: MessageThreadProps) {
   const { data: messages, isLoading, error } = useMessages(opcodeUrl, sessionID, directory)
-  const userScrolledUpRef = useRef(false)
   const hasInitialScrolledRef = useRef(false)
   const lastMessageCountRef = useRef(0)
-  const isFollowingRef = useRef(true)
+
+  const { scrollToBottom, setFollowing, isFollowing } = useAutoScroll({
+    containerRef,
+    dependency: sessionID,
+    onScrollStateChange
+  })
 
   useEffect(() => {
     hasInitialScrolledRef.current = false
-    userScrolledUpRef.current = false
     lastMessageCountRef.current = 0
-    isFollowingRef.current = true
   }, [sessionID])
-  
-  const scrollToBottom = useCallback(() => {
-    if (!containerRef?.current) return
-    containerRef.current.scrollTop = containerRef.current.scrollHeight
-    userScrolledUpRef.current = false
-    onScrollStateChange?.(false)
-  }, [containerRef, onScrollStateChange])
 
-  useEffect(() => {
-    if (!containerRef?.current) return
-    
-    const container = containerRef.current
-    
-    const handleScroll = () => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      const isScrolledUp = distanceFromBottom > SCROLL_THRESHOLD
-      
-      if (isScrolledUp) {
-        isFollowingRef.current = false
-      }
-      
-      if (userScrolledUpRef.current !== isScrolledUp) {
-        userScrolledUpRef.current = isScrolledUp
-        onScrollStateChange?.(isScrolledUp)
-      }
-    }
-    
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [containerRef, onScrollStateChange])
-  
   useEffect(() => {
     if (!containerRef?.current || !messages) return
 
@@ -92,16 +63,16 @@ export const MessageThread = memo(function MessageThread({ opcodeUrl, sessionID,
     if (currentCount > prevCount) {
       const newMessage = messages[currentCount - 1]
       if (newMessage?.info.role === 'user') {
-        isFollowingRef.current = true
+        setFollowing(true)
         scrollToBottom()
         return
       }
     }
 
-    if (isFollowingRef.current) {
+    if (isFollowing()) {
       scrollToBottom()
     }
-  }, [messages, containerRef, scrollToBottom])
+  }, [messages, containerRef, scrollToBottom, setFollowing, isFollowing])
 
   if (isLoading) {
     return (
