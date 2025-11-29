@@ -30,9 +30,11 @@ export function useAutoScroll<T extends Message>({
   const isFollowingRef = useRef(true)
   const lastMessageCountRef = useRef(0)
   const hasInitialScrolledRef = useRef(false)
+  const isProgrammaticScrollRef = useRef(false)
 
   const scrollToBottom = useCallback(() => {
     if (!containerRef?.current) return
+    isProgrammaticScrollRef.current = true
     containerRef.current.scrollTop = containerRef.current.scrollHeight
     isFollowingRef.current = true
     onScrollStateChange?.(false)
@@ -50,13 +52,15 @@ export function useAutoScroll<T extends Message>({
     const container = containerRef.current
     
     const handleScroll = () => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      const isScrolledUp = distanceFromBottom > SCROLL_THRESHOLD
-      
-      if (isScrolledUp) {
-        isFollowingRef.current = false
+      if (isProgrammaticScrollRef.current) {
+        isProgrammaticScrollRef.current = false
+        return
       }
       
+      isFollowingRef.current = false
+      
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+      const isScrolledUp = distanceFromBottom > SCROLL_THRESHOLD
       onScrollStateChange?.(isScrolledUp)
     }
     
