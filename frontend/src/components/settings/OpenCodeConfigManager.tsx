@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { DialogTrigger } from '@/components/ui/dialog'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -194,19 +193,16 @@ export function OpenCodeConfigManager() {
             )}
             Restart Server
           </Button>
-<CreateConfigDialog
+<Button type="button" onClick={() => setIsCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            New Config
+          </Button>
+          <CreateConfigDialog
             isOpen={isCreateDialogOpen}
             onOpenChange={setIsCreateDialogOpen}
             onCreate={createConfig}
             isUpdating={isUpdating}
-          >
-            <DialogTrigger asChild>
-              <Button>
-                <Plus className="h-4 w-4 mr-2" />
-                New Config
-              </Button>
-            </DialogTrigger>
-          </CreateConfigDialog>
+          />
         </div>
       </div>
 
@@ -222,12 +218,11 @@ export function OpenCodeConfigManager() {
             <Card key={config.id}>
               <CardHeader className="pb-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <CardTitle className="text-base">{config.name}</CardTitle>
                     {config.isDefault && (
-                      <Badge variant="default" className="text-xs">
-                        <Star className="h-3 w-3 mr-1" />
-                        Default
+                      <Badge variant="default" className="">
+                        <Star className="h-4 w-4" />
                       </Badge>
                     )}
                   </div>

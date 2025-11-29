@@ -12,10 +12,9 @@ interface CreateConfigDialogProps {
   onOpenChange: (open: boolean) => void
   onCreate: (name: string, content: string, isDefault: boolean) => Promise<void>
   isUpdating: boolean
-  children?: React.ReactNode
 }
 
-export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating, children }: CreateConfigDialogProps) {
+export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating }: CreateConfigDialogProps) {
   const [name, setName] = useState('')
   const [content, setContent] = useState('')
   const [isDefault, setIsDefault] = useState(false)
@@ -23,7 +22,10 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating,
   const [errorLine, setErrorLine] = useState<number | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event?: React.MouseEvent) => {
+    event?.preventDefault()
+    event?.stopPropagation()
+    
     if (!name.trim() || !content.trim()) return
 
     try {
@@ -90,16 +92,14 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating,
   }
 
   return (
-    <>
-      {children}
-      <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl">
-        <DialogHeader>
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-2xl max-h-[90vh] sm:max-h-[85vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
           <DialogTitle>Create OpenCode Config</DialogTitle>
         </DialogHeader>
-        <div className="space-y-4">
+        <div className="space-y-4 overflow-y-auto flex-1 pr-2">
           <div>
-            <Label htmlFor="config-name">Config Name</Label>
+            <Label htmlFor="config-name" className="pb-1">Config Name</Label>
             <Input
               id="config-name"
               value={name}
@@ -109,7 +109,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating,
           </div>
           
           <div>
-            <Label htmlFor="config-upload">Upload JSON File</Label>
+            <Label htmlFor="config-upload" className="pb-1">Upload JSON File</Label>
             <Input
               id="config-upload"
               type="file"
@@ -119,14 +119,14 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating,
           </div>
 
           <div>
-            <Label htmlFor="config-content">Config Content (JSON)</Label>
+            <Label htmlFor="config-content" className="pb-1">Config Content (JSON)</Label>
             <Textarea
               id="config-content"
               ref={textareaRef}
               value={content}
               onChange={(e) => handleContentChange(e.target.value)}
               placeholder='{"$schema": "https://opencode.ai/config.json", "theme": "dark"}'
-              rows={20}
+              rows={12}
               className="font-mono text-sm"
             />
             {error && (
@@ -147,22 +147,22 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating,
             />
             <Label htmlFor="config-default">Set as default configuration</Label>
           </div>
+        </div>
 
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button 
-              onClick={handleSubmit} 
-              disabled={isUpdating || !name.trim() || !content.trim()}
-            >
-              {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Create
-            </Button>
-          </div>
+        <div className="flex justify-end gap-2 flex-shrink-0 pt-4 border-t">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button 
+            type="button"
+            onClick={(e) => handleSubmit(e)} 
+            disabled={isUpdating || !name.trim() || !content.trim()}
+          >
+            {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Create
+          </Button>
         </div>
       </DialogContent>
     </Dialog>
-    </>
   )
 }

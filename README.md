@@ -71,6 +71,17 @@ A full-stack web application for running [OpenCode](https://github.com/sst/openc
 ### File Context
 ![File Context](https://github.com/chriswritescode-dev/opencode-web/releases/download/0.2.5/file-context.gif)
 
+## Mobile Screenshots
+
+### Repository List
+<img width="300" alt="Mobile Repository List" src="https://github.com/user-attachments/assets/4a854373-9e4d-41ac-9a6c-c0eb37b0ac42" />
+
+### Chat Interface
+<img width="300" alt="Mobile Chat Interface" src="https://github.com/user-attachments/assets/57fe81c1-b169-43eb-b95f-6e027d7bea10" />
+
+### OpenCode Configuration
+<img width="300" alt="Mobile OpenCode Configuration" src="https://github.com/user-attachments/assets/fcb16958-3134-434f-8c78-fb07259f5ce1" />
+
 ## Coming Soon
 
 -  **Authentication** - User authentication and session management
