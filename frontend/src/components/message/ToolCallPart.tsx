@@ -59,7 +59,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
           e.stopPropagation()
           onFileClick?.(ref.filePath)
         }}
-        className="text-blue-300 hover:text-blue-200 cursor-pointer underline decoration-dotted"
+        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
         title={`Click to open ${ref.filePath}`}
       >
         {ref.fullMatch}
@@ -96,13 +96,13 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
   const getStatusColor = () => {
     switch (part.state.status) {
       case 'completed':
-        return 'text-green-400'
+        return 'text-green-600 dark:text-green-400'
       case 'error':
-        return 'text-red-400'
+        return 'text-red-600 dark:text-red-400'
       case 'running':
-        return 'text-yellow-400'
+        return 'text-yellow-600 dark:text-yellow-400'
       default:
-        return 'text-zinc-400'
+        return 'text-muted-foreground'
     }
   }
 
@@ -154,9 +154,9 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
     return (
       <div ref={outputRef} className="my-2">
         <div className="flex items-center gap-2 text-sm mb-2">
-          <span className="text-green-400">✓</span>
+          <span className="text-green-600 dark:text-green-400">✓</span>
           <span className="font-medium">$</span>
-          <span className="text-zinc-300">{command}</span>
+          <span className="text-foreground">{command}</span>
           {part.state.status === 'completed' && part.state.time && (
             <span className="text-muted-foreground text-xs ml-auto">
               {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
@@ -188,13 +188,13 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
                 onFileClick(previewText)
               }
             }}
-            className="text-blue-300 text-xs truncate hover:text-blue-200 cursor-pointer underline decoration-dotted"
+            className="text-blue-600 dark:text-blue-400 text-xs truncate hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
             title={`Click to open ${previewText}`}
           >
             {previewText}
           </span>
         ) : previewText ? (
-          <span className="text-zinc-400 text-xs truncate">{previewText}</span>
+          <span className="text-muted-foreground text-xs truncate">{previewText}</span>
         ) : null}
         <span className="text-muted-foreground text-xs ml-auto">({part.state.status})</span>
       </button>
@@ -213,24 +213,24 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
               {part.tool === 'bash' ? (
                 <div className="text-sm">
                   <div className="flex items-center gap-2 mb-1">
-                    <div className="text-zinc-400">Command:</div>
+                    <div className="text-muted-foreground">Command:</div>
                     <CopyButton 
                       content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''} 
                       title="Copy command" 
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto">
-                    <span className="text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                    <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
                   </div>
                 </div>
               ) : (
                 <div className="text-sm">
-                  <div className="text-zinc-400 mb-1">Input:</div>
+                  <div className="text-muted-foreground mb-1">Input:</div>
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
                 </div>
               )}
               <div className="text-sm" ref={outputRef}>
-                <div className="text-zinc-400 mb-1">Output:</div>
+                <div className="text-muted-foreground mb-1">Output:</div>
                 <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
                      onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
                      title="Click to copy output">
@@ -238,7 +238,7 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
                 </pre>
               </div>
               {part.state.time && (
-                <div className="text-xs text-zinc-500">
+                <div className="text-xs text-muted-foreground">
                   Duration: {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
                 </div>
               )}
@@ -247,8 +247,8 @@ export function ToolCallPart({ part, onFileClick }: ToolCallPartProps) {
 
           {part.state.status === 'error' && (
             <div className="text-sm">
-              <div className="text-red-400 mb-1">Error:</div>
-              <pre className="bg-accent p-2 rounded text-xs overflow-x-auto text-red-300">
+              <div className="text-red-600 dark:text-red-400 mb-1">Error:</div>
+              <pre className="bg-accent p-2 rounded text-xs overflow-x-auto text-red-600 dark:text-red-300">
                 {part.state.error}
               </pre>
             </div>

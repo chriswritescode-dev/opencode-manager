@@ -56,7 +56,7 @@ const statusConfig: Record<GitFileStatusType, { icon: typeof FileText; color: st
   added: { icon: FilePlus, color: 'text-green-500', bgColor: 'bg-green-500/10', label: 'Added' },
   deleted: { icon: FileX, color: 'text-red-500', bgColor: 'bg-red-500/10', label: 'Deleted' },
   renamed: { icon: FileText, color: 'text-blue-500', bgColor: 'bg-blue-500/10', label: 'Renamed' },
-  untracked: { icon: File, color: 'text-gray-400', bgColor: 'bg-gray-500/10', label: 'Untracked' },
+  untracked: { icon: File, color: 'text-muted-foreground', bgColor: 'bg-muted/50', label: 'Untracked' },
   copied: { icon: FileText, color: 'text-purple-500', bgColor: 'bg-purple-500/10', label: 'Copied' },
 }
 
@@ -71,7 +71,7 @@ function DiffLineComponent({ line, showLineNumbers, onLineClick }: { line: DiffL
 
   if (line.type === 'hunk') {
     return (
-      <div className="px-4 py-1 bg-blue-500/10 text-blue-400 text-xs font-mono">
+      <div className="px-4 py-1 bg-blue-500/10 text-blue-600 dark:text-blue-400 text-xs font-mono">
         {line.content}
       </div>
     )
@@ -84,9 +84,9 @@ function DiffLineComponent({ line, showLineNumbers, onLineClick }: { line: DiffL
       : ''
 
   const textClass = line.type === 'add'
-    ? 'text-green-400'
+    ? 'text-green-600 dark:text-green-400'
     : line.type === 'remove'
-      ? 'text-red-400'
+      ? 'text-red-600 dark:text-red-400'
       : 'text-foreground'
 
   const lineNumber = line.newLineNumber ?? line.oldLineNumber

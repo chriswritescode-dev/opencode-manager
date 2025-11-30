@@ -69,7 +69,7 @@ export function RepoCard({
                      onSelect(repo.id, !isSelected);
                    }
                  }}
-                 className={`font-semibold text-lg text-foreground truncate group-hover:text-blue-400 transition-colors ${
+                 className={`font-semibold text-lg text-foreground truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${
                    onSelect ? "cursor-pointer" : "cursor-not-allowed opacity-60"
                  }`}
                >
@@ -77,14 +77,14 @@ export function RepoCard({
                </h3>
              {repo.isWorktree && (
               <Badge
-                className="text-xs px-2.5 py-0.5 bg-purple-600/20 text-purple-400 border-purple-600/40"
+                className="text-xs px-2.5 py-0.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 border-purple-600/40"
               >
                 worktree
               </Badge>
             )}
             {repo.cloneStatus === "cloning" && (
               <Badge
-                className="text-xs px-2.5 py-0.5 bg-blue-600/20 text-blue-400 border-blue-600/40"
+                className="text-xs px-2.5 py-0.5 bg-blue-600/20 text-blue-600 dark:text-blue-400 border-blue-600/40"
               >
                 cloning
               </Badge>
@@ -101,7 +101,7 @@ export function RepoCard({
         <div className="flex flex-col gap-2">
           {repo.cloneStatus === "cloning" && (
             <div className="text-sm text-muted-foreground flex items-center gap-2">
-              <Loader2 className="w-3 h-3 animate-spin text-blue-400" />
+              <Loader2 className="w-3 h-3 animate-spin text-blue-600 dark:text-blue-400" />
               <span>Cloning repository...</span>
             </div>
           )}

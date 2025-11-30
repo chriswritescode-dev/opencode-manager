@@ -53,7 +53,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           <Button
             variant="ghost"
             size="sm"
-            className="h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-400 hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20"
+            className="h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20"
           >
             <GitBranch className="w-3 h-3" />
             <span className="hidden sm:inline">{currentBranch}</span>

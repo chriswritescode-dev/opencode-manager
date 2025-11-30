@@ -44,12 +44,12 @@ export const SessionList = ({
   }, [sessions, searchQuery]);
 
   if (isLoading) {
-    return <div className="p-4 text-sm text-gray-400">Loading sessions...</div>;
+    return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
   }
 
   if (!sessions || sessions.length === 0) {
     return (
-      <div className="p-4 text-sm text-gray-400">
+      <div className="p-4 text-sm text-muted-foreground">
         No sessions yet. Create one to get started.
       </div>
     );
@@ -115,7 +115,7 @@ export const SessionList = ({
       <div className="p-4 flex-shrink-0">
         <div className="flex items-center gap-3 mb-3">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               type="text"
               placeholder="Search"
@@ -183,7 +183,7 @@ export const SessionList = ({
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         <div className="flex flex-col gap-2">
           {filteredSessions.length === 0 ? (
-            <div className="text-sm text-gray-400 text-center py-4">
+            <div className="text-sm text-muted-foreground text-center py-4">
               No sessions found
             </div>
           ) : (
@@ -192,10 +192,10 @@ export const SessionList = ({
                 key={session.id}
                 className={`p-3 cursor-pointer transition-all ${
                   selectedSessions.has(session.id)
-                    ? "border-blue-500 shadow-lg shadow-blue-900/30 bg-[#2a2a2a]"
+                    ? "border-blue-500 shadow-lg shadow-blue-900/30 dark:shadow-blue-900/30 bg-accent"
                     : activeSessionID === session.id
-                      ? "bg-[#333333] border-[#5a5a5a]"
-                      : "bg-[#2a2a2a] border-[#4a4a4a] hover:bg-[#333333] hover:border-[#5a5a5a]"
+                      ? "bg-accent border-border"
+                      : "bg-card border-border hover:bg-accent hover:border-border"
                 } hover:shadow-lg`}
                 onClick={() => onSelectSession(session.id)}
               >
@@ -212,10 +212,10 @@ export const SessionList = ({
                       className="w-5 h-5 flex-shrink-0 mt-0.5"
                     />
                     <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium text-white truncate">
+                      <h3 className="text-sm font-medium text-foreground truncate">
                         {session.title || "Untitled Session"}
                       </h3>
-                      <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
+                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                         {session.parentID && (
                           <span className="flex items-center gap-1">
                             <GitBranch className="w-3 h-3" />
@@ -232,7 +232,7 @@ export const SessionList = ({
                     </div>
                   </div>
                   <button
-                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-400 bg-transparent border-none cursor-pointer"
+                    className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
                     onClick={(e) => handleDelete(session.id, e)}
                   >
                     <Trash2 className="w-4 h-4" />

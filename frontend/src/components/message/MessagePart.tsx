@@ -136,25 +136,25 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       return <ToolCallPart part={part} onFileClick={onFileClick} />
     case 'reasoning':
       return (
-        <details className="border border-zinc-800 rounded-lg my-2">
-          <summary className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 cursor-pointer text-sm font-medium">
+        <details className="border border-border rounded-lg my-2">
+          <summary className="px-4 py-2 bg-muted hover:bg-accent cursor-pointer text-sm font-medium">
             Reasoning
           </summary>
-          <div className="p-4 bg-zinc-950 text-sm text-zinc-300 whitespace-pre-wrap">
+          <div className="p-4 bg-card text-sm text-muted-foreground whitespace-pre-wrap">
             {part.text}
           </div>
         </details>
       )
     case 'snapshot':
       return (
-        <div className="border border-zinc-800 rounded-lg p-4 my-2 bg-zinc-950">
-          <div className="text-xs text-zinc-500 font-mono">Snapshot: {part.snapshot}</div>
+        <div className="border border-border rounded-lg p-4 my-2 bg-card">
+          <div className="text-xs text-muted-foreground font-mono">Snapshot: {part.snapshot}</div>
         </div>
       )
     case 'agent':
       return (
-        <div className="border border-zinc-800 rounded-lg p-4 my-2 bg-zinc-950">
-          <div className="text-sm font-medium text-blue-400">Agent: {part.name}</div>
+        <div className="border border-border rounded-lg p-4 my-2 bg-card">
+          <div className="text-sm font-medium text-blue-600 dark:text-blue-400">Agent: {part.name}</div>
         </div>
       )
     case 'step-finish':
@@ -167,8 +167,8 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       )
     case 'file':
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-zinc-800 border border-zinc-700 text-sm text-zinc-300">
-          <span className="text-blue-400">@</span>
+        <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground">
+          <span className="text-blue-600 dark:text-blue-400">@</span>
           <span className="font-medium">{part.filename || 'File'}</span>
         </span>
       )

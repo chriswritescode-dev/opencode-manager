@@ -107,7 +107,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                   >
                     <div className="flex items-center gap-4">
                       <div className="p-3 bg-accent rounded-lg">
-                        <item.icon className="w-6 h-6 text-blue-400" />
+                        <item.icon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-foreground mb-1">{item.label}</h3>

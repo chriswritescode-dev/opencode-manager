@@ -131,7 +131,7 @@ export function RepoDetail() {
                variant="outline"
                onClick={() => setFileBrowserOpen(true)}
                size="sm"
-               className="text-white border-gray-600 hover:bg-gray-800 transition-all duration-200 hover:scale-105"
+               className="text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
              >
                <FolderOpen className="w-4 h-4 sm:mr-2" />
                <span className="hidden sm:inline">Files</span>

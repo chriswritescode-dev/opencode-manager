@@ -15,7 +15,7 @@ const statusConfig: Record<GitFileStatusType, { icon: typeof FileText; color: st
   added: { icon: FilePlus, color: 'text-green-500', label: 'Added' },
   deleted: { icon: FileX, color: 'text-red-500', label: 'Deleted' },
   renamed: { icon: FileText, color: 'text-blue-500', label: 'Renamed' },
-  untracked: { icon: File, color: 'text-gray-400', label: 'Untracked' },
+  untracked: { icon: File, color: 'text-muted-foreground', label: 'Untracked' },
   copied: { icon: FileText, color: 'text-purple-500', label: 'Copied' },
 }
 

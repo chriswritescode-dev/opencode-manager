@@ -67,7 +67,7 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
       >
         <div className="flex items-center justify-between px-4 sm:py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-blue-400" />
+            <GitBranch className="w-4 h-4 text-foreground" />
             <h2 className="text-sm font-semibold text-foreground">
               {selectedFile ? 'File Changes' : 'Git Changes'}
             </h2>

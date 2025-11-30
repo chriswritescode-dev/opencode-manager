@@ -440,9 +440,9 @@ export function PromptInput({
             : "Send a message..."
         }
         disabled={disabled || hasActiveStream}
-        className={`w-full bg-background/90 px-2 md:px-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-black resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
+        className={`w-full bg-background/90 px-2 md:px-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-background resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
           isBashMode 
-            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-black' 
+            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-background' 
             : ''
         }`}
         rows={1}

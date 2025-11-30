@@ -31,7 +31,7 @@ const isMessageThinking = (msg: MessageWithParts): boolean => {
 export const MessageThread = memo(function MessageThread({ messages, onFileClick }: MessageThreadProps) {
   if (!messages || messages.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-zinc-600">
+      <div className="flex items-center justify-center h-full text-muted-foreground">
         No messages yet. Start a conversation below.
       </div>
     )
@@ -56,7 +56,7 @@ export const MessageThread = memo(function MessageThread({ messages, onFileClick
               } ${streaming ? 'animate-pulse-subtle' : ''}`}
             >
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-medium text-zinc-400">
+                <span className="text-xs font-medium text-muted-foreground">
                   {msg.info.role === 'user' ? 'You' : (msg.info.role === 'assistant' && 'modelID' in msg.info ? msg.info.modelID : 'Assistant')}
                 </span>
                 {msg.info.time && (
@@ -65,14 +65,14 @@ export const MessageThread = memo(function MessageThread({ messages, onFileClick
                   </span>
                 )}
                 {streaming && (
-                  <span className="text-xs text-blue-400 flex items-center gap-1">
+                  <span className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
                     <span className="animate-pulse">●</span> <span className="shine-loading">Generating...</span>
                   </span>
                 )}
               </div>
               
               {thinking ? (
-                <div className="flex items-center gap-2 text-zinc-500">
+                <div className="flex items-center gap-2 text-muted-foreground">
                   <span className="animate-pulse">▋</span>
                   <span className="text-sm shine-loading">Thinking...</span>
                 </div>

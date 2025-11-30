@@ -123,7 +123,7 @@ export function ModelSelectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[80vh] bg-[#1a1a1a] border-[#333] text-white">
+      <DialogContent className="max-w-4xl max-h-[80vh] bg-background border-border text-foreground">
         <DialogHeader>
           <DialogTitle className="text-xl font-semibold">
             Select Model
@@ -133,12 +133,12 @@ export function ModelSelectDialog({
         <div className="space-y-4">
           {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-400" />
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search models or providers..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-[#0a0a0a] border-[#333] text-white placeholder-zinc-500"
+              className="pl-10 bg-card border-border text-foreground placeholder-muted-foreground"
             />
           </div>
 
