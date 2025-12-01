@@ -1,7 +1,9 @@
 import { spawn, execSync } from 'child_process'
 import path from 'path'
 import { logger } from '../utils/logger'
+import { SettingsService } from './settings'
 import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-webui/shared'
+import type { Database } from 'bun:sqlite'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
@@ -12,8 +14,13 @@ class OpenCodeServerManager {
   private serverProcess: any = null
   private serverPid: number | null = null
   private isHealthy: boolean = false
+  private db: Database | null = null
 
   private constructor() {}
+
+  setDatabase(db: Database) {
+    this.db = db
+  }
 
   static getInstance(): OpenCodeServerManager {
     if (!OpenCodeServerManager.instance) {
@@ -29,6 +36,17 @@ class OpenCodeServerManager {
     }
 
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
+    
+    let gitToken = ''
+    if (this.db) {
+      try {
+        const settingsService = new SettingsService(this.db)
+        const settings = settingsService.getSettings('default')
+        gitToken = settings.preferences.gitToken || ''
+      } catch (error) {
+        logger.warn('Failed to get git token from settings:', error)
+      }
+    }
     
     const existingProcesses = await this.findProcessesByPort(OPENCODE_SERVER_PORT)
     if (existingProcesses.length > 0) {
@@ -79,7 +97,10 @@ class OpenCodeServerManager {
         env: {
           ...process.env,
           XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
-          OPENCODE_CONFIG: OPENCODE_CONFIG_PATH
+          OPENCODE_CONFIG: OPENCODE_CONFIG_PATH,
+          GITHUB_TOKEN: gitToken,
+          GIT_ASKPASS: 'echo',
+          GIT_TERMINAL_PROMPT: '0'
         }
       }
     )

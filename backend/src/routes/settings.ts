@@ -79,8 +79,18 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const validated = UpdateSettingsSchema.parse(body)
       
+      const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.updateSettings(validated.preferences, userId)
-      return c.json(settings)
+      
+      let serverRestarted = false
+      if (validated.preferences.gitToken !== undefined && 
+          validated.preferences.gitToken !== currentSettings.preferences.gitToken) {
+        logger.info('GitHub token changed, restarting OpenCode server')
+        await opencodeServerManager.restart()
+        serverRestarted = true
+      }
+      
+      return c.json({ ...settings, serverRestarted })
     } catch (error) {
       logger.error('Failed to update settings:', error)
       if (error instanceof z.ZodError) {

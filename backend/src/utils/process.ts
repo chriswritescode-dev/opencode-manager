@@ -4,6 +4,7 @@ import { logger } from './logger'
 interface ExecuteCommandOptions {
   cwd?: string
   silent?: boolean
+  env?: Record<string, string>
 }
 
 export async function executeCommand(
@@ -19,7 +20,8 @@ export async function executeCommand(
     
     const proc: ChildProcess = spawn(command || '', cmdArgs, {
       cwd: options.cwd,
-      shell: false
+      shell: false,
+      env: { ...process.env, ...options.env }
     })
 
     let stdout = ''

@@ -135,6 +135,7 @@ try {
   await ensureDefaultConfigExists()
   await syncDefaultConfigToDisk()
   
+  opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
 } catch (error) {

@@ -6,9 +6,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { TTSSettings } from './TTSSettings'
+import { showToast } from '@/lib/toast'
 
 export function GeneralSettings() {
-  const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
+  const { preferences, isLoading, updateSettings, updateSettingsAsync, isUpdating } = useSettings()
   
   const [gitToken, setGitToken] = useState('')
   
@@ -120,7 +121,17 @@ export function GeneralSettings() {
             placeholder="ghp_..."
             value={gitToken}
             onChange={(e) => setGitToken(e.target.value)}
-            onBlur={() => updateSettings({ gitToken })}
+            onBlur={async () => {
+              if (gitToken !== preferences?.gitToken) {
+                showToast.loading('Restarting OpenCode server...', { id: 'restart-server' })
+                try {
+                  await updateSettingsAsync({ gitToken })
+                  showToast.success('GitHub token updated', { id: 'restart-server' })
+                } catch {
+                  showToast.error('Failed to update GitHub token', { id: 'restart-server' })
+                }
+              }
+            }}
             className="bg-background border-border text-foreground placeholder:text-muted-foreground"
           />
           <p className="text-sm text-muted-foreground">
