@@ -62,7 +62,7 @@ export function SessionDetail() {
     repoDirectory,
   );
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory);
-  const abortSession = useAbortSession(opcodeUrl, repoDirectory);
+  const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
 

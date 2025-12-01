@@ -63,7 +63,7 @@ export function PromptInput({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
-  const abortSession = useAbortSession(opcodeUrl, directory)
+  const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { data: messages } = useMessages(opcodeUrl, sessionID, directory)
   const { data: config } = useConfig(opcodeUrl)
   const { preferences, updateSettings } = useSettings()

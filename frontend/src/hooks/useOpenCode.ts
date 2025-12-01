@@ -1,12 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useRef, useEffect, useCallback } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import type {
   MessageWithParts,
   MessageListResponse,
   ContentPart,
 } from "../api/types";
-import type { paths } from "../api/opencode-types";
+import type { paths, components } from "../api/opencode-types";
+
+type AssistantMessage = components["schemas"]["AssistantMessage"];
 
 type SendPromptRequest = NonNullable<
   paths["/session/{id}/message"]["post"]["requestBody"]
@@ -248,15 +250,129 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
   });
 };
 
-export const useAbortSession = (opcodeUrl: string | null | undefined, directory?: string) => {
-  const client = useOpenCodeClient(opcodeUrl, directory);
+const ABORT_RETRY_INTERVAL_MS = 3000;
+const MAX_ABORT_RETRIES = 10;
 
-  return useMutation({
-    mutationFn: async (sessionID: string) => {
+export const useAbortSession = (
+  opcodeUrl: string | null | undefined,
+  directory?: string,
+  sessionID?: string
+) => {
+  const client = useOpenCodeClient(opcodeUrl, directory);
+  const queryClient = useQueryClient();
+  const retryIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const retryCountRef = useRef(0);
+
+  const forceCompleteMessages = useCallback((targetSessionID: string) => {
+    const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
+    
+    queryClient.setQueryData<MessageListResponse>(queryKey, (old) => {
+      if (!old) return old;
+      
+      return old.map(msg => {
+        if (msg.info.role === "assistant") {
+          const assistantInfo = msg.info as AssistantMessage;
+          if (!assistantInfo.time.completed) {
+            return {
+              ...msg,
+              info: {
+                ...assistantInfo,
+                time: {
+                  ...assistantInfo.time,
+                  completed: Date.now()
+                },
+                error: {
+                  name: "MessageAbortedError" as const,
+                  data: { message: "Session aborted" }
+                }
+              }
+            };
+          }
+        }
+        return msg;
+      });
+    });
+  }, [queryClient, opcodeUrl, directory]);
+
+  const stopRetrying = useCallback(() => {
+    if (retryIntervalRef.current) {
+      clearInterval(retryIntervalRef.current);
+      retryIntervalRef.current = null;
+    }
+    retryCountRef.current = 0;
+  }, []);
+
+  const isSessionComplete = useCallback((targetSessionID: string) => {
+    const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
+    const messages = queryClient.getQueryData<MessageListResponse>(queryKey);
+    
+    const hasActiveStream = messages?.some(msg => {
+      if (msg.info.role !== "assistant") return false;
+      const assistantInfo = msg.info as AssistantMessage;
+      return !assistantInfo.time.completed;
+    });
+
+    return !hasActiveStream;
+  }, [queryClient, opcodeUrl, directory]);
+
+  useEffect(() => {
+    if (!sessionID) return;
+
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      const queryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      if (event.query.queryKey.join(",") === queryKey.join(",")) {
+        if (isSessionComplete(sessionID) && retryIntervalRef.current) {
+          stopRetrying();
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [sessionID, queryClient, opcodeUrl, directory, isSessionComplete, stopRetrying]);
+
+  useEffect(() => {
+    return () => stopRetrying();
+  }, [stopRetrying]);
+
+  const mutation = useMutation({
+    mutationFn: async (targetSessionID: string) => {
       if (!client) throw new Error("No client available");
-      await client.abortSession(sessionID);
+      
+      stopRetrying();
+      forceCompleteMessages(targetSessionID);
+
+      const attemptAbort = async () => {
+        try {
+          await client.abortSession(targetSessionID);
+          stopRetrying();
+        } catch {
+          // Will retry on next interval
+        }
+      };
+
+      attemptAbort();
+
+      retryIntervalRef.current = setInterval(() => {
+        retryCountRef.current++;
+        
+        if (retryCountRef.current >= MAX_ABORT_RETRIES) {
+          stopRetrying();
+          return;
+        }
+
+        if (isSessionComplete(targetSessionID)) {
+          stopRetrying();
+          return;
+        }
+
+        attemptAbort();
+      }, ABORT_RETRY_INTERVAL_MS);
+      
+      return targetSessionID;
     },
   });
+
+  return mutation;
 };
 
 export const useSendShell = (opcodeUrl: string | null | undefined, directory?: string) => {
