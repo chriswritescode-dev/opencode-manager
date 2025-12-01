@@ -17,6 +17,13 @@ async function hasCommits(repoPath: string): Promise<boolean> {
   }
 }
 
+function getAuthenticatedUrl(repoUrl: string, gitToken: string): string {
+  if (gitToken && repoUrl.startsWith('https://github.com')) {
+    return repoUrl.replace('https://', `https://${gitToken}@`)
+  }
+  return repoUrl
+}
+
 async function safeGetCurrentBranch(repoPath: string): Promise<string | null> {
   try {
     const repoHasCommits = await hasCommits(repoPath)
@@ -75,7 +82,18 @@ export async function initLocalRepo(
     logger.info(`Created directory for local repo: ${fullPath}`)
     
     logger.info(`Initializing git repository: ${fullPath}`)
-    await executeCommand(['git', 'init'], fullPath)
+    const settingsService = new SettingsService(database)
+    const settings = settingsService.getSettings('default')
+    const gitToken = settings.preferences.gitToken
+    const env: Record<string, string> = gitToken ? 
+    { 
+      GITHUB_TOKEN: gitToken, 
+      GIT_ASKPASS: 'echo', 
+      GIT_TERMINAL_PROMPT: '0'
+    } : 
+    { GIT_ASKPASS: 'echo', GIT_TERMINAL_PROMPT: '0' }
+    
+    await executeCommand(['git', 'init'], { cwd: fullPath })
     
     if (branch && branch !== 'main') {
       await executeCommand(['git', '-C', fullPath, 'checkout', '-b', branch])
@@ -158,9 +176,7 @@ export async function cloneRepo(
     const settings = settingsService.getSettings('default')
     const gitToken = settings.preferences.gitToken
     
-    let cloneUrl = gitToken && repoUrl.startsWith('https://github.com') 
-      ? repoUrl.replace('https://', `https://${gitToken}@`) 
-      : repoUrl
+    const cloneUrl = getAuthenticatedUrl(repoUrl, gitToken || '')
     
     if (shouldUseWorktree) {
       logger.info(`Creating worktree for branch: ${branch}`)
@@ -201,7 +217,7 @@ export async function cloneRepo(
       }
       
       try {
-        const cloneCmd = ['git', 'clone', '-b', branch, cloneUrl, worktreeDirName]
+        const cloneCmd = ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
         await executeCommand(cloneCmd, getReposPath())
       } catch (error: any) {
         if (error.message.includes('destination path') && error.message.includes('already exists')) {
@@ -210,7 +226,7 @@ export async function cloneRepo(
         }
         
         logger.info(`Branch '${branch}' not found during clone, cloning default branch and creating branch locally`)
-        const cloneCmd = ['git', 'clone', cloneUrl, worktreeDirName]
+        const cloneCmd = ['git', 'clone', repoUrl, worktreeDirName]
         await executeCommand(cloneCmd, getReposPath())
         let localBranchExists = 'missing'
         try {
@@ -292,8 +308,8 @@ export async function cloneRepo(
       
       try {
         const cloneCmd = branch
-          ? ['git', 'clone', '-b', branch, cloneUrl, worktreeDirName]
-          : ['git', 'clone', cloneUrl, worktreeDirName]
+          ? ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
+          : ['git', 'clone', repoUrl, worktreeDirName]
         
         await executeCommand(cloneCmd, getReposPath())
       } catch (error: any) {
@@ -304,7 +320,7 @@ export async function cloneRepo(
         
         if (branch && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
-          const cloneCmd = ['git', 'clone', cloneUrl, worktreeDirName]
+const cloneCmd = ['git', 'clone', repoUrl, worktreeDirName]
           await executeCommand(cloneCmd, getReposPath())
           let localBranchExists = 'missing'
           try {

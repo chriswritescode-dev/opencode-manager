@@ -1,5 +1,7 @@
 import { executeCommand } from '../utils/process'
 import { logger } from '../utils/logger'
+import { SettingsService } from './settings'
+import type { Database } from 'bun:sqlite'
 import path from 'path'
 
 async function hasCommits(repoPath: string): Promise<boolean> {
@@ -8,6 +10,33 @@ async function hasCommits(repoPath: string): Promise<boolean> {
     return true
   } catch {
     return false
+  }
+}
+
+function getGitEnvironment(database: Database): Record<string, string> {
+  try {
+    const settingsService = new SettingsService(database)
+    const settings = settingsService.getSettings('default')
+    const gitToken = settings.preferences.gitToken
+    
+    if (gitToken) {
+      return {
+        GITHUB_TOKEN: gitToken,
+        GIT_ASKPASS: 'echo',
+        GIT_TERMINAL_PROMPT: '0'
+      }
+    }
+    
+    return {
+      GIT_ASKPASS: 'echo',
+      GIT_TERMINAL_PROMPT: '0'
+    }
+  } catch (error) {
+    logger.warn('Failed to get git token from settings:', error)
+    return {
+      GIT_ASKPASS: 'echo',
+      GIT_TERMINAL_PROMPT: '0'
+    }
   }
 }
 
@@ -123,10 +152,11 @@ function parsePorcelainV2(output: string): { branch: string; ahead: number; behi
   return { branch, ahead, behind, files }
 }
 
-export async function getGitStatus(repoPath: string): Promise<GitStatusResponse> {
+export async function getGitStatus(repoPath: string, database?: Database): Promise<GitStatusResponse> {
   try {
     const fullPath = path.resolve(repoPath)
-    const output = await executeCommand(['git', '-C', fullPath, 'status', '--porcelain=v2', '--branch'])
+    const env = database ? getGitEnvironment(database) : undefined
+    const output = await executeCommand(['git', '-C', fullPath, 'status', '--porcelain=v2', '--branch'], { env })
     const { branch, ahead, behind, files } = parsePorcelainV2(output)
 
     return {
@@ -142,10 +172,10 @@ export async function getGitStatus(repoPath: string): Promise<GitStatusResponse>
   }
 }
 
-export async function getFileDiff(repoPath: string, filePath: string): Promise<FileDiffResponse> {
+export async function getFileDiff(repoPath: string, filePath: string, database?: Database): Promise<FileDiffResponse> {
   try {
     const fullRepoPath = path.resolve(repoPath)
-    const status = await getGitStatus(repoPath)
+    const status = await getGitStatus(repoPath, database)
     const fileStatus = status.files.find(f => f.path === filePath)
 
     if (!fileStatus) {
@@ -164,9 +194,11 @@ export async function getFileDiff(repoPath: string, filePath: string): Promise<F
     let deletions = 0
     let isBinary = false
 
+    const env = database ? getGitEnvironment(database) : undefined
+    
     if (fileStatus.status === 'untracked') {
       try {
-        const content = await executeCommand(['git', '-C', fullRepoPath, 'diff', '--no-index', '--', '/dev/null', filePath])
+        const content = await executeCommand(['git', '-C', fullRepoPath, 'diff', '--no-index', '--', '/dev/null', filePath], { env })
         diff = content
       } catch (error: any) {
         if (error.message?.includes('exit code 1') || error.message?.includes('Command failed with code 1')) {
@@ -181,7 +213,7 @@ export async function getFileDiff(repoPath: string, filePath: string): Promise<F
       try {
         const repoHasCommits = await hasCommits(fullRepoPath)
         if (repoHasCommits) {
-          diff = await executeCommand(['git', '-C', fullRepoPath, 'diff', 'HEAD', '--', filePath])
+          diff = await executeCommand(['git', '-C', fullRepoPath, 'diff', 'HEAD', '--', filePath], { env })
         } else {
           diff = `New file (no commits yet): ${filePath}`
         }

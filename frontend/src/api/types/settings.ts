@@ -46,6 +46,7 @@ export interface UserPreferences {
 export interface SettingsResponse {
   preferences: UserPreferences
   updatedAt: number
+  serverRestarted?: boolean
 }
 
 export interface UpdateSettingsRequest {

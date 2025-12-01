@@ -10,6 +10,12 @@ interface ToastOptions {
   id?: string | number
 }
 
+interface PromiseToastMessages {
+  loading: string
+  success: string
+  error: string
+}
+
 export const showToast = {
   success: (message: string, options?: ToastOptions) => {
     return toast.success(message, options)
@@ -29,6 +35,10 @@ export const showToast = {
   
   loading: (message: string, options?: ToastOptions) => {
     return toast.loading(message, options)
+  },
+  
+  promise: <T>(promise: Promise<T>, messages: PromiseToastMessages) => {
+    return toast.promise(promise, messages)
   },
   
   dismiss: (id?: string | number) => {
