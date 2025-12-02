@@ -20,8 +20,15 @@ RUN apt-get update && apt-get install -y \
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-RUN curl -fsSL https://bun.sh/install | bash && \
-    ln -s $HOME/.bun/bin/bun /usr/local/bin/bun
+USER node
+
+RUN mkdir -p /home/node/.local/bin && \
+    curl -fsSL https://bun.sh/install | bash && \
+    ln -s /home/node/.bun/bin/bun /home/node/.local/bin/bun
+
+USER root
+
+ENV PATH="/home/node/.local/bin:/home/node/.bun/bin:${PATH}"
 
 WORKDIR /app
 
@@ -47,8 +54,13 @@ RUN pnpm --filter frontend build
 
 FROM base AS runner
 
-RUN curl -fsSL https://opencode.ai/install | bash && \
-    ln -s $HOME/.opencode/bin/opencode /usr/local/bin/opencode
+USER node
+
+RUN mkdir -p /home/node/.local/bin && \
+    curl -fsSL https://opencode.ai/install | bash && \
+    ln -s /home/node/.opencode/bin/opencode /home/node/.local/bin/opencode
+
+USER root
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -69,7 +81,10 @@ RUN mkdir -p /app/backend/node_modules/@opencode-webui && \
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
-RUN mkdir -p /workspace /app/data
+RUN mkdir -p /workspace /app/data && \
+    chown -R node:node /workspace /app/data /app
+
+USER node
 
 EXPOSE 5003
 

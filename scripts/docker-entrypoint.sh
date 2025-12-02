@@ -1,6 +1,7 @@
 #!/bin/bash
 set -e
 
+export HOME=/home/node
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
 
