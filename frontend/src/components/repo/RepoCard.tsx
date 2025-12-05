@@ -1,10 +1,10 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Trash2, GitBranch, ExternalLink } from "lucide-react";
+import { Loader2, Trash2, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
-import { AddBranchWorkspaceDialog } from "./AddBranchWorkspaceDialog";
+
+import { BranchSwitcher } from "./BranchSwitcher";
 
 interface RepoCardProps {
   repo: {
@@ -31,7 +31,7 @@ export function RepoCard({
   onSelect,
 }: RepoCardProps) {
   const navigate = useNavigate();
-  const [addBranchOpen, setAddBranchOpen] = useState(false);
+  
   const repoName = repo.repoUrl 
     ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
     : repo.localPath || "Local Repo";
@@ -90,10 +90,7 @@ export function RepoCard({
               </Badge>
             )}
           </div>
-          <p className="text-sm text-muted-foreground truncate flex items-center gap-1">
-              <GitBranch className="w-3 h-3" />
-              {branchToDisplay}
-            </p>
+          
         </div>
 
         
@@ -118,21 +115,17 @@ export function RepoCard({
               <ExternalLink className="w-4 h-4 mr-2" />
               Open
             </Button>
-	    
 
-              <Button
-                size="sm"
-									
-                variant="outline"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setAddBranchOpen(true);
-                }}
-                disabled={!isReady || !repo.repoUrl}
+            {!repo.isWorktree && (
+              <BranchSwitcher
+                repoId={repo.id}
+                currentBranch={branchToDisplay || ""}
+                isWorktree={repo.isWorktree}
+                repoUrl={repo.repoUrl}
+                repoLocalPath={repo.localPath}
                 className="h-10 sm:h-9 w-10 p-0"
-              >
-                <GitBranch className="w-4 h-4" />
-              </Button>
+              />
+            )}
 
             <Button
               size="sm"
@@ -153,13 +146,7 @@ export function RepoCard({
         </div>
       </div>
 
-      {repo.repoUrl && (
-        <AddBranchWorkspaceDialog
-          open={addBranchOpen}
-          onOpenChange={setAddBranchOpen}
-          repoUrl={repo.repoUrl}
-        />
-      )}
+      
     </div>
   );
 }
