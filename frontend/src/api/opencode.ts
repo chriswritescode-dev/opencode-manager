@@ -92,6 +92,11 @@ export class OpenCodeClient {
   }
 
   async getProviders() {
+    const response = await this.client.get('/provider')
+    return response.data
+  }
+
+  async getConfigProviders() {
     const response = await this.client.get('/config/providers')
     return response.data
   }

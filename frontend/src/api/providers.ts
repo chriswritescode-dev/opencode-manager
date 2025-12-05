@@ -1,6 +1,63 @@
-import { settingsApi } from "./settings";
 import axios from "axios";
 import { API_BASE_URL } from "@/config";
+import { settingsApi } from "./settings";
+
+export type ProviderSource = "configured" | "local" | "builtin";
+
+export interface OpenCodeModel {
+  id: string;
+  providerID: string;
+  name: string;
+  api: {
+    id: string;
+    url?: string;
+    npm: string;
+  };
+  status: "active" | "deprecated";
+  headers: Record<string, string>;
+  options: Record<string, unknown>;
+  cost: {
+    input: number;
+    output: number;
+    cache: {
+      read: number;
+      write: number;
+    };
+  };
+  limit: {
+    context: number;
+    output: number;
+  };
+  capabilities: {
+    temperature: boolean;
+    reasoning: boolean;
+    attachment: boolean;
+    toolcall: boolean;
+    input: {
+      text: boolean;
+      audio: boolean;
+      image: boolean;
+      video: boolean;
+      pdf: boolean;
+    };
+    output: {
+      text: boolean;
+      audio: boolean;
+      image: boolean;
+      video: boolean;
+      pdf: boolean;
+    };
+  };
+}
+
+export interface OpenCodeProvider {
+  id: string;
+  source: "custom" | "builtin";
+  name: string;
+  env: string[];
+  options: Record<string, unknown>;
+  models: Record<string, OpenCodeModel>;
+}
 
 export interface Model {
   id: string;
@@ -40,6 +97,7 @@ export interface Provider {
   npm?: string;
   models: Record<string, Model>;
   options?: Record<string, unknown>;
+  source?: ProviderSource;
 }
 
 export interface ProviderWithModels {
@@ -49,168 +107,193 @@ export interface ProviderWithModels {
   env: string[];
   npm?: string;
   models: Model[];
+  source: ProviderSource;
 }
 
-// Default providers for common OpenCode setups
-const DEFAULT_PROVIDERS: Provider[] = [
-  {
-    id: "anthropic",
-    name: "Anthropic",
-    api: "https://api.anthropic.com",
-    env: ["ANTHROPIC_API_KEY"],
-    npm: "@anthropic-ai/sdk",
-    models: {
-      "claude-3-5-sonnet-20241022": {
-        id: "claude-3-5-sonnet-20241022",
-        name: "Claude 3.5 Sonnet (October 2024)",
-        release_date: "2024-10-22",
-        attachment: true,
-        reasoning: false,
-        temperature: true,
-        tool_call: true,
-        cost: { input: 3, output: 15 },
-        limit: { context: 200000, output: 8192 },
-        modalities: { input: ["text", "image"], output: ["text"] },
-        experimental: false,
-      },
-      "claude-3-5-haiku-20241022": {
-        id: "claude-3-5-haiku-20241022",
-        name: "Claude 3.5 Haiku (October 2024)",
-        release_date: "2024-10-22",
-        attachment: true,
-        reasoning: false,
-        temperature: true,
-        tool_call: true,
-        cost: { input: 1, output: 5 },
-        limit: { context: 200000, output: 8192 },
-        modalities: { input: ["text", "image"], output: ["text"] },
-        experimental: false,
-      },
-    },
-  },
-  {
-    id: "openai",
-    name: "OpenAI",
-    api: "https://api.openai.com/v1",
-    env: ["OPENAI_API_KEY"],
-    npm: "openai",
-    models: {
-      "gpt-4o": {
-        id: "gpt-4o",
-        name: "GPT-4o",
-        release_date: "2024-05-13",
-        attachment: true,
-        reasoning: false,
-        temperature: true,
-        tool_call: true,
-        cost: { input: 5, output: 15 },
-        limit: { context: 128000, output: 4096 },
-        modalities: {
-          input: ["text", "image", "audio"],
-          output: ["text", "audio"],
-        },
-        experimental: false,
-      },
-      "gpt-4o-mini": {
-        id: "gpt-4o-mini",
-        name: "GPT-4o Mini",
-        release_date: "2024-07-18",
-        attachment: true,
-        reasoning: false,
-        temperature: true,
-        tool_call: true,
-        cost: { input: 0.15, output: 0.6 },
-        limit: { context: 128000, output: 16384 },
-        modalities: { input: ["text", "image"], output: ["text"] },
-        experimental: false,
-      },
-    },
-  },
-  {
-    id: "google",
-    name: "Google",
-    api: "https://generativelanguage.googleapis.com/v1beta",
-    env: ["GOOGLE_API_KEY"],
-    npm: "@google/generative-ai",
-    models: {
-      "gemini-1.5-pro": {
-        id: "gemini-1.5-pro",
-        name: "Gemini 1.5 Pro",
-        release_date: "2024-02-15",
-        attachment: true,
-        reasoning: false,
-        temperature: true,
-        tool_call: true,
-        cost: { input: 3.5, output: 10.5 },
-        limit: { context: 2000000, output: 8192 },
-        modalities: {
-          input: ["text", "image", "audio", "video"],
-          output: ["text"],
-        },
-        experimental: false,
-      },
-      "gemini-1.5-flash": {
-        id: "gemini-1.5-flash",
-        name: "Gemini 1.5 Flash",
-        release_date: "2024-02-15",
-        attachment: true,
-        reasoning: false,
-        temperature: true,
-        tool_call: true,
-        cost: { input: 0.075, output: 0.3 },
-        limit: { context: 1000000, output: 8192 },
-        modalities: {
-          input: ["text", "image", "audio", "video"],
-          output: ["text"],
-        },
-        experimental: false,
-      },
-    },
-  },
-];
+interface ConfigProvider {
+  npm?: string;
+  name?: string;
+  api?: string;
+  options?: {
+    baseURL?: string;
+    [key: string]: unknown;
+  };
+  models?: Record<string, ConfigModel>;
+}
 
-async function getProvidersFromConfig(): Promise<Provider[]> {
+interface ConfigModel {
+  id?: string;
+  name?: string;
+  limit?: {
+    context?: number;
+    output?: number;
+  };
+  [key: string]: unknown;
+}
+
+const LOCAL_PROVIDER_IDS = ["ollama", "lmstudio", "llamacpp", "jan"];
+
+function classifyProviderSource(providerId: string, isFromConfig: boolean): ProviderSource {
+  if (!isFromConfig) return "builtin";
+  if (LOCAL_PROVIDER_IDS.includes(providerId.toLowerCase())) return "local";
+  return "configured";
+}
+
+function getProviderPriority(source: ProviderSource): number {
+  switch (source) {
+    case "configured": return 1;
+    case "local": return 2;
+    case "builtin": return 3;
+    default: return 4;
+  }
+}
+
+
+
+async function getProvidersFromOpenCodeServer(): Promise<Provider[]> {
   try {
-    const configResponse = await settingsApi.getDefaultOpenCodeConfig();
-    if (configResponse?.content?.provider) {
-      const providerRecord = configResponse.content.provider as Record<string, Provider>;
-      const providers = Object.entries(providerRecord).map(([id, provider]) => ({
-        ...provider,
-        id: provider.id || id,
-      }));
-      return providers;
+    const response = await axios.get(`${API_BASE_URL}/api/opencode/provider`);
+    
+    if (response?.data?.all && Array.isArray(response.data.all)) {
+      return response.data.all.map((openCodeProvider: OpenCodeProvider) => {
+        const models: Record<string, Model> = {};
+        
+        Object.entries(openCodeProvider.models).forEach(([modelId, openCodeModel]) => {
+          models[modelId] = {
+            id: openCodeModel.id,
+            name: openCodeModel.name,
+            attachment: openCodeModel.capabilities.attachment,
+            reasoning: openCodeModel.capabilities.reasoning,
+            temperature: openCodeModel.capabilities.temperature,
+            tool_call: openCodeModel.capabilities.toolcall,
+            cost: {
+              input: openCodeModel.cost.input,
+              output: openCodeModel.cost.output,
+              cache_read: openCodeModel.cost.cache.read,
+              cache_write: openCodeModel.cost.cache.write,
+            },
+            limit: {
+              context: openCodeModel.limit.context,
+              output: openCodeModel.limit.output,
+            },
+            modalities: {
+              input: Object.keys(openCodeModel.capabilities.input).filter(
+                (key) => openCodeModel.capabilities.input[key as keyof typeof openCodeModel.capabilities.input]
+              ) as ("text" | "audio" | "image" | "video" | "pdf")[],
+              output: Object.keys(openCodeModel.capabilities.output).filter(
+                (key) => openCodeModel.capabilities.output[key as keyof typeof openCodeModel.capabilities.output]
+              ) as ("text" | "audio" | "image" | "video" | "pdf")[],
+            },
+            provider: {
+              npm: openCodeModel.api.npm,
+            },
+          };
+        });
+
+        return {
+          id: openCodeProvider.id,
+          name: openCodeProvider.name,
+          env: openCodeProvider.env,
+          models,
+          options: openCodeProvider.options,
+        };
+      });
     }
   } catch (error) {
-    console.warn("Failed to load OpenCode config", error);
+    console.warn("Failed to load providers from OpenCode server", error);
   }
 
-  return DEFAULT_PROVIDERS;
+  return [];
 }
 
 export async function getProviders(): Promise<Provider[]> {
-  return await getProvidersFromConfig();
+  return await getProvidersFromOpenCodeServer();
+}
+
+async function getConfiguredProviders(): Promise<ProviderWithModels[]> {
+  try {
+    const config = await settingsApi.getDefaultOpenCodeConfig();
+    if (!config?.content?.provider) return [];
+
+    const configProviders = config.content.provider as Record<string, ConfigProvider>;
+    const result: ProviderWithModels[] = [];
+
+    for (const [providerId, providerConfig] of Object.entries(configProviders)) {
+      if (!providerConfig || typeof providerConfig !== "object") continue;
+
+      const source = classifyProviderSource(providerId, true);
+      const models: Model[] = [];
+
+      if (providerConfig.models) {
+        for (const [modelId, modelConfig] of Object.entries(providerConfig.models)) {
+          if (!modelConfig || typeof modelConfig !== "object") continue;
+
+          models.push({
+            id: modelConfig.id || modelId,
+            name: modelConfig.name || modelId,
+            limit: modelConfig.limit ? {
+              context: modelConfig.limit.context || 0,
+              output: modelConfig.limit.output || 0,
+            } : undefined,
+          });
+        }
+      }
+
+      result.push({
+        id: providerId,
+        name: providerConfig.name || providerId,
+        api: providerConfig.api || providerConfig.options?.baseURL,
+        env: [],
+        npm: providerConfig.npm,
+        models,
+        source,
+      });
+    }
+
+    return result;
+  } catch (error) {
+    console.warn("Failed to load configured providers", error);
+    return [];
+  }
 }
 
 export async function getProvidersWithModels(): Promise<ProviderWithModels[]> {
-  const providers = await getProviders();
+  const [builtinProviders, configuredProviders] = await Promise.all([
+    getProviders(),
+    getConfiguredProviders(),
+  ]);
 
-  const result = providers.map((provider) => {
-    const models = Object.entries(provider.models || {}).map(([id, model]) => ({
-      ...model,
-      id: model.id || id,
-      name: model.name || id,
-    }));
-    return {
-      id: provider.id,
-      name: provider.name,
-      api: provider.api,
-      env: provider.env || [],
-      npm: provider.npm,
-      models,
-    };
+  const configuredIds = new Set(configuredProviders.map((p) => p.id));
+
+  const builtinResult: ProviderWithModels[] = builtinProviders
+    .filter((provider) => !configuredIds.has(provider.id))
+    .map((provider) => {
+      const models = Object.entries(provider.models || {}).map(([id, model]) => ({
+        ...model,
+        id: model.id || id,
+        name: model.name || id,
+      }));
+      return {
+        id: provider.id,
+        name: provider.name,
+        api: provider.api,
+        env: provider.env || [],
+        npm: provider.npm,
+        models,
+        source: "builtin" as ProviderSource,
+      };
+    });
+
+  const allProviders = [...configuredProviders, ...builtinResult];
+
+  allProviders.sort((a, b) => {
+    const priorityA = getProviderPriority(a.source);
+    const priorityB = getProviderPriority(b.source);
+    if (priorityA !== priorityB) return priorityA - priorityB;
+    return a.name.localeCompare(b.name);
   });
 
-  return result;
+  return allProviders;
 }
 
 export async function getModel(
