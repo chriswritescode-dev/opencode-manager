@@ -7,7 +7,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { GitBranch, Check, Plus, GitCommit } from "lucide-react";
+import { GitBranch, Check, Plus, GitCommit, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listBranches, switchBranch } from "@/api/repos";
 import { useGitStatus } from "@/api/git";
@@ -61,9 +61,14 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           <Button
             variant="ghost"
             size="sm"
+            disabled={switchBranchMutation.isPending}
             className={`h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20 ${className || ""}`}
           >
-            <GitBranch className="w-3 h-3" />
+            {switchBranchMutation.isPending ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <GitBranch className="w-3 h-3" />
+            )}
             <span className="hidden sm:inline truncate">{currentBranch}</span>
           </Button>
         </DropdownMenuTrigger>
