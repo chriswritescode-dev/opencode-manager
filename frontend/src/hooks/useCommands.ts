@@ -189,8 +189,7 @@ export function useCommands(opcodeUrl: string | null) {
     
     const searchTerm = query.toLowerCase()
     return commands.filter(command =>
-      command.name.toLowerCase().includes(searchTerm) ||
-      command.description?.toLowerCase().includes(searchTerm)
+      command.name.toLowerCase().includes(searchTerm)
     )
   }
 

@@ -109,12 +109,11 @@ export function PromptInput({
 
     const commandMatch = prompt.match(/^\/([a-zA-Z0-9_-]+)(?:\s+(.*))?$/)
     if (commandMatch) {
-      const [, commandName] = commandMatch
+      const [, commandName, commandArgs] = commandMatch
       const command = filterCommands(commandName)[0]
       
       if (command) {
-        
-        executeCommand(command)
+        executeCommand(command, commandArgs?.trim() || '')
         setPrompt('')
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto'
@@ -149,23 +148,41 @@ export function PromptInput({
     setShowSuggestions(false)
     setSuggestionQuery('')
     
-    const cursorPosition = textareaRef.current.selectionStart
-    const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
-    
-    if (commandMatch) {
-      const beforeCommand = prompt.slice(0, commandMatch.index)
-      const afterCommand = prompt.slice(cursorPosition)
-      const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
+    if (command.template) {
+      const cleanedTemplate = command.template
+        .replace(/\$ARGUMENTS/g, '')
+        .replace(/\$\d+/g, '')
+        .trim()
       
-      setPrompt(newPrompt)
+      setPrompt(cleanedTemplate)
       
       setTimeout(() => {
         if (textareaRef.current) {
-          const newCursorPos = beforeCommand.length + command.name.length + 2
           textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          textareaRef.current.setSelectionRange(cleanedTemplate.length, cleanedTemplate.length)
+          textareaRef.current.style.height = 'auto'
+          textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
         }
       }, 0)
+    } else {
+      const cursorPosition = textareaRef.current.selectionStart
+      const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
+      
+      if (commandMatch) {
+        const beforeCommand = prompt.slice(0, commandMatch.index)
+        const afterCommand = prompt.slice(cursorPosition)
+        const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
+        
+        setPrompt(newPrompt)
+        
+        setTimeout(() => {
+          if (textareaRef.current) {
+            const newCursorPos = beforeCommand.length + command.name.length + 2
+            textareaRef.current.focus()
+            textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          }
+        }, 0)
+      }
     }
   }
   

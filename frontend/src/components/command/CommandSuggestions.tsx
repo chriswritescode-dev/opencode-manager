@@ -18,26 +18,34 @@ export function CommandSuggestions({
   query,
   commands,
   onSelect,
+  onClose,
   selectedIndex = 0
 }: CommandSuggestionsProps) {
-  const containerRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const filteredCommands = commands.filter(command =>
-    command.name.toLowerCase().includes(query.toLowerCase()) ||
-    command.description?.toLowerCase().includes(query.toLowerCase())
+    command.name.toLowerCase().includes(query.toLowerCase())
   )
 
-  
-
-  
-
-  // Scroll selected item into view
   useEffect(() => {
-    if (!isOpen || !containerRef.current) return
+    if (!isOpen) return
 
-    const selectedItem = containerRef.current.querySelector(`[data-selected="true"]`) as HTMLElement
+    const handleClickOutside = (e: MouseEvent) => {
+      if (listRef.current && !listRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isOpen, onClose])
+
+  useEffect(() => {
+    if (!isOpen || !listRef.current) return
+
+    const selectedItem = listRef.current.children[selectedIndex] as HTMLElement
     if (selectedItem) {
-      selectedItem.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      selectedItem.scrollIntoView({ block: 'nearest' })
     }
   }, [selectedIndex, isOpen])
 
@@ -47,45 +55,33 @@ export function CommandSuggestions({
 
   return (
     <div
-      ref={containerRef}
-      className="absolute bottom-full left-0 right-0 mb-2 z-50 bg-background border border-border rounded-lg shadow-lg max-h-64 overflow-y-auto"
+      ref={listRef}
+      className="absolute bottom-full left-0 right-0 mb-2 z-50 bg-background border border-border rounded-lg shadow-xl max-h-[30vh] md:max-h-[40vh] lg:max-h-[50vh] overflow-y-auto"
     >
-      <div className="p-1">
-        {filteredCommands.map((command, index) => {
-          const isSelected = index === selectedIndex
-          const displayName = `/${command.name}`
-          
-          return (
-            <div
-              key={command.name}
-              data-selected={isSelected}
-              className={`px-3 py-2 cursor-pointer rounded-md transition-colors flex items-center gap-2 ${
-                isSelected 
-                  ? 'bg-primary/20 text-foreground' 
-                  : 'hover:bg-muted text-muted-foreground'
-              }`}
-              onClick={() => onSelect(command)}
-              
-            >
-              <Command className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm truncate">{displayName}</div>
-                {command.description && (
-                  <div className="text-xs text-muted-foreground truncate">{command.description}</div>
-                )}
-              </div>
+      {filteredCommands.map((command, index) => {
+        const isSelected = index === selectedIndex
+        const displayName = `/${command.name}`
+
+        return (
+          <button
+            key={command.name}
+            onClick={() => onSelect(command)}
+            className={`w-full px-3 py-2 text-left transition-colors flex items-center gap-2 ${
+              isSelected
+                ? 'bg-primary text-primary-foreground'
+                : 'hover:bg-muted text-foreground'
+            }`}
+          >
+            <Command className={`h-4 w-4 flex-shrink-0 ${isSelected ? 'opacity-90' : 'opacity-70'}`} />
+            <div className="flex-1 min-w-0">
+              <div className="font-mono text-sm font-medium truncate">{displayName}</div>
+              {command.description && (
+                <div className="text-xs opacity-70 mt-0.5 truncate">{command.description}</div>
+              )}
             </div>
-          )
-        })}
-      </div>
-      
-      <div className="px-3 py-2 border-t border-border text-xs text-muted-foreground">
-        <div className="flex items-center gap-4">
-          <span>↑↓ Navigate</span>
-          <span>↵ Select</span>
-          <span>Esc Close</span>
-        </div>
-      </div>
+          </button>
+        )
+      })}
     </div>
   )
 }

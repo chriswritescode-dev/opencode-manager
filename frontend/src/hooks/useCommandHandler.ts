@@ -27,7 +27,7 @@ export function useCommandHandler({
   const createSession = useCreateSession(opcodeUrl, directory)
   const [loading, setLoading] = useState(false)
 
-  const executeCommand = useCallback(async (command: CommandType) => {
+  const executeCommand = useCallback(async (command: CommandType, args: string = '') => {
     if (!opcodeUrl) return
 
     setLoading(true)
@@ -35,7 +35,6 @@ export function useCommandHandler({
     try {
       const client = createOpenCodeClient(opcodeUrl, directory)
       
-      // Handle special commands that need UI interaction
       switch (command.name) {
         case 'sessions':
         case 'resume':
@@ -48,10 +47,9 @@ export function useCommandHandler({
           break
           
         case 'themes':
-          // Themes command will be sent to server and appear as message
           await client.sendCommand(sessionID, {
             command: command.name,
-            arguments: ''
+            arguments: args
           })
           break
           
@@ -59,16 +57,13 @@ export function useCommandHandler({
           onShowHelpDialog?.()
           break
           
-case 'new':
+        case 'new':
         case 'clear':
-          // Create a new session and navigate to it
           try {
             const newSession = await createSession.mutateAsync({
               agent: undefined
             })
             if (newSession?.id) {
-              // Navigate to the correct repo session URL pattern
-              // We need to get the current repo ID from the URL
               const currentPath = window.location.pathname
               const repoMatch = currentPath.match(/\/repos\/(\d+)\/sessions\//)
               if (repoMatch) {
@@ -76,7 +71,6 @@ case 'new':
                 const newPath = `/repos/${repoId}/sessions/${newSession.id}`
                 navigate(newPath)
               } else {
-                // Fallback: try to navigate to session directly if route exists
                 navigate(`/session/${newSession.id}`)
               }
             }
@@ -95,18 +89,16 @@ case 'new':
         case 'details':
         case 'editor':
         case 'init':
-          // These commands will be sent to the server and appear as messages
           await client.sendCommand(sessionID, {
             command: command.name,
-            arguments: ''
+            arguments: args
           })
           break
           
         default:
-          // Send custom commands to server
           await client.sendCommand(sessionID, {
             command: command.name,
-            arguments: ''
+            arguments: args
           })
       }
     } catch (error) {
