@@ -34,6 +34,8 @@ interface PromptInputProps {
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
+  onToggleDetails?: () => boolean
+  onExportSession?: () => void
 }
 
 export function PromptInput({ 
@@ -45,7 +47,9 @@ export function PromptInput({
   onScrollToBottom,
   onShowSessionsDialog,
   onShowModelsDialog,
-  onShowHelpDialog
+  onShowHelpDialog,
+  onToggleDetails,
+  onExportSession
 }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
   const [modelName, setModelName] = useState<string>('')
@@ -73,7 +77,9 @@ export function PromptInput({
     directory,
     onShowSessionsDialog,
     onShowModelsDialog,
-    onShowHelpDialog
+    onShowHelpDialog,
+    onToggleDetails,
+    onExportSession
   })
   
   const { files: searchResults } = useFileSearch(

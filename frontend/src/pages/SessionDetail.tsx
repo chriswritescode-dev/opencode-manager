@@ -21,6 +21,8 @@ import { usePermissionRequests } from "@/hooks/usePermissionRequests";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useEffect, useRef, useCallback } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
+import { exportSession, downloadMarkdown } from "@/lib/exportSession";
+import { showToast } from "@/lib/toast";
 import type { PermissionResponse } from "@/api/types";
 
 export function SessionDetail() {
@@ -135,6 +137,23 @@ export function SessionDetail() {
     await openCodeClient.respondToPermission(permissionSessionID, permissionID, response)
   }, [openCodeClient]);
 
+  const handleToggleDetails = useCallback(() => {
+    const newValue = !preferences?.expandToolCalls
+    updateSettings({ expandToolCalls: newValue })
+    return newValue
+  }, [preferences?.expandToolCalls, updateSettings]);
+
+  const handleExportSession = useCallback(() => {
+    if (!messages || !session) {
+      showToast.error('No session data to export')
+      return
+    }
+    
+    const { filename, content } = exportSession(messages, session)
+    downloadMarkdown(content, filename)
+    showToast.success(`Exported to ${filename}`)
+  }, [messages, session]);
+
   
 
   if (!sessionId) {
@@ -200,6 +219,8 @@ export function SessionDetail() {
               onShowHelpDialog={() => {
                 openSettings()
               }}
+              onToggleDetails={handleToggleDetails}
+              onExportSession={handleExportSession}
             />
           </div>
         )}

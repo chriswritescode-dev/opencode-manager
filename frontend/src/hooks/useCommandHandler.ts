@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createOpenCodeClient } from '@/api/opencode'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { showToast } from '@/lib/toast'
 import type { components } from '@/api/opencode-types'
 
 type CommandType = components['schemas']['Command']
@@ -13,6 +14,8 @@ interface CommandHandlerProps {
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
+  onToggleDetails?: () => boolean
+  onExportSession?: () => void
 }
 
 export function useCommandHandler({
@@ -21,7 +24,9 @@ export function useCommandHandler({
   directory,
   onShowSessionsDialog,
   onShowModelsDialog,
-  onShowHelpDialog
+  onShowHelpDialog,
+  onToggleDetails,
+  onExportSession
 }: CommandHandlerProps) {
   const navigate = useNavigate()
   const createSession = useCreateSession(opcodeUrl, directory)
@@ -79,14 +84,25 @@ export function useCommandHandler({
           }
           break
           
+        case 'details':
+          if (onToggleDetails) {
+            const expanded = onToggleDetails()
+            showToast.success(expanded ? 'Tool details expanded' : 'Tool details collapsed')
+          }
+          break
+          
+        case 'export':
+          if (onExportSession) {
+            onExportSession()
+          }
+          break
+          
         case 'share':
         case 'unshare':
-        case 'export':
         case 'compact':
         case 'summarize':
         case 'undo':
         case 'redo':
-        case 'details':
         case 'editor':
         case 'init':
           await client.sendCommand(sessionID, {
@@ -106,7 +122,7 @@ export function useCommandHandler({
     } finally {
       setLoading(false)
     }
-  }, [sessionID, opcodeUrl, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, createSession, navigate])
+  }, [sessionID, opcodeUrl, directory, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, createSession, navigate])
 
   return {
     executeCommand,
