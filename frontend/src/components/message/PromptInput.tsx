@@ -11,6 +11,7 @@ import { ChevronDown } from 'lucide-react'
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { FileSuggestions } from './FileSuggestions'
 import { detectMentionTrigger, parsePromptToParts, getFilename } from '@/lib/promptParser'
+import { getSessionModel } from '@/lib/model'
 import { getModel, formatModelName } from '@/api/providers'
 import type { components } from '@/api/opencode-types'
 import type { MessageWithParts, FileInfo } from '@/api/types'
@@ -365,11 +366,7 @@ export function PromptInput({
   const modeColor = currentMode === 'plan' ? 'text-yellow-600 dark:text-yellow-500' : 'text-green-600 dark:text-green-500'
   const modeBg = currentMode === 'plan' ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-green-500/10 border-green-500/30'
 
-  const lastAssistantMessage = messages?.filter(msg => msg.info.role === 'assistant').pop()
-  const sessionModel = lastAssistantMessage?.info.role === 'assistant' 
-    ? `${lastAssistantMessage.info.providerID}/${lastAssistantMessage.info.modelID}`
-    : null
-  const currentModel = sessionModel || config?.model || ''
+  const currentModel = getSessionModel(messages, config?.model) || ''
 
   useEffect(() => {
     const loadModelName = async () => {

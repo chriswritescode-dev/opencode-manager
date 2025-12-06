@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
@@ -10,8 +10,9 @@ import { SessionList } from "@/components/session/SessionList";
 import { PermissionRequestDialog } from "@/components/session/PermissionRequestDialog";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages } from "@/hooks/useOpenCode";
+import { useSession, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages, useConfig } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT } from "@/config";
+import { getSessionModel } from "@/lib/model";
 import { useSSE } from "@/hooks/useSSE";
 import { useSettings } from "@/hooks/useSettings";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -48,6 +49,9 @@ export function SessionDetail() {
   const repoDirectory = repo?.fullPath;
 
   const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
+  const { data: config } = useConfig(opcodeUrl);
+
+  const currentSessionModel = useMemo(() => getSessionModel(messages, config?.model), [messages, config?.model]);
 
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
@@ -205,6 +209,7 @@ export function SessionDetail() {
         open={modelDialogOpen}
         onOpenChange={setModelDialogOpen}
         opcodeUrl={opcodeUrl}
+        currentSessionModel={currentSessionModel}
       />
 
       {/* Sessions Dialog */}

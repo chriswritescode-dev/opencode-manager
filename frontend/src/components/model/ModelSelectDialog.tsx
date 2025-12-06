@@ -25,12 +25,14 @@ interface ModelSelectDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   opcodeUrl?: string | null;
+  currentSessionModel?: string | null;
 }
 
 export function ModelSelectDialog({
   open,
   onOpenChange,
   opcodeUrl,
+  currentSessionModel,
 }: ModelSelectDialogProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProvider, setSelectedProvider] = useState<string>("");
@@ -39,7 +41,7 @@ export function ModelSelectDialog({
   const client = useOpenCodeClient(opcodeUrl);
   const { sessionID } = useParams<{ sessionID: string }>();
 
-  const currentModel = preferences?.defaultModel || "";
+  const currentModel = currentSessionModel || preferences?.defaultModel || "";
 
   const { data: providers = [], isLoading: loading } = useQuery({
     queryKey: ["providers-with-models"],
@@ -51,6 +53,7 @@ export function ModelSelectDialog({
     if (currentModel && providers.length > 0) {
       const [providerId] = currentModel.split("/");
       setSelectedProvider(providerId);
+      setViewMode('models');
     }
   }, [currentModel, providers]);
 

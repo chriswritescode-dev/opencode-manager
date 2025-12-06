@@ -1,6 +1,5 @@
 import { useContextUsage } from '@/hooks/useContextUsage'
 import { getModel, formatModelName } from '@/api/providers'
-import { useSettings } from '@/hooks/useSettings'
 import { useState, useEffect } from 'react'
 
 interface ContextUsageIndicatorProps {
@@ -11,28 +10,25 @@ interface ContextUsageIndicatorProps {
 
 export function ContextUsageIndicator({ opcodeUrl, sessionID, directory }: ContextUsageIndicatorProps) {
   const { totalTokens, contextLimit, usagePercentage, currentModel, isLoading } = useContextUsage(opcodeUrl, sessionID, directory)
-  const { preferences } = useSettings()
   const [modelName, setModelName] = useState<string>('')
-
-  const displayModel = preferences?.defaultModel || currentModel || ''
 
   useEffect(() => {
     const loadModelName = async () => {
-      if (displayModel) {
+      if (currentModel) {
         try {
-          const [providerId, modelId] = displayModel.split('/')
+          const [providerId, modelId] = currentModel.split('/')
           if (providerId && modelId) {
             const model = await getModel(providerId, modelId)
             if (model) {
               setModelName(formatModelName(model))
             } else {
-              setModelName(displayModel)
+              setModelName(currentModel)
             }
           } else {
-            setModelName(displayModel)
+            setModelName(currentModel)
           }
         } catch {
-          setModelName(displayModel)
+          setModelName(currentModel)
         }
       } else {
         setModelName('')
@@ -40,7 +36,7 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory }: Conte
     }
 
     loadModelName()
-  }, [displayModel, opcodeUrl])
+  }, [currentModel])
 
   if (isLoading) {
     return (
