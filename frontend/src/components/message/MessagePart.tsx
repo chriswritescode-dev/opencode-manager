@@ -1,10 +1,11 @@
 import { memo } from 'react'
 import type { components } from '@/api/opencode-types'
-import { Copy, Volume2, Square, Loader2 } from 'lucide-react'
+import { Volume2, Square, Loader2 } from 'lucide-react'
 import { TextPart } from './TextPart'
 import { PatchPart } from './PatchPart'
 import { ToolCallPart } from './ToolCallPart'
 import { useTTS } from '@/hooks/useTTS'
+import { CopyButton } from '@/components/ui/copy-button'
 
 type Part = components['schemas']['Part']
 
@@ -14,6 +15,7 @@ interface MessagePartProps {
   allParts?: Part[]
   partIndex?: number
   onFileClick?: (filePath: string, lineNumber?: number) => void
+  onChildSessionClick?: (sessionId: string) => void
   messageTextContent?: string
 }
 
@@ -52,29 +54,7 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
   }
 }
 
-function CopyButton({ content, title, className = "" }: { content: string; title: string; className?: string }) {
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(content)
-    } catch (error) {
-      console.error('Failed to copy content:', error)
-    }
-  }
 
-  if (!content.trim()) {
-    return null
-  }
-
-  return (
-    <button
-      onClick={handleCopy}
-      className={`p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground ${className}`}
-      title={title}
-    >
-      <Copy className="w-4 h-4" />
-    </button>
-  )
-}
 
 interface TTSButtonProps {
   content: string
@@ -118,7 +98,7 @@ export function TTSButton({ content, className = "" }: TTSButtonProps) {
 
 
 
-export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, messageTextContent }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent }: MessagePartProps) {
   const copyableContent = getCopyableContent(part, allParts)
   
   switch (part.type) {
@@ -133,7 +113,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
     case 'patch':
       return <PatchPart part={part} />
     case 'tool':
-      return <ToolCallPart part={part} onFileClick={onFileClick} />
+      return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} />
     case 'reasoning':
       return (
         <details className="border border-border rounded-lg my-2">

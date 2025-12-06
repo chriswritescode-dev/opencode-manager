@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
-import { Trash2, GitBranch, Clock, Search, MoreHorizontal } from "lucide-react";
+import { Trash2, Clock, Search, MoreHorizontal } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface SessionListProps {
@@ -35,10 +35,13 @@ export const SessionList = ({
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
-    if (!searchQuery.trim()) return sessions;
+    
+    const rootSessions = sessions.filter((session) => !session.parentID);
+    
+    if (!searchQuery.trim()) return rootSessions;
 
     const query = searchQuery.toLowerCase();
-    return sessions.filter((session) =>
+    return rootSessions.filter((session) =>
       (session.title || "Untitled Session").toLowerCase().includes(query),
     );
   }, [sessions, searchQuery]);
@@ -216,12 +219,6 @@ export const SessionList = ({
                         {session.title || "Untitled Session"}
                       </h3>
                       <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        {session.parentID && (
-                          <span className="flex items-center gap-1">
-                            <GitBranch className="w-3 h-3" />
-                            Forked
-                          </span>
-                        )}
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
                           {formatDistanceToNow(new Date(session.time.updated), {

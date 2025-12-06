@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, type KeyboardEvent } from 'react'
-import { useSendPrompt, useAbortSession, useMessages, useSendShell, useConfig } from '@/hooks/useOpenCode'
+import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react'
+import { useSendPrompt, useAbortSession, useMessages, useSendShell, useConfig, useAgents } from '@/hooks/useOpenCode'
 import { useSettings } from '@/hooks/useSettings'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
@@ -9,8 +9,8 @@ import { useUserBash } from '@/stores/userBashStore'
 import { ChevronDown } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
-import { FileSuggestions } from './FileSuggestions'
-import { detectMentionTrigger, parsePromptToParts, getFilename } from '@/lib/promptParser'
+import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
+import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 import { getSessionModel } from '@/lib/model'
 import { getModel, formatModelName } from '@/api/providers'
 import type { components } from '@/api/opencode-types'
@@ -57,11 +57,12 @@ export function PromptInput({
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
   const [attachedFiles, setAttachedFiles] = useState(new Map<string, FileInfo>())
-  const [showFileSuggestions, setShowFileSuggestions] = useState(false)
-  const [fileQuery, setFileQuery] = useState('')
+  const [showMentionSuggestions, setShowMentionSuggestions] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
   const [mentionRange, setMentionRange] = useState<{ start: number, end: number } | null>(null)
-  const [selectedFileIndex, setSelectedFileIndex] = useState(0)
+  const [selectedMentionIndex, setSelectedMentionIndex] = useState(0)
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
+  const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
@@ -84,10 +85,35 @@ export function PromptInput({
   
   const { files: searchResults } = useFileSearch(
     opcodeUrl,
-    fileQuery,
-    showFileSuggestions,
+    mentionQuery,
+    showMentionSuggestions,
     directory
   )
+  
+  const { data: agents = [] } = useAgents(opcodeUrl, directory)
+  
+  const mentionItems = useMemo((): MentionItem[] => {
+    const filteredAgents = filterAgentsByQuery(
+      agents.map(a => ({ name: a.name, description: a.description })),
+      mentionQuery
+    )
+    
+    const agentItems: MentionItem[] = filteredAgents.map(agent => ({
+      type: 'agent',
+      value: agent.name,
+      label: agent.name,
+      description: agent.description
+    }))
+    
+    const fileItems: MentionItem[] = searchResults.map(file => ({
+      type: 'file',
+      value: file,
+      label: getFilename(file),
+      description: file
+    }))
+    
+    return [...agentItems, ...fileItems]
+  }, [agents, searchResults, mentionQuery])
   
 
   const { addUserBashCommand } = useUserBash()
@@ -134,11 +160,12 @@ export function PromptInput({
       sessionID,
       parts,
       model: currentModel,
-      agent: currentMode
+      agent: selectedAgent || currentMode
     })
 
     setPrompt('')
     setAttachedFiles(new Map())
+    setSelectedAgent(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
@@ -192,42 +219,56 @@ export function PromptInput({
     }
   }
   
-  const handleFileSelect = (filePath: string) => {
+  const handleMentionSelect = (item: MentionItem) => {
     if (!mentionRange || !textareaRef.current) return
     
-    const filename = getFilename(filePath)
     const beforeMention = prompt.slice(0, mentionRange.start)
     const afterMention = prompt.slice(mentionRange.end)
     
-    const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
-    setPrompt(newPrompt)
-    
-    const absolutePath = filePath.startsWith('/') 
-      ? filePath 
-      : directory 
-        ? `${directory}/${filePath}` 
-        : filePath
-    
-    setAttachedFiles(prev => {
-      const next = new Map(prev)
-      next.set(filename.toLowerCase(), {
-        path: absolutePath,
-        name: filename
+    if (item.type === 'agent') {
+      const newPrompt = beforeMention + '@' + item.value + ' ' + afterMention
+      setPrompt(newPrompt)
+      setSelectedAgent(item.value)
+      
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newCursorPos = beforeMention.length + item.value.length + 2
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        }
+      }, 0)
+    } else {
+      const filename = getFilename(item.value)
+      const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
+      setPrompt(newPrompt)
+      
+      const absolutePath = item.value.startsWith('/') 
+        ? item.value 
+        : directory 
+          ? `${directory}/${item.value}` 
+          : item.value
+      
+      setAttachedFiles(prev => {
+        const next = new Map(prev)
+        next.set(filename.toLowerCase(), {
+          path: absolutePath,
+          name: filename
+        })
+        return next
       })
-      return next
-    })
+      
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newCursorPos = beforeMention.length + filename.length + 2
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        }
+      }, 0)
+    }
     
-    setShowFileSuggestions(false)
-    setFileQuery('')
+    setShowMentionSuggestions(false)
+    setMentionQuery('')
     setMentionRange(null)
-    
-    setTimeout(() => {
-      if (textareaRef.current) {
-        const newCursorPos = beforeMention.length + filename.length + 2
-        textareaRef.current.focus()
-        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-      }
-    }, 0)
   }
 
   const handleModeToggle = () => {
@@ -243,33 +284,33 @@ export function PromptInput({
       return
     }
 
-    if (showFileSuggestions && searchResults.length > 0) {
+    if (showMentionSuggestions && mentionItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setSelectedFileIndex(prev => 
-          prev < searchResults.length - 1 ? prev + 1 : prev
+        setSelectedMentionIndex(prev => 
+          prev < mentionItems.length - 1 ? prev + 1 : prev
         )
         return
       }
       
       if (e.key === 'ArrowUp') {
         e.preventDefault()
-        setSelectedFileIndex(prev => prev > 0 ? prev - 1 : 0)
+        setSelectedMentionIndex(prev => prev > 0 ? prev - 1 : 0)
         return
       }
       
       if (e.key === 'Enter') {
         e.preventDefault()
-        if (searchResults[selectedFileIndex]) {
-          handleFileSelect(searchResults[selectedFileIndex])
+        if (mentionItems[selectedMentionIndex]) {
+          handleMentionSelect(mentionItems[selectedMentionIndex])
         }
         return
       }
       
       if (e.key === 'Escape') {
         e.preventDefault()
-        setShowFileSuggestions(false)
-        setFileQuery('')
+        setShowMentionSuggestions(false)
+        setMentionQuery('')
         setMentionRange(null)
         return
       }
@@ -314,8 +355,8 @@ export function PromptInput({
     } else if (e.key === 'Escape') {
       setShowSuggestions(false)
       setSuggestionQuery('')
-      setShowFileSuggestions(false)
-      setFileQuery('')
+      setShowMentionSuggestions(false)
+      setMentionQuery('')
       setMentionRange(null)
       setPrompt('')
       if (textareaRef.current) {
@@ -353,10 +394,10 @@ export function PromptInput({
     const mentionTrigger = detectMentionTrigger(value, cursorPosition)
     
     if (mentionTrigger) {
-      setFileQuery(mentionTrigger.query)
+      setMentionQuery(mentionTrigger.query)
       setMentionRange({ start: mentionTrigger.start, end: mentionTrigger.end })
-      setShowFileSuggestions(true)
-      setSelectedFileIndex(0)
+      setShowMentionSuggestions(true)
+      setSelectedMentionIndex(0)
     } else {
       const commandMatch = value.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
       
@@ -370,9 +411,9 @@ export function PromptInput({
         setSuggestionQuery('')
       }
       
-      if (showFileSuggestions) {
-        setShowFileSuggestions(false)
-        setFileQuery('')
+      if (showMentionSuggestions) {
+        setShowMentionSuggestions(false)
+        setMentionQuery('')
         setMentionRange(null)
       }
     }
@@ -483,7 +524,7 @@ export function PromptInput({
                 <span className="font-mono">Cmd/Ctrl+Enter</span> - Send message
               </DropdownMenuItem>
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                <span className="font-mono">@</span> - Mention files
+                <span className="font-mono">@</span> - Mention files or agents
               </DropdownMenuItem>
               <DropdownMenuItem disabled className="text-xs text-muted-foreground">
                 <span className="font-mono">!</span> - Bash command mode
@@ -529,16 +570,16 @@ export function PromptInput({
         selectedIndex={selectedCommandIndex}
       />
       
-      <FileSuggestions
-        isOpen={showFileSuggestions}
-        files={searchResults}
-        onSelect={handleFileSelect}
+      <MentionSuggestions
+        isOpen={showMentionSuggestions}
+        items={mentionItems}
+        onSelect={handleMentionSelect}
         onClose={() => {
-          setShowFileSuggestions(false)
-          setFileQuery('')
+          setShowMentionSuggestions(false)
+          setMentionQuery('')
           setMentionRange(null)
         }}
-        selectedIndex={selectedFileIndex}
+        selectedIndex={selectedMentionIndex}
       />
     </div>
   )
