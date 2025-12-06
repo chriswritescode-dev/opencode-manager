@@ -10,6 +10,7 @@ type ConfigResponse = paths['/config']['get']['responses']['200']['content']['ap
 type CommandListResponse = paths['/command']['get']['responses']['200']['content']['application/json']
 type CommandRequest = NonNullable<paths['/session/{id}/command']['post']['requestBody']>['content']['application/json']
 type ShellRequest = NonNullable<paths['/session/{id}/shell']['post']['requestBody']>['content']['application/json']
+type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
 
 export class OpenCodeClient {
   private client: AxiosInstance
@@ -119,6 +120,11 @@ export class OpenCodeClient {
   async respondToPermission(sessionID: string, permissionID: string, response: 'once' | 'always' | 'reject') {
     const result = await this.client.post(`/session/${sessionID}/permissions/${permissionID}`, { response })
     return result.data
+  }
+
+  async listAgents() {
+    const response = await this.client.get<AgentListResponse>('/agent')
+    return response.data
   }
 
   getEventSourceURL() {

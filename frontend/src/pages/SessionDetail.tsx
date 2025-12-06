@@ -128,6 +128,16 @@ export function SessionDetail() {
     setSelectedFilePath(undefined)
   }, []);
 
+  const handleChildSessionClick = useCallback((childSessionId: string) => {
+    navigate(`/repos/${repoId}/sessions/${childSessionId}`)
+  }, [navigate, repoId]);
+
+  const handleParentSessionClick = useCallback(() => {
+    if (session?.parentID) {
+      navigate(`/repos/${repoId}/sessions/${session.parentID}`)
+    }
+  }, [navigate, repoId, session?.parentID]);
+
   const handlePermissionResponse = useCallback(async (
     permissionID: string, 
     permissionSessionID: string, 
@@ -186,9 +196,11 @@ export function SessionDetail() {
         isReconnecting={isReconnecting}
         opcodeUrl={opcodeUrl}
         repoDirectory={repoDirectory}
+        parentSessionId={session?.parentID}
         onFileBrowserOpen={() => setFileBrowserOpen(true)}
         onSettingsOpen={openSettings}
         onSessionTitleUpdate={handleSessionTitleUpdate}
+        onParentSessionClick={handleParentSessionClick}
       />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
@@ -202,6 +214,7 @@ export function SessionDetail() {
               directory={repoDirectory}
               messages={messages}
               onFileClick={handleFileClick}
+              onChildSessionClick={handleChildSessionClick}
             />
           ) : null}
         </div>

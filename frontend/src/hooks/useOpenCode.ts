@@ -442,3 +442,13 @@ export const useConfig = (opcodeUrl: string | null | undefined) => {
     enabled: !!client,
   });
 };
+
+export const useAgents = (opcodeUrl: string | null | undefined, directory?: string) => {
+  const client = useOpenCodeClient(opcodeUrl, directory);
+
+  return useQuery({
+    queryKey: ["opencode", "agents", opcodeUrl, directory],
+    queryFn: () => client!.listAgents(),
+    enabled: !!client,
+  });
+};

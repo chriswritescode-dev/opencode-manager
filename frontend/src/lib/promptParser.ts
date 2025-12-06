@@ -9,6 +9,11 @@ export interface MentionTrigger {
   query: string
 }
 
+export interface AgentInfo {
+  name: string
+  description?: string
+}
+
 export function detectMentionTrigger(
   text: string,
   cursorPosition: number
@@ -24,6 +29,13 @@ export function detectMentionTrigger(
     end: cursorPosition,
     query: match[2]
   }
+}
+
+export function filterAgentsByQuery(agents: AgentInfo[], query: string): AgentInfo[] {
+  const lowerQuery = query.toLowerCase()
+  return agents.filter(agent => 
+    agent.name.toLowerCase().includes(lowerQuery)
+  )
 }
 
 export function parsePromptToParts(

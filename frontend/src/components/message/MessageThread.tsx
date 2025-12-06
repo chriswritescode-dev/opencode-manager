@@ -16,6 +16,7 @@ interface MessageThreadProps {
   directory?: string
   messages?: MessageWithParts[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
+  onChildSessionClick?: (sessionId: string) => void
 }
 
 const isMessageStreaming = (msg: MessageWithParts): boolean => {
@@ -28,7 +29,7 @@ const isMessageThinking = (msg: MessageWithParts): boolean => {
   return msg.parts.length === 0 && isMessageStreaming(msg)
 }
 
-export const MessageThread = memo(function MessageThread({ messages, onFileClick }: MessageThreadProps) {
+export const MessageThread = memo(function MessageThread({ messages, onFileClick, onChildSessionClick }: MessageThreadProps) {
   if (!messages || messages.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -86,6 +87,7 @@ export const MessageThread = memo(function MessageThread({ messages, onFileClick
                         allParts={msg.parts}
                         partIndex={index}
                         onFileClick={onFileClick}
+                        onChildSessionClick={onChildSessionClick}
                         messageTextContent={msg.info.role === 'assistant' ? getMessageTextContent(msg) : undefined}
                       />
                     </div>

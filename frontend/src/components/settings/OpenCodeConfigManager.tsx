@@ -12,7 +12,7 @@ import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
 import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 
 interface OpenCodeConfig {
   id: number
@@ -24,6 +24,7 @@ interface OpenCodeConfig {
 }
 
 export function OpenCodeConfigManager() {
+  const queryClient = useQueryClient()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -44,6 +45,8 @@ export function OpenCodeConfigManager() {
     },
     onSuccess: (data) => {
       console.log('OpenCode server restarted successfully:', data.message)
+      // Invalidate agents cache after server restart
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     },
     onError: (error) => {
       console.error('Failed to restart OpenCode server:', error)
@@ -62,9 +65,11 @@ export function OpenCodeConfigManager() {
     }
   }
 
-  const updateConfigContent = async (configName: string, newContent: Record<string, unknown>) => {
+  const updateConfigContent = async (configName: string, newContent: Record<string, unknown>, restartServer = false) => {
     try {
       setIsUpdating(true)
+      const previousContent = configs.find(c => c.name === configName)?.content
+      
       await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
       
       // Update the local state
@@ -78,6 +83,15 @@ export function OpenCodeConfigManager() {
       if (selectedConfig && selectedConfig.name === configName) {
         setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: Date.now() })
       }
+      
+      // Auto-restart server if agents were modified
+      const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
+      if (restartServer || agentsChanged) {
+        restartServerMutation.mutate()
+      }
+      
+      // Invalidate agents cache so @ mentions get updated
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to update config:', error)
     } finally {
@@ -115,6 +129,8 @@ export function OpenCodeConfigManager() {
       
       setIsCreateDialogOpen(false)
       fetchConfigs()
+      // Invalidate agents cache in case new config has agents
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to create config:', error)
       throw error
@@ -131,6 +147,8 @@ export function OpenCodeConfigManager() {
       await settingsApi.deleteOpenCodeConfig(config.name)
       setDeleteConfirmConfig(null)
       fetchConfigs()
+      // Invalidate agents cache in case deleted config had agents
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to delete config:', error)
     } finally {
@@ -282,8 +300,15 @@ export function OpenCodeConfigManager() {
         onClose={() => setIsEditDialogOpen(false)}
         onUpdate={async (content) => {
           if (!editingConfig) return
+          const agentsChanged = JSON.stringify(editingConfig.content.agent) !== JSON.stringify(content.agent)
           await settingsApi.updateOpenCodeConfig(editingConfig.name, { content })
           await fetchConfigs()
+          // Auto-restart server if agents were modified
+          if (agentsChanged) {
+            restartServerMutation.mutate()
+          }
+          // Invalidate agents cache so @ mentions get updated
+          queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
         }}
         isUpdating={isUpdating}
       />
