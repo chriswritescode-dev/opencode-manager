@@ -92,4 +92,34 @@ export class AuthService {
     }
     return null
   }
+
+  async isOAuthTokenExpired(providerId: string): Promise<boolean> {
+    const oauth = await this.getOAuth(providerId)
+    if (!oauth) {
+      return true
+    }
+    
+    // Add 5-minute buffer before expiration
+    const expirationBuffer = 5 * 60 * 1000 // 5 minutes in ms
+    const currentTime = Date.now()
+    const expirationTime = oauth.expires * 1000 // Convert seconds to ms
+    
+    return currentTime >= (expirationTime - expirationBuffer)
+  }
+
+  async getOAuthWithRefreshCheck(providerId: string): Promise<{ access: string; refresh: string; expires: number } | null> {
+    const oauth = await this.getOAuth(providerId)
+    if (!oauth) {
+      return null
+    }
+
+    // Check if token is expired
+    if (await this.isOAuthTokenExpired(providerId)) {
+      logger.info(`OAuth token for ${providerId} is expired, refresh needed`)
+      // Note: Actual token refresh would need to be implemented via provider-specific logic
+      // For now, we return the expired token and let the OpenCode server handle refresh
+    }
+
+    return oauth
+  }
 }

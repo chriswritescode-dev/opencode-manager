@@ -35,7 +35,8 @@ A full-stack web application for running [OpenCode](https://github.com/sst/openc
 
 ### AI Model & Provider Configuration
 - **Model Selection** - Browse and select from available AI models with filtering
-- **Provider Management** - Configure multiple AI providers with API keys
+- **Provider Management** - Configure multiple AI providers with API keys or OAuth
+- **OAuth Authentication** - Secure OAuth login for supported providers (Anthropic, GitHub Copilot)
 - **Context Usage Indicator** - Visual progress bar showing token usage
 - **Agent Configuration** - Create custom agents with system prompts and tool permissions
 
@@ -137,5 +138,53 @@ cp .env.example .env
 # Start development servers (backend + frontend)
 npm run dev
 ```
+
+## OAuth Provider Setup
+
+OpenCode WebUI supports OAuth authentication for select providers, offering a more secure and convenient alternative to API keys.
+
+### Supported Providers
+
+- **Anthropic (Claude)** - OAuth login with Claude Pro/Max accounts
+- **GitHub Copilot** - OAuth device flow authentication
+
+### OAuth vs API Keys
+
+| Feature | OAuth | API Keys |
+|---------|-------|----------|
+| **Security** | High (no manual key handling) | Medium (requires secure storage) |
+| **Setup** | One-time authorization flow | Manual key entry |
+| **Refresh** | Automatic token refresh | Manual key rotation |
+| **Expiration** | Handled automatically | Keys don't expire |
+
+### Setting Up OAuth
+
+1. **Navigate to Settings → Provider Credentials**
+2. **Select a provider** that shows the "OAuth" badge
+3. **Click "Add OAuth"** to start the authorization flow
+4. **Choose authentication method:**
+   - **"Open Authorization Page"** - Opens browser for sign-in
+   - **"Use Authorization Code"** - Provides code for manual entry
+5. **Complete authorization** in the browser or enter the provided code
+6. **Connection status** will show as "Configured" when successful
+
+### OAuth Flow Types
+
+- **Auto Flow** (GitHub Copilot): Opens browser window, automatic completion
+- **Code Flow** (Anthropic): Requires manual code entry from authorization page
+
+### Troubleshooting OAuth
+
+- **"Invalid authorization code"**: Start the OAuth flow again
+- **"Access denied"**: Check provider permissions and try again
+- **"Code expired"**: Authorization codes expire quickly, restart the flow
+- **"Server error"**: Check internet connection and try again later
+
+### Token Management
+
+- OAuth tokens are stored securely in your workspace
+- Tokens automatically refresh when expired
+- Use "Update OAuth" to re-authorize if needed
+- API keys can still be used alongside OAuth for the same provider
 
 

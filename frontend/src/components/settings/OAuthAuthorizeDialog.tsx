@@ -30,7 +30,21 @@ export function OAuthAuthorizeDialog({
       const response = await oauthApi.authorize(providerId, methodIndex)
       onSuccess(response)
     } catch (err) {
-      setError('Failed to initiate OAuth authorization')
+      let errorMessage = 'Failed to initiate OAuth authorization'
+      
+      if (err instanceof Error) {
+        if (err.message.includes('provider not found')) {
+          errorMessage = `Provider "${providerId}" is not available or does not support OAuth`
+        } else if (err.message.includes('invalid method')) {
+          errorMessage = 'Invalid authentication method selected'
+        } else if (err.message.includes('server error')) {
+          errorMessage = 'Server error occurred. Please try again later'
+        } else {
+          errorMessage = err.message
+        }
+      }
+      
+      setError(errorMessage)
       console.error('OAuth authorize error:', err)
     } finally {
       setIsLoading(false)

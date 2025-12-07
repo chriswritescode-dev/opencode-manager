@@ -23,19 +23,60 @@ export interface ProviderAuthMethods {
 
 export const oauthApi = {
   authorize: async (providerId: string, method: number): Promise<OAuthAuthorizeResponse> => {
-    const { data } = await axios.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
-      method,
-    })
-    return data
+    try {
+      const { data } = await axios.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+        method,
+      })
+      return data
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.error || error.message
+        throw new Error(`OAuth authorization failed: ${message}`)
+      }
+      throw error
+    }
   },
 
   callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> => {
-    const { data } = await axios.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, request)
-    return data
+    try {
+      const { data } = await axios.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, request)
+      return data
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.error || error.message
+        throw new Error(`OAuth callback failed: ${message}`)
+      }
+      throw error
+    }
   },
 
   getAuthMethods: async (): Promise<ProviderAuthMethods> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/oauth/auth-methods`)
-    return data.providers || data
+    try {
+      const { data } = await axios.get(`${API_BASE_URL}/api/oauth/auth-methods`)
+      return data.providers || data
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.error || error.message
+        throw new Error(`Failed to get provider auth methods: ${message}`)
+      }
+      throw error
+    }
+  },
+
+  getTokenStatus: async (providerId: string): Promise<{
+    hasCredentials: boolean
+    isOAuth: boolean
+    isExpired: boolean
+  }> => {
+    try {
+      const { data } = await axios.get(`${API_BASE_URL}/api/oauth/${providerId}/token-status`)
+      return data
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message = error.response?.data?.error || error.message
+        throw new Error(`Failed to get token status: ${message}`)
+      }
+      throw error
+    }
   },
 }
