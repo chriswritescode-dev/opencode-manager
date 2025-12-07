@@ -125,7 +125,7 @@ docker exec -it opencode-web sh
 
 ```bash
 # Clone the repository
-git clone https://github.com/cstech-dev/opencode-webui.git
+git clone https://github.com/chriswritescode-dev/opencode-webui.git
 cd opencode-webui
 
 # Install dependencies (uses Bun workspaces)
