@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { GitChangesPanel } from './GitChangesPanel'
 import { FileDiffView } from './FileDiffView'
 import { FilePreviewDialog } from './FilePreviewDialog'
 import { Button } from '@/components/ui/button'
 import { X, GitBranch } from 'lucide-react'
-import { useMobile } from '@/hooks/useMobile'
+import { useMobile, useSwipeBack } from '@/hooks/useMobile'
 import { useQueryClient } from '@tanstack/react-query'
 
 interface GitChangesSheetProps {
@@ -22,6 +22,16 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
   const [previewLineNumber, setPreviewLineNumber] = useState<number | undefined>()
   const isMobile = useMobile()
   const queryClient = useQueryClient()
+  const contentRef = useRef<HTMLDivElement>(null)
+  
+  const { bind: bindSwipe, swipeStyles } = useSwipeBack(
+    selectedFile ? () => setSelectedFile(undefined) : onClose,
+    { enabled: isOpen && !previewFilePath }
+  )
+  
+  useEffect(() => {
+    return bindSwipe(contentRef.current)
+  }, [bindSwipe])
 
   useEffect(() => {
     if (!isOpen) {
@@ -62,8 +72,10 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
   return (
     <Dialog open={isOpen} onOpenChange={handleOpenChange}>
       <DialogContent
+        ref={contentRef}
         className="w-screen h-screen max-w-none max-h-none p-0 gap-0 bg-background border-0 flex flex-col"
         hideCloseButton
+        style={swipeStyles}
       >
         <div className="flex items-center justify-between px-4 sm:py-3 border-b border-border flex-shrink-0">
           <div className="flex items-center gap-2">

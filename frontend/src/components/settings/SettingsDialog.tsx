@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
@@ -7,6 +7,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, X, Key } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { useSwipeBack } from '@/hooks/useMobile'
 
 interface SettingsDialogProps {
   open: boolean
@@ -17,6 +18,24 @@ type SettingsView = 'menu' | 'general' | 'shortcuts' | 'opencode' | 'providers'
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
+  const contentRef = useRef<HTMLDivElement>(null)
+
+  const handleSwipeBack = useCallback(() => {
+    if (mobileView === 'menu') {
+      setMobileView('menu')
+      onOpenChange(false)
+    } else {
+      setMobileView('menu')
+    }
+  }, [mobileView, onOpenChange])
+
+  const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
+    enabled: open,
+  })
+
+  useEffect(() => {
+    return bindSwipe(contentRef.current)
+  }, [bindSwipe])
 
   const menuItems = [
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
@@ -32,7 +51,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-4xl w-full h-[100vh] sm:h-auto sm:w-[95vw] sm:max-h-[90vh] bg-gradient-to-br from-background via-background to-background border-border p-0 sm:rounded-lg overflow-hidden !flex !flex-col left-0 top-0 translate-x-0 translate-y-0 max-h-[100vh] sm:left-[50%] sm:top-[50%] sm:translate-x-[-50%] sm:translate-y-[-50%] [&>button:last-child]:hidden">
+      <DialogContent 
+        ref={contentRef}
+        className="max-w-4xl w-full h-[100vh] sm:h-auto sm:w-[95vw] sm:max-h-[90vh] bg-gradient-to-br from-background via-background to-background border-border p-0 sm:rounded-lg overflow-hidden !flex !flex-col left-0 top-0 translate-x-0 translate-y-0 max-h-[100vh] sm:left-[50%] sm:top-[50%] sm:translate-x-[-50%] sm:translate-y-[-50%] [&>button:last-child]:hidden"
+        style={swipeStyles}
+      >
         
         <div className="hidden sm:flex sm:flex-col sm:h-[90vh]">
           <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0">

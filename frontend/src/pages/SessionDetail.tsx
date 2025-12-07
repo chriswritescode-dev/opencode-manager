@@ -19,6 +19,7 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { usePermissionRequests } from "@/hooks/usePermissionRequests";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
+import { useSwipeBack } from "@/hooks/useMobile";
 import { useEffect, useRef, useCallback } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
@@ -31,11 +32,24 @@ export function SessionDetail() {
   const repoId = parseInt(id || "0");
   const { preferences, updateSettings } = useSettings();
   const messageContainerRef = useRef<HTMLDivElement>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
+  
+  const handleSwipeBack = useCallback(() => {
+    navigate(`/repos/${repoId}`);
+  }, [navigate, repoId]);
+  
+  const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
+    enabled: !fileBrowserOpen && !modelDialogOpen && !sessionsDialogOpen,
+  });
+  
+  useEffect(() => {
+    return bindSwipe(pageRef.current);
+  }, [bindSwipe]);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -186,7 +200,11 @@ export function SessionDetail() {
   }
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
+    <div 
+      ref={pageRef}
+      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
+      style={swipeStyles}
+    >
       <SessionDetailHeader
         repo={repo}
         sessionId={sessionId}

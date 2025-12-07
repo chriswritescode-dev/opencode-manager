@@ -1,9 +1,10 @@
-import { useEffect, useState, memo, useCallback } from 'react'
+import { useEffect, useState, memo, useCallback, useRef } from 'react'
 import { FileBrowser } from './FileBrowser'
 import { Button } from '@/components/ui/button'
 import { PathDisplay } from '@/components/ui/path-display'
 import { X } from 'lucide-react'
 import { GPU_ACCELERATED_STYLE, MODAL_TRANSITION_MS } from '@/lib/utils'
+import { useSwipeBack } from '@/hooks/useMobile'
 
 interface FileBrowserSheetProps {
   isOpen: boolean
@@ -18,6 +19,15 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
   const [isEditing, setIsEditing] = useState(false)
   const [displayPath, setDisplayPath] = useState<string>('/')
   const [shouldRender, setShouldRender] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+  
+  const { bind, swipeStyles } = useSwipeBack(onClose, {
+    enabled: isOpen && !isEditing,
+  })
+  
+  useEffect(() => {
+    return bind(containerRef.current)
+  }, [bind])
   
   useEffect(() => {
     if (isOpen) {
@@ -76,6 +86,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
 
   return (
     <div 
+      ref={containerRef}
       className="fixed inset-0 z-50"
       style={{
         opacity: isOpen ? 1 : 0,
@@ -85,7 +96,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
     >
       <div 
         className="absolute inset-0 bg-background flex flex-col"
-        style={GPU_ACCELERATED_STYLE}
+        style={{ ...GPU_ACCELERATED_STYLE, ...swipeStyles }}
       >
         <div className="flex-shrink-0 border-b border-border bg-background backdrop-blur-sm px-4 py-1">
           <div className="flex items-center justify-between">

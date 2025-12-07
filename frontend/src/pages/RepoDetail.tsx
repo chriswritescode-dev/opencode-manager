@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
@@ -9,6 +9,7 @@ import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { BackButton } from "@/components/ui/back-button";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT } from "@/config";
+import { useSwipeBack } from "@/hooks/useMobile";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,8 +21,20 @@ export function RepoDetail() {
   const queryClient = useQueryClient();
   const repoId = parseInt(id || "0");
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
-  
   const [switchConfigOpen, setSwitchConfigOpen] = useState(false);
+  const pageRef = useRef<HTMLDivElement>(null);
+  
+  const handleSwipeBack = useCallback(() => {
+    navigate("/");
+  }, [navigate]);
+  
+  const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
+    enabled: !fileBrowserOpen && !switchConfigOpen,
+  });
+  
+  useEffect(() => {
+    return bindSwipe(pageRef.current);
+  }, [bindSwipe]);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -91,7 +104,11 @@ export function RepoDetail() {
   const currentBranch = repo.currentBranch || "main";
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
+    <div 
+      ref={pageRef}
+      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
+      style={swipeStyles}
+    >
       <div className="flex-shrink-0 z-10 border-b border-border bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-4 py-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">

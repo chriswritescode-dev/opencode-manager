@@ -2,6 +2,7 @@ import { memo, useCallback, useState, useEffect, useRef } from "react";
 import { FilePreview } from "./FilePreview";
 import type { FileInfo } from "@/types/files";
 import { GPU_ACCELERATED_STYLE, MODAL_TRANSITION_MS } from "@/lib/utils";
+import { useSwipeBack } from "@/hooks/useMobile";
 
 interface MobileFilePreviewModalProps {
   isOpen: boolean;
@@ -18,6 +19,15 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
 }: MobileFilePreviewModalProps) {
   const [localFile, setLocalFile] = useState<FileInfo | null>(null);
   const isClosingRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  const { bind, swipeStyles } = useSwipeBack(onClose, {
+    enabled: isOpen,
+  });
+  
+  useEffect(() => {
+    return bind(containerRef.current);
+  }, [bind]);
 
   useEffect(() => {
     if (isOpen && file && !file.isDirectory) {
@@ -42,8 +52,9 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
 
   return (
     <div 
+      ref={containerRef}
       className="fixed inset-0 z-50 bg-background"
-      style={{ isolation: 'isolate', ...GPU_ACCELERATED_STYLE }}
+      style={{ isolation: 'isolate', ...GPU_ACCELERATED_STYLE, ...swipeStyles }}
     >
       <div
         className={`h-full overflow-hidden bg-background ${showFilePreviewHeader ? "" : "pb-8"}`}
