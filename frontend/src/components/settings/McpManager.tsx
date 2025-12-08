@@ -71,7 +71,7 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
       if (!config) return
       
       const currentMcp = (config.content?.mcp as Record<string, any>) || {}
-      const { [serverId]: deleted, ...rest } = currentMcp
+      const { [serverId]: _deleted, ...rest } = currentMcp
       
       const updatedConfig = {
         ...config.content,

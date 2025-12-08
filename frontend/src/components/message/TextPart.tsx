@@ -27,7 +27,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
     if (typeof node === 'number') return node.toString()
     if (Array.isArray(node)) return node.map(extractTextContent).join('')
     if (React.isValidElement(node)) {
-      const element = node as React.ReactElement<any, any>
+      const element = node as React.ReactElement<Record<string, unknown>>
       if (element.props.children) {
         return extractTextContent(element.props.children as React.ReactNode)
       }

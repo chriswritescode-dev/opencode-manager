@@ -16,14 +16,6 @@ export function KeyboardShortcuts() {
   const [tempShortcuts, setTempShortcuts] = useState<Record<string, string>>({})
   const [currentKeys, setCurrentKeys] = useState<string>('')
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
   const shortcuts = { ...DEFAULT_KEYBOARD_SHORTCUTS, ...preferences?.keyboardShortcuts, ...tempShortcuts }
 
   const handleKeyDown = (e: KeyboardEvent, action: string) => {
@@ -105,7 +97,15 @@ export function KeyboardShortcuts() {
         document.removeEventListener('keyup', handleGlobalKeyUp)
       }
     }
-  }, [recordingKey])
+  }, [recordingKey, handleKeyDown, handleKeyUp])
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
 
   return (
     <div className="bg-card border border-border rounded-lg p-6">
