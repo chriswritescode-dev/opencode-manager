@@ -6,7 +6,6 @@ import { AuthCredentialsSchema } from '../../../shared/src/schemas/auth'
 import type { z } from 'zod'
 
 type AuthCredentials = z.infer<typeof AuthCredentialsSchema>
-type AuthEntry = AuthCredentials[string]
 
 export class AuthService {
   private authPath = getAuthPath()
@@ -56,40 +55,4 @@ export class AuthService {
     return !!auth[providerId]
   }
 
-  async get(providerId: string): Promise<AuthEntry | null> {
-    const auth = await this.getAll()
-    return auth[providerId] || null
-  }
-
-  async isOAuth(providerId: string): Promise<boolean> {
-    const entry = await this.get(providerId)
-    return entry?.type === 'oauth'
-  }
-
-  async getOAuth(providerId: string): Promise<{ access: string; refresh: string; expires: number } | null> {
-    const entry = await this.get(providerId)
-    if (entry?.type === 'oauth') {
-      return {
-        access: entry.access!,
-        refresh: entry.refresh!,
-        expires: entry.expires!,
-      }
-    }
-    return null
-  }
-
-  async isOAuthTokenExpired(providerId: string): Promise<boolean> {
-    const oauth = await this.getOAuth(providerId)
-    if (!oauth) {
-      return true
-    }
-    
-    // Add 5-minute buffer before expiration
-    const expirationBuffer = 5 * 60 * 1000 // 5 minutes in ms
-    const currentTime = Date.now()
-    const expirationTime = oauth.expires * 1000 // Convert seconds to ms
-    
-    return currentTime >= (expirationTime - expirationBuffer)
-  }
-
-  }
+}

@@ -12,7 +12,6 @@ interface ModelStore {
   isInitialized: boolean
   
   setModel: (model: ModelSelection) => void
-  setModelFromString: (modelString: string) => void
   initializeFromConfig: (configModel: string | undefined) => void
   getModelString: () => string | null
 }
@@ -47,13 +46,6 @@ export const useModelStore = create<ModelStore>()(
             recentModels: newRecent,
           }
         })
-      },
-
-      setModelFromString: (modelString: string) => {
-        const parsed = parseModelString(modelString)
-        if (parsed) {
-          get().setModel(parsed)
-        }
       },
 
       initializeFromConfig: (configModel: string | undefined) => {

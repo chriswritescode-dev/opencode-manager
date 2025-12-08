@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react'
-import { useSendPrompt, useAbortSession, useMessages, useSendShell, useConfig, useAgents } from '@/hooks/useOpenCode'
+import { useSendPrompt, useAbortSession, useMessages, useSendShell, useAgents } from '@/hooks/useOpenCode'
 import { useSettings } from '@/hooks/useSettings'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
+import { useModelSelection } from '@/hooks/useModelSelection'
 
 import { useUserBash } from '@/stores/userBashStore'
-import { useModelStore } from '@/stores/modelStore'
 import { ChevronDown } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
@@ -69,7 +69,6 @@ export function PromptInput({
   const sendShell = useSendShell(opcodeUrl, directory)
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { data: messages } = useMessages(opcodeUrl, sessionID, directory)
-  const { data: config } = useConfig(opcodeUrl, directory)
   const { preferences, updateSettings } = useSettings()
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
@@ -430,14 +429,8 @@ export function PromptInput({
   const modeColor = currentMode === 'plan' ? 'text-yellow-600 dark:text-yellow-500' : 'text-green-600 dark:text-green-500'
   const modeBg = currentMode === 'plan' ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-green-500/10 border-green-500/30'
 
-  const { model: selectedModel, initializeFromConfig, getModelString } = useModelStore()
-  const currentModel = getModelString() || ''
-
-  useEffect(() => {
-    if (config?.model) {
-      initializeFromConfig(config.model)
-    }
-  }, [config?.model, initializeFromConfig])
+  const { model: selectedModel, modelString } = useModelSelection(opcodeUrl, directory)
+  const currentModel = modelString || ''
 
   useEffect(() => {
     const loadModelName = async () => {

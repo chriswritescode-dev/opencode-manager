@@ -1,7 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
 import { proxyRequest } from '../services/proxy'
-import { AuthService } from '../services/auth'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-webui/shared'
 import { 
@@ -14,7 +13,6 @@ const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
 
 export function createOAuthRoutes() {
   const app = new Hono()
-  const authService = new AuthService()
 
   app.post('/:id/oauth/authorize', async (c) => {
     try {
@@ -115,41 +113,6 @@ export function createOAuthRoutes() {
         return c.json({ error: 'Invalid response data', details: error.issues }, 500)
       }
       return c.json({ error: 'Failed to get provider auth methods' }, 500)
-    }
-  })
-
-  app.get('/:id/token-status', async (c) => {
-    try {
-      const providerId = c.req.param('id')
-      
-      const hasCredentials = await authService.has(providerId)
-      if (!hasCredentials) {
-        return c.json({ 
-          hasCredentials: false,
-          isOAuth: false,
-          isExpired: false
-        })
-      }
-
-      const isOAuth = await authService.isOAuth(providerId)
-      if (!isOAuth) {
-        return c.json({ 
-          hasCredentials: true,
-          isOAuth: false,
-          isExpired: false
-        })
-      }
-
-      const isExpired = await authService.isOAuthTokenExpired(providerId)
-      
-      return c.json({ 
-        hasCredentials: true,
-        isOAuth: true,
-        isExpired
-      })
-    } catch (error) {
-      logger.error('Token status error:', error)
-      return c.json({ error: 'Failed to get token status' }, 500)
     }
   })
 

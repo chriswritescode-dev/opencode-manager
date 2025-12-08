@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -63,10 +63,10 @@ export function ProviderSettings() {
     setSelectedProvider(null)
   }
 
-  const supportsOAuth = (providerId: string) => {
+  const supportsOAuth = useCallback((providerId: string) => {
     const methods = authMethods?.[providerId] || []
     return methods.some(method => method.type === 'oauth')
-  }
+  }, [authMethods])
 
   const hasCredentials = (providerId: string) => {
     return credentialsList?.includes(providerId) || false
@@ -75,7 +75,12 @@ export function ProviderSettings() {
   const oauthProviders = useMemo(() => {
     if (!providers || !authMethods) return []
     return providers.filter(provider => supportsOAuth(provider.id))
-  }, [providers, authMethods])
+  }, [providers, authMethods, supportsOAuth])
+
+  const selectedProviderName = useMemo(() => {
+    if (!selectedProvider) return ''
+    return providers?.find(p => p.id === selectedProvider)?.name || selectedProvider
+  }, [selectedProvider, providers])
 
   if (providersLoading || credentialsLoading) {
     return (
@@ -171,7 +176,7 @@ export function ProviderSettings() {
       {selectedProvider && (
         <OAuthAuthorizeDialog
           providerId={selectedProvider}
-          providerName={providers?.find(p => p.id === selectedProvider)?.name || selectedProvider}
+          providerName={selectedProviderName}
           open={oauthDialogOpen}
           onOpenChange={handleOAuthDialogClose}
           onSuccess={handleOAuthAuthorize}
@@ -181,7 +186,7 @@ export function ProviderSettings() {
       {selectedProvider && oauthResponse && (
         <OAuthCallbackDialog
           providerId={selectedProvider}
-          providerName={providers?.find(p => p.id === selectedProvider)?.name || selectedProvider}
+          providerName={selectedProviderName}
           authResponse={oauthResponse}
           open={oauthCallbackDialogOpen}
           onOpenChange={setOauthCallbackDialogOpen}

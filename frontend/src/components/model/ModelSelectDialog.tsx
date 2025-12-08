@@ -15,10 +15,9 @@ import {
   formatModelName,
   formatProviderName,
 } from "@/api/providers";
-import { useConfig } from "@/hooks/useOpenCode";
+import { useModelSelection } from "@/hooks/useModelSelection";
 import { useQuery } from "@tanstack/react-query";
 import type { Model, ProviderWithModels } from "@/api/providers";
-import { useModelStore } from "@/stores/modelStore";
 
 interface ModelSelectDialogProps {
   open: boolean;
@@ -362,15 +361,8 @@ export function ModelSelectDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProvider, setSelectedProvider] = useState<string>("");
 
-  const { data: config } = useConfig(opcodeUrl, directory);
-  const { setModel, initializeFromConfig, getModelString, recentModels } = useModelStore();
-  const currentModel = getModelString() || "";
-
-  useEffect(() => {
-    if (config?.model) {
-      initializeFromConfig(config.model);
-    }
-  }, [config?.model, initializeFromConfig]);
+  const { modelString, setModel, recentModels } = useModelSelection(opcodeUrl, directory);
+  const currentModel = modelString || "";
 
   const { data: providers = [], isLoading: loading } = useQuery({
     queryKey: ["providers-with-models"],
