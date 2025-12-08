@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, ExternalLink, CheckCircle } from 'lucide-react'
 import { oauthApi, type OAuthAuthorizeResponse } from '@/api/oauth'
+import { mapOAuthError, OAuthMethod } from '@/lib/oauthErrors'
 
 interface OAuthCallbackDialogProps {
   providerId: string
@@ -32,26 +33,10 @@ export function OAuthCallbackDialog({
     setError(null)
 
     try {
-      await oauthApi.callback(providerId, { method: 0 })
+      await oauthApi.callback(providerId, { method: OAuthMethod.AUTO })
       onSuccess()
     } catch (err) {
-      let errorMessage = 'Failed to complete OAuth callback'
-      
-      if (err instanceof Error) {
-        if (err.message.includes('invalid code')) {
-          errorMessage = 'Invalid authorization code. Please try the OAuth flow again.'
-        } else if (err.message.includes('expired')) {
-          errorMessage = 'Authorization code has expired. Please try the OAuth flow again.'
-        } else if (err.message.includes('access denied')) {
-          errorMessage = 'Access was denied. Please check the permissions and try again.'
-        } else if (err.message.includes('server error')) {
-          errorMessage = 'Server error occurred. Please try again later.'
-        } else {
-          errorMessage = err.message
-        }
-      }
-      
-      setError(errorMessage)
+      setError(mapOAuthError(err, 'callback'))
       console.error('OAuth callback error:', err)
     } finally {
       setIsLoading(false)
@@ -68,26 +53,10 @@ export function OAuthCallbackDialog({
     setError(null)
 
     try {
-      await oauthApi.callback(providerId, { method: 1, code: authCode.trim() })
+      await oauthApi.callback(providerId, { method: OAuthMethod.CODE, code: authCode.trim() })
       onSuccess()
     } catch (err) {
-      let errorMessage = 'Failed to complete OAuth callback'
-      
-      if (err instanceof Error) {
-        if (err.message.includes('invalid code')) {
-          errorMessage = 'Invalid authorization code. Please check the code and try again.'
-        } else if (err.message.includes('expired')) {
-          errorMessage = 'Authorization code has expired. Please start the OAuth flow again.'
-        } else if (err.message.includes('access denied')) {
-          errorMessage = 'Access was denied. Please check the permissions and try again.'
-        } else if (err.message.includes('server error')) {
-          errorMessage = 'Server error occurred. Please try again later.'
-        } else {
-          errorMessage = err.message
-        }
-      }
-      
-      setError(errorMessage)
+      setError(mapOAuthError(err, 'callback'))
       console.error('OAuth callback error:', err)
     } finally {
       setIsLoading(false)

@@ -1,6 +1,12 @@
 import axios from "axios"
 import { API_BASE_URL } from "@/config"
 
+/**
+ * OAuth types - should match shared/src/schemas/auth.ts
+ * These are duplicated here to avoid Zod dependency in frontend bundle.
+ * If updating these types, also update the shared schemas.
+ */
+
 export interface OAuthAuthorizeResponse {
   url: string
   method: "auto" | "code"

@@ -148,7 +148,7 @@ app.route('/api/settings', createSettingsRoutes(db))
 app.route('/api/health', createHealthRoutes(db))
 app.route('/api/files', createFileRoutes(db))
 app.route('/api/providers', createProvidersRoutes())
-app.route('/api/oauth', createOAuthRoutes(db))
+app.route('/api/oauth', createOAuthRoutes())
 app.route('/api/tts', createTTSRoutes(db))
 
 app.all('/api/opencode/*', async (c) => {

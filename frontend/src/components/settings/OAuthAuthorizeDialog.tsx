@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ExternalLink, Copy } from 'lucide-react'
 import { oauthApi, type OAuthAuthorizeResponse } from '@/api/oauth'
+import { mapOAuthError, OAuthMethod } from '@/lib/oauthErrors'
 
 interface OAuthAuthorizeDialogProps {
   providerId: string
@@ -30,21 +31,7 @@ export function OAuthAuthorizeDialog({
       const response = await oauthApi.authorize(providerId, methodIndex)
       onSuccess(response)
     } catch (err) {
-      let errorMessage = 'Failed to initiate OAuth authorization'
-      
-      if (err instanceof Error) {
-        if (err.message.includes('provider not found')) {
-          errorMessage = `Provider "${providerId}" is not available or does not support OAuth`
-        } else if (err.message.includes('invalid method')) {
-          errorMessage = 'Invalid authentication method selected'
-        } else if (err.message.includes('server error')) {
-          errorMessage = 'Server error occurred. Please try again later'
-        } else {
-          errorMessage = err.message
-        }
-      }
-      
-      setError(errorMessage)
+      setError(mapOAuthError(err, 'authorize'))
       console.error('OAuth authorize error:', err)
     } finally {
       setIsLoading(false)
@@ -74,7 +61,7 @@ export function OAuthAuthorizeDialog({
 
         <div className="space-y-3">
           <Button
-            onClick={() => handleAuthorize(0)}
+            onClick={() => handleAuthorize(OAuthMethod.AUTO)}
             disabled={isLoading}
             className="w-full justify-start"
             variant="outline"
@@ -84,7 +71,7 @@ export function OAuthAuthorizeDialog({
           </Button>
 
           <Button
-            onClick={() => handleAuthorize(1)}
+            onClick={() => handleAuthorize(OAuthMethod.CODE)}
             disabled={isLoading}
             className="w-full justify-start"
             variant="outline"

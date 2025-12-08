@@ -3,14 +3,16 @@ import { z } from 'zod'
 import { proxyRequest } from '../services/proxy'
 import { AuthService } from '../services/auth'
 import { logger } from '../utils/logger'
+import { ENV } from '@opencode-webui/shared'
 import { 
   OAuthAuthorizeRequestSchema, 
   OAuthAuthorizeResponseSchema,
-  OAuthCallbackRequestSchema,
-  ProviderAuthMethodsResponseSchema
+  OAuthCallbackRequestSchema
 } from '../../../shared/src/schemas/auth'
 
-export function createOAuthRoutes(db: any) {
+const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
+
+export function createOAuthRoutes() {
   const app = new Hono()
   const authService = new AuthService()
 
@@ -23,7 +25,7 @@ export function createOAuthRoutes(db: any) {
       // Proxy to OpenCode server
       const response = await proxyRequest(
         new Request(
-          `http://127.0.0.1:5551/provider/${providerId}/oauth/authorize`,
+          `${OPENCODE_SERVER_URL}/provider/${providerId}/oauth/authorize`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -60,7 +62,7 @@ export function createOAuthRoutes(db: any) {
       // Proxy to OpenCode server
       const response = await proxyRequest(
         new Request(
-          `http://127.0.0.1:5551/provider/${providerId}/oauth/callback`,
+          `${OPENCODE_SERVER_URL}/provider/${providerId}/oauth/callback`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -91,7 +93,7 @@ export function createOAuthRoutes(db: any) {
     try {
       // Proxy to OpenCode server
       const response = await proxyRequest(
-        new Request('http://127.0.0.1:5551/provider/auth', {
+        new Request(`${OPENCODE_SERVER_URL}/provider/auth`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' }
         })

@@ -84,6 +84,7 @@ export function ProviderSettings() {
   }
 
 const handleOAuthSuccess = () => {
+    queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
     setOauthCallbackDialogOpen(false)
     setOauthResponse(null)
     setSelectedProvider(null)

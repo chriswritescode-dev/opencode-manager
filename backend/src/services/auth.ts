@@ -38,26 +38,11 @@ export class AuthService {
     logger.info(`Set credentials for provider: ${providerId}`)
   }
 
-  async setOAuth(providerId: string, credentials: { access: string; refresh: string; expires: number }): Promise<void> {
-    const auth = await this.getAll()
-    auth[providerId] = {
-      type: 'oauth',
-      access: credentials.access,
-      refresh: credentials.refresh,
-      expires: credentials.expires,
-    }
-
-    await fs.mkdir(path.dirname(this.authPath), { recursive: true })
-    await fs.writeFile(this.authPath, JSON.stringify(auth, null, 2), { mode: 0o600 })
-    
-    logger.info(`Set OAuth credentials for provider: ${providerId}`)
-  }
-
   async delete(providerId: string): Promise<void> {
     const auth = await this.getAll()
     delete auth[providerId]
     
-    await fs.writeFile(this.authPath, JSON.stringify(auth, null, 2))
+    await fs.writeFile(this.authPath, JSON.stringify(auth, null, 2), { mode: 0o600 })
     logger.info(`Deleted credentials for provider: ${providerId}`)
   }
 
@@ -107,19 +92,4 @@ export class AuthService {
     return currentTime >= (expirationTime - expirationBuffer)
   }
 
-  async getOAuthWithRefreshCheck(providerId: string): Promise<{ access: string; refresh: string; expires: number } | null> {
-    const oauth = await this.getOAuth(providerId)
-    if (!oauth) {
-      return null
-    }
-
-    // Check if token is expired
-    if (await this.isOAuthTokenExpired(providerId)) {
-      logger.info(`OAuth token for ${providerId} is expired, refresh needed`)
-      // Note: Actual token refresh would need to be implemented via provider-specific logic
-      // For now, we return the expired token and let the OpenCode server handle refresh
-    }
-
-    return oauth
   }
-}
