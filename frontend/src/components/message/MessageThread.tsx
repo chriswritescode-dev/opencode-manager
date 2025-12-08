@@ -1,4 +1,4 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import { MessagePart } from './MessagePart'
 import type { MessageWithParts } from '@/api/types'
 
@@ -24,12 +24,24 @@ const isMessageStreaming = (msg: MessageWithParts): boolean => {
   return !('completed' in msg.info.time && msg.info.time.completed)
 }
 
-const isMessageThinking = (msg: MessageWithParts): boolean => {
-  if (msg.info.role !== 'assistant') return false
-  return msg.parts.length === 0 && isMessageStreaming(msg)
+
+
+const findPendingAssistantMessageId = (messages: MessageWithParts[]): string | undefined => {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i]
+    if (msg.info.role === 'assistant' && isMessageStreaming(msg)) {
+      return msg.info.id
+    }
+  }
+  return undefined
 }
 
 export const MessageThread = memo(function MessageThread({ messages, onFileClick, onChildSessionClick }: MessageThreadProps) {
+  const pendingAssistantId = useMemo(() => {
+    if (!messages) return undefined
+    return findPendingAssistantMessageId(messages)
+  }, [messages])
+  
   if (!messages || messages.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
@@ -42,7 +54,7 @@ export const MessageThread = memo(function MessageThread({ messages, onFileClick
     <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
       {messages.map((msg) => {
         const streaming = isMessageStreaming(msg)
-        const thinking = isMessageThinking(msg)
+        const isQueued = msg.info.role === 'user' && pendingAssistantId && msg.info.id > pendingAssistantId
         
         return (
           <div
@@ -52,7 +64,9 @@ export const MessageThread = memo(function MessageThread({ messages, onFileClick
             <div
               className={`w-full rounded-lg p-1.5 ${
                 msg.info.role === 'user'
-                  ? 'bg-blue-600/20 border border-blue-600/30'
+                  ? isQueued 
+                    ? 'bg-amber-500/10 border border-amber-500/30'
+                    : 'bg-blue-600/20 border border-blue-600/30'
                   : 'bg-card/50 border border-border'
               } ${streaming ? 'animate-pulse-subtle' : ''}`}
             >
@@ -65,35 +79,28 @@ export const MessageThread = memo(function MessageThread({ messages, onFileClick
                     {new Date(msg.info.time.created).toLocaleTimeString()}
                   </span>
                 )}
-                {streaming && (
-                  <span className="text-xs text-blue-600 dark:text-blue-400 flex items-center gap-1">
-                    <span className="animate-pulse">●</span> <span className="shine-loading">Generating...</span>
+                {isQueued && (
+                  <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
+                    QUEUED
                   </span>
                 )}
               </div>
               
-              {thinking ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <span className="animate-pulse">▋</span>
-                  <span className="text-sm shine-loading">Thinking...</span>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {msg.parts.map((part, index) => (
-                    <div key={`${msg.info.id}-${part.id}-${index}`}>
-                      <MessagePart 
-                        part={part} 
-                        role={msg.info.role}
-                        allParts={msg.parts}
-                        partIndex={index}
-                        onFileClick={onFileClick}
-                        onChildSessionClick={onChildSessionClick}
-                        messageTextContent={msg.info.role === 'assistant' ? getMessageTextContent(msg) : undefined}
-                      />
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="space-y-2">
+                {msg.parts.map((part, index) => (
+                  <div key={`${msg.info.id}-${part.id}-${index}`}>
+                    <MessagePart 
+                      part={part} 
+                      role={msg.info.role}
+                      allParts={msg.parts}
+                      partIndex={index}
+                      onFileClick={onFileClick}
+                      onChildSessionClick={onChildSessionClick}
+                      messageTextContent={msg.info.role === 'assistant' ? getMessageTextContent(msg) : undefined}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )

@@ -3,7 +3,7 @@ import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { detectFileReferences } from '@/lib/fileReferences'
-import { ExternalLink } from 'lucide-react'
+import { ExternalLink, Loader2 } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 
 type ToolPart = components['schemas']['ToolPart']
@@ -87,13 +87,15 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const getStatusIcon = () => {
     switch (part.state.status) {
       case 'completed':
-        return '✓'
+        return <span>✓</span>
       case 'error':
-        return '✗'
+        return <span>✗</span>
       case 'running':
-        return '⟳'
+        return <Loader2 className="w-3.5 h-3.5 animate-spin" />
+      case 'pending':
+        return <span className="inline-block w-2 h-2 rounded-full bg-current animate-pulse" />
       default:
-        return '○'
+        return <span>○</span>
     }
   }
 
@@ -150,8 +152,23 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     )
   }
 
+  const getBorderStyle = () => {
+    switch (part.state.status) {
+      case 'running':
+        return 'border-yellow-500/50 shadow-sm shadow-yellow-500/10'
+      case 'pending':
+        return 'border-blue-500/30'
+      case 'error':
+        return 'border-red-500/30'
+      case 'completed':
+        return 'border-border'
+      default:
+        return 'border-border'
+    }
+  }
+
   return (
-    <div className="border border-border rounded-lg overflow-hidden my-2">
+    <div className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm min-w-0"
@@ -194,7 +211,18 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       </button>
 
       {expanded && (
-        <div className="bg-card space-y-2">
+        <div className="bg-card space-y-2 p-3">
+          {part.state.status === 'pending' && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className="flex gap-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+              <span>Preparing tool call...</span>
+            </div>
+          )}
+          
           {part.state.status === 'running' && (
             <div className="text-sm">
               <div className="text-zinc-400 mb-1">Input:</div>

@@ -4,8 +4,11 @@ import { Volume2, Square, Loader2 } from 'lucide-react'
 import { TextPart } from './TextPart'
 import { PatchPart } from './PatchPart'
 import { ToolCallPart } from './ToolCallPart'
+import { RetryPart } from './RetryPart'
 import { useTTS } from '@/hooks/useTTS'
 import { CopyButton } from '@/components/ui/copy-button'
+
+type RetryPartType = components['schemas']['RetryPart']
 
 type Part = components['schemas']['Part']
 
@@ -152,6 +155,8 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
           <span className="font-medium">{part.filename || 'File'}</span>
         </span>
       )
+    case 'retry':
+      return <RetryPart part={part as RetryPartType} />
     default:
       return 
   }

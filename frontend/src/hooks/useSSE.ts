@@ -5,6 +5,7 @@ import type { SSEEvent, MessageListResponse } from '@/api/types'
 import { permissionEvents } from './usePermissionRequests'
 import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
 
 const MAX_RECONNECT_DELAY = 30000
 const INITIAL_RECONNECT_DELAY = 1000
@@ -50,6 +51,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isReconnecting, setIsReconnecting] = useState(false)
+  const setSessionStatus = useSessionStatus((state) => state.setStatus)
 
   const scheduleReconnect = useCallback((connectFn: () => void) => {
     if (!mountedRef.current) return
@@ -126,6 +128,16 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           const sessionID = part.sessionID
           const messageID = part.messageID
           
+          if (part.type === 'retry') {
+            const retryPart = part as { attempt: number; error: { data: { message: string } } }
+            setSessionStatus(sessionID, { 
+              type: 'retry', 
+              attempt: retryPart.attempt,
+              message: retryPart.error?.data?.message || 'Retrying...',
+              next: Date.now() + 5000
+            })
+          }
+          
           const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
           if (!currentData) return
           
@@ -162,6 +174,13 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           
           const { info } = event.properties
           const sessionID = info.sessionID
+          
+          if (info.role === 'assistant') {
+            const isComplete = 'completed' in info.time && info.time.completed
+            if (!isComplete) {
+              setSessionStatus(sessionID, { type: 'busy' })
+            }
+          }
           
           const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
           if (!currentData) {
@@ -244,6 +263,9 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           if (!('sessionID' in event.properties)) break
           
           const { sessionID } = event.properties
+          
+          setSessionStatus(sessionID, { type: 'idle' })
+          
           const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
           if (!currentData) break
           
@@ -390,7 +412,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
         setIsConnected(false)
       }
     }
-  }, [client, queryClient, opcodeUrl, directory, scheduleReconnect, resetReconnectDelay])
+  }, [client, queryClient, opcodeUrl, directory, scheduleReconnect, resetReconnectDelay, setSessionStatus])
 
   return { isConnected, error, isReconnecting }
 }

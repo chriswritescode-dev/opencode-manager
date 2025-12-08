@@ -11,6 +11,7 @@ import { ChevronDown } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
+import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 import { getModel, formatModelName } from '@/api/providers'
 import type { components } from '@/api/opencode-types'
@@ -119,6 +120,23 @@ export function PromptInput({
 
   const handleSubmit = () => {
     if (!prompt.trim() || disabled) return
+    
+    if (hasActiveStream) {
+      const parts = parsePromptToParts(prompt, attachedFiles)
+      sendPrompt.mutate({
+        sessionID,
+        parts,
+        model: currentModel,
+        agent: selectedAgent || currentMode
+      })
+      setPrompt('')
+      setAttachedFiles(new Map())
+      setSelectedAgent(null)
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+      }
+      return
+    }
 
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
@@ -454,16 +472,20 @@ export function PromptInput({
   }, [selectedModel, currentModel])
 
   useEffect(() => {
-    if (textareaRef.current && !disabled && !hasActiveStream) {
+    if (textareaRef.current && !disabled) {
       textareaRef.current.focus()
     }
-  }, [disabled, hasActiveStream])
+  }, [disabled])
 
   
 
   return (
     <div className="relative backdrop-blur-md bg-background opacity-95 border border-border rounded-xl p-2 md:p-3 mx-2 md:mx-4 mb-2 md:mb-5 w-[90%] md:max-w-4xl">
-      
+      {hasActiveStream && (
+        <div className="mb-2">
+          <SessionStatusIndicator sessionID={sessionID} />
+        </div>
+      )}
       
       <textarea
         ref={textareaRef}
@@ -475,7 +497,7 @@ export function PromptInput({
             ? "Enter bash command..." 
             : "Send a message..."
         }
-        disabled={disabled || hasActiveStream}
+        disabled={disabled}
         className={`w-full bg-background/90 px-2 md:px-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-background resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
           isBashMode 
             ? 'border-purple-500/50 bg-purple-500/5 focus:bg-background' 
@@ -537,18 +559,24 @@ export function PromptInput({
               <ChevronDown className="w-5 h-5" />
             </button>
           )}
+          {hasActiveStream && (
+            <button
+              onClick={handleStop}
+              disabled={disabled}
+              className="px-3 md:px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              title="Stop"
+            >
+              Stop
+            </button>
+          )}
           <button
             data-submit-prompt
-            onClick={hasActiveStream ? handleStop : handleSubmit}
-            disabled={(!prompt.trim() && !hasActiveStream) || disabled}
-            className={`px-5 md:px-6 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-              hasActiveStream
-                ? 'bg-destructive hover:bg-destructive/90 text-destructive-foreground' 
-                : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground'
-            }`}
-            title={hasActiveStream ? 'Stop' : 'Send'}
+            onClick={handleSubmit}
+            disabled={!prompt.trim() || disabled}
+            className="px-5 md:px-6 py-1.5 rounded-lg text-sm font-medium transition-colors bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground"
+            title={hasActiveStream ? 'Queue message' : 'Send'}
           >
-            {hasActiveStream ? 'Stop' : 'Send'}
+            {hasActiveStream ? 'Queue' : 'Send'}
           </button>
         </div>
       </div>
