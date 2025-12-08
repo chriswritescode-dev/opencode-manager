@@ -143,19 +143,10 @@ npm run dev
 
 OpenCode WebUI supports OAuth authentication for select providers, offering a more secure and convenient alternative to API keys.
 
-### Supported Providers
+### Supported OAuth Providers
 
 - **Anthropic (Claude)** - OAuth login with Claude Pro/Max accounts
 - **GitHub Copilot** - OAuth device flow authentication
-
-### OAuth vs API Keys
-
-| Feature | OAuth | API Keys |
-|---------|-------|----------|
-| **Security** | High (no manual key handling) | Medium (requires secure storage) |
-| **Setup** | One-time authorization flow | Manual key entry |
-| **Refresh** | Automatic token refresh | Manual key rotation |
-| **Expiration** | Handled automatically | Keys don't expire |
 
 ### Setting Up OAuth
 
@@ -168,23 +159,5 @@ OpenCode WebUI supports OAuth authentication for select providers, offering a mo
 5. **Complete authorization** in the browser or enter the provided code
 6. **Connection status** will show as "Configured" when successful
 
-### OAuth Flow Types
-
-- **Auto Flow** (GitHub Copilot): Opens browser window, automatic completion
-- **Code Flow** (Anthropic): Requires manual code entry from authorization page
-
-### Troubleshooting OAuth
-
-- **"Invalid authorization code"**: Start the OAuth flow again
-- **"Access denied"**: Check provider permissions and try again
-- **"Code expired"**: Authorization codes expire quickly, restart the flow
-- **"Server error"**: Check internet connection and try again later
-
-### Token Management
-
-- OAuth tokens are stored securely in your workspace
-- Tokens automatically refresh when expired
-- Use "Update OAuth" to re-authorize if needed
-- API keys can still be used alongside OAuth for the same provider
 
 
