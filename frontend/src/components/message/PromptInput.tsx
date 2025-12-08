@@ -7,6 +7,7 @@ import { useFileSearch } from '@/hooks/useFileSearch'
 import { useModelSelection } from '@/hooks/useModelSelection'
 
 import { useUserBash } from '@/stores/userBashStore'
+import { useMobile } from '@/hooks/useMobile'
 import { ChevronDown } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
@@ -449,6 +450,8 @@ export function PromptInput({
 
   const { model: selectedModel, modelString } = useModelSelection(opcodeUrl, directory)
   const currentModel = modelString || ''
+  const isMobile = useMobile()
+  const hideSecondaryButtons = isMobile && (hasActiveStream || showScrollButton)
 
   useEffect(() => {
     const loadModelName = async () => {
@@ -518,36 +521,40 @@ export function PromptInput({
           >
             {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
-          <button
-            onClick={onShowModelsDialog}
-            className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
-          >
-            {modelName.length > 12 ? modelName.substring(0, 10) + '...' : modelName || 'Select model'}
-          </button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="w-6 h-6 rounded-full border-2 border-foreground text-foreground hover:bg-foreground hover:text-background transition-colors flex items-center justify-center text-sm font-medium flex-shrink-0"
-                title="Help"
-              >
-                ?
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground font-medium">
-                Keyboard Shortcuts
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                <span className="font-mono">Cmd/Ctrl+Enter</span> - Send message
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                <span className="font-mono">@</span> - Mention files or agents
-              </DropdownMenuItem>
-              <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                <span className="font-mono">!</span> - Bash command mode
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {!hideSecondaryButtons && (
+            <button
+              onClick={onShowModelsDialog}
+              className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
+            >
+              {modelName.length > 12 ? modelName.substring(0, 10) + '...' : modelName || 'Select model'}
+            </button>
+          )}
+          {!hideSecondaryButtons && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  className="w-6 h-6 rounded-full border-2 border-foreground text-foreground hover:bg-foreground hover:text-background transition-colors flex items-center justify-center text-sm font-medium flex-shrink-0"
+                  title="Help"
+                >
+                  ?
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuItem disabled className="text-xs text-muted-foreground font-medium">
+                  Keyboard Shortcuts
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                  <span className="font-mono">Cmd/Ctrl+Enter</span> - Send message
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                  <span className="font-mono">@</span> - Mention files or agents
+                </DropdownMenuItem>
+                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
+                  <span className="font-mono">!</span> - Bash command mode
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
           {showScrollButton && (
