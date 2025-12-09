@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
+import { useMcpServers } from '@/hooks/useMcpServers'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 
@@ -31,15 +32,16 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
   const [enabled, setEnabled] = useState(true)
   
   const queryClient = useQueryClient()
+  const { addServerAsync, isAddingServer } = useMcpServers()
 
   const addMcpServerMutation = useMutation({
     mutationFn: async () => {
       const config = await settingsApi.getDefaultOpenCodeConfig()
       if (!config) throw new Error('No default config found')
       
-      const currentMcp = (config.content?.mcp as Record<string, any>) || {}
+      const currentMcp = (config.content?.mcp as Record<string, unknown>) || {}
       
-      const mcpConfig: any = {
+      const mcpConfig: Record<string, unknown> = {
         type: serverType,
         enabled,
       }
@@ -80,8 +82,29 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
       }
 
       await settingsApi.updateOpenCodeConfig(config.name, { content: updatedConfig })
+      
+      if (enabled) {
+        await addServerAsync({ 
+          name: serverId, 
+          config: {
+            type: serverType,
+            enabled,
+            command: serverType === 'local' ? command.split(' ').filter(arg => arg.trim()) : undefined,
+            url: serverType === 'remote' ? url.trim() : undefined,
+            environment: serverType === 'local' && Object.keys(environment).length > 0 
+              ? environment.reduce((acc, env) => {
+                  if (env.key.trim() && env.value.trim()) {
+                    acc[env.key.trim()] = env.value.trim()
+                  }
+                  return acc
+                }, {} as Record<string, string>)
+              : undefined,
+            timeout: timeout && parseInt(timeout) ? parseInt(timeout) : undefined,
+          }
+        })
+      }
     },
-onSuccess: async () => {
+    onSuccess: async () => {
       if (onUpdate) {
         const config = await settingsApi.getDefaultOpenCodeConfig()
         if (config) {
@@ -90,6 +113,7 @@ onSuccess: async () => {
       } else {
         queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
       }
+      queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
       handleClose()
     },
   })
@@ -124,6 +148,8 @@ onSuccess: async () => {
     setEnabled(true)
     onOpenChange(false)
   }
+
+  const isPending = addMcpServerMutation.isPending || isAddingServer
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -228,7 +254,7 @@ onSuccess: async () => {
                       size="icon"
                       onClick={() => handleRemoveEnvironmentVar(index)}
                     >
-                      ×
+                      x
                     </Button>
                   )}
                 </div>
@@ -259,7 +285,7 @@ onSuccess: async () => {
               checked={enabled}
               onCheckedChange={setEnabled}
             />
-            <Label htmlFor="enabled">Enable server on startup</Label>
+            <Label htmlFor="enabled">Connect immediately after adding</Label>
           </div>
         </div>
 
@@ -269,9 +295,9 @@ onSuccess: async () => {
           </Button>
           <Button
             onClick={handleAdd}
-            disabled={!serverId || addMcpServerMutation.isPending}
+            disabled={!serverId || isPending}
           >
-            {addMcpServerMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Add MCP Server
           </Button>
         </DialogFooter>

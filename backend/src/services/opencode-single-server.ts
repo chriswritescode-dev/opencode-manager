@@ -8,13 +8,28 @@ import type { Database } from 'bun:sqlite'
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
 const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
+const MIN_OPENCODE_VERSION = '1.0.137'
+
+function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split('.').map(Number)
+  const parts2 = v2.split('.').map(Number)
+  
+  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+    const p1 = parts1[i] || 0
+    const p2 = parts2[i] || 0
+    if (p1 > p2) return 1
+    if (p1 < p2) return -1
+  }
+  return 0
+}
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
-  private serverProcess: any = null
+  private serverProcess: ReturnType<typeof spawn> | null = null
   private serverPid: number | null = null
   private isHealthy: boolean = false
   private db: Database | null = null
+  private version: string | null = null
 
   private constructor() {}
 
@@ -105,7 +120,7 @@ class OpenCodeServerManager {
       }
     )
 
-    this.serverPid = this.serverProcess.pid
+    this.serverPid = this.serverProcess.pid ?? null
 
     logger.info(`OpenCode server started with PID ${this.serverPid}`)
 
@@ -116,6 +131,15 @@ class OpenCodeServerManager {
 
     this.isHealthy = true
     logger.info('OpenCode server is healthy')
+
+    await this.fetchVersion()
+    if (this.version) {
+      logger.info(`OpenCode version: ${this.version}`)
+      if (!this.isVersionSupported()) {
+        logger.warn(`OpenCode version ${this.version} is below minimum required version ${MIN_OPENCODE_VERSION}`)
+        logger.warn('Some features like MCP management may not work correctly')
+      }
+    }
   }
 
   async stop(): Promise<void> {
@@ -152,6 +176,19 @@ class OpenCodeServerManager {
     return OPENCODE_SERVER_PORT
   }
 
+  getVersion(): string | null {
+    return this.version
+  }
+
+  getMinVersion(): string {
+    return MIN_OPENCODE_VERSION
+  }
+
+  isVersionSupported(): boolean {
+    if (!this.version) return false
+    return compareVersions(this.version, MIN_OPENCODE_VERSION) >= 0
+  }
+
   async checkHealth(): Promise<boolean> {
     try {
       const response = await fetch(`http://127.0.0.1:${OPENCODE_SERVER_PORT}/doc`, {
@@ -161,6 +198,20 @@ class OpenCodeServerManager {
     } catch {
       return false
     }
+  }
+
+  async fetchVersion(): Promise<string | null> {
+    try {
+      const result = execSync('opencode --version 2>&1', { encoding: 'utf8' })
+      const match = result.match(/(\d+\.\d+\.\d+)/)
+      if (match && match[1]) {
+        this.version = match[1]
+        return this.version
+      }
+    } catch (error) {
+      logger.warn('Failed to get OpenCode version:', error)
+    }
+    return null
   }
 
   private async waitForHealth(timeoutMs: number): Promise<boolean> {
