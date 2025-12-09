@@ -27,25 +27,7 @@ const UpdateOpenCodeConfigSchema = z.object({
   isDefault: z.boolean().optional(),
 })
 
-function hasMcpChanged(oldContent: Record<string, unknown>, newContent: Record<string, unknown>): boolean {
-  const oldMcp = oldContent.mcp as Record<string, any> || {}
-  const newMcp = newContent.mcp as Record<string, any> || {}
-  
-  const oldKeys = Object.keys(oldMcp).sort()
-  const newKeys = Object.keys(newMcp).sort()
-  
-  if (JSON.stringify(oldKeys) !== JSON.stringify(newKeys)) {
-    return true
-  }
-  
-  for (const key of oldKeys) {
-    if (JSON.stringify(oldMcp[key]) !== JSON.stringify(newMcp[key])) {
-      return true
-    }
-  }
-  
-  return false
-}
+
 
 const CreateCustomCommandSchema = z.object({
   name: z.string().min(1).max(255),
@@ -170,11 +152,6 @@ export function createSettingsRoutes(db: Database) {
         logger.info(`Wrote default config to: ${configPath}`)
         
         await patchOpenCodeConfig(config.content)
-        
-        if (existingConfig && hasMcpChanged(existingConfig.content, config.content)) {
-          logger.info('MCP configuration changed, restarting OpenCode server')
-          await opencodeServerManager.restart()
-        }
       }
       
       return c.json(config)

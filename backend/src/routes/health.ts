@@ -17,7 +17,10 @@ export function createHealthRoutes(db: Database) {
         timestamp: new Date().toISOString(),
         database: dbCheck ? 'connected' : 'disconnected',
         opencode: opencodeHealthy ? 'healthy' : 'unhealthy',
-        opencodePort: opencodeServerManager.getPort()
+        opencodePort: opencodeServerManager.getPort(),
+        opencodeVersion: opencodeServerManager.getVersion(),
+        opencodeMinVersion: opencodeServerManager.getMinVersion(),
+        opencodeVersionSupported: opencodeServerManager.isVersionSupported()
       })
     } catch (error) {
       return c.json({

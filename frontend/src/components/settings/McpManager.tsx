@@ -4,14 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
-import { Plus, Trash2, Globe, Terminal, Loader2 } from 'lucide-react'
+import { Plus, Trash2, Globe, Terminal, Loader2, AlertCircle, RefreshCw, Key, XCircle } from 'lucide-react'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { AddMcpServerDialog } from './AddMcpServerDialog'
+import { useMcpServers } from '@/hooks/useMcpServers'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import type { McpStatus } from '@/api/mcp'
 
 interface McpServerConfig {
   type: 'local' | 'remote'
-  enabled: boolean
+  enabled?: boolean
   command?: string[]
   url?: string
   environment?: Record<string, string>
@@ -27,51 +29,61 @@ interface McpManagerProps {
   onConfigUpdate?: (configName: string, content: Record<string, unknown>) => Promise<void>
 }
 
+function getStatusBadge(status: McpStatus) {
+  switch (status.status) {
+    case 'connected':
+      return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+    case 'disabled':
+      return <Badge variant="secondary" className="text-xs">Disabled</Badge>
+    case 'failed':
+      return (
+        <Badge variant="destructive" className="text-xs flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" />
+          Failed
+        </Badge>
+      )
+    case 'needs_auth':
+      return (
+        <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
+          <Key className="h-3 w-3" />
+          Auth Required
+        </Badge>
+      )
+    case 'needs_client_registration':
+      return (
+        <Badge variant="outline" className="text-xs flex items-center gap-1 border-orange-500 text-orange-600">
+          <AlertCircle className="h-3 w-3" />
+          Registration Required
+        </Badge>
+      )
+    default:
+      return <Badge variant="outline" className="text-xs">Unknown</Badge>
+  }
+}
+
 export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps) {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [deleteConfirmServer, setDeleteConfirmServer] = useState<{ id: string; name: string } | null>(null)
   const [togglingServerId, setTogglingServerId] = useState<string | null>(null)
   
   const queryClient = useQueryClient()
-
-  const toggleServerMutation = useMutation({
-    mutationFn: async ({ serverId, enabled }: { serverId: string; enabled: boolean }) => {
-      if (!config) return
-      
-      setTogglingServerId(serverId)
-      
-      const currentMcp = (config.content?.mcp as Record<string, any>) || {}
-      const serverConfig = currentMcp[serverId]
-      
-      if (!serverConfig) return
-      
-      const updatedConfig = {
-        ...config.content,
-        mcp: {
-          ...currentMcp,
-          [serverId]: {
-            ...serverConfig,
-            enabled,
-          },
-        },
-      }
-      
-      await onUpdate(updatedConfig)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
-    },
-    onSettled: () => {
-      setTogglingServerId(null)
-    },
-  })
+  const { 
+    status: mcpStatus, 
+    isLoading: isLoadingStatus,
+    refetch: refetchStatus,
+    connect,
+    disconnect,
+    authenticate,
+    isToggling
+  } = useMcpServers()
 
   const deleteServerMutation = useMutation({
     mutationFn: async (serverId: string) => {
       if (!config) return
       
-      const currentMcp = (config.content?.mcp as Record<string, any>) || {}
-      const { [serverId]: _deleted, ...rest } = currentMcp
+      const currentMcp = (config.content?.mcp as Record<string, McpServerConfig>) || {}
+      const { [serverId]: _, ...rest } = currentMcp
+      void _
       
       const updatedConfig = {
         ...config.content,
@@ -82,16 +94,34 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
+      queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
       setDeleteConfirmServer(null)
     },
   })
 
   const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> || {}
   
-  const isAnyOperationPending = toggleServerMutation.isPending || deleteServerMutation.isPending || togglingServerId !== null
+  const isAnyOperationPending = deleteServerMutation.isPending || togglingServerId !== null || isToggling
 
-  const handleToggleServer = (serverId: string, enabled: boolean) => {
-    toggleServerMutation.mutate({ serverId, enabled })
+  const handleToggleServer = async (serverId: string) => {
+    const currentStatus = mcpStatus?.[serverId]
+    if (!currentStatus) return
+    
+    setTogglingServerId(serverId)
+    try {
+      if (currentStatus.status === 'connected') {
+        await disconnect(serverId)
+      } else if (currentStatus.status === 'disabled') {
+        await connect(serverId)
+      } else if (currentStatus.status === 'needs_auth') {
+        await authenticate(serverId)
+      } else if (currentStatus.status === 'failed') {
+        await connect(serverId)
+      }
+    } finally {
+      setTogglingServerId(null)
+      refetchStatus()
+    }
   }
 
   const handleDeleteServer = () => {
@@ -125,6 +155,14 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
     return 'MCP server'
   }
 
+  const getErrorMessage = (serverId: string): string | null => {
+    const status = mcpStatus?.[serverId]
+    if (!status) return null
+    if (status.status === 'failed') return status.error
+    if (status.status === 'needs_client_registration') return status.error
+    return null
+  }
+
   if (!config) {
     return (
       <div className="text-center py-8">
@@ -155,19 +193,29 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
             Manage Model Context Protocol servers for {config.name}
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button className='mr-1 h-6'>
-              <Plus className="h-4 w-4" />
-             
-            </Button>
-          </DialogTrigger>
-          <AddMcpServerDialog 
-            open={isAddDialogOpen} 
-            onOpenChange={setIsAddDialogOpen}
-            onUpdate={onConfigUpdate}
-          />
-        </Dialog>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6"
+            onClick={() => refetchStatus()}
+            disabled={isLoadingStatus}
+          >
+            <RefreshCw className={`h-3 w-3 ${isLoadingStatus ? 'animate-spin' : ''}`} />
+          </Button>
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className='mr-1 h-6'>
+                <Plus className="h-4 w-4" />
+              </Button>
+            </DialogTrigger>
+            <AddMcpServerDialog 
+              open={isAddDialogOpen} 
+              onOpenChange={setIsAddDialogOpen}
+              onUpdate={onConfigUpdate}
+            />
+          </Dialog>
+        </div>
       </div>
 
       {Object.keys(mcpServers).length === 0 ? (
@@ -178,58 +226,70 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Object.entries(mcpServers).map(([serverId, serverConfig]) => (
-            <Card key={serverId}>
-              <CardHeader className="pb-3">
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      {serverConfig.type === 'local' ? (
-                        <Terminal className="h-4 w-4 text-muted-foreground" />
-                      ) : (
-                        <Globe className="h-4 w-4 text-muted-foreground" />
-                      )}
-                      <CardTitle className="text-base">{getServerDisplayName(serverId)}</CardTitle>
+          {Object.entries(mcpServers).map(([serverId, serverConfig]) => {
+            const status = mcpStatus?.[serverId]
+            const isConnected = status?.status === 'connected'
+            const errorMessage = getErrorMessage(serverId)
+            
+            return (
+              <Card key={serverId} className={errorMessage ? 'border-red-500/50' : ''}>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2">
+                        {serverConfig.type === 'local' ? (
+                          <Terminal className="h-4 w-4 text-muted-foreground" />
+                        ) : (
+                          <Globe className="h-4 w-4 text-muted-foreground" />
+                        )}
+                        <CardTitle className="text-base">{getServerDisplayName(serverId)}</CardTitle>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {status ? getStatusBadge(status) : (
+                          <Badge variant="outline" className="text-xs">Loading...</Badge>
+                        )}
+                        <Badge variant="outline" className="text-xs">
+                          {serverConfig.type}
+                        </Badge>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant={serverConfig.enabled ? 'default' : 'secondary'} className="text-xs">
-                        {serverConfig.enabled ? 'Enabled' : 'Disabled'}
-                      </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        {serverConfig.type}
-                      </Badge>
+                      <Switch
+                        checked={isConnected}
+                        onCheckedChange={() => handleToggleServer(serverId)}
+                        disabled={isAnyOperationPending || togglingServerId === serverId}
+                      />
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDeleteConfirmServer({ id: serverId, name: getServerDisplayName(serverId) })}
+                        className="text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Switch
-                      checked={serverConfig.enabled}
-                      onCheckedChange={(enabled) => handleToggleServer(serverId, enabled)}
-                      disabled={isAnyOperationPending}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleteConfirmServer({ id: serverId, name: getServerDisplayName(serverId) })}
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                </CardHeader>
+                <CardContent className='p-2'>
+                  <div className="text-sm text-muted-foreground space-y-1">
+                    <p>{getServerDescription(serverConfig)}</p>
+                    {serverConfig.timeout && (
+                      <p>Timeout: {serverConfig.timeout}ms</p>
+                    )}
+                    {serverConfig.environment && Object.keys(serverConfig.environment).length > 0 && (
+                      <p>Environment variables: {Object.keys(serverConfig.environment).length} configured</p>
+                    )}
+                    {errorMessage && (
+                      <div className="flex items-start gap-2 mt-2 p-2 bg-red-500/10 rounded text-red-600 text-xs">
+                        <XCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                        <span className="break-words">{errorMessage}</span>
+                      </div>
+                    )}
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className='p-2'>
-                <div className="text-sm text-muted-foreground space-y-1">
-                  <p>{getServerDescription(serverConfig)}</p>
-                  {serverConfig.timeout && (
-                    <p>Timeout: {serverConfig.timeout}ms</p>
-                  )}
-                  {serverConfig.environment && Object.keys(serverConfig.environment).length > 0 && (
-                    <p>Environment variables: {Object.keys(serverConfig.environment).length} configured</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            )
+          })}
         </div>
       )}
 
