@@ -486,7 +486,7 @@ export function PromptInput({
   
 
   return (
-    <div className="relative backdrop-blur-md bg-background opacity-95 border border-border rounded-xl p-2 md:p-3 mx-2 md:mx-4 mb-2 md:mb-5 w-[90%] md:max-w-4xl">
+    <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 md:mx-4 mb-2 md:mb-1 w-[95%] md:max-w-4xl">
       {hasActiveStream && (
         <div className="">
           <SessionStatusIndicator sessionID={sessionID} />
@@ -560,15 +560,13 @@ export function PromptInput({
           )}
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-          {showScrollButton && (
-            <button
+          <button
               onClick={onScrollToBottom}
-              className="p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors border border-foreground/30"
+              className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors border border-transparent ${showScrollButton ? 'border-foreground/30 visible' : 'invisible'}`}
               title="Scroll to bottom"
             >
               <ChevronDown className="w-5 h-5" />
             </button>
-          )}
 {showStopButton && (
             <button
               onClick={handleStop}

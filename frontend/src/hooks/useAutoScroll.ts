@@ -32,14 +32,17 @@ export function useAutoScroll<T extends Message>({
   const userScrolledAtRef = useRef(0)
   const userDisengagedRef = useRef(false)
   const pointerStartYRef = useRef<number | null>(null)
+  const onScrollStateChangeRef = useRef(onScrollStateChange)
+  
+  onScrollStateChangeRef.current = onScrollStateChange
 
   const scrollToBottom = useCallback(() => {
     if (!containerRef?.current) return
     userScrolledAtRef.current = 0
     userDisengagedRef.current = false
     containerRef.current.scrollTop = containerRef.current.scrollHeight
-    onScrollStateChange?.(false)
-  }, [containerRef, onScrollStateChange])
+    onScrollStateChangeRef.current?.(false)
+  }, [containerRef])
 
   useEffect(() => {
     lastMessageCountRef.current = 0
@@ -49,14 +52,13 @@ export function useAutoScroll<T extends Message>({
   }, [sessionId])
 
   useEffect(() => {
-    if (!containerRef?.current) return
-    
-    const container = containerRef.current
+    const container = containerRef?.current
+    if (!container) return
     
     const markDisengaged = () => {
       userScrolledAtRef.current = Date.now()
       userDisengagedRef.current = true
-      onScrollStateChange?.(true)
+      onScrollStateChangeRef.current?.(true)
     }
 
     const handlePointerDown = (e: PointerEvent) => {
@@ -85,6 +87,23 @@ export function useAutoScroll<T extends Message>({
         markDisengaged()
       }
     }
+
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = container
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+      
+      if (isAtBottom) {
+        if (userDisengagedRef.current) {
+          userScrolledAtRef.current = 0
+          userDisengagedRef.current = false
+          onScrollStateChangeRef.current?.(false)
+        }
+      } else if (!userDisengagedRef.current) {
+        userScrolledAtRef.current = Date.now()
+        userDisengagedRef.current = true
+        onScrollStateChangeRef.current?.(true)
+      }
+    }
     
     container.addEventListener('pointerdown', handlePointerDown, { passive: true })
     container.addEventListener('pointermove', handlePointerMove, { passive: true })
@@ -92,6 +111,7 @@ export function useAutoScroll<T extends Message>({
     container.addEventListener('pointercancel', handlePointerUp, { passive: true })
     container.addEventListener('wheel', handleWheel, { passive: true })
     container.addEventListener('keydown', handleKeyDown)
+    container.addEventListener('scroll', handleScroll, { passive: true })
     
     return () => {
       container.removeEventListener('pointerdown', handlePointerDown)
@@ -100,8 +120,9 @@ export function useAutoScroll<T extends Message>({
       container.removeEventListener('pointercancel', handlePointerUp)
       container.removeEventListener('wheel', handleWheel)
       container.removeEventListener('keydown', handleKeyDown)
+      container.removeEventListener('scroll', handleScroll)
     }
-  }, [containerRef, onScrollStateChange])
+  }, [containerRef, sessionId, messages])
 
   useEffect(() => {
     if (!containerRef?.current || !messages) return
