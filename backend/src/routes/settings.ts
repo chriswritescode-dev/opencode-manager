@@ -139,7 +139,6 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const validated = UpdateOpenCodeConfigSchema.parse(body)
       
-      const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
       const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)

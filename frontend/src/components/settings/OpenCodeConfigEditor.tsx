@@ -4,7 +4,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2 } from 'lucide-react'
 import type { OpenCodeConfig } from '@/api/types/settings'
-import stripJsonComments from 'strip-json-comments'
+import { parseJsonc } from '@/lib/jsonc'
 
 interface OpenCodeConfigEditorProps {
   config: OpenCodeConfig | null
@@ -44,7 +44,7 @@ export function OpenCodeConfigEditor({
     if (!config) return
 
     try {
-      const parsedContent = JSON.parse(stripJsonComments(editConfigContent))
+      const parsedContent = parseJsonc<Record<string, unknown>>(editConfigContent)
       
       const forbiddenFields = ['id', 'createdAt', 'updatedAt']
       const foundForbidden = forbiddenFields.filter(field => field in parsedContent)

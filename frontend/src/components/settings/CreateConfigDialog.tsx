@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
-import stripJsonComments from 'strip-json-comments'
+import { parseJsonc } from '@/lib/jsonc'
 
 interface CreateConfigDialogProps {
   isOpen: boolean
@@ -63,11 +63,21 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
     reader.onload = (e) => {
       const fileContent = e.target?.result as string
       try {
-        JSON.parse(stripJsonComments(fileContent))
+        parseJsonc(fileContent)
         setContent(fileContent)
         setName(file.name.replace('.json', '').replace('.jsonc', ''))
-      } catch {
-        window.alert('Invalid JSON/JSONC file')
+        setError('')
+        setErrorLine(null)
+      } catch (err) {
+        if (err instanceof SyntaxError) {
+          const match = err.message.match(/line (\d+)/i)
+          const line = match ? parseInt(match[1]) : null
+          setErrorLine(line)
+          setError(`Invalid JSON/JSONC file: ${err.message}`)
+        } else {
+          setError('Invalid JSON/JSONC file')
+          setErrorLine(null)
+        }
       }
     }
     reader.readAsText(file)
@@ -120,7 +130,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
           </div>
 
           <div>
-            <Label htmlFor="config-content" className="pb-1">Config Content (JSON)</Label>
+            <Label htmlFor="config-content" className="pb-1">Config Content (JSON/JSONC)</Label>
             <Textarea
               id="config-content"
               ref={textareaRef}

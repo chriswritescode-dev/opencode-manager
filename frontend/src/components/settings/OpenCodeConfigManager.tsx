@@ -13,17 +13,8 @@ import { AgentsEditor } from './AgentsEditor'
 import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import stripJsonComments from 'strip-json-comments'
-
-interface OpenCodeConfig {
-  id: number
-  name: string
-  content: Record<string, unknown>
-  rawContent?: string
-  isDefault: boolean
-  createdAt: number
-  updatedAt: number
-}
+import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
+import type { OpenCodeConfig } from '@/api/types/settings'
 
 export function OpenCodeConfigManager() {
   const queryClient = useQueryClient()
@@ -115,7 +106,7 @@ export function OpenCodeConfigManager() {
   const createConfig = async (name: string, rawContent: string, isDefault: boolean) => {
     try {
       setIsUpdating(true)
-      const parsedContent = JSON.parse(stripJsonComments(rawContent))
+      const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
       
       const forbiddenFields = ['id', 'createdAt', 'updatedAt']
       const foundForbidden = forbiddenFields.filter(field => field in parsedContent)
@@ -173,8 +164,7 @@ export function OpenCodeConfigManager() {
 
   const downloadConfig = (config: OpenCodeConfig) => {
     const content = config.rawContent || JSON.stringify(config.content, null, 2)
-    const hasComments = config.rawContent && config.rawContent.includes('//')
-    const extension = hasComments ? 'jsonc' : 'json'
+    const extension = config.rawContent && hasJsoncComments(config.rawContent) ? 'jsonc' : 'json'
     const blob = new Blob([content], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -304,7 +294,7 @@ export function OpenCodeConfigManager() {
         onClose={() => setIsEditDialogOpen(false)}
         onUpdate={async (rawContent) => {
           if (!editingConfig) return
-          const parsedContent = JSON.parse(stripJsonComments(rawContent)) as Record<string, unknown>
+          const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
           const agentsChanged = JSON.stringify(editingConfig.content.agent) !== JSON.stringify(parsedContent.agent)
           await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
           await fetchConfigs()
