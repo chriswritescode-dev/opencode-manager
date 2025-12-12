@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
-import { getWorkspacePath } from '@opencode-webui/shared'
+import { getWorkspacePath } from '@opencode-manager/shared'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000

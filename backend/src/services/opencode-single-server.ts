@@ -2,7 +2,7 @@ import { spawn, execSync } from 'child_process'
 import path from 'path'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
-import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-webui/shared'
+import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared'
 import type { Database } from 'bun:sqlite'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT

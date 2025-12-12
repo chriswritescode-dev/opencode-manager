@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: opencode-web
+    container_name: opencode-manager
     ports:
       - "5003:5003"
     environment:

@@ -1,4 +1,4 @@
-# OpenCode Web Manager
+# OpenCode Manager
 
 A full-stack web application for running [OpenCode](https://github.com/sst/opencode) in local processes, controllable via a modern web interface. Designed to allow users to run and control OpenCode from their phone or any device with a web browser.  
 
@@ -86,8 +86,8 @@ A full-stack web application for running [OpenCode](https://github.com/sst/openc
 
 ```bash
 # Clone the repository
-git clone https://github.com/cstech-dev/opencode-webui.git
-cd opencode-webui
+git clone https://github.com/cstech-dev/opencode-manager.git
+cd opencode-manager
 
 # Start with Docker Compose (single container)
 docker-compose up -d
@@ -126,8 +126,8 @@ docker exec -it opencode-web sh
 
 ```bash
 # Clone the repository
-git clone https://github.com/chriswritescode-dev/opencode-webui.git
-cd opencode-webui
+git clone https://github.com/chriswritescode-dev/opencode-manager.git
+cd opencode-manager
 
 # Install dependencies (uses Bun workspaces)
 bun install

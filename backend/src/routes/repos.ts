@@ -8,7 +8,7 @@ import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 import { withTransactionAsync } from '../db/transactions'
-import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-webui/shared'
+import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared'
 import path from 'path'
 
 export function createRepoRoutes(database: Database) {

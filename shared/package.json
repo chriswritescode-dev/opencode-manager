@@ -1,5 +1,5 @@
 {
-  "name": "@opencode-webui/shared",
+  "name": "@opencode-manager/shared",
   "version": "1.0.0",
   "type": "module",
   "private": true,

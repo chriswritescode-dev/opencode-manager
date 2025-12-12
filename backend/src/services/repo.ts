@@ -5,7 +5,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
-import { getReposPath } from '@opencode-webui/shared'
+import { getReposPath } from '@opencode-manager/shared'
 import path from 'path'
 
 async function hasCommits(repoPath: string): Promise<boolean> {

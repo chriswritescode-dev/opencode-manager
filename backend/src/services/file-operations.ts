@@ -1,7 +1,7 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { logger } from '../utils/logger'
-import { getReposPath } from '@opencode-webui/shared'
+import { getReposPath } from '@opencode-manager/shared'
 
 export async function readFileContent(filePath: string): Promise<string> {
   try {

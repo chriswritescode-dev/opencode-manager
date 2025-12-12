@@ -1,4 +1,4 @@
-import { ENV } from '@opencode-webui/shared'
+import { ENV } from '@opencode-manager/shared'
 
 type LogLevel = 'info' | 'warn' | 'error' | 'debug'
 

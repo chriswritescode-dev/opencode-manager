@@ -4,7 +4,7 @@ import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { patchOpenCodeConfig } from '../services/proxy'
-import { getOpenCodeConfigFilePath } from '@opencode-webui/shared'
+import { getOpenCodeConfigFilePath } from '@opencode-manager/shared'
 import { 
   UserPreferencesSchema, 
   OpenCodeConfigSchema,

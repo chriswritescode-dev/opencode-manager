@@ -57,6 +57,6 @@ if [ "$OPENCODE_VERSION" != "unknown" ]; then
   fi
 fi
 
-echo "🚀 Starting OpenCode WebUI Backend..."
+echo "🚀 Starting OpenCode Manager Backend..."
 
 exec "$@"

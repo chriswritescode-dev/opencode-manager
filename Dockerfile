@@ -67,8 +67,8 @@ COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY package.json pnpm-workspace.yaml ./
 
-RUN mkdir -p /app/backend/node_modules/@opencode-webui && \
-    ln -s /app/shared /app/backend/node_modules/@opencode-webui/shared
+RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
+    ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
 
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

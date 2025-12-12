@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { proxyRequest } from '../services/proxy'
 import { logger } from '../utils/logger'
-import { ENV } from '@opencode-webui/shared'
+import { ENV } from '@opencode-manager/shared'
 import { 
   OAuthAuthorizeRequestSchema, 
   OAuthAuthorizeResponseSchema,

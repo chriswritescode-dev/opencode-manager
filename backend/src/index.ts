@@ -23,7 +23,7 @@ import {
   getOpenCodeConfigFilePath,
   getDatabasePath,
   ENV
-} from '@opencode-webui/shared'
+} from '@opencode-manager/shared'
 
 const { PORT, HOST } = ENV.SERVER
 const DB_PATH = getDatabasePath()
