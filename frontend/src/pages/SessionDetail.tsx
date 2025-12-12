@@ -271,16 +271,7 @@ export function SessionDetail() {
                 directory={repoDirectory}
                 activeSessionID={sessionId || undefined}
                 onSelectSession={(sessionID) => {
-                  // Navigate to the correct repo session URL pattern
-                  const currentPath = window.location.pathname
-                  const repoMatch = currentPath.match(/\/repos\/(\d+)\/sessions\//)
-                  if (repoMatch) {
-                    const repoId = repoMatch[1]
-                    navigate(`/repos/${repoId}/sessions/${sessionID}`)
-                  } else {
-                    // Fallback for direct session access
-                    navigate(`/session/${sessionID}`)
-                  }
+                  navigate(`/repos/${repoId}/sessions/${sessionID}`)
                   setSessionsDialogOpen(false)
                 }}
               />

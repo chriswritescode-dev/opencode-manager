@@ -27,7 +27,7 @@ function AppContent() {
         <Route path="/" element={<Repos />} />
         <Route path="/repos/:id" element={<RepoDetail />} />
         <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-        <Route path="/session/:sessionId" element={<SessionDetail />} />
+        
       </Routes>
       <SettingsDialog open={isOpen} onOpenChange={close} />
       <Toaster 

@@ -67,6 +67,7 @@ export const useCreateSession = (opcodeUrl: string | null | undefined, directory
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
 
+
   return useMutation({
     mutationFn: async (data: {
       title?: string;
