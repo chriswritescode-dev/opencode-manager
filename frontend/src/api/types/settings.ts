@@ -57,6 +57,7 @@ export interface OpenCodeConfig {
   id: number
   name: string
   content: Record<string, unknown>
+  rawContent?: string
   isDefault: boolean
   createdAt: number
   updatedAt: number
@@ -64,12 +65,12 @@ export interface OpenCodeConfig {
 
 export interface CreateOpenCodeConfigRequest {
   name: string
-  content: Record<string, unknown>
+  content: Record<string, unknown> | string
   isDefault?: boolean
 }
 
 export interface UpdateOpenCodeConfigRequest {
-  content: Record<string, unknown>
+  content: Record<string, unknown> | string
   isDefault?: boolean
 }
 

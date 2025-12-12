@@ -248,6 +248,7 @@ function getMimeType(filePath: string, _content: Uint8Array): string {
     '.jsx': 'text/javascript',
     '.tsx': 'text/typescript',
     '.json': 'application/json',
+    '.jsonc': 'application/json',
     '.xml': 'application/xml',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',

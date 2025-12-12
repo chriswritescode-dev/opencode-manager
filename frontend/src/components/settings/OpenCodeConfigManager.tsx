@@ -13,11 +13,13 @@ import { AgentsEditor } from './AgentsEditor'
 import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import stripJsonComments from 'strip-json-comments'
 
 interface OpenCodeConfig {
   id: number
   name: string
   content: Record<string, unknown>
+  rawContent?: string
   isDefault: boolean
   createdAt: number
   updatedAt: number
@@ -110,10 +112,10 @@ export function OpenCodeConfigManager() {
     }
   }, [configs, selectedConfig])
 
-  const createConfig = async (name: string, content: string, isDefault: boolean) => {
+  const createConfig = async (name: string, rawContent: string, isDefault: boolean) => {
     try {
       setIsUpdating(true)
-      const parsedContent = JSON.parse(content)
+      const parsedContent = JSON.parse(stripJsonComments(rawContent))
       
       const forbiddenFields = ['id', 'createdAt', 'updatedAt']
       const foundForbidden = forbiddenFields.filter(field => field in parsedContent)
@@ -123,13 +125,12 @@ export function OpenCodeConfigManager() {
       
       await settingsApi.createOpenCodeConfig({
         name: name.trim(),
-        content: parsedContent,
+        content: rawContent,
         isDefault,
       })
       
       setIsCreateDialogOpen(false)
       fetchConfigs()
-      // Invalidate agents cache in case new config has agents
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to create config:', error)
@@ -171,11 +172,14 @@ export function OpenCodeConfigManager() {
   
 
   const downloadConfig = (config: OpenCodeConfig) => {
-    const blob = new Blob([JSON.stringify(config.content, null, 2)], { type: 'application/json' })
+    const content = config.rawContent || JSON.stringify(config.content, null, 2)
+    const hasComments = config.rawContent && config.rawContent.includes('//')
+    const extension = hasComments ? 'jsonc' : 'json'
+    const blob = new Blob([content], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${config.name}.json`
+    a.download = `${config.name}.${extension}`
     a.click()
     URL.revokeObjectURL(url)
   }
@@ -298,16 +302,15 @@ export function OpenCodeConfigManager() {
         config={editingConfig}
         isOpen={isEditDialogOpen}
         onClose={() => setIsEditDialogOpen(false)}
-        onUpdate={async (content) => {
+        onUpdate={async (rawContent) => {
           if (!editingConfig) return
-          const agentsChanged = JSON.stringify(editingConfig.content.agent) !== JSON.stringify(content.agent)
-          await settingsApi.updateOpenCodeConfig(editingConfig.name, { content })
+          const parsedContent = JSON.parse(stripJsonComments(rawContent)) as Record<string, unknown>
+          const agentsChanged = JSON.stringify(editingConfig.content.agent) !== JSON.stringify(parsedContent.agent)
+          await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
           await fetchConfigs()
-          // Auto-restart server if agents were modified
           if (agentsChanged) {
             restartServerMutation.mutate()
           }
-          // Invalidate agents cache so @ mentions get updated
           queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
         }}
         isUpdating={isUpdating}

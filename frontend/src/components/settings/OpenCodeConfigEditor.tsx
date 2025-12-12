@@ -4,12 +4,13 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2 } from 'lucide-react'
 import type { OpenCodeConfig } from '@/api/types/settings'
+import stripJsonComments from 'strip-json-comments'
 
 interface OpenCodeConfigEditorProps {
   config: OpenCodeConfig | null
   isOpen: boolean
   onClose: () => void
-  onUpdate: (content: Record<string, unknown>) => Promise<void>
+  onUpdate: (content: string) => Promise<void>
   isUpdating: boolean
 }
 
@@ -27,7 +28,7 @@ export function OpenCodeConfigEditor({
 
   useEffect(() => {
     if (config && isOpen) {
-      setEditConfigContent(JSON.stringify(config.content, null, 2))
+      setEditConfigContent(config.rawContent || JSON.stringify(config.content, null, 2))
       setEditError('')
       setEditErrorLine(null)
     }
@@ -43,7 +44,7 @@ export function OpenCodeConfigEditor({
     if (!config) return
 
     try {
-      const parsedContent = JSON.parse(editConfigContent)
+      const parsedContent = JSON.parse(stripJsonComments(editConfigContent))
       
       const forbiddenFields = ['id', 'createdAt', 'updatedAt']
       const foundForbidden = forbiddenFields.filter(field => field in parsedContent)
@@ -51,14 +52,14 @@ export function OpenCodeConfigEditor({
         throw new Error(`Invalid fields found: ${foundForbidden.join(', ')}. These fields are managed automatically.`)
       }
       
-      await onUpdate(parsedContent)
+      await onUpdate(editConfigContent)
       onClose()
     } catch (error) {
       if (error instanceof SyntaxError) {
         const match = error.message.match(/line (\d+)/i)
         const line = match ? parseInt(match[1]) : null
         setEditErrorLine(line)
-        setEditError('Invalid JSON format')
+        setEditError('Invalid JSON/JSONC format')
       } else {
         setEditError(error instanceof Error ? error.message : 'Failed to update config')
       }
@@ -93,7 +94,7 @@ export function OpenCodeConfigEditor({
             <div className="flex-1 p-6 overflow-hidden">
               <div className="h-full flex flex-col">
                 <Label htmlFor="edit-config-content" className="mb-2">
-                  Config Content (JSON)
+                  Config Content (JSON/JSONC)
                 </Label>
                 <Textarea
                   id="edit-config-content"

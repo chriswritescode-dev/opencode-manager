@@ -18,12 +18,12 @@ const UpdateSettingsSchema = z.object({
 
 const CreateOpenCodeConfigSchema = z.object({
   name: z.string().min(1).max(255),
-  content: OpenCodeConfigSchema,
+  content: z.union([OpenCodeConfigSchema, z.string()]),
   isDefault: z.boolean().optional(),
 })
 
 const UpdateOpenCodeConfigSchema = z.object({
-  content: OpenCodeConfigSchema,
+  content: z.union([OpenCodeConfigSchema, z.string()]),
   isDefault: z.boolean().optional(),
 })
 

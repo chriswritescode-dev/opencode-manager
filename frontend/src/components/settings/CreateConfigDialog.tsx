@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
+import stripJsonComments from 'strip-json-comments'
 
 interface CreateConfigDialogProps {
   isOpen: boolean
@@ -62,11 +63,11 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
     reader.onload = (e) => {
       const fileContent = e.target?.result as string
       try {
-        JSON.parse(fileContent)
+        JSON.parse(stripJsonComments(fileContent))
         setContent(fileContent)
         setName(file.name.replace('.json', '').replace('.jsonc', ''))
       } catch {
-        window.alert('Invalid JSON file')
+        window.alert('Invalid JSON/JSONC file')
       }
     }
     reader.readAsText(file)

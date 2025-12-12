@@ -107,12 +107,12 @@ export const OpenCodeConfigMetadataSchema = z.object({
 
 export const CreateOpenCodeConfigRequestSchema = z.object({
   name: z.string().min(1).max(255),
-  content: OpenCodeConfigSchema,
+  content: z.union([OpenCodeConfigSchema, z.string()]),
   isDefault: z.boolean().optional(),
 });
 
 export const UpdateOpenCodeConfigRequestSchema = z.object({
-  content: OpenCodeConfigSchema,
+  content: z.union([OpenCodeConfigSchema, z.string()]),
   isDefault: z.boolean().optional(),
 });
 

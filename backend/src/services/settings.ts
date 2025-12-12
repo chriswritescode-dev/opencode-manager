@@ -1,19 +1,31 @@
 import { Database } from 'bun:sqlite'
 import { logger } from '../utils/logger'
+import stripJsonComments from 'strip-json-comments'
 import type { 
   UserPreferences, 
   SettingsResponse, 
   OpenCodeConfig,
   CreateOpenCodeConfigRequest,
-  UpdateOpenCodeConfigRequest,
-  OpenCodeConfigResponse 
+  UpdateOpenCodeConfigRequest
 } from '../types/settings'
 import {
   UserPreferencesSchema,
   OpenCodeConfigSchema,
-  OpenCodeConfigMetadataSchema,
   DEFAULT_USER_PREFERENCES,
 } from '../types/settings'
+
+interface OpenCodeConfigWithRaw extends OpenCodeConfig {
+  rawContent: string
+}
+
+interface OpenCodeConfigResponseWithRaw {
+  configs: OpenCodeConfigWithRaw[]
+  defaultConfig: OpenCodeConfigWithRaw | null
+}
+
+function parseJsonc(content: string): unknown {
+  return JSON.parse(stripJsonComments(content))
+}
 
 export class SettingsService {
   constructor(private db: Database) {}
@@ -31,7 +43,7 @@ export class SettingsService {
     }
 
     try {
-      const parsed = JSON.parse(row.preferences)
+      const parsed = parseJsonc(row.preferences) as Record<string, unknown>
       const validated = UserPreferencesSchema.parse({
         ...DEFAULT_USER_PREFERENCES,
         ...parsed,
@@ -92,7 +104,7 @@ export class SettingsService {
     }
   }
 
-  getOpenCodeConfigs(userId: string = 'default'): OpenCodeConfigResponse {
+  getOpenCodeConfigs(userId: string = 'default'): OpenCodeConfigResponseWithRaw {
     const rows = this.db
       .query('SELECT * FROM opencode_configs WHERE user_id = ? ORDER BY created_at DESC')
       .all(userId) as Array<{
@@ -105,18 +117,20 @@ export class SettingsService {
         updated_at: number
       }>
 
-    const configs: OpenCodeConfig[] = []
-    let defaultConfig: OpenCodeConfig | null = null
+    const configs: OpenCodeConfigWithRaw[] = []
+    let defaultConfig: OpenCodeConfigWithRaw | null = null
 
     for (const row of rows) {
       try {
-        const content = JSON.parse(row.config_content)
+        const rawContent = row.config_content
+        const content = parseJsonc(rawContent)
         const validated = OpenCodeConfigSchema.parse(content)
         
-        const config: OpenCodeConfig = {
+        const config: OpenCodeConfigWithRaw = {
           id: row.id,
           name: row.config_name,
           content: validated,
+          rawContent: rawContent,
           isDefault: Boolean(row.is_default),
           createdAt: row.created_at,
           updatedAt: row.updated_at,
@@ -141,8 +155,16 @@ export class SettingsService {
   createOpenCodeConfig(
     request: CreateOpenCodeConfigRequest,
     userId: string = 'default'
-  ): OpenCodeConfig {
-    const contentValidated = OpenCodeConfigSchema.parse(request.content)
+  ): OpenCodeConfigWithRaw {
+    const rawContent = typeof request.content === 'string' 
+      ? request.content 
+      : JSON.stringify(request.content, null, 2)
+    
+    const parsedContent = typeof request.content === 'string'
+      ? parseJsonc(request.content)
+      : request.content
+    
+    const contentValidated = OpenCodeConfigSchema.parse(parsedContent)
     const now = Date.now()
 
     const existingCount = this.db
@@ -165,16 +187,17 @@ export class SettingsService {
       .run(
         userId,
         request.name,
-        JSON.stringify(contentValidated),
+        rawContent,
         shouldBeDefault,
         now,
         now
       )
 
-    const config: OpenCodeConfig = {
+    const config: OpenCodeConfigWithRaw = {
       id: result.lastInsertRowid as number,
       name: request.name,
       content: contentValidated,
+      rawContent: rawContent,
       isDefault: shouldBeDefault,
       createdAt: now,
       updatedAt: now,
@@ -188,7 +211,7 @@ export class SettingsService {
     configName: string,
     request: UpdateOpenCodeConfigRequest,
     userId: string = 'default'
-  ): OpenCodeConfig | null {
+  ): OpenCodeConfigWithRaw | null {
     const existing = this.db
       .query('SELECT * FROM opencode_configs WHERE user_id = ? AND config_name = ?')
       .get(userId, configName) as {
@@ -202,7 +225,15 @@ export class SettingsService {
       return null
     }
 
-    const contentValidated = OpenCodeConfigSchema.parse(request.content)
+    const rawContent = typeof request.content === 'string' 
+      ? request.content 
+      : JSON.stringify(request.content, null, 2)
+    
+    const parsedContent = typeof request.content === 'string'
+      ? parseJsonc(request.content)
+      : request.content
+
+    const contentValidated = OpenCodeConfigSchema.parse(parsedContent)
     const now = Date.now()
 
     if (request.isDefault) {
@@ -218,17 +249,18 @@ export class SettingsService {
          WHERE user_id = ? AND config_name = ?`
       )
       .run(
-        JSON.stringify(contentValidated),
+        rawContent,
         request.isDefault !== undefined ? request.isDefault : existing.is_default,
         now,
         userId,
         configName
       )
 
-    const config: OpenCodeConfig = {
+    const config: OpenCodeConfigWithRaw = {
       id: existing.id,
       name: configName,
       content: contentValidated,
+      rawContent: rawContent,
       isDefault: request.isDefault !== undefined ? request.isDefault : existing.is_default,
       createdAt: existing.created_at,
       updatedAt: now,
@@ -252,7 +284,7 @@ export class SettingsService {
     return deleted
   }
 
-  setDefaultOpenCodeConfig(configName: string, userId: string = 'default'): OpenCodeConfig | null {
+  setDefaultOpenCodeConfig(configName: string, userId: string = 'default'): OpenCodeConfigWithRaw | null {
     const existing = this.db
       .query('SELECT * FROM opencode_configs WHERE user_id = ? AND config_name = ?')
       .get(userId, configName) as {
@@ -279,13 +311,15 @@ export class SettingsService {
       .run(now, userId, configName)
 
     try {
-      const content = JSON.parse(existing.config_content)
+      const rawContent = existing.config_content
+      const content = parseJsonc(rawContent)
       const validated = OpenCodeConfigSchema.parse(content)
 
-      const config: OpenCodeConfig = {
+      const config: OpenCodeConfigWithRaw = {
         id: existing.id,
         name: configName,
         content: validated,
+        rawContent: rawContent,
         isDefault: true,
         createdAt: existing.created_at,
         updatedAt: now,
@@ -299,7 +333,7 @@ export class SettingsService {
     }
   }
 
-  getDefaultOpenCodeConfig(userId: string = 'default'): OpenCodeConfig | null {
+  getDefaultOpenCodeConfig(userId: string = 'default'): OpenCodeConfigWithRaw | null {
     const row = this.db
       .query('SELECT * FROM opencode_configs WHERE user_id = ? AND is_default = TRUE')
       .get(userId) as {
@@ -315,13 +349,15 @@ export class SettingsService {
     }
 
     try {
-      const content = JSON.parse(row.config_content)
+      const rawContent = row.config_content
+      const content = parseJsonc(rawContent)
       const validated = OpenCodeConfigSchema.parse(content)
 
       return {
         id: row.id,
         name: row.config_name,
         content: validated,
+        rawContent: rawContent,
         isDefault: true,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -332,7 +368,7 @@ export class SettingsService {
     }
   }
 
-  getOpenCodeConfigByName(configName: string, userId: string = 'default'): OpenCodeConfig | null {
+  getOpenCodeConfigByName(configName: string, userId: string = 'default'): OpenCodeConfigWithRaw | null {
     const row = this.db
       .query('SELECT * FROM opencode_configs WHERE user_id = ? AND config_name = ?')
       .get(userId, configName) as {
@@ -349,13 +385,15 @@ export class SettingsService {
     }
 
     try {
-      const content = JSON.parse(row.config_content)
+      const rawContent = row.config_content
+      const content = parseJsonc(rawContent)
       const validated = OpenCodeConfigSchema.parse(content)
 
       return {
         id: row.id,
         name: row.config_name,
         content: validated,
+        rawContent: rawContent,
         isDefault: Boolean(row.is_default),
         createdAt: row.created_at,
         updatedAt: row.updated_at,
@@ -367,19 +405,16 @@ export class SettingsService {
   }
 
   getOpenCodeConfigContent(configName: string, userId: string = 'default'): string | null {
-    const config = this.getOpenCodeConfigByName(configName, userId)
+    const row = this.db
+      .query('SELECT config_content FROM opencode_configs WHERE user_id = ? AND config_name = ?')
+      .get(userId, configName) as { config_content: string } | undefined
     
-    if (!config) {
+    if (!row) {
       logger.error(`Config '${configName}' not found for user ${userId}`)
       return null
     }
 
-    try {
-      return JSON.stringify(config.content, null, 2)
-    } catch (error) {
-      logger.error(`Failed to stringify config '${configName}':`, error)
-      return null
-    }
+    return row.config_content
   }
 
   ensureSingleConfigIsDefault(userId: string = 'default'): void {
