@@ -59,10 +59,18 @@ Always bind to \`0.0.0.0\` to allow external access from the Docker host.
 
 ## Package Management
 
+### Node.js Packages
 Prefer **pnpm** or **bun** over npm for installing dependencies to save disk space:
 - Use \`pnpm install\` instead of \`npm install\`
 - Use \`bun install\` as an alternative
 - Both are pre-installed in the container
+
+### Python Packages
+Prefer **uv** for Python package management:
+- Use \`uv venv\` to create virtual environments instead of \`python -m venv\`
+- Use \`uv pip install\` to install packages instead of \`pip install\`
+- Use \`uv pip\` for all pip operations
+- uv is pre-installed in the container and provides faster package installation
 
 ## General Guidelines
 

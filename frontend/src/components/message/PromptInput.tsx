@@ -491,7 +491,7 @@ export function PromptInput({
   return (
     <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 md:mx-4 mb-4 md:mb-1 w-[94%] md:max-w-4xl">
       {hasActiveStream && (
-        <div className="">
+        <div className="pb-1">
           <SessionStatusIndicator sessionID={sessionID} />
         </div>
       )}

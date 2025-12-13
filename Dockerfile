@@ -16,6 +16,9 @@ RUN apt-get update && apt-get install -y \
     less \
     tree \
     file \
+    python3 \
+    python3-pip \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
@@ -24,6 +27,11 @@ RUN curl -fsSL https://bun.sh/install | bash && \
     mv /root/.bun /opt/bun && \
     chmod -R 755 /opt/bun && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    mv /root/.local/bin/uv /usr/local/bin/uv && \
+    mv /root/.local/bin/uvx /usr/local/bin/uvx && \
+    chmod +x /usr/local/bin/uv /usr/local/bin/uvx
 
 WORKDIR /app
 
