@@ -24,14 +24,73 @@ function getPermissionTypeLabel(type: string): string {
       return 'Run Command'
     case 'edit':
       return 'Edit File'
+    case 'write':
+      return 'Write File'
     case 'webfetch':
       return 'Fetch URL'
+    case 'external_directory':
+      return 'External Access'
+    case 'doom_loop':
+      return 'Repeated Action'
     default:
       return type.charAt(0).toUpperCase() + type.slice(1)
   }
 }
 
-function getPermissionDescription(permission: Permission): string {
+function getPermissionDetails(permission: Permission): { primary: string; secondary?: string } {
+  const metadata = permission.metadata || {}
+  
+  switch (permission.type) {
+    case 'bash': {
+      const command = metadata.command as string | undefined
+      if (command) {
+        return { primary: command }
+      }
+      break
+    }
+    case 'edit':
+    case 'write': {
+      const filePath = metadata.filePath as string | undefined
+      const diff = metadata.diff as string | undefined
+      if (filePath) {
+        return { 
+          primary: filePath,
+          secondary: diff ? diff.slice(0, 500) + (diff.length > 500 ? '\n...' : '') : undefined
+        }
+      }
+      break
+    }
+    case 'webfetch': {
+      const url = metadata.url as string | undefined
+      if (url) {
+        return { primary: url }
+      }
+      break
+    }
+    case 'external_directory': {
+      const command = metadata.command as string | undefined
+      const filepath = metadata.filepath as string | undefined
+      if (command) {
+        return { primary: command }
+      }
+      if (filepath) {
+        return { primary: filepath }
+      }
+      break
+    }
+    case 'doom_loop': {
+      const tool = metadata.tool as string | undefined
+      const input = metadata.input
+      if (tool) {
+        return { 
+          primary: `Tool: ${tool}`,
+          secondary: input ? JSON.stringify(input, null, 2).slice(0, 300) : undefined
+        }
+      }
+      break
+    }
+  }
+  
   const patterns = Array.isArray(permission.pattern) 
     ? permission.pattern 
     : permission.pattern 
@@ -39,22 +98,10 @@ function getPermissionDescription(permission: Permission): string {
       : []
   
   if (patterns.length > 0) {
-    return patterns.join('\n')
+    return { primary: patterns.join('\n') }
   }
   
-  if (permission.metadata?.command) {
-    return String(permission.metadata.command)
-  }
-  
-  if (permission.metadata?.path) {
-    return String(permission.metadata.path)
-  }
-  
-  if (permission.metadata?.url) {
-    return String(permission.metadata.url)
-  }
-  
-  return ''
+  return { primary: '' }
 }
 
 export function PermissionRequestDialog({
@@ -83,7 +130,7 @@ export function PermissionRequestDialog({
   }
 
   const typeLabel = getPermissionTypeLabel(permission.type)
-  const description = getPermissionDescription(permission)
+  const details = getPermissionDetails(permission)
   const hasMultiple = pendingCount > 1
 
   return (
@@ -110,10 +157,18 @@ export function PermissionRequestDialog({
             </span>
           </div>
           
-          {description && (
+          {details.primary && (
             <div className="bg-muted/50 border rounded-md p-3 max-h-32 overflow-y-auto">
               <pre className="text-sm font-mono whitespace-pre-wrap break-all">
-                {description}
+                {details.primary}
+              </pre>
+            </div>
+          )}
+          
+          {details.secondary && (
+            <div className="bg-muted/30 border rounded-md p-3 max-h-24 overflow-y-auto">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-all text-muted-foreground">
+                {details.secondary}
               </pre>
             </div>
           )}
