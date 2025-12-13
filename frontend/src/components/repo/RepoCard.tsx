@@ -1,8 +1,11 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Trash2, ExternalLink } from "lucide-react";
+import { Loader2, Trash2, ExternalLink, Download } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { downloadRepo } from "@/api/repos";
+import { showToast } from "@/lib/toast";
 
 import { BranchSwitcher } from "./BranchSwitcher";
 
@@ -31,6 +34,7 @@ export function RepoCard({
   onSelect,
 }: RepoCardProps) {
   const navigate = useNavigate();
+  const [isDownloading, setIsDownloading] = useState(false);
   
   const repoName = repo.repoUrl 
     ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
@@ -126,6 +130,32 @@ export function RepoCard({
                 className="h-10 sm:h-9 w-[140px] max-w-[140px]"
               />
             )}
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async (e) => {
+                e.stopPropagation();
+                setIsDownloading(true);
+                try {
+                  await downloadRepo(repo.id, repoName);
+                  showToast.success("Download complete");
+                } catch (error: unknown) {
+                  showToast.error(error instanceof Error ? error.message : "Download failed");
+                } finally {
+                  setIsDownloading(false);
+                }
+              }}
+              disabled={!isReady || isDownloading}
+              className="h-10 sm:h-9 w-10 p-0"
+              title="Download as ZIP (excludes gitignored files)"
+            >
+              {isDownloading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Download className="w-4 h-4" />
+              )}
+            </Button>
 
             <Button
               size="sm"

@@ -3,11 +3,11 @@ import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import * as repoService from '../services/repo'
 import * as gitOperations from '../services/git-operations'
+import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
-import { withTransactionAsync } from '../db/transactions'
 import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared'
 import path from 'path'
 
@@ -253,6 +253,44 @@ export function createRepoRoutes(database: Database) {
       return c.json(diff)
     } catch (error: any) {
       logger.error('Failed to get file diff:', error)
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.get('/:id/download', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = db.getRepoById(database, id)
+      
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+      
+      const repoPath = path.resolve(getReposPath(), repo.localPath)
+      const repoName = path.basename(repo.localPath)
+      
+      logger.info(`Starting archive creation for repo ${id}: ${repoPath}`)
+      const archivePath = await archiveService.createRepoArchive(repoPath)
+      const archiveSize = await archiveService.getArchiveSize(archivePath)
+      const archiveStream = archiveService.getArchiveStream(archivePath)
+      
+      archiveStream.on('end', () => {
+        archiveService.deleteArchive(archivePath)
+      })
+      
+      archiveStream.on('error', () => {
+        archiveService.deleteArchive(archivePath)
+      })
+
+      return new Response(archiveStream as unknown as ReadableStream, {
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${repoName}.zip"`,
+          'Content-Length': archiveSize.toString(),
+        }
+      })
+    } catch (error: any) {
+      logger.error('Failed to create repo archive:', error)
       return c.json({ error: error.message }, 500)
     }
   })
