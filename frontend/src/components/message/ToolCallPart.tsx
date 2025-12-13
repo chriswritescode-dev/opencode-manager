@@ -67,7 +67,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
   useEffect(() => {
     if (part.tool === 'bash' && expanded && outputRef.current) {
-      outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      outputRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     }
   }, [expanded, part.tool])
 
@@ -132,7 +132,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     const command = part.state.input.command as string
     const output = part.state.status === 'completed' ? part.state.output : ''
     return (
-      <div ref={outputRef} className="my-2">
+      <div className="my-2">
         <div className="flex items-center gap-2 text-sm mb-2">
           <span className="text-green-600 dark:text-green-400">✓</span>
           <span className="font-medium">$</span>
@@ -168,7 +168,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   }
 
   return (
-    <div className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
+    <div ref={outputRef} className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm min-w-0"
@@ -251,7 +251,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
                 </div>
               )}
-              <div className="text-sm" ref={outputRef}>
+              <div className="text-sm">
                 <div className="text-muted-foreground mb-1">Output:</div>
                 <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
                      onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
