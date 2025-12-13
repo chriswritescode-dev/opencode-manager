@@ -123,7 +123,7 @@ export function RepoCard({
                 isWorktree={repo.isWorktree}
                 repoUrl={repo.repoUrl}
                 repoLocalPath={repo.localPath}
-                className="h-10 sm:h-9 min-w-10"
+                className="h-10 sm:h-9 w-[140px] max-w-[140px]"
               />
             )}
 

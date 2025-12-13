@@ -158,6 +158,7 @@ export function SessionDetailHeader({
             isWorktree={repo.isWorktree}
             repoUrl={repo.repoUrl}
             repoLocalPath={repo.localPath}
+            className="max-w-[80px] sm:w-[140px] sm:max-w-[140px]"
           />
           <div className="flex items-center gap-1 sm:gap-2">
             <div

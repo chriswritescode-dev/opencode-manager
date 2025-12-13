@@ -123,6 +123,7 @@ export function RepoDetail() {
                   currentBranch={currentBranch}
                   isWorktree={repo.isWorktree}
                   repoUrl={repo.repoUrl}
+                  className="w-[140px] max-w-[140px]"
                 />
               ) : branchToDisplay ? (
                 <Badge

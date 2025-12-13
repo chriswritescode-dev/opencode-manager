@@ -47,6 +47,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
       queryClient.invalidateQueries({ queryKey: ["branches", repoId] });
+      queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
   });
 
