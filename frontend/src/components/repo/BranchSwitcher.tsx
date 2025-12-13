@@ -21,9 +21,10 @@ interface BranchSwitcherProps {
   repoUrl?: string | null;
   repoLocalPath?: string;
   className?: string;
+  iconOnly?: boolean;
 }
 
-export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, repoLocalPath, className }: BranchSwitcherProps) {
+export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, repoLocalPath, className, iconOnly }: BranchSwitcherProps) {
   const [addBranchOpen, setAddBranchOpen] = useState(false);
   const [gitChangesOpen, setGitChangesOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -63,14 +64,14 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             variant="ghost"
             size="sm"
             disabled={switchBranchMutation.isPending}
-            className={`h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20 ${className || ""}`}
+            className={`h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20 ${iconOnly ? 'w-6' : ''} ${className || ""}`}
           >
             {switchBranchMutation.isPending ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
               <GitBranch className="w-3 h-3" />
             )}
-            <span className="truncate">{currentBranch}</span>
+            {!iconOnly && <span className="truncate">{currentBranch}</span>}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px]">
