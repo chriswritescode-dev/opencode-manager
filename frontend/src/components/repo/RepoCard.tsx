@@ -106,8 +106,8 @@ export function RepoCard({
               <span>Cloning repository...</span>
             </div>
           )}
-          <div className="flex gap-2 flex-wrap">
-					            <Button
+          <div className="flex gap-2">
+            <Button
               size="sm"
               onClick={(e) => {
                 e.stopPropagation();
@@ -127,7 +127,8 @@ export function RepoCard({
                 isWorktree={repo.isWorktree}
                 repoUrl={repo.repoUrl}
                 repoLocalPath={repo.localPath}
-                className="h-10 sm:h-9 w-[140px] max-w-[140px]"
+                iconOnly={true}
+                className="h-10 sm:h-9 w-10"
               />
             )}
 
@@ -172,7 +173,8 @@ export function RepoCard({
               ) : (
                 <Trash2 className="w-4 h-4" />
               )}
-            </Button>          </div>
+            </Button>
+          </div>
         </div>
       </div>
 
