@@ -101,9 +101,7 @@ export function createRepoRoutes(database: Database) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      await withTransactionAsync(database, async (db) => {
-        await repoService.deleteRepoFiles(db, id)
-      })
+      await repoService.deleteRepoFiles(database, id)
       
       return c.json({ success: true })
     } catch (error: any) {

@@ -70,7 +70,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             ) : (
               <GitBranch className="w-3 h-3" />
             )}
-            <span className="hidden sm:inline truncate">{currentBranch}</span>
+            <span className="truncate">{currentBranch}</span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px]">
