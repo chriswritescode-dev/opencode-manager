@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -10,6 +10,7 @@ import { CreateConfigDialog } from './CreateConfigDialog'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
 import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
+import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -53,6 +54,7 @@ export function OpenCodeConfigManager() {
   const [editingConfig, setEditingConfig] = useState<OpenCodeConfig | null>(null)
   const [selectedConfig, setSelectedConfig] = useState<OpenCodeConfig | null>(null)
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    agentsMd: false,
     commands: false,
     agents: false,
     mcp: false,
@@ -61,6 +63,7 @@ export function OpenCodeConfigManager() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
   
+  const agentsMdRef = useRef<HTMLButtonElement>(null)
   const commandsRef = useRef<HTMLButtonElement>(null)
   const agentsRef = useRef<HTMLButtonElement>(null)
   const mcpRef = useRef<HTMLButtonElement>(null)
@@ -360,9 +363,34 @@ export function OpenCodeConfigManager() {
         isUpdating={isUpdating}
       />
 
-      {/* Commands, Agents, and MCP Section */}
+      {/* Global AGENTS.md Section */}
       <div className="mt-8 space-y-6">
         <div className="border-t border-border pt-6">
+          <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0 mb-6">
+            <button
+              ref={agentsMdRef}
+              className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+              onClick={() => {
+                const isExpanding = !expandedSections.agentsMd
+                setExpandedSections(prev => ({ ...prev, agentsMd: isExpanding }))
+                if (isExpanding) {
+                  setTimeout(() => scrollToSection(agentsMdRef), 100)
+                }
+              }}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText className="h-4 w-4 text-blue-500" />
+                <h4 className="text-sm font-medium truncate">Global Agent Instructions (AGENTS.md)</h4>
+              </div>
+              <Edit className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
+            </button>
+            <div className={`${expandedSections.agentsMd ? 'block' : 'hidden'} border-t border-border`}>
+              <div className="p-4">
+                <AgentsMdEditor />
+              </div>
+            </div>
+          </div>
+
           <h3 className="text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
           <p className="text-sm text-muted-foreground mb-6">
             Add custom commands, agents, and MCP servers to your OpenCode configurations. Select a configuration below to edit its settings.

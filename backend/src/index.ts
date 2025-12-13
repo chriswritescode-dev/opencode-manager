@@ -10,7 +10,7 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
-import { ensureDirectoryExists, writeFileContent } from './services/file-operations'
+import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { cleanupOrphanedDirectories } from './services/repo'
@@ -21,6 +21,7 @@ import {
   getReposPath, 
   getConfigPath,
   getOpenCodeConfigFilePath,
+  getAgentsMdPath,
   getDatabasePath,
   ENV
 } from '@opencode-manager/shared'
@@ -37,6 +38,37 @@ app.use('/*', cors({
 }))
 
 const db = initializeDatabase(DB_PATH)
+
+export const DEFAULT_AGENTS_MD = `# OpenCode Manager - Global Agent Instructions
+
+## Critical System Constraints
+
+- **DO NOT** use ports 5003 or 5551 - these are reserved for OpenCode Manager
+- **DO NOT** kill or stop processes on ports 5003 or 5551
+- **DO NOT** modify files in the \`.config/opencode\` directory unless explicitly requested
+
+## Dev Server Ports
+
+When starting dev servers, use the pre-allocated ports 5100-5103:
+- Port 5100: Primary dev server (frontend)
+- Port 5101: Secondary dev server (API/backend)
+- Port 5102: Additional service
+- Port 5103: Additional service
+
+Always bind to \`0.0.0.0\` to allow external access from the Docker host.
+
+## Package Management
+
+Prefer **pnpm** or **bun** over npm for installing dependencies to save disk space:
+- Use \`pnpm install\` instead of \`npm install\`
+- Use \`bun install\` as an alternative
+- Both are pre-installed in the container
+
+## General Guidelines
+
+- This file is merged with any AGENTS.md files in individual repositories
+- Repository-specific instructions take precedence for their respective codebases
+`
 
 const DEFAULT_OPENCODE_CONFIG = {
   $schema: 'https://opencode.ai/config.json',
@@ -122,6 +154,16 @@ async function syncDefaultConfigToDisk(): Promise<void> {
   }
 }
 
+async function ensureDefaultAgentsMdExists(): Promise<void> {
+  const agentsMdPath = getAgentsMdPath()
+  const exists = await fileExists(agentsMdPath)
+  
+  if (!exists) {
+    await writeFileContent(agentsMdPath, DEFAULT_AGENTS_MD)
+    logger.info(`Created default AGENTS.md at: ${agentsMdPath}`)
+  }
+}
+
 try {
   await ensureDirectoryExists(getWorkspacePath())
   await ensureDirectoryExists(getReposPath())
@@ -135,6 +177,7 @@ try {
   
   await ensureDefaultConfigExists()
   await syncDefaultConfigToDisk()
+  await ensureDefaultAgentsMdExists()
   
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()

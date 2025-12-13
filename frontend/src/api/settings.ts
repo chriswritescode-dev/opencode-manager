@@ -102,4 +102,19 @@ export const settingsApi = {
     const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-restart`)
     return data
   },
+
+  getAgentsMd: async (): Promise<{ content: string }> => {
+    const { data } = await axios.get(`${API_BASE_URL}/api/settings/agents-md`)
+    return data
+  },
+
+  getDefaultAgentsMd: async (): Promise<{ content: string }> => {
+    const { data } = await axios.get(`${API_BASE_URL}/api/settings/agents-md/default`)
+    return data
+  },
+
+  updateAgentsMd: async (content: string): Promise<{ success: boolean }> => {
+    const { data } = await axios.put(`${API_BASE_URL}/api/settings/agents-md`, { content })
+    return data
+  },
 }

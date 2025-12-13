@@ -6,6 +6,10 @@ services:
     container_name: opencode-manager
     ports:
       - "5003:5003"
+      - "5100:5100"
+      - "5101:5101"
+      - "5102:5102"
+      - "5103:5103"
     environment:
       - NODE_ENV=production
       - HOST=0.0.0.0

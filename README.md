@@ -125,6 +125,49 @@ docker-compose restart
 docker exec -it opencode-manager sh
 ```
 
+### Dev Server Ports
+
+The Docker container exposes ports `5100-5103` for running dev servers inside your repositories. Configure your project's dev server to use one of these ports and access it directly from your browser.
+
+**Example usage:**
+```bash
+# Vite (vite.config.ts)
+server: { port: 5100, host: '0.0.0.0' }
+
+# Next.js
+next dev -p 5100 -H 0.0.0.0
+
+# Express/Node
+app.listen(5100, '0.0.0.0')
+```
+
+Access your dev server at `http://localhost:5100` (or your Docker host IP).
+
+To customize the exposed ports, edit `docker-compose.yml`:
+```yaml
+ports:
+  - "5003:5003"      # OpenCode Manager
+  - "5100:5100"      # Dev server 1
+  - "5101:5101"      # Dev server 2
+  - "5102:5102"      # Dev server 3
+  - "5103:5103"      # Dev server 4
+```
+
+### Global Agent Instructions (AGENTS.md)
+
+OpenCode Manager creates a default `AGENTS.md` file in the workspace config directory (`/workspace/.config/opencode/AGENTS.md`). This file provides global instructions to AI agents working within the container.
+
+**Default instructions include:**
+- Reserved ports (5003 for OpenCode Manager, 5551 for OpenCode server)
+- Available dev server ports (5100-5103)
+- Guidelines for binding to `0.0.0.0` for Docker accessibility
+
+**Editing AGENTS.md:**
+- Via UI: Settings > OpenCode > Global Agent Instructions
+- Via file: Edit `/workspace/.config/opencode/AGENTS.md` directly
+
+This file is merged with any repository-specific `AGENTS.md` files, with repository instructions taking precedence for their respective codebases.
+
 ### Option 2: Local Development
 
 ```bash

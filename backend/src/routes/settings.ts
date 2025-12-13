@@ -2,15 +2,16 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
-import { writeFileContent } from '../services/file-operations'
+import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { patchOpenCodeConfig } from '../services/proxy'
-import { getOpenCodeConfigFilePath } from '@opencode-manager/shared'
+import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared'
 import { 
   UserPreferencesSchema, 
   OpenCodeConfigSchema,
 } from '../types/settings'
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import { DEFAULT_AGENTS_MD } from '../index'
 
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
@@ -323,6 +324,49 @@ export function createSettingsRoutes(db: Database) {
     } catch (error) {
       logger.error('Failed to delete custom command:', error)
       return c.json({ error: 'Failed to delete custom command' }, 500)
+    }
+  })
+
+  app.get('/agents-md', async (c) => {
+    try {
+      const agentsMdPath = getAgentsMdPath()
+      const exists = await fileExists(agentsMdPath)
+      
+      if (!exists) {
+        return c.json({ content: '' })
+      }
+      
+      const content = await readFileContent(agentsMdPath)
+      return c.json({ content })
+    } catch (error) {
+      logger.error('Failed to get AGENTS.md:', error)
+      return c.json({ error: 'Failed to get AGENTS.md' }, 500)
+    }
+  })
+
+  app.get('/agents-md/default', async (c) => {
+    return c.json({ content: DEFAULT_AGENTS_MD })
+  })
+
+  app.put('/agents-md', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { content } = z.object({ content: z.string() }).parse(body)
+      
+      const agentsMdPath = getAgentsMdPath()
+      await writeFileContent(agentsMdPath, content)
+      logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
+      
+      await opencodeServerManager.restart()
+      logger.info('Restarted OpenCode server after AGENTS.md update')
+      
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to update AGENTS.md:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to update AGENTS.md' }, 500)
     }
   })
 
