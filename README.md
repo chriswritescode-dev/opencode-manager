@@ -24,6 +24,7 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 - **File Operations** - Create files/folders, rename, delete
 - **Drag-and-Drop Upload** - Upload files by dragging into the browser
 - **Large File Support** - Virtualization for large files
+- **ZIP Download** - Download repos as ZIP excluding gitignored files
 
 ### Chat & Session Features
 - **Slash Commands** - Built-in commands (`/help`, `/new`, `/models`, `/export`, `/compact`, etc.)
@@ -54,6 +55,8 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 - **Mobile-First Design** - Responsive UI optimized for mobile use
 - **PWA Support** - Installable as Progressive Web App
 - **iOS Keyboard Support** - Proper keyboard handling on iOS
+- **Enter Key Send** - Press Enter to automatically close keyboard and send messages
+- **Swipe-to-Navigate** - Swipe right from left edge to navigate back
 
 ### Text-to-Speech (TTS)
 - **AI Message Playback** - Listen to assistant responses with TTS
