@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,6 +16,35 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import type { OpenCodeConfig } from '@/api/types/settings'
 
+interface Command {
+  template: string
+  description?: string
+  agent?: string
+  model?: string
+  subtask?: boolean
+  topP?: number
+}
+
+interface Agent {
+  prompt?: string
+  description?: string
+  mode?: 'subagent' | 'primary' | 'all'
+  temperature?: number
+  topP?: number
+  model?: {
+    modelID: string
+    providerID: string
+  }
+  tools?: Record<string, boolean>
+  permission?: {
+    edit?: 'ask' | 'allow' | 'deny'
+    bash?: 'ask' | 'allow' | 'deny' | Record<string, 'ask' | 'allow' | 'deny'>
+    webfetch?: 'ask' | 'allow' | 'deny'
+  }
+  disable?: boolean
+  [key: string]: unknown
+}
+
 export function OpenCodeConfigManager() {
   const queryClient = useQueryClient()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
@@ -32,6 +61,31 @@ export function OpenCodeConfigManager() {
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
   
+  const commandsRef = useRef<HTMLButtonElement>(null)
+  const agentsRef = useRef<HTMLButtonElement>(null)
+  const mcpRef = useRef<HTMLButtonElement>(null)
+  
+  const scrollToSection = (ref: React.RefObject<HTMLButtonElement | null>) => {
+    if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      
+      console.log('Scroll check:', {
+        section: ref.current.textContent?.trim(),
+        rectTop: rect.top,
+        rectBottom: rect.bottom,
+        viewportHeight: window.innerHeight
+      })
+      
+      // Always scroll to ensure the section is at the top when expanded
+      console.log('Scrolling to section:', ref.current.textContent?.trim())
+      ref.current.scrollIntoView({ 
+        behavior: 'smooth', 
+        block: 'start',
+        inline: 'nearest'
+      })
+    }
+  }
+
   const restartServerMutation = useMutation({
     mutationFn: async () => {
       return await settingsApi.restartOpenCodeServer()
@@ -343,13 +397,23 @@ export function OpenCodeConfigManager() {
                   <>
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
+                        ref={commandsRef}
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
-                        onClick={() => setExpandedSections(prev => ({ ...prev, commands: !prev.commands }))}
+                        onClick={() => {
+                          const isExpanding = !expandedSections.commands
+                          console.log('Commands clicked, expanding:', isExpanding)
+                          setExpandedSections(prev => ({ ...prev, commands: isExpanding }))
+                          
+                          // Only scroll when expanding, not collapsing
+                          if (isExpanding) {
+                            setTimeout(() => scrollToSection(commandsRef), 100)
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Commands</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys(selectedConfig.content.command as Record<string, any> || {}).length} configured
+                            {Object.keys(selectedConfig.content.command as Record<string, Command> || {}).length} configured
                           </span>
                         </div>
                         <Edit className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
@@ -357,7 +421,7 @@ export function OpenCodeConfigManager() {
                       <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-1 sm:p-4 max-h-[50vh] overflow-y-auto">
                           <CommandsEditor
-                            commands={(selectedConfig.content.command as Record<string, any>) || {}}
+                            commands={(selectedConfig.content.command as Record<string, Command>) || {}}
                             onChange={(commands) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -372,13 +436,23 @@ export function OpenCodeConfigManager() {
                     
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
+                        ref={agentsRef}
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
-                        onClick={() => setExpandedSections(prev => ({ ...prev, agents: !prev.agents }))}
+                        onClick={() => {
+                          const isExpanding = !expandedSections.agents
+                          console.log('Agents clicked, expanding:', isExpanding)
+                          setExpandedSections(prev => ({ ...prev, agents: isExpanding }))
+                          
+                          // Only scroll when expanding, not collapsing
+                          if (isExpanding) {
+                            setTimeout(() => scrollToSection(agentsRef), 100)
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Agents</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys(selectedConfig.content.agent as Record<string, any> || {}).length} configured
+                            {Object.keys(selectedConfig.content.agent as Record<string, Agent> || {}).length} configured
                           </span>
                         </div>
                         <Edit className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
@@ -386,7 +460,7 @@ export function OpenCodeConfigManager() {
                       <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-4 max-h-[50vh] overflow-y-auto">
                           <AgentsEditor
-                            agents={(selectedConfig.content.agent as Record<string, any>) || {}}
+                            agents={(selectedConfig.content.agent as Record<string, Agent>) || {}}
                             onChange={(agents) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -401,13 +475,23 @@ export function OpenCodeConfigManager() {
 
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
+                        ref={mcpRef}
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
-                        onClick={() => setExpandedSections(prev => ({ ...prev, mcp: !prev.mcp }))}
+                        onClick={() => {
+                          const isExpanding = !expandedSections.mcp
+                          console.log('MCP clicked, expanding:', isExpanding)
+                          setExpandedSections(prev => ({ ...prev, mcp: isExpanding }))
+                          
+                          // Only scroll when expanding, not collapsing
+                          if (isExpanding) {
+                            setTimeout(() => scrollToSection(mcpRef), 100)
+                          }
+                        }}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">MCP Servers</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys((selectedConfig.content.mcp as Record<string, any>) || {}).length} configured
+                            {Object.keys((selectedConfig.content.mcp as Record<string, unknown>) || {}).length} configured
                           </span>
                         </div>
                         <Edit className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
