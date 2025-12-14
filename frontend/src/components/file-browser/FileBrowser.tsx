@@ -274,13 +274,6 @@ useEffect(() => {
     } : null)
 
     await loadFiles(currentPath)
-
-    setTimeout(() => {
-      setUploadProgress(null)
-      if (errors.length > 0) {
-        setError(`${errors.length} file(s) failed to upload`)
-      }
-    }, 2000)
   }, [currentPath, uploadSingleFile])
 
   const handleUpload = useCallback(async (fileList: FileList) => {
@@ -408,14 +401,17 @@ useEffect(() => {
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const isUploadComplete = uploadProgress && uploadProgress.current >= uploadProgress.total
+  const canDismissDialog = isUploadComplete || uploadProgress?.cancelled
+
   const uploadDialog = (
-    <Dialog open={!!uploadProgress} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-md" hideCloseButton>
+    <Dialog open={!!uploadProgress} onOpenChange={(open) => { if (!open && canDismissDialog) setUploadProgress(null) }}>
+      <DialogContent className="sm:max-w-md" hideCloseButton={!canDismissDialog}>
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>
               {uploadProgress?.cancelled ? 'Upload Cancelled' : 
-               uploadProgress && uploadProgress.current >= uploadProgress.total ? 'Upload Complete' : 'Uploading...'}
+               isUploadComplete ? 'Upload Complete' : 'Uploading...'}
             </span>
             {uploadProgress && uploadProgress.current < uploadProgress.total && !uploadProgress.cancelled && (
               <Button variant="ghost" size="sm" onClick={cancelUpload}>
@@ -433,13 +429,34 @@ useEffect(() => {
             <p className="text-sm text-muted-foreground">
               {uploadProgress.current} / {uploadProgress.total} files
             </p>
-            <p className="text-xs text-muted-foreground truncate">
-              {uploadProgress.currentFile}
-            </p>
-            {uploadProgress.errors.length > 0 && (
-              <p className="text-xs text-destructive">
-                {uploadProgress.errors.length} file(s) failed
+            {!isUploadComplete && (
+              <p className="text-xs text-muted-foreground truncate">
+                {uploadProgress.currentFile}
               </p>
+            )}
+            {uploadProgress.errors.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-destructive">
+                  {uploadProgress.errors.length} file(s) failed:
+                </p>
+                <div className="max-h-32 overflow-y-auto rounded border border-destructive/20 bg-destructive/5 p-2">
+                  {uploadProgress.errors.map((error, index) => (
+                    <p key={index} className="text-xs text-destructive break-all">
+                      {error}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+            {canDismissDialog && (
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="w-full mt-2"
+                onClick={() => setUploadProgress(null)}
+              >
+                Close
+              </Button>
             )}
           </div>
         )}
