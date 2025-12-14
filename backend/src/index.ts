@@ -116,7 +116,6 @@ const DEFAULT_OPENCODE_CONFIG = {
     agent_cycle: 'tab',
     agent_cycle_reverse: 'shift+tab',
     input_clear: 'ctrl+c',
-    input_forward_delete: 'ctrl+d',
     input_paste: 'ctrl+v',
     input_submit: 'return',
     input_newline: 'shift+return,ctrl+j',
