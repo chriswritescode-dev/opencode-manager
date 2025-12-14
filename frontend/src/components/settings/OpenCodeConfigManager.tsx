@@ -32,10 +32,8 @@ interface Agent {
   mode?: 'subagent' | 'primary' | 'all'
   temperature?: number
   topP?: number
-  model?: {
-    modelID: string
-    providerID: string
-  }
+  top_p?: number
+  model?: string
   tools?: Record<string, boolean>
   permission?: {
     edit?: 'ask' | 'allow' | 'deny'
