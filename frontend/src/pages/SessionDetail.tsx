@@ -10,7 +10,7 @@ import { SessionList } from "@/components/session/SessionList";
 import { PermissionRequestDialog } from "@/components/session/PermissionRequestDialog";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages } from "@/hooks/useOpenCode";
+import { useSession, useSessions, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useSettings } from "@/hooks/useSettings";
@@ -56,14 +56,13 @@ export function SessionDetail() {
     enabled: !!repoId,
   });
 
-  const { currentPermission, pendingCount, dismissPermission } = usePermissionRequests();
-  
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   const openCodeClient = useOpenCodeClient(opcodeUrl, repo?.fullPath);
   
   const repoDirectory = repo?.fullPath;
 
   const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
+  const { data: sessions } = useSessions(opcodeUrl, repoDirectory);
 
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
@@ -78,6 +77,7 @@ export function SessionDetail() {
     repoDirectory,
   );
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory);
+  const { currentPermission, pendingCount, isFromDifferentSession, dismissPermission } = usePermissionRequests(sessionId);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
@@ -291,6 +291,8 @@ export function SessionDetail() {
       <PermissionRequestDialog
         permission={currentPermission}
         pendingCount={pendingCount}
+        isFromDifferentSession={isFromDifferentSession}
+        sessionTitle={currentPermission ? sessions?.find(s => s.id === currentPermission.sessionID)?.title : undefined}
         onRespond={handlePermissionResponse}
         onDismiss={dismissPermission}
       />
