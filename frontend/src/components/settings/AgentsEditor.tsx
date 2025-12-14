@@ -11,10 +11,8 @@ interface Agent {
   mode?: 'subagent' | 'primary' | 'all'
   temperature?: number
   topP?: number
-  model?: {
-    modelID: string
-    providerID: string
-  }
+  top_p?: number
+  model?: string
   tools?: Record<string, boolean>
   permission?: {
     edit?: 'ask' | 'allow' | 'deny'
@@ -120,7 +118,7 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
                     <p>Mode: {agent.mode}</p>
                     {agent.temperature !== undefined && <p>Temperature: {agent.temperature}</p>}
                     {agent.topP !== undefined && <p>Top P: {agent.topP}</p>}
-                    {agent.model?.modelID && <p>Model: {agent.model.providerID}/{agent.model.modelID}</p>}
+                    {agent.model && <p>Model: {agent.model}</p>}
                     {agent.disable && <p>Status: Disabled</p>}
                   </div>
                   {agent.prompt && (
