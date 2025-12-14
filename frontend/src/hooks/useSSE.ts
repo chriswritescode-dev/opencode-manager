@@ -272,13 +272,36 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           const now = Date.now()
           const updated = currentData.map(msg => {
             if (msg.info.role !== 'assistant') return msg
-            if ('completed' in msg.info.time && msg.info.time.completed) return msg
+            
+            const updatedParts = msg.parts.map(part => {
+              if (part.type !== 'tool') return part
+              if (part.state.status !== 'running' && part.state.status !== 'pending') return part
+              return {
+                ...part,
+                state: {
+                  ...part.state,
+                  status: 'completed' as const,
+                  output: part.state.status === 'running' ? '[Session ended - output not captured]' : '[Tool was pending when session ended]',
+                  title: part.state.status === 'running' ? (part.state as { title?: string }).title || '' : '',
+                  metadata: (part.state as { metadata?: Record<string, unknown> }).metadata || {},
+                  time: {
+                    start: (part.state as { time?: { start: number } }).time?.start || now,
+                    end: now
+                  }
+                }
+              }
+            })
+            
+            const msgUpdated = updatedParts !== msg.parts
+            if ('completed' in msg.info.time && msg.info.time.completed && !msgUpdated) return msg
+            
             return {
               ...msg,
               info: {
                 ...msg.info,
                 time: { ...msg.info.time, completed: now }
-              }
+              },
+              parts: updatedParts
             }
           })
           
