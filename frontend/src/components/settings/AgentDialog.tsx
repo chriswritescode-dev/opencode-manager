@@ -1,6 +1,8 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -8,6 +10,8 @@ import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, For
 import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
+import { getProvidersWithModels } from '@/api/providers'
 
 const agentFormSchema = z.object({
   name: z.string().min(1, 'Agent name is required').regex(/^[a-z0-9-]+$/, 'Must be lowercase letters, numbers, and hyphens only'),
@@ -36,10 +40,8 @@ interface Agent {
   mode?: 'subagent' | 'primary' | 'all'
   temperature?: number
   topP?: number
-  model?: {
-    modelID: string
-    providerID: string
-  }
+  top_p?: number
+  model?: string
   tools?: Record<string, boolean>
   permission?: {
     edit?: 'ask' | 'allow' | 'deny'
@@ -50,6 +52,12 @@ interface Agent {
   [key: string]: unknown
 }
 
+function parseModelString(model?: string): { providerId: string; modelId: string } {
+  if (!model) return { providerId: '', modelId: '' }
+  const [providerId, ...rest] = model.split('/')
+  return { providerId: providerId || '', modelId: rest.join('/') || '' }
+}
+
 interface AgentDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -58,6 +66,29 @@ interface AgentDialogProps {
 }
 
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
+  const parsedModel = parseModelString(editingAgent?.agent.model)
+  
+  const { data: providers = [] } = useQuery({
+    queryKey: ['providers-with-models'],
+    queryFn: () => getProvidersWithModels(),
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const providerOptions: ComboboxOption[] = useMemo(() => {
+    const sourceLabels: Record<string, string> = {
+      configured: 'Custom',
+      local: 'Local',
+      builtin: 'Built-in',
+    }
+    return providers.map(p => ({
+      value: p.id,
+      label: p.name || p.id,
+      description: p.models.length > 0 ? `${p.models.length} models` : undefined,
+      group: sourceLabels[p.source] || 'Other',
+    }))
+  }, [providers])
+
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
     defaultValues: {
@@ -66,9 +97,9 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       prompt: editingAgent?.agent.prompt || '',
       mode: editingAgent?.agent.mode || 'subagent',
       temperature: editingAgent?.agent.temperature ?? 0.7,
-      topP: editingAgent?.agent.topP ?? 1,
-      modelId: editingAgent?.agent.model?.modelID || '',
-      providerId: editingAgent?.agent.model?.providerID || '',
+      topP: editingAgent?.agent.topP ?? editingAgent?.agent.top_p ?? 1,
+      modelId: parsedModel.modelId,
+      providerId: parsedModel.providerId,
       write: editingAgent?.agent.tools?.write ?? true,
       edit: editingAgent?.agent.tools?.edit ?? true,
       bash: editingAgent?.agent.tools?.bash ?? true,
@@ -79,6 +110,23 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       disable: editingAgent?.agent.disable ?? false
     }
   })
+
+  const selectedProviderId = form.watch('providerId')
+
+  const modelOptions: ComboboxOption[] = useMemo(() => {
+    const selectedProvider = providers.find(p => p.id === selectedProviderId)
+    if (selectedProvider && selectedProvider.models.length > 0) {
+      return selectedProvider.models.map(m => ({
+        value: m.id,
+        label: m.name || m.id,
+      }))
+    }
+    return providers.flatMap(p => p.models.map(m => ({
+      value: m.id,
+      label: m.name || m.id,
+      group: p.name || p.id,
+    })))
+  }, [providers, selectedProviderId])
 
   const handleSubmit = (values: AgentFormValues) => {
     const agent: Agent = {
@@ -101,11 +149,8 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
       }
     }
 
-    if (values.modelId || values.providerId) {
-      agent.model = {
-        modelID: values.modelId || '',
-        providerID: values.providerId || ''
-      }
+    if (values.modelId && values.providerId) {
+      agent.model = `${values.providerId}/${values.modelId}`
     }
 
     onSubmit(values.name, agent)
@@ -259,14 +304,17 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
               <div className="flex flex-col sm:grid grid-cols-2 gap-4">
                 <FormField
                   control={form.control}
-                  name="modelId"
+                  name="providerId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Model ID</FormLabel>
+                      <FormLabel>Provider ID</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="claude-3-5-sonnet-20241022"
+                        <Combobox
+                          value={field.value || ''}
+                          onChange={field.onChange}
+                          options={providerOptions}
+                          placeholder="Select or type provider..."
+                          allowCustomValue
                         />
                       </FormControl>
                       <FormMessage />
@@ -276,14 +324,17 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
 
                 <FormField
                   control={form.control}
-                  name="providerId"
+                  name="modelId"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Provider ID</FormLabel>
+                      <FormLabel>Model ID</FormLabel>
                       <FormControl>
-                        <Input
-                          {...field}
-                          placeholder="anthropic"
+                        <Combobox
+                          value={field.value || ''}
+                          onChange={field.onChange}
+                          options={modelOptions}
+                          placeholder="Select or type model..."
+                          allowCustomValue
                         />
                       </FormControl>
                       <FormMessage />
