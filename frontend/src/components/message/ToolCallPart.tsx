@@ -278,7 +278,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               )}
               <div className="text-sm">
                 <div className="text-muted-foreground mb-1">Output:</div>
-                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
+                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all cursor-pointer hover:bg-accent/80 transition-colors" 
                      onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
                      title="Click to copy output">
                   {part.state.status === 'completed' ? part.state.output : ''}
