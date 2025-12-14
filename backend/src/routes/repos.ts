@@ -204,7 +204,8 @@ export function createRepoRoutes(database: Database) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const branches = await repoService.listBranches(repo)
+       const branches = await repoService.listBranches(database, repo)
+
       
       return c.json(branches)
     } catch (error: any) {
@@ -223,7 +224,8 @@ export function createRepoRoutes(database: Database) {
       }
       
       const repoPath = path.resolve(getReposPath(), repo.localPath)
-      const status = await gitOperations.getGitStatus(repoPath)
+       const status = await gitOperations.getGitStatus(repoPath, database)
+
       
       return c.json(status)
     } catch (error: any) {
@@ -248,7 +250,8 @@ export function createRepoRoutes(database: Database) {
       }
       
       const repoPath = path.resolve(getReposPath(), repo.localPath)
-      const diff = await gitOperations.getFileDiff(repoPath, filePath)
+       const diff = await gitOperations.getFileDiff(repoPath, filePath, database)
+
       
       return c.json(diff)
     } catch (error: any) {

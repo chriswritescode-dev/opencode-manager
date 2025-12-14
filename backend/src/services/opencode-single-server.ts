@@ -1,6 +1,7 @@
 import { spawn, execSync } from 'child_process'
 import path from 'path'
 import { logger } from '../utils/logger'
+import { createGitHubGitEnv, createNoPromptGitEnv } from '../utils/git-auth'
 import { SettingsService } from './settings'
 import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared'
 import type { Database } from 'bun:sqlite'
@@ -101,8 +102,9 @@ class OpenCodeServerManager {
     logger.info(`OpenCode server working directory: ${OPENCODE_SERVER_DIRECTORY}`)
     logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(OPENCODE_SERVER_DIRECTORY, '.config')}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
-    
-    
+
+    const gitEnv = gitToken ? createGitHubGitEnv(gitToken) : createNoPromptGitEnv()
+
     this.serverProcess = spawn(
       'opencode', 
       ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', '127.0.0.1'],
@@ -112,12 +114,10 @@ class OpenCodeServerManager {
         stdio: isDevelopment ? 'inherit' : 'ignore',
         env: {
           ...process.env,
+          ...gitEnv,
           XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.config'),
           OPENCODE_CONFIG: OPENCODE_CONFIG_PATH,
-          GITHUB_TOKEN: gitToken,
-          GIT_ASKPASS: gitToken ? 'echo $GITHUB_TOKEN' : 'echo',
-          GIT_TERMINAL_PROMPT: '0'
         }
       }
     )
