@@ -5,6 +5,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
+import { createGitEnvForRepoUrl, createNoPromptGitEnv } from '../utils/git-auth'
 import { getReposPath } from '@opencode-manager/shared'
 import path from 'path'
 
@@ -34,6 +35,22 @@ async function safeGetCurrentBranch(repoPath: string): Promise<string | null> {
     return currentBranch.trim()
   } catch {
     return null
+  }
+}
+
+function getGitEnv(database: Database, repoUrl?: string | null): Record<string, string> {
+  try {
+    const settingsService = new SettingsService(database)
+    const settings = settingsService.getSettings('default')
+    const gitToken = settings.preferences.gitToken
+
+    if (!repoUrl) {
+      return createNoPromptGitEnv()
+    }
+
+    return createGitEnvForRepoUrl(repoUrl, gitToken)
+  } catch {
+    return createNoPromptGitEnv()
   }
 }
 
@@ -77,17 +94,7 @@ export async function initLocalRepo(
     logger.info(`Created directory for local repo: ${fullPath}`)
     
     logger.info(`Initializing git repository: ${fullPath}`)
-    const settingsService = new SettingsService(database)
-    const settings = settingsService.getSettings('default')
-    const gitToken = settings.preferences.gitToken
-    const env: Record<string, string> = gitToken ? 
-    { 
-      GITHUB_TOKEN: gitToken, 
-      GIT_ASKPASS: 'echo $GITHUB_TOKEN', 
-      GIT_TERMINAL_PROMPT: '0'
-    } : 
-    { GIT_ASKPASS: 'echo', GIT_TERMINAL_PROMPT: '0' }
-    
+
     await executeCommand(['git', 'init'], { cwd: fullPath })
     
     if (branch && branch !== 'main') {
@@ -167,19 +174,16 @@ export async function cloneRepo(
   const repo = db.createRepo(database, createRepoInput)
   
   try {
-    const settingsService = new SettingsService(database)
-    const settings = settingsService.getSettings('default')
-    const gitToken = settings.preferences.gitToken
-    
-    const cloneUrl = repoUrl
-    
+    const env = getGitEnv(database, repoUrl)
+
     if (shouldUseWorktree) {
       logger.info(`Creating worktree for branch: ${branch}`)
       
       const baseRepoPath = path.resolve(getReposPath(), baseRepoDirName)
       const worktreePath = path.resolve(getReposPath(), worktreeDirName)
       
-      await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'])
+       await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], { env })
+
       
       await createWorktreeSafely(baseRepoPath, worktreePath, branch)
       
@@ -213,7 +217,7 @@ export async function cloneRepo(
       
       try {
         const cloneCmd = ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
-        await executeCommand(cloneCmd, getReposPath())
+        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
       } catch (error: any) {
         if (error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
@@ -222,7 +226,7 @@ export async function cloneRepo(
         
         logger.info(`Branch '${branch}' not found during clone, cloning default branch and creating branch locally`)
         const cloneCmd = ['git', 'clone', repoUrl, worktreeDirName]
-        await executeCommand(cloneCmd, getReposPath())
+        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
         let localBranchExists = 'missing'
         try {
           await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -246,7 +250,8 @@ export async function cloneRepo(
           
           if (branch) {
             logger.info(`Switching to branch: ${branch}`)
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'])
+             await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { env })
+
             
             let remoteBranchExists = false
             try {
@@ -306,7 +311,7 @@ export async function cloneRepo(
           ? ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
           : ['git', 'clone', repoUrl, worktreeDirName]
         
-        await executeCommand(cloneCmd, getReposPath())
+        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
       } catch (error: any) {
         if (error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
@@ -316,7 +321,7 @@ export async function cloneRepo(
         if (branch && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
 const cloneCmd = ['git', 'clone', repoUrl, worktreeDirName]
-          await executeCommand(cloneCmd, getReposPath())
+          await executeCommand(cloneCmd, { cwd: getReposPath(), env })
           let localBranchExists = 'missing'
           try {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -352,12 +357,13 @@ export async function getCurrentBranch(repo: Repo): Promise<string | null> {
   return branch || repo.branch || repo.defaultBranch || null
 }
 
-export async function listBranches(repo: Repo): Promise<{ local: string[], remote: string[], current: string | null }> {
+export async function listBranches(database: Database, repo: Repo): Promise<{ local: string[], remote: string[], current: string | null }> {
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
-    
+    const env = getGitEnv(database, repo.repoUrl)
+
     if (!repo.isLocal) {
-      await executeCommand(['git', '-C', repoPath, 'fetch', '--all'])
+      await executeCommand(['git', '-C', repoPath, 'fetch', '--all'], { env })
     }
     
     const localBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '--format=%(refname:short)'])
@@ -399,10 +405,11 @@ export async function switchBranch(database: Database, repoId: number, branch: s
   
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
-    
+    const env = getGitEnv(database, repo.repoUrl)
+
     logger.info(`Switching to branch: ${branch} in ${repo.localPath}`)
-    
-    await executeCommand(['git', '-C', repoPath, 'fetch', '--all'])
+
+    await executeCommand(['git', '-C', repoPath, 'fetch', '--all'], { env })
     
     let localBranchExists = false
     try {
@@ -450,8 +457,10 @@ export async function pullRepo(database: Database, repoId: number): Promise<void
   }
   
   try {
+    const env = getGitEnv(database, repo.repoUrl)
+
     logger.info(`Pulling repo: ${repo.repoUrl}`)
-    await executeCommand(['git', '-C', path.resolve(getReposPath(), repo.localPath), 'pull'])
+    await executeCommand(['git', '-C', path.resolve(getReposPath(), repo.localPath), 'pull'], { env })
     
     db.updateLastPulled(database, repoId)
     logger.info(`Repo pulled successfully: ${repo.repoUrl}`)

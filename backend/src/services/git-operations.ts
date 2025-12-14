@@ -3,6 +3,7 @@ import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
 import type { Database } from 'bun:sqlite'
 import path from 'path'
+import { createGitHubGitEnv, createNoPromptGitEnv } from '../utils/git-auth'
 
 async function hasCommits(repoPath: string): Promise<boolean> {
   try {
@@ -18,25 +19,15 @@ function getGitEnvironment(database: Database): Record<string, string> {
     const settingsService = new SettingsService(database)
     const settings = settingsService.getSettings('default')
     const gitToken = settings.preferences.gitToken
-    
+
     if (gitToken) {
-      return {
-        GITHUB_TOKEN: gitToken,
-        GIT_ASKPASS: 'echo $GITHUB_TOKEN',
-        GIT_TERMINAL_PROMPT: '0'
-      }
+      return createGitHubGitEnv(gitToken)
     }
-    
-    return {
-      GIT_ASKPASS: 'echo',
-      GIT_TERMINAL_PROMPT: '0'
-    }
+
+    return createNoPromptGitEnv()
   } catch (error) {
     logger.warn('Failed to get git token from settings:', error)
-    return {
-      GIT_ASKPASS: 'echo',
-      GIT_TERMINAL_PROMPT: '0'
-    }
+    return createNoPromptGitEnv()
   }
 }
 
