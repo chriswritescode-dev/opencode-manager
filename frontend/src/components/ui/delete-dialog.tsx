@@ -35,10 +35,10 @@ export function DeleteDialog({
         </DialogHeader>
         
         {itemName && (
-          <Alert>
-            <AlertTriangle className="h-4 w-4" />
-            <AlertDescription>
-              This will permanently delete "{itemName}". This action cannot be undone.
+          <Alert className="overflow-hidden">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            <AlertDescription className="break-all">
+              This will permanently delete "<span className="font-medium">{itemName}</span>". This action cannot be undone.
             </AlertDescription>
           </Alert>
         )}

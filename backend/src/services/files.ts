@@ -138,7 +138,7 @@ export async function getFile(userPath: string): Promise<FileInfo> {
   }
 }
 
-export async function uploadFile(userPath: string, file: File): Promise<FileUploadResult> {
+export async function uploadFile(userPath: string, file: File, relativePath?: string): Promise<FileUploadResult> {
   if (file.size > FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES) {
     throw new Error('File too large')
   }
@@ -148,17 +148,25 @@ export async function uploadFile(userPath: string, file: File): Promise<FileUplo
     throw new Error('File type not allowed')
   }
   
-  const validatedPath = validatePath(userPath)
-  const fileName = file.name || path.basename(userPath)
-  const fullPath = path.join(validatedPath, fileName)
+  const validatedBasePath = validatePath(userPath)
+  const targetRelativePath = relativePath || file.name || path.basename(userPath)
+  const fullPath = path.join(validatedBasePath, targetRelativePath)
+  
+  const finalValidatedPath = validatePath(path.join(userPath, targetRelativePath))
+  if (finalValidatedPath !== fullPath) {
+    throw { message: 'Invalid relative path', statusCode: 400 }
+  }
+  
+  const parentDir = path.dirname(fullPath)
+  await fs.mkdir(parentDir, { recursive: true })
   
   const buffer = await file.arrayBuffer()
   
   await writeFileContent(fullPath, Buffer.from(buffer))
   
   return {
-    name: fileName,
-    path: path.join(userPath, fileName),
+    name: path.basename(targetRelativePath),
+    path: path.join(userPath, targetRelativePath),
     size: file.size,
     mimeType,
   }
