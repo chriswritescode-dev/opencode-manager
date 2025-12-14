@@ -99,6 +99,7 @@ class OpenCodeServerManager {
     }
 
     logger.info(`OpenCode server working directory: ${OPENCODE_SERVER_DIRECTORY}`)
+    logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(OPENCODE_SERVER_DIRECTORY, '.config')}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
     
     
@@ -112,6 +113,7 @@ class OpenCodeServerManager {
         env: {
           ...process.env,
           XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
+          XDG_CONFIG_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.config'),
           OPENCODE_CONFIG: OPENCODE_CONFIG_PATH,
           GITHUB_TOKEN: gitToken,
           GIT_ASKPASS: gitToken ? 'echo $GITHUB_TOKEN' : 'echo',
