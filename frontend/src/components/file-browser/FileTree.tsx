@@ -1,7 +1,9 @@
 import { useState, memo } from 'react'
+import { useMobile } from '@/hooks/useMobile'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { API_BASE_URL } from '@/config'
 import { 
   File, 
   Folder, 
@@ -10,7 +12,8 @@ import {
   ChevronDown,
   MoreHorizontal,
   Trash2,
-  Edit3
+  Edit3,
+  Download
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -42,6 +45,7 @@ interface TreeNodeProps {
 }
 
 function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, onDelete, onRename }: TreeNodeProps) {
+  const isMobile = useMobile()
   const [expanded, setExpanded] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editName, setEditName] = useState(file.name)
@@ -84,6 +88,18 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
   const handleRenameCancel = () => {
     setEditing(false)
     setEditName(file.name)
+  }
+
+  const handleDownload = () => {
+    if (file.isDirectory) return
+    
+    const downloadUrl = `${API_BASE_URL}/api/files/${file.path}?download=true`
+    const link = document.createElement('a')
+    link.href = downloadUrl
+    link.download = file.name
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
   }
 
   const getFileIcon = () => {
@@ -167,12 +183,18 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
             <Button
               variant="ghost"
               size="sm"
-              className="w-6 h-6 p-0 opacity-0 group-hover:opacity-100"
+              className={`w-6 h-6 p-0 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
             >
               <MoreHorizontal className="w-3 h-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
+            {!file.isDirectory && (
+              <DropdownMenuItem onClick={handleDownload}>
+                <Download className="w-4 h-4 mr-2" />
+                Download
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={handleRename}>
               <Edit3 className="w-4 h-4 mr-2" />
               Rename
