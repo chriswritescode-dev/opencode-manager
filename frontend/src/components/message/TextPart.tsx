@@ -49,7 +49,7 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
 
   return (
     <div className="relative">
-      <pre className={`bg-accent p-1 rounded-lg overflow-x-auto border border-border my-4 ${className || ''}`} {...props}>
+      <pre className={`bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4 ${className || ''}`} {...props}>
         {children}
       </pre>
       <button
@@ -82,7 +82,7 @@ export function TextPart({ part }: TextPartProps) {
             const isInline = !className || !className.includes('language-')
             if (isInline) {
               return (
-                <code className={className || "bg-accent px-1.5 py-0.5 rounded text-sm text-foreground"} {...props}>
+                <code className={className || "bg-accent px-1.5 py-0.5 rounded text-sm text-foreground break-all"} {...props}>
                   {children}
                 </code>
               )
