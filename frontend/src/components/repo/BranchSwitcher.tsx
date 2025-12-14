@@ -45,8 +45,8 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
 
   const switchBranchMutation = useMutation({
     mutationFn: (branch: string) => switchBranch(repoId, branch),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
+    onSuccess: (updatedRepo) => {
+      queryClient.setQueryData(["repo", repoId], updatedRepo);
       queryClient.invalidateQueries({ queryKey: ["branches", repoId] });
       queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
