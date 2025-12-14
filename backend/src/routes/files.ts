@@ -66,7 +66,8 @@ export function createFileRoutes(_database: Database) {
         return c.json({ error: 'No file provided' }, 400)
       }
       
-      const result = await fileService.uploadFile(path, file)
+      const relativePath = body.relativePath as string | undefined
+      const result = await fileService.uploadFile(path, file, relativePath)
       return c.json(result)
     } catch (error: any) {
       logger.error('Failed to upload file:', error)

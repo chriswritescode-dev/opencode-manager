@@ -1,9 +1,11 @@
-import { useState, memo } from 'react'
+import { useState, memo, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Upload, Plus, FolderPlus, FilePlus } from 'lucide-react'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Upload, Plus, FolderPlus, FilePlus, File, Folder } from 'lucide-react'
+import { useMobile } from '@/hooks/useMobile'
 
 interface FileOperationsProps {
   onUpload: (files: FileList) => void
@@ -14,6 +16,10 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [createType, setCreateType] = useState<'file' | 'folder'>('file')
   const [createName, setCreateName] = useState('')
+  
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const isMobile = useMobile()
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
@@ -33,21 +39,45 @@ export const FileOperations = memo(function FileOperations({ onUpload, onCreate 
 
   return (
     <div className="flex items-center gap-2">
-      <div className="relative">
-        <input
-          type="file"
-          id="file-upload"
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-          onChange={handleFileSelect}
-          multiple
-        />
-        <Button variant="outline" size="sm" asChild>
-          <label htmlFor="file-upload" className="cursor-pointer flex items-center gap-2">
-            <Upload className="w-4 h-4" />
-            <span className='hidden sm:inline'>Upload</span>
-          </label>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileSelect}
+        multiple
+      />
+      <input
+        ref={folderInputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFileSelect}
+        {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+      />
+      
+      {isMobile ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm">
+              <Upload className="w-4 h-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => fileInputRef.current?.click()}>
+              <File className="w-4 h-4 mr-2" />
+              Files
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => folderInputRef.current?.click()}>
+              <Folder className="w-4 h-4 mr-2" />
+              Folder
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+          <Upload className="w-4 h-4" />
+          <span className="hidden sm:inline ml-1">Upload</span>
         </Button>
-      </div>
+      )}
 
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
         <DialogTrigger asChild>
