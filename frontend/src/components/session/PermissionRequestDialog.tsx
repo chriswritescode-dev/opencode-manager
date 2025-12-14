@@ -14,8 +14,10 @@ import { cn } from '@/lib/utils'
 interface PermissionRequestDialogProps {
   permission: Permission | null
   pendingCount: number
+  isFromDifferentSession?: boolean
+  sessionTitle?: string
   onRespond: (permissionID: string, sessionID: string, response: PermissionResponse) => Promise<void>
-  onDismiss: (permissionID: string) => void
+  onDismiss: (permissionID: string, sessionID?: string) => void
 }
 
 function getPermissionTypeLabel(type: string): string {
@@ -107,6 +109,8 @@ function getPermissionDetails(permission: Permission): { primary: string; second
 export function PermissionRequestDialog({
   permission,
   pendingCount,
+  isFromDifferentSession,
+  sessionTitle,
   onRespond,
   onDismiss,
 }: PermissionRequestDialogProps) {
@@ -122,7 +126,7 @@ export function PermissionRequestDialog({
       await onRespond(permission.id, permission.sessionID, response)
     } catch (error) {
       console.error('Failed to respond to permission:', error)
-      onDismiss(permission.id)
+      onDismiss(permission.id, permission.sessionID)
     } finally {
       setIsLoading(false)
       setLoadingAction(null)
@@ -132,6 +136,7 @@ export function PermissionRequestDialog({
   const typeLabel = getPermissionTypeLabel(permission.type)
   const details = getPermissionDetails(permission)
   const hasMultiple = pendingCount > 1
+  const displaySessionName = sessionTitle || `Session ${permission.sessionID.slice(0, 8)}...`
 
   return (
     <Dialog open={true} onOpenChange={() => {}}>
@@ -173,9 +178,15 @@ export function PermissionRequestDialog({
             </div>
           )}
 
-          <div className="text-xs text-muted-foreground">
-            Session: <span className="font-mono">{permission.sessionID.slice(0, 12)}...</span>
-          </div>
+          {isFromDifferentSession ? (
+            <div className="text-xs bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 rounded-md px-2 py-1.5">
+              From another session: <span className="font-medium">{displaySessionName}</span>
+            </div>
+          ) : (
+            <div className="text-xs text-muted-foreground">
+              Session: <span className="font-medium">{displaySessionName}</span>
+            </div>
+          )}
         </div>
 
         <DialogFooter className="flex-row gap-2 sm:justify-between">

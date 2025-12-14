@@ -293,8 +293,12 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           break
 
         case 'permission.replied':
-          if ('permissionID' in event.properties) {
-            permissionEvents.emit({ type: 'remove', permissionID: event.properties.permissionID })
+          if ('permissionID' in event.properties && 'sessionID' in event.properties) {
+            permissionEvents.emit({ 
+              type: 'remove', 
+              sessionID: event.properties.sessionID,
+              permissionID: event.properties.permissionID 
+            })
           }
           break
 
