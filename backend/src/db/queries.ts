@@ -1,6 +1,6 @@
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
-import { getReposPath } from '@opencode-manager/shared'
+import { getReposPath } from '@opencode-manager/shared/config/env'
 import path from 'path'
 
 export interface RepoRow {

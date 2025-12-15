@@ -6,7 +6,7 @@ import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
-import { getWorkspacePath } from '@opencode-manager/shared'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
 const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'discovery')

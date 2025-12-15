@@ -9,7 +9,7 @@ import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
-import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared'
+import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared/config/env'
 import path from 'path'
 
 export function createRepoRoutes(database: Database) {

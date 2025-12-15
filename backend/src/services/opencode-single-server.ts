@@ -3,7 +3,7 @@ import path from 'path'
 import { logger } from '../utils/logger'
 import { createGitHubGitEnv, createNoPromptGitEnv } from '../utils/git-auth'
 import { SettingsService } from './settings'
-import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared'
+import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT

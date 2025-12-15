@@ -24,7 +24,7 @@ import {
   getAgentsMdPath,
   getDatabasePath,
   ENV
-} from '@opencode-manager/shared'
+} from '@opencode-manager/shared/config/env'
 
 const { PORT, HOST } = ENV.SERVER
 const DB_PATH = getDatabasePath()

@@ -13,7 +13,8 @@ import {
   getFileStats, 
   listDirectory 
 } from './file-operations'
-import { FILE_LIMITS, ALLOWED_MIME_TYPES, getReposPath } from '@opencode-manager/shared'
+import { getReposPath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { ALLOWED_MIME_TYPES } from '@opencode-manager/shared'
 import type { ChunkedFileInfo, PatchOperation } from '@opencode-manager/shared'
 
 const SHARED_WORKSPACE_BASE = getReposPath()
