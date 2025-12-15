@@ -19,12 +19,7 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 
 import type { components } from '@/api/opencode-types'
 import type { MessageWithParts, FileInfo } from '@/api/types'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+
 
 type CommandType = components['schemas']['Command']
 
@@ -507,46 +502,21 @@ export function PromptInput({
           >
             {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
-          {!hideSecondaryButtons && (
-            hasActiveStream ? (
+          {hasActiveStream ? (
               <div className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground max-w-[120px] md:max-w-[180px] truncate">
                 <SessionStatusIndicator sessionID={sessionID} />
               </div>
             ) : (
-              <button
-                onClick={onShowModelsDialog}
-                className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
-              >
-                {currentModel.length > 12 ? currentModel.substring(0, 10) + '...' : currentModel || 'Select model'}
-              </button>
-            )
-          )}
-          {!hideSecondaryButtons && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+              !hideSecondaryButtons && (
                 <button
-                  className="w-6 h-6 rounded-full border-2 border-foreground text-foreground hover:bg-foreground hover:text-background transition-colors flex items-center justify-center text-sm font-medium flex-shrink-0"
-                  title="Help"
+                  onClick={onShowModelsDialog}
+                  className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
                 >
-                  ?
+                  {currentModel.length > 12 ? currentModel.substring(0, 10) + '...' : currentModel || 'Select model'}
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground font-medium">
-                  Keyboard Shortcuts
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                  <span className="font-mono">Cmd/Ctrl+Enter</span> - Send message
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                  <span className="font-mono">@</span> - Mention files or agents
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                  <span className="font-mono">!</span> - Bash command mode
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+              )
+            )}
+          
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
           <button
