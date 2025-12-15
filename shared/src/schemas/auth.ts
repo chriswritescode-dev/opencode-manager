@@ -27,7 +27,7 @@ export const ProviderAuthMethodSchema = z.object({
   label: z.string(),
 });
 
-export const ProviderAuthMethodsSchema = z.record(z.array(ProviderAuthMethodSchema));
+export const ProviderAuthMethodsSchema = z.record(z.string(), z.array(ProviderAuthMethodSchema));
 
 export const OAuthAuthorizeRequestSchema = z.object({
   method: z.number(),
@@ -45,5 +45,5 @@ export const OAuthCallbackRequestSchema = z.object({
 });
 
 export const ProviderAuthMethodsResponseSchema = z.object({
-  providers: z.record(z.array(ProviderAuthMethodSchema)),
+  providers: z.record(z.string(), z.array(ProviderAuthMethodSchema)),
 });

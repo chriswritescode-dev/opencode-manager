@@ -117,4 +117,9 @@ export const settingsApi = {
     const { data } = await axios.put(`${API_BASE_URL}/api/settings/agents-md`, { content })
     return data
   },
+
+  validateGitToken: async (gitToken: string): Promise<{ valid: boolean; message: string }> => {
+    const { data } = await axios.post(`${API_BASE_URL}/api/settings/validate-git-token`, { gitToken })
+    return data
+  },
 }
