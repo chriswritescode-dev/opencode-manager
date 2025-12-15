@@ -231,7 +231,7 @@ export async function cloneRepo(
       const baseRepoPath = path.resolve(getReposPath(), baseRepoDirName)
       const worktreePath = path.resolve(getReposPath(), worktreeDirName)
       
-       await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], { env })
+       await executeGitWithFallback(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env })
 
       
       await createWorktreeSafely(baseRepoPath, worktreePath, branch)
@@ -297,7 +297,7 @@ export async function cloneRepo(
           
           if (branch) {
             logger.info(`Switching to branch: ${branch}`)
-             await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { env })
+             await executeGitWithFallback(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { cwd: getReposPath(), env })
 
             
             let remoteBranchExists = false
