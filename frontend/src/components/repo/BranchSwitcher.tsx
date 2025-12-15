@@ -9,10 +9,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GitBranch, Check, Plus, GitCommit, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listBranches, switchBranch } from "@/api/repos";
+import { listBranches, switchBranch, GitAuthError } from "@/api/repos";
 import { useGitStatus } from "@/api/git";
 import { AddBranchWorkspaceDialog } from "@/components/repo/AddBranchWorkspaceDialog";
 import { GitChangesSheet } from "@/components/file-browser/GitChangesSheet";
+import { showToast } from "@/lib/toast";
 
 interface BranchSwitcherProps {
   repoId: number;
@@ -50,11 +51,21 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
       queryClient.invalidateQueries({ queryKey: ["branches", repoId] });
       queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
+    onError: (error) => {
+      if (error instanceof GitAuthError) {
+        showToast.error('Authentication failed. Please update your Git token in Settings or run "gh auth login".');
+      } else {
+        showToast.error(error.message || 'Failed to switch branch');
+      }
+    },
   });
 
   if (isWorktree) {
     return null;
   }
+
+  const isCurrentBranchInList = branches?.all?.includes(currentBranch) ?? false;
+  const showLoading = switchBranchMutation.isPending || (branchesLoading && !isCurrentBranchInList);
 
   return (
     <>
@@ -66,7 +77,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             disabled={switchBranchMutation.isPending}
             className={`h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20 ${iconOnly ? 'w-6' : ''} ${className || ""}`}
           >
-            {switchBranchMutation.isPending ? (
+            {showLoading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
               <GitBranch className="w-3 h-3" />
@@ -79,8 +90,8 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             <DropdownMenuItem disabled className="text-muted-foreground">
               Loading branches...
             </DropdownMenuItem>
-          ) : branches?.local && branches.local.length > 0 ? (
-            branches.local.map((branch: string) => (
+          ) : branches?.all && branches.all.length > 0 ? (
+            branches.all.map((branch: string) => (
               <DropdownMenuItem
                 key={branch}
                 onClick={() => switchBranchMutation.mutate(branch)}
@@ -136,6 +147,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           open={addBranchOpen}
           onOpenChange={setAddBranchOpen}
           repoUrl={repoUrl}
+          repoId={repoId}
         />
       )}
 
