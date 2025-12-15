@@ -60,10 +60,6 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
     },
   });
 
-  if (isWorktree) {
-    return null;
-  }
-
   const isCurrentBranchInList = branches?.all?.includes(currentBranch) ?? false;
   const showLoading = switchBranchMutation.isPending || (branchesLoading && !isCurrentBranchInList);
 
@@ -86,57 +82,85 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px]">
-          {branchesLoading ? (
-            <DropdownMenuItem disabled className="text-muted-foreground">
-              Loading branches...
-            </DropdownMenuItem>
-          ) : branches?.all && branches.all.length > 0 ? (
-            branches.all.map((branch: string) => (
-              <DropdownMenuItem
-                key={branch}
-                onClick={() => switchBranchMutation.mutate(branch)}
-                disabled={switchBranchMutation.isPending}
-                className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
-              >
+          {isWorktree ? (
+            <>
+              <DropdownMenuItem disabled className="text-muted-foreground">
                 <div className="flex items-center gap-2 w-full">
                   <GitBranch className="w-3 h-3" />
-                  <span className="flex-1">{branch}</span>
-                  {branch === currentBranch && <Check className="w-3 h-3 text-green-500" />}
+                  <span className="flex-1">Worktree: {currentBranch}</span>
                 </div>
               </DropdownMenuItem>
-            ))
-          ) : (
-            <DropdownMenuItem disabled className="text-muted-foreground">
-              No branches available
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => setGitChangesOpen(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
-          >
-            <div className="flex items-center gap-2 w-full">
-              <GitCommit className="w-3 h-3" />
-              <span className="flex-1">View Changes</span>
-              {gitStatus?.hasChanges && (
-                <span className="text-xs text-yellow-500">
-                  {gitStatus.files.length}
-                </span>
-              )}
-            </div>
-          </DropdownMenuItem>
-          {!isWorktree && repoUrl && (
-            <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => setAddBranchOpen(true)}
+                onClick={() => setGitChangesOpen(true)}
                 className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
               >
                 <div className="flex items-center gap-2 w-full">
-                  <Plus className="w-3 h-3" />
-                  <span className="flex-1">Add Branch</span>
+                  <GitCommit className="w-3 h-3" />
+                  <span className="flex-1">View Changes</span>
+                  {gitStatus?.hasChanges && (
+                    <span className="text-xs text-yellow-500">
+                      {gitStatus.files.length}
+                    </span>
+                  )}
                 </div>
               </DropdownMenuItem>
+            </>
+          ) : (
+            <>
+              {branchesLoading ? (
+                <DropdownMenuItem disabled className="text-muted-foreground">
+                  Loading branches...
+                </DropdownMenuItem>
+              ) : branches?.all && branches.all.length > 0 ? (
+                branches.all.map((branch: string) => (
+                  <DropdownMenuItem
+                    key={branch}
+                    onClick={() => switchBranchMutation.mutate(branch)}
+                    disabled={switchBranchMutation.isPending}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 w-full">
+                      <GitBranch className="w-3 h-3" />
+                      <span className="flex-1">{branch}</span>
+                      {branch === currentBranch && <Check className="w-3 h-3 text-green-500" />}
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem disabled className="text-muted-foreground">
+                  No branches available
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setGitChangesOpen(true)}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+              >
+                <div className="flex items-center gap-2 w-full">
+                  <GitCommit className="w-3 h-3" />
+                  <span className="flex-1">View Changes</span>
+                  {gitStatus?.hasChanges && (
+                    <span className="text-xs text-yellow-500">
+                      {gitStatus.files.length}
+                    </span>
+                  )}
+                </div>
+              </DropdownMenuItem>
+              {repoUrl && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setAddBranchOpen(true)}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 w-full">
+                      <Plus className="w-3 h-3" />
+                      <span className="flex-1">Add Branch</span>
+                    </div>
+                  </DropdownMenuItem>
+                </>
+              )}
             </>
           )}
         </DropdownMenuContent>
