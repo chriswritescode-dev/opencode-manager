@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createRepo } from "@/api/repos";
+import { createRepo, createBranch } from "@/api/repos";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,24 +15,32 @@ interface AddBranchWorkspaceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   repoUrl: string;
+  repoId: number;
 }
 
 export function AddBranchWorkspaceDialog({
   open,
   onOpenChange,
   repoUrl,
+  repoId,
 }: AddBranchWorkspaceDialogProps) {
   const [branch, setBranch] = useState("");
-  const [useWorktree, setUseWorktree] = useState(true);
+  const [useWorktree, setUseWorktree] = useState(false);
   const queryClient = useQueryClient();
 
   const mutation = useMutation({
-    mutationFn: () =>
-      createRepo(repoUrl, undefined, branch || undefined, undefined, useWorktree),
+    mutationFn: () => {
+      if (useWorktree) {
+        return createRepo(repoUrl, undefined, branch || undefined, undefined, true)
+      }
+      return createBranch(repoId, branch)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] });
+      queryClient.invalidateQueries({ queryKey: ["branches", repoId] });
+      queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
       setBranch("");
-      setUseWorktree(true);
+      setUseWorktree(false);
       onOpenChange(false);
     },
   });
@@ -54,10 +62,10 @@ export function AddBranchWorkspaceDialog({
       <DialogContent className="max-w-[90%] sm:max-w-[500px] bg-[#141414] border-[#2a2a2a]">
         <DialogHeader>
           <DialogTitle className="text-xl bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-            Add Branch Workspace
+            Add Branch
           </DialogTitle>
           <p className="text-sm text-zinc-400 mt-1">
-            Create a new workspace for{" "}
+            Create a new branch for{" "}
             {repoUrl.split("/").pop()?.replace(".git", "")}
           </p>
         </DialogHeader>
@@ -99,8 +107,8 @@ export function AddBranchWorkspaceDialog({
             </div>
             <p className="text-xs text-zinc-500">
               {useWorktree
-                ? "Creates a git worktree - shares git history with base repo (recommended, faster)"
-                : "Creates a full clone - independent copy of the repository (slower, more disk space)"}
+                ? "Creates a separate workspace directory - allows working on multiple branches simultaneously"
+                : "Creates a local branch in the current repository"}
             </p>
           </div>
 
@@ -112,12 +120,12 @@ export function AddBranchWorkspaceDialog({
             {mutation.isPending ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                {useWorktree ? "Creating worktree..." : "Cloning..."}
+                {useWorktree ? "Creating worktree..." : "Creating branch..."}
               </>
             ) : useWorktree ? (
               "Create Worktree"
             ) : (
-              "Clone Branch"
+              "Create Branch"
             )}
           </Button>
           {mutation.isError && (
