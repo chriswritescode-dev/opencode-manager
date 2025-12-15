@@ -13,6 +13,10 @@ export const TTSConfigSchema = z.object({
   voice: z.string(),
   model: z.string(),
   speed: z.number().min(0.25).max(4.0),
+  availableVoices: z.array(z.string()).optional(),
+  availableModels: z.array(z.string()).optional(),
+  lastVoicesFetch: z.number().optional(),
+  lastModelsFetch: z.number().optional(),
 });
 
 export const CustomAgentSchema = z.object({
@@ -54,6 +58,10 @@ export const DEFAULT_TTS_CONFIG = {
   voice: "alloy",
   model: "tts-1",
   speed: 1.0,
+  availableVoices: [],
+  availableModels: [],
+  lastVoicesFetch: 0,
+  lastModelsFetch: 0,
 };
 
 export const DEFAULT_USER_PREFERENCES = {

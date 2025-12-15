@@ -11,6 +11,10 @@ export interface TTSConfig {
   voice: string
   model: string
   speed: number
+  availableVoices?: string[]
+  availableModels?: string[]
+  lastVoicesFetch?: number
+  lastModelsFetch?: number
 }
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
@@ -20,6 +24,10 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   voice: 'alloy',
   model: 'tts-1',
   speed: 1.0,
+  availableVoices: [],
+  availableModels: [],
+  lastVoicesFetch: 0,
+  lastModelsFetch: 0,
 }
 
 export interface CustomAgent {
