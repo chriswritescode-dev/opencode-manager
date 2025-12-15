@@ -1,104 +1,60 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import axios from 'axios'
 import { API_BASE_URL } from '@/config'
 
-async function fetchTTSModels(userId?: string, forceRefresh = false): Promise<{ models: string[]; cached: boolean }> {
-  const url = new URL(`${API_BASE_URL}/api/tts/models`)
-  if (userId) url.searchParams.set('userId', userId)
-  if (forceRefresh) url.searchParams.set('refresh', 'true')
-
-  const response = await fetch(url.toString())
-
-  if (!response.ok) {
-    let errorMessage = 'Failed to fetch TTS models'
-    try {
-      const errorData = await response.json()
-      errorMessage = errorData.error || errorMessage
-    } catch {
-      if (response.status === 400) errorMessage = 'TTS not configured'
-      else if (response.status === 401) errorMessage = 'Invalid TTS API key'
-      else if (response.status === 500) errorMessage = 'TTS service unavailable'
-    }
-    throw new Error(errorMessage)
-  }
-
-  return response.json()
+export interface TTSModelsResponse {
+  models: string[]
+  cached: boolean
 }
 
-async function fetchTTSVoices(userId?: string, forceRefresh = false): Promise<{ voices: string[]; cached: boolean }> {
-  const url = new URL(`${API_BASE_URL}/api/tts/voices`)
-  if (userId) url.searchParams.set('userId', userId)
-  if (forceRefresh) url.searchParams.set('refresh', 'true')
-
-  const response = await fetch(url.toString())
-
-  if (!response.ok) {
-    let errorMessage = 'Failed to fetch TTS voices'
-    try {
-      const errorData = await response.json()
-      errorMessage = errorData.error || errorMessage
-    } catch {
-      if (response.status === 400) errorMessage = 'TTS not configured'
-      else if (response.status === 401) errorMessage = 'Invalid TTS API key'
-      else if (response.status === 500) errorMessage = 'TTS service unavailable'
-    }
-    throw new Error(errorMessage)
-  }
-
-  return response.json()
+export interface TTSVoicesResponse {
+  voices: string[]
+  cached: boolean
 }
 
-export function useTTSModels(userId?: string, enabled = true) {
-  return useQuery({
-    queryKey: ['tts-models', userId],
-    queryFn: () => fetchTTSModels(userId),
-    enabled,
-    staleTime: 60 * 60 * 1000, // 1 hour
-    gcTime: 2 * 60 * 60 * 1000, // 2 hours
-  })
+export interface TTSStatusResponse {
+  enabled: boolean
+  configured: boolean
+  cache: {
+    count: number
+    sizeBytes: number
+    sizeMB: number
+    maxSizeMB: number
+    ttlHours: number
+  }
 }
 
-export function useTTSVoices(userId?: string, enabled = true) {
-  return useQuery({
-    queryKey: ['tts-voices', userId],
-    queryFn: () => fetchTTSVoices(userId),
-    enabled,
-    staleTime: 60 * 60 * 1000, // 1 hour
-    gcTime: 2 * 60 * 60 * 1000, // 2 hours
-  })
-}
+export const ttsApi = {
+  getModels: async (userId = 'default', forceRefresh = false): Promise<TTSModelsResponse> => {
+    const { data } = await axios.get(`${API_BASE_URL}/api/tts/models`, {
+      params: { userId, ...(forceRefresh && { refresh: 'true' }) },
+    })
+    return data
+  },
 
-export function useTTSDiscovery(userId?: string) {
-  const queryClient = useQueryClient()
+  getVoices: async (userId = 'default', forceRefresh = false): Promise<TTSVoicesResponse> => {
+    const { data } = await axios.get(`${API_BASE_URL}/api/tts/voices`, {
+      params: { userId, ...(forceRefresh && { refresh: 'true' }) },
+    })
+    return data
+  },
 
-  const refreshModels = async () => {
-    const result = await fetchTTSModels(userId, true)
-    queryClient.setQueryData(['tts-models', userId], result)
-    return result
-  }
+  getStatus: async (userId = 'default'): Promise<TTSStatusResponse> => {
+    const { data } = await axios.get(`${API_BASE_URL}/api/tts/status`, {
+      params: { userId },
+    })
+    return data
+  },
 
-  const refreshVoices = async () => {
-    const result = await fetchTTSVoices(userId, true)
-    queryClient.setQueryData(['tts-voices', userId], result)
-    return result
-  }
-
-  const refreshAll = async () => {
-    const [models, voices] = await Promise.all([
-      refreshModels(),
-      refreshVoices()
-    ])
-    return { models, voices }
-  }
-
-  return {
-    refreshModels,
-    refreshVoices,
-    refreshAll,
-    invalidateModels: () => queryClient.invalidateQueries({ queryKey: ['tts-models', userId] }),
-    invalidateVoices: () => queryClient.invalidateQueries({ queryKey: ['tts-voices', userId] }),
-    invalidateAll: () => {
-      queryClient.invalidateQueries({ queryKey: ['tts-models', userId] })
-      queryClient.invalidateQueries({ queryKey: ['tts-voices', userId] })
-    }
-  }
+  synthesize: async (text: string, userId = 'default', signal?: AbortSignal): Promise<Blob> => {
+    const { data } = await axios.post(
+      `${API_BASE_URL}/api/tts/synthesize`,
+      { text },
+      {
+        params: { userId },
+        responseType: 'blob',
+        signal,
+      }
+    )
+    return data
+  },
 }
