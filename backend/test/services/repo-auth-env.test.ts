@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getReposPath } from '@opencode-manager/shared'
+import { getReposPath } from '@opencode-manager/shared/config/env'
 import { createGitHubGitEnv } from '../../src/utils/git-auth'
 
 const executeCommand = vi.fn()

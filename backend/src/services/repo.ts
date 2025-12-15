@@ -6,7 +6,7 @@ import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
 import { createGitEnvForRepoUrl, createNoPromptGitEnv, createGitHubGitEnv } from '../utils/git-auth'
-import { getReposPath } from '@opencode-manager/shared'
+import { getReposPath } from '@opencode-manager/shared/config/env'
 import path from 'path'
 
 export class GitAuthenticationError extends Error {
