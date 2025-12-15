@@ -217,6 +217,23 @@ body {
 .prose-enhanced pre {
   margin-top: 1.5em;
   margin-bottom: 1.5em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.prose-enhanced code {
+  word-break: break-all;
+}
+
+@media (max-width: 640px) {
+  .prose-enhanced pre {
+    padding: 0.5rem;
+    font-size: 0.75rem;
+  }
+  
+  .prose-enhanced code {
+    font-size: 0.75rem;
+  }
 }
 
 .prose-enhanced :first-child {

@@ -12,6 +12,11 @@ import {
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../index'
+import { createGitHubGitEnv } from '../utils/git-auth'
+import { exec } from 'child_process'
+import { promisify } from 'util'
+
+const execAsync = promisify(exec)
 
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
@@ -39,6 +44,10 @@ const CreateCustomCommandSchema = z.object({
 const UpdateCustomCommandSchema = z.object({
   description: z.string().min(1).max(1000),
   promptTemplate: z.string().min(1).max(10000),
+})
+
+const ValidateGitTokenSchema = z.object({
+  gitToken: z.string(),
 })
 
 export function createSettingsRoutes(db: Database) {
@@ -367,6 +376,72 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to update AGENTS.md' }, 500)
+    }
+  })
+
+  app.post('/validate-git-token', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { gitToken } = ValidateGitTokenSchema.parse(body)
+      
+      if (!gitToken) {
+        return c.json({ valid: true, message: 'No token provided' })
+      }
+
+      // Test the token by trying to access a public GitHub repo via git ls-remote
+      const testRepoUrl = 'https://github.com/octocat/Hello-World.git'
+      const env = createGitHubGitEnv(gitToken)
+      
+      try {
+        await execAsync(`git ls-remote ${testRepoUrl}`, { 
+          env: { ...process.env, ...env },
+          timeout: 10000
+        })
+        
+        // If command succeeded (exit code 0), token is valid
+        // stderr may contain warnings but that's ok
+        return c.json({ 
+          valid: true, 
+          message: 'Token is valid' 
+        })
+      } catch (error) {
+        logger.error('Git token validation failed:', error)
+        
+        if (error instanceof Error) {
+          const errorMsg = error.message.toLowerCase()
+          
+          if (errorMsg.includes('authentication failed') || 
+              errorMsg.includes('not authorized') ||
+              errorMsg.includes('invalid username or token') ||
+              errorMsg.includes('password authentication is not supported') ||
+              errorMsg.includes('401') ||
+              errorMsg.includes('403') ||
+              errorMsg.includes('code 128')) {
+            return c.json({ 
+              valid: false, 
+              message: 'Invalid GitHub token. Please check your token and permissions.' 
+            })
+          }
+          
+          if (errorMsg.includes('timeout') || errorMsg.includes('network')) {
+            return c.json({ 
+              valid: false, 
+              message: 'Network error - could not validate token. Please try again.' 
+            })
+          }
+        }
+        
+        return c.json({ 
+          valid: false, 
+          message: 'Failed to validate token: ' + (error instanceof Error ? error.message : 'Unknown error')
+        })
+      }
+    } catch (error) {
+      logger.error('Token validation endpoint error:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to validate token' }, 500)
     }
   })
 

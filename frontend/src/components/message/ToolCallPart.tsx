@@ -19,7 +19,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   const references = detectFileReferences(jsonString)
 
   if (references.length === 0) {
-    return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto">{jsonString}</pre>
+    return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{jsonString}</pre>
   }
 
   const parts: React.ReactNode[] = []
@@ -51,7 +51,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
     parts.push(jsonString.slice(lastIndex))
   }
 
-  return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto">{parts}</pre>
+  return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
@@ -224,10 +224,35 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           )}
           
           {part.state.status === 'running' && (
-            <div className="text-sm">
-              <div className="text-zinc-400 mb-1">Input:</div>
-              <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-            </div>
+            <>
+              {part.tool === 'bash' ? (
+                <div className="text-sm">
+                  <div className="flex items-center gap-2 mb-1">
+                    <div className="text-muted-foreground">Command:</div>
+                    <CopyButton 
+                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''} 
+                      title="Copy command" 
+                    />
+                  </div>
+                  <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
+                    <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                  </div>
+                  <div className="flex items-center gap-2 mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Running...</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm">
+                  <div className="text-muted-foreground mb-1">Input:</div>
+                  <ClickableJson json={part.state.input} onFileClick={onFileClick} />
+                  <div className="flex items-center gap-2 mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                    <span>Running...</span>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {part.state.status === 'completed' && (
@@ -241,7 +266,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                       title="Copy command" 
                     />
                   </div>
-                  <div className="bg-accent p-2 rounded text-xs overflow-x-auto">
+                  <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
                     <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
                   </div>
                 </div>
@@ -253,7 +278,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               )}
               <div className="text-sm">
                 <div className="text-muted-foreground mb-1">Output:</div>
-                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
+                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all cursor-pointer hover:bg-accent/80 transition-colors" 
                      onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
                      title="Click to copy output">
                   {part.state.status === 'completed' ? part.state.output : ''}
@@ -270,7 +295,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           {part.state.status === 'error' && (
             <div className="text-sm">
               <div className="text-red-600 dark:text-red-400 mb-1">Error:</div>
-              <pre className="bg-accent p-2 rounded text-xs overflow-x-auto text-red-600 dark:text-red-300">
+              <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-red-600 dark:text-red-300">
                 {part.state.error}
               </pre>
             </div>

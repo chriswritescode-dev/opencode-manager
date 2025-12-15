@@ -9,7 +9,9 @@ import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
+const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'discovery')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000
 const MAX_CACHE_SIZE_MB = 200
 const MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_MB * 1024 * 1024
 
@@ -23,8 +25,19 @@ function generateCacheKey(text: string, voice: string, model: string, speed: num
   return hash.digest('hex')
 }
 
+function normalizeToBaseUrl(endpoint: string): string {
+  return endpoint
+    .replace(/\/v1\/audio\/speech$/, '')
+    .replace(/\/audio\/speech$/, '')
+    .replace(/\/$/, '')
+}
+
 async function ensureCacheDir(): Promise<void> {
   await mkdir(TTS_CACHE_DIR, { recursive: true })
+}
+
+async function ensureDiscoveryCacheDir(): Promise<void> {
+  await mkdir(DISCOVERY_CACHE_DIR, { recursive: true })
 }
 
 async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
@@ -102,6 +115,128 @@ async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
   }
   
   await writeFile(filePath, audioData)
+}
+
+async function getCachedDiscovery(cacheKey: string): Promise<string[] | null> {
+  try {
+    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
+    const fileStat = await stat(filePath)
+    
+    if (Date.now() - fileStat.mtimeMs > DISCOVERY_CACHE_TTL_MS) {
+      await unlink(filePath)
+      return null
+    }
+    
+    const content = await readFile(filePath, 'utf-8')
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}
+
+async function cacheDiscovery(cacheKey: string, data: string[]): Promise<void> {
+  try {
+    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
+    await writeFile(filePath, JSON.stringify(data))
+  } catch (error) {
+    logger.error(`Failed to cache discovery data for ${cacheKey}:`, error)
+  }
+}
+
+function generateDiscoveryCacheKey(endpoint: string, apiKey: string, type: 'models' | 'voices'): string {
+  const hash = createHash('sha256')
+  hash.update(`${endpoint}|${apiKey.substring(0, 8)}|${type}`)
+  return hash.digest('hex')
+}
+
+async function fetchAvailableModels(endpoint: string, apiKey: string): Promise<string[]> {
+  const baseUrl = normalizeToBaseUrl(endpoint)
+  const endpointVariations = [
+    `${baseUrl}/v1/models`,
+    `${baseUrl}/models`,
+  ]
+  
+  for (const modelEndpoint of endpointVariations) {
+    try {
+      const response = await fetch(modelEndpoint, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json() as { data?: { id?: string }[] } | unknown[]
+        
+        // Handle different response formats
+        if ('data' in data && Array.isArray(data.data)) {
+          // OpenAI format: { data: [{ id: "gpt-4" }, ...] }
+          return data.data
+            .filter((model) => model.id && typeof model.id === 'string')
+            .filter((model) => 
+              model.id!.toLowerCase().includes('tts') || 
+              model.id!.toLowerCase().includes('audio') ||
+              model.id!.toLowerCase().includes('speech')
+            )
+            .map((model) => model.id!)
+        } else if (Array.isArray(data)) {
+          return data.filter((item): item is string => typeof item === 'string')
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch models from ${modelEndpoint}:`, error)
+      continue
+    }
+  }
+  
+  return ['tts-1', 'tts-1-hd']
+}
+
+async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<string[]> {
+  const baseUrl = normalizeToBaseUrl(endpoint)
+  const endpointVariations = [
+    `${baseUrl}/v1/audio/voices`,
+    `${baseUrl}/voices`,
+    `${baseUrl}/audio/voices`,
+  ]
+  
+  for (const voiceEndpoint of endpointVariations) {
+    try {
+      const response = await fetch(voiceEndpoint, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      })
+      
+      if (response.ok) {
+        type VoiceItem = { id?: string; name?: string; voice?: string }
+        const data = await response.json() as { data?: VoiceItem[]; voices?: string[] } | (string | VoiceItem)[]
+        
+        // Handle different response formats
+        if ('data' in data && Array.isArray(data.data)) {
+          // OpenAI-style format: { data: [{ name: "alloy" }, ...] }
+          return data.data
+            .filter((voice) => voice.id || voice.name)
+            .map((voice) => (voice.id || voice.name)!)
+        } else if ('voices' in data && Array.isArray(data.voices)) {
+          // Kokoro-style format: { "voices": ["af_alloy", "af_aoede", ...] }
+          return data.voices.filter((v): v is string => typeof v === 'string')
+        } else if (Array.isArray(data)) {
+          // Simple array format: ["alloy", "echo", ...] or [{ voice: "alloy" }, ...]
+          return data.map((item) => {
+            if (typeof item === 'string') return item
+            return item.name || item.voice || item.id
+          }).filter((v): v is string => typeof v === 'string')
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch voices from ${voiceEndpoint}:`, error)
+      continue
+    }
+  }
+  
+  return ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']
 }
 
 export async function cleanupExpiredCache(): Promise<number> {
@@ -217,7 +352,10 @@ export function createTTSRoutes(db: Database) {
       
       logger.info(`TTS cache miss, calling API: ${cacheKey.substring(0, 8)}...`)
       
-      const response = await fetch(endpoint, {
+      const baseUrl = normalizeToBaseUrl(endpoint)
+      const speechEndpoint = `${baseUrl}/v1/audio/speech`
+      
+      const response = await fetch(speechEndpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -237,7 +375,28 @@ export function createTTSRoutes(db: Database) {
         const errorText = await response.text()
         logger.error(`TTS API error: ${response.status} - ${errorText}`)
         const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
-        return c.json({ error: 'TTS API request failed', details: errorText }, status)
+        
+        // Try to parse error details for better frontend display
+        let errorDetails = errorText
+        try {
+          const errorJson = JSON.parse(errorText)
+          if (errorJson.detail?.error?.message) {
+            errorDetails = errorJson.detail.error.message
+          } else if (errorJson.detail?.message) {
+            errorDetails = errorJson.detail.message
+          } else if (errorJson.message) {
+            errorDetails = errorJson.message
+          }
+        } catch {
+          // Use raw error text if parsing fails
+        }
+        
+        return c.json({ 
+          error: 'TTS API request failed', 
+          details: errorDetails,
+          voice: voice,
+          availableVoices: ttsConfig?.availableVoices || []
+        }, status)
       }
       
       const audioBuffer = Buffer.from(await response.arrayBuffer())
@@ -260,6 +419,102 @@ export function createTTSRoutes(db: Database) {
         return c.json({ error: 'Invalid request', details: error.issues }, 400)
       }
       return c.json({ error: 'TTS synthesis failed' }, 500)
+    }
+  })
+
+  app.get('/models', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      const forceRefresh = c.req.query('refresh') === 'true'
+      
+      const settingsService = new SettingsService(db)
+      const settings = settingsService.getSettings(userId)
+      const ttsConfig = settings.preferences.tts
+      
+      if (!ttsConfig?.apiKey || !ttsConfig?.endpoint) {
+        return c.json({ error: 'TTS not configured' }, 400)
+      }
+      
+      const cacheKey = generateDiscoveryCacheKey(ttsConfig.endpoint, ttsConfig.apiKey, 'models')
+      
+      // Check cache first (unless force refresh)
+      if (!forceRefresh) {
+        const cachedModels = await getCachedDiscovery(cacheKey)
+        if (cachedModels) {
+          logger.info(`Models cache hit for user ${userId}`)
+          return c.json({ models: cachedModels, cached: true })
+        }
+      }
+      
+      // Fetch from API
+      await ensureDiscoveryCacheDir()
+      logger.info(`Fetching TTS models for user ${userId}`)
+      
+      const models = await fetchAvailableModels(ttsConfig.endpoint, ttsConfig.apiKey)
+      await cacheDiscovery(cacheKey, models)
+      
+      // Update user preferences with available models
+      await settingsService.updateSettings({
+        tts: {
+          ...ttsConfig,
+          availableModels: models,
+          lastModelsFetch: Date.now()
+        }
+      }, userId)
+      
+      logger.info(`Fetched ${models.length} TTS models`)
+      return c.json({ models, cached: false })
+    } catch (error) {
+      logger.error('Failed to fetch TTS models:', error)
+      return c.json({ error: 'Failed to fetch models' }, 500)
+    }
+  })
+
+  app.get('/voices', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      const forceRefresh = c.req.query('refresh') === 'true'
+      
+      const settingsService = new SettingsService(db)
+      const settings = settingsService.getSettings(userId)
+      const ttsConfig = settings.preferences.tts
+      
+      if (!ttsConfig?.apiKey || !ttsConfig?.endpoint) {
+        return c.json({ error: 'TTS not configured' }, 400)
+      }
+      
+      const cacheKey = generateDiscoveryCacheKey(ttsConfig.endpoint, ttsConfig.apiKey, 'voices')
+      
+      // Check cache first (unless force refresh)
+      if (!forceRefresh) {
+        const cachedVoices = await getCachedDiscovery(cacheKey)
+        if (cachedVoices) {
+          logger.info(`Voices cache hit for user ${userId}`)
+          return c.json({ voices: cachedVoices, cached: true })
+        }
+      }
+      
+      // Fetch from API
+      await ensureDiscoveryCacheDir()
+      logger.info(`Fetching TTS voices for user ${userId}`)
+      
+      const voices = await fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey)
+      await cacheDiscovery(cacheKey, voices)
+      
+      // Update user preferences with available voices
+      await settingsService.updateSettings({
+        tts: {
+          ...ttsConfig,
+          availableVoices: voices,
+          lastVoicesFetch: Date.now()
+        }
+      }, userId)
+      
+      logger.info(`Fetched ${voices.length} TTS voices`)
+      return c.json({ voices, cached: false })
+    } catch (error) {
+      logger.error('Failed to fetch TTS voices:', error)
+      return c.json({ error: 'Failed to fetch voices' }, 500)
     }
   })
 

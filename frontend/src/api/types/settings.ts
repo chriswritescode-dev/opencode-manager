@@ -1,25 +1,17 @@
+import {
+  DEFAULT_TTS_CONFIG,
+  DEFAULT_KEYBOARD_SHORTCUTS,
+  DEFAULT_USER_PREFERENCES,
+  type TTSConfig,
+} from '@opencode-manager/shared'
+
+export type { TTSConfig }
+export { DEFAULT_TTS_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES }
+
 export interface CustomCommand {
   name: string
   description: string
   promptTemplate: string
-}
-
-export interface TTSConfig {
-  enabled: boolean
-  endpoint: string
-  apiKey: string
-  voice: string
-  model: string
-  speed: number
-}
-
-export const DEFAULT_TTS_CONFIG: TTSConfig = {
-  enabled: false,
-  endpoint: 'https://api.openai.com/v1/audio/speech',
-  apiKey: '',
-  voice: 'alloy',
-  model: 'tts-1',
-  speed: 1.0,
 }
 
 export interface CustomAgent {
@@ -77,36 +69,4 @@ export interface UpdateOpenCodeConfigRequest {
 export interface OpenCodeConfigResponse {
   configs: OpenCodeConfig[]
   defaultConfig: OpenCodeConfig | null
-}
-
-const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0
-const CMD_KEY = isMac ? 'Cmd' : 'Ctrl'
-
-export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
-  submit: `${CMD_KEY}+Enter`,
-  abort: 'Escape',
-  toggleMode: 'Tab',
-  undo: `${CMD_KEY}+Z`,
-  redo: `${CMD_KEY}+Shift+Z`,
-  compact: `${CMD_KEY}+K`,
-  fork: `${CMD_KEY}+Shift+F`,
-  settings: `${CMD_KEY}+,`,
-  sessions: `${CMD_KEY}+S`,
-  newSession: `${CMD_KEY}+N`,
-  closeSession: `${CMD_KEY}+W`,
-  toggleSidebar: `${CMD_KEY}+B`,
-  selectModel: `${CMD_KEY}+M`,
-}
-
-export const DEFAULT_USER_PREFERENCES: UserPreferences = {
-  theme: 'dark',
-  mode: 'build',
-  autoScroll: true,
-  showReasoning: false,
-  expandToolCalls: false,
-  keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
-  customCommands: [],
-  customAgents: [],
-  gitToken: undefined,
-  tts: DEFAULT_TTS_CONFIG,
 }

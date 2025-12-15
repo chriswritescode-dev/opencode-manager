@@ -13,6 +13,10 @@ export const TTSConfigSchema = z.object({
   voice: z.string(),
   model: z.string(),
   speed: z.number().min(0.25).max(4.0),
+  availableVoices: z.array(z.string()).optional(),
+  availableModels: z.array(z.string()).optional(),
+  lastVoicesFetch: z.number().optional(),
+  lastModelsFetch: z.number().optional(),
 });
 
 export const CustomAgentSchema = z.object({
@@ -21,15 +25,37 @@ export const CustomAgentSchema = z.object({
   config: z.record(z.string(), z.any()),
 });
 
-export const DEFAULT_KEYBOARD_SHORTCUTS = {
-  submit: "shift+Enter",
-  abort: "Escape",
-  undo: "ctrl+Z",
-  redo: "ctrl+R",
-  compact: "ctrl",
-  newSession: "ctrl+N",
-  toggleMode: "Tab",
-  selectModel: "ctrl+M",
+export type TTSConfig = {
+  enabled: boolean;
+  endpoint: string;
+  apiKey: string;
+  voice: string;
+  model: string;
+  speed: number;
+  availableVoices?: string[];
+  availableModels?: string[];
+  lastVoicesFetch?: number;
+  lastModelsFetch?: number;
+};
+
+const isBrowser = typeof navigator !== 'undefined';
+const isMac = isBrowser && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+const CMD_KEY = isMac ? 'Cmd' : 'Ctrl';
+
+export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
+  submit: `${CMD_KEY}+Enter`,
+  abort: 'Escape',
+  toggleMode: 'Tab',
+  undo: `${CMD_KEY}+Z`,
+  redo: `${CMD_KEY}+Shift+Z`,
+  compact: `${CMD_KEY}+K`,
+  fork: `${CMD_KEY}+Shift+F`,
+  settings: `${CMD_KEY}+,`,
+  sessions: `${CMD_KEY}+S`,
+  newSession: `${CMD_KEY}+N`,
+  closeSession: `${CMD_KEY}+W`,
+  toggleSidebar: `${CMD_KEY}+B`,
+  selectModel: `${CMD_KEY}+M`,
 };
 
 export const UserPreferencesSchema = z.object({
@@ -47,13 +73,17 @@ export const UserPreferencesSchema = z.object({
   tts: TTSConfigSchema.optional(),
 });
 
-export const DEFAULT_TTS_CONFIG = {
+export const DEFAULT_TTS_CONFIG: TTSConfig = {
   enabled: false,
-  endpoint: "https://api.openai.com/v1/audio/speech",
+  endpoint: "https://api.openai.com",
   apiKey: "",
   voice: "alloy",
   model: "tts-1",
   speed: 1.0,
+  availableVoices: [],
+  availableModels: [],
+  lastVoicesFetch: 0,
+  lastModelsFetch: 0,
 };
 
 export const DEFAULT_USER_PREFERENCES = {
