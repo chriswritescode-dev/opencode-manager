@@ -4,13 +4,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
-import { Loader2, Volume2, Square, CheckCircle, XCircle } from 'lucide-react'
+import { useTTSModels, useTTSVoices, useTTSDiscovery } from '@/api/tts'
+import { Loader2, Volume2, Square, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Slider } from '@/components/ui/slider'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
+import { Combobox } from '@/components/ui/combobox'
 import { DEFAULT_TTS_CONFIG } from '@/api/types/settings'
 
 const TEST_PHRASE = 'Text to speech is working correctly.'
@@ -37,7 +38,9 @@ type TTSFormValues = z.infer<typeof ttsFormSchema>
 export function TTSSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
   const { speak, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
+  const { refreshModels, refreshVoices, refreshAll } = useTTSDiscovery()
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [isRefreshingDiscovery, setIsRefreshingDiscovery] = useState(false)
   
   const form = useForm<TTSFormValues>({
     resolver: zodResolver(ttsFormSchema),
@@ -47,8 +50,38 @@ export function TTSSettings() {
   const { reset, formState: { isDirty, isValid } } = form
   const watchEnabled = form.watch('enabled')
   const watchApiKey = form.watch('apiKey')
+  const watchEndpoint = form.watch('endpoint')
   
   const canTest = watchEnabled && watchApiKey && !isDirty
+  
+  // Fetch available models and voices when TTS is configured
+  const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useTTSModels(
+    preferences?.tts?.enabled && preferences?.tts?.apiKey ? undefined : 'default',
+    watchEnabled && !!watchApiKey && !!watchEndpoint
+  )
+  
+  const { data: voicesData, isLoading: isLoadingVoices, refetch: refetchVoices } = useTTSVoices(
+    preferences?.tts?.enabled && preferences?.tts?.apiKey ? undefined : 'default',
+    watchEnabled && !!watchApiKey && !!watchEndpoint
+  )
+  
+  const availableModels = modelsData?.models || []
+  const availableVoices = voicesData?.voices || []
+  const modelsCached = modelsData?.cached || false
+  const voicesCached = voicesData?.cached || false
+  
+  const handleRefreshDiscovery = async () => {
+    setIsRefreshingDiscovery(true)
+    try {
+      await refreshAll()
+      await Promise.all([
+        refetchModels(),
+        refetchVoices()
+      ])
+    } finally {
+      setIsRefreshingDiscovery(false)
+    }
+  }
   
   useEffect(() => {
     if (preferences?.tts) {
@@ -179,29 +212,29 @@ export function TTSSettings() {
                 )}
               />
 
-              <FormField
+<FormField
                 control={form.control}
                 name="voice"
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Voice</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a voice" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="alloy">Alloy</SelectItem>
-                        <SelectItem value="echo">Echo</SelectItem>
-                        <SelectItem value="fable">Fable</SelectItem>
-                        <SelectItem value="onyx">Onyx</SelectItem>
-                        <SelectItem value="nova">Nova</SelectItem>
-                        <SelectItem value="shimmer">Shimmer</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <Combobox
+                        value={field.value}
+                        onChange={field.onChange}
+                        options={availableVoices.map(voice => ({
+                          value: voice,
+                          label: voice
+                        }))}
+                        placeholder="Select a voice or type custom name..."
+                        disabled={!watchEnabled || isLoadingVoices}
+                        allowCustomValue={true}
+                      />
+                    </FormControl>
                     <FormDescription>
-                      Voice for text-to-speech output
+                      {isLoadingVoices ? 'Loading available voices...' : 
+                       voicesCached ? `Available voices (${availableVoices.length}) - cached` :
+                       `Available voices (${availableVoices.length})`}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -214,19 +247,23 @@ export function TTSSettings() {
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>Model</FormLabel>
-                    <Select onValueChange={field.onChange} value={field.value}>
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select a model" />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="tts-1">TTS-1 (faster)</SelectItem>
-                        <SelectItem value="tts-1-hd">TTS-1-HD (higher quality)</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <Combobox
+                        value={field.value}
+                        onChange={field.onChange}
+                        options={availableModels.map(model => ({
+                          value: model,
+                          label: model
+                        }))}
+                        placeholder="Select a model or type custom name..."
+                        disabled={!watchEnabled || isLoadingModels}
+                        allowCustomValue={true}
+                      />
+                    </FormControl>
                     <FormDescription>
-                      TTS model quality
+                      {isLoadingModels ? 'Loading available models...' : 
+                       modelsCached ? `Available models (${availableModels.length}) - cached` :
+                       `Available models (${availableModels.length})`}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -261,6 +298,34 @@ export function TTSSettings() {
                   </FormItem>
                 )}
               />
+
+              <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+                <div className="space-y-0.5">
+                  <div className="text-base font-medium">Refresh Discovery Data</div>
+                  <p className="text-sm text-muted-foreground">
+                    Force refresh available models and voices from the endpoint
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefreshDiscovery}
+                  disabled={!watchEnabled || !watchApiKey || isRefreshingDiscovery}
+                >
+                  {isRefreshingDiscovery ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      Refreshing...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Refresh
+                    </>
+                  )}
+                </Button>
+              </div>
 
               <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                 <div className="space-y-0.5">
