@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import * as repoService from '../services/repo'
+import { GitAuthenticationError } from '../services/repo'
 import * as gitOperations from '../services/git-operations'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
@@ -191,6 +192,40 @@ export function createRepoRoutes(database: Database) {
       return c.json({ ...updatedRepo, currentBranch })
     } catch (error: any) {
       logger.error('Failed to switch branch:', error)
+      if (error instanceof GitAuthenticationError) {
+        return c.json({ error: error.message, code: 'AUTH_FAILED' }, 401)
+      }
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.post('/:id/branch/create', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = db.getRepoById(database, id)
+      
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+      
+      const body = await c.req.json()
+      const { branch } = body
+      
+      if (!branch) {
+        return c.json({ error: 'branch is required' }, 400)
+      }
+      
+      await repoService.createBranch(database, id, branch)
+      
+      const updatedRepo = db.getRepoById(database, id)
+      const currentBranch = await repoService.getCurrentBranch(updatedRepo!)
+      
+      return c.json({ ...updatedRepo, currentBranch })
+    } catch (error: any) {
+      logger.error('Failed to create branch:', error)
+      if (error instanceof GitAuthenticationError) {
+        return c.json({ error: error.message, code: 'AUTH_FAILED' }, 401)
+      }
       return c.json({ error: error.message }, 500)
     }
   })

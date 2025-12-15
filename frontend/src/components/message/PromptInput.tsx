@@ -15,15 +15,11 @@ import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
-import { getModel, formatModelName } from '@/api/providers'
+
+
 import type { components } from '@/api/opencode-types'
 import type { MessageWithParts, FileInfo } from '@/api/types'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+
 
 type CommandType = components['schemas']['Command']
 
@@ -55,7 +51,7 @@ export function PromptInput({
   onExportSession
 }: PromptInputProps) {
   const [prompt, setPrompt] = useState('')
-  const [modelName, setModelName] = useState<string>('')
+  
   const [isBashMode, setIsBashMode] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
@@ -452,33 +448,16 @@ export function PromptInput({
   const modeColor = currentMode === 'plan' ? 'text-yellow-600 dark:text-yellow-500' : 'text-green-600 dark:text-green-500'
   const modeBg = currentMode === 'plan' ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-green-500/10 border-green-500/30'
 
-  const { model: selectedModel, modelString } = useModelSelection(opcodeUrl, directory)
+  const { modelString } = useModelSelection(opcodeUrl, directory)
   const currentModel = modelString || ''
   const isMobile = useMobile()
   const sessionStatus = useSessionStatusForSession(sessionID)
   const showStopButton = hasActiveStream && (sessionStatus.type === 'busy' || sessionStatus.type === 'retry')
   const hideSecondaryButtons = isMobile && hasActiveStream
 
-  useEffect(() => {
-    const loadModelName = async () => {
-      if (selectedModel) {
-        try {
-          const model = await getModel(selectedModel.providerID, selectedModel.modelID)
-          if (model) {
-            setModelName(formatModelName(model))
-          } else {
-            setModelName(currentModel)
-          }
-        } catch {
-          setModelName(currentModel)
-        }
-      } else {
-        setModelName('No model selected')
-      }
-    }
+  
 
-    loadModelName()
-  }, [selectedModel, currentModel])
+  
 
   useEffect(() => {
     if (textareaRef.current && !disabled) {
@@ -490,11 +469,7 @@ export function PromptInput({
 
   return (
     <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 md:mx-4 mb-4 md:mb-1 w-[94%] md:max-w-4xl">
-      {hasActiveStream && (
-        <div className="pb-1">
-          <SessionStatusIndicator sessionID={sessionID} />
-        </div>
-      )}
+      
       
       <textarea
         ref={textareaRef}
@@ -527,40 +502,21 @@ export function PromptInput({
           >
             {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
-          {!hideSecondaryButtons && (
-            <button
-              onClick={onShowModelsDialog}
-              className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
-            >
-              {modelName.length > 12 ? modelName.substring(0, 10) + '...' : modelName || 'Select model'}
-            </button>
-          )}
-          {!hideSecondaryButtons && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+          {hasActiveStream ? (
+              <div className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground max-w-[120px] md:max-w-[180px] truncate">
+                <SessionStatusIndicator sessionID={sessionID} />
+              </div>
+            ) : (
+              !hideSecondaryButtons && (
                 <button
-                  className="w-6 h-6 rounded-full border-2 border-foreground text-foreground hover:bg-foreground hover:text-background transition-colors flex items-center justify-center text-sm font-medium flex-shrink-0"
-                  title="Help"
+                  onClick={onShowModelsDialog}
+                  className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
                 >
-                  ?
+                  {currentModel.length > 12 ? currentModel.substring(0, 10) + '...' : currentModel || 'Select model'}
                 </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground font-medium">
-                  Keyboard Shortcuts
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                  <span className="font-mono">Cmd/Ctrl+Enter</span> - Send message
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                  <span className="font-mono">@</span> - Mention files or agents
-                </DropdownMenuItem>
-                <DropdownMenuItem disabled className="text-xs text-muted-foreground">
-                  <span className="font-mono">!</span> - Bash command mode
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
+              )
+            )}
+          
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
           <button
