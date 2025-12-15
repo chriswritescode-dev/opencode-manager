@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
-import { Loader2, Volume2, Square, CheckCircle, XCircle } from 'lucide-react'
+import { Loader2, Volume2, Square, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -37,7 +37,6 @@ type TTSFormValues = z.infer<typeof ttsFormSchema>
 export function TTSSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
   const { speak, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
-  const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle')
   
   const form = useForm<TTSFormValues>({
     resolver: zodResolver(ttsFormSchema),
@@ -67,20 +66,12 @@ export function TTSSettings() {
     updateSettings({ tts: data })
   }
   
-  const handleTest = async () => {
-    setTestStatus('idle')
-    try {
-      await speak(TEST_PHRASE)
-      setTestStatus('success')
-      setTimeout(() => setTestStatus('idle'), 3000)
-    } catch {
-      setTestStatus('error')
-    }
+  const handleTest = () => {
+    speak(TEST_PHRASE)
   }
   
   const handleStopTest = () => {
     stop()
-    setTestStatus('idle')
   }
 
   if (isLoading) {
@@ -274,12 +265,6 @@ export function TTSSettings() {
                     <p className="text-sm text-destructive flex items-center gap-1">
                       <XCircle className="h-4 w-4" />
                       {ttsError}
-                    </p>
-                  )}
-                  {testStatus === 'success' && (
-                    <p className="text-sm text-green-500 flex items-center gap-1">
-                      <CheckCircle className="h-4 w-4" />
-                      TTS is working
                     </p>
                   )}
                 </div>

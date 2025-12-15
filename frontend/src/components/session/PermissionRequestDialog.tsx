@@ -140,7 +140,7 @@ export function PermissionRequestDialog({
 
   return (
     <Dialog open={true} onOpenChange={() => {}}>
-      <DialogContent hideCloseButton className="sm:max-w-md">
+      <DialogContent hideCloseButton className="max-w-[calc(100vw-2rem)] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Permission Request
@@ -163,16 +163,16 @@ export function PermissionRequestDialog({
           </div>
           
           {details.primary && (
-            <div className="bg-muted/50 border rounded-md p-3 max-h-32 overflow-y-auto">
-              <pre className="text-sm font-mono whitespace-pre-wrap break-all">
+            <div className="bg-muted/50 border rounded-md p-3 max-h-32 overflow-x-auto overflow-y-auto">
+              <pre className="text-sm font-mono whitespace-pre-wrap break-words max-w-full">
                 {details.primary}
               </pre>
             </div>
           )}
           
           {details.secondary && (
-            <div className="bg-muted/30 border rounded-md p-3 max-h-24 overflow-y-auto">
-              <pre className="text-xs font-mono whitespace-pre-wrap break-all text-muted-foreground">
+            <div className="bg-muted/30 border rounded-md p-3 max-h-24 overflow-x-auto overflow-y-auto">
+              <pre className="text-xs font-mono whitespace-pre-wrap break-words max-w-full text-muted-foreground">
                 {details.secondary}
               </pre>
             </div>
@@ -189,13 +189,13 @@ export function PermissionRequestDialog({
           )}
         </div>
 
-        <DialogFooter className="flex-row gap-2 sm:justify-between">
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:justify-between">
           <Button
             variant="outline"
             onClick={() => handleResponse('reject')}
             disabled={isLoading}
             className={cn(
-              "flex-1",
+              "w-full sm:flex-1",
               loadingAction === 'reject' && "opacity-70"
             )}
           >
@@ -206,7 +206,7 @@ export function PermissionRequestDialog({
             onClick={() => handleResponse('once')}
             disabled={isLoading}
             className={cn(
-              "flex-1",
+              "w-full sm:flex-1",
               loadingAction === 'once' && "opacity-70"
             )}
           >
@@ -217,7 +217,7 @@ export function PermissionRequestDialog({
             onClick={() => handleResponse('always')}
             disabled={isLoading}
             className={cn(
-              "flex-1",
+              "w-full sm:flex-1",
               loadingAction === 'always' && "opacity-70"
             )}
           >

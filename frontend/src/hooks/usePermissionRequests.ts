@@ -58,8 +58,9 @@ export function usePermissionRequests(currentSessionID?: string) {
           
           const filtered = sessionPermissions.filter(p => p.id !== permissionID)
           if (filtered.length === 0) {
-            const { [sessionID]: _, ...rest } = prev
-            return rest
+            return Object.fromEntries(
+              Object.entries(prev).filter(([key]) => key !== sessionID)
+            )
           }
           return { ...prev, [sessionID]: filtered }
         })
@@ -93,8 +94,9 @@ export function usePermissionRequests(currentSessionID?: string) {
         
         const filtered = sessionPermissions.filter(p => p.id !== permissionID)
         if (filtered.length === 0) {
-          const { [sessionID]: _, ...rest } = prev
-          return rest
+          return Object.fromEntries(
+            Object.entries(prev).filter(([key]) => key !== sessionID)
+          )
         }
         return { ...prev, [sessionID]: filtered }
       }

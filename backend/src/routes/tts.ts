@@ -10,6 +10,8 @@ import { getWorkspacePath } from '@opencode-manager/shared'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
+const MAX_CACHE_SIZE_MB = 200
+const MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_MB * 1024 * 1024
 
 const TTSRequestSchema = z.object({
   text: z.string().min(1).max(4096),
@@ -41,8 +43,64 @@ async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
   }
 }
 
+async function getCacheSize(): Promise<number> {
+  try {
+    const files = await readdir(TTS_CACHE_DIR)
+    let totalSize = 0
+    
+    for (const file of files) {
+      if (!file.endsWith('.mp3')) continue
+      
+      const filePath = join(TTS_CACHE_DIR, file)
+      const fileStat = await stat(filePath)
+      totalSize += fileStat.size
+    }
+    
+    return totalSize
+  } catch {
+    return 0
+  }
+}
+
+async function cleanupOldestFiles(requiredSpace: number): Promise<void> {
+  try {
+    const files = await readdir(TTS_CACHE_DIR)
+    const fileInfos = []
+    
+    for (const file of files) {
+      if (!file.endsWith('.mp3')) continue
+      
+      const filePath = join(TTS_CACHE_DIR, file)
+      const fileStat = await stat(filePath)
+      fileInfos.push({ path: filePath, mtimeMs: fileStat.mtimeMs, size: fileStat.size })
+    }
+    
+    fileInfos.sort((a, b) => a.mtimeMs - b.mtimeMs)
+    
+    let freedSpace = 0
+    for (const fileInfo of fileInfos) {
+      await unlink(fileInfo.path)
+      freedSpace += fileInfo.size
+      
+      if (freedSpace >= requiredSpace) break
+    }
+    
+    logger.info(`TTS cache freed ${freedSpace} bytes by removing old files`)
+  } catch (error) {
+    logger.error('TTS cache cleanup failed:', error)
+  }
+}
+
 async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
   const filePath = join(TTS_CACHE_DIR, `${cacheKey}.mp3`)
+  
+  await ensureCacheDir()
+  const currentCacheSize = await getCacheSize()
+  
+  if (currentCacheSize + audioData.length > MAX_CACHE_SIZE_BYTES) {
+    await cleanupOldestFiles(audioData.length)
+  }
+  
   await writeFile(filePath, audioData)
 }
 
@@ -78,10 +136,48 @@ export async function cleanupExpiredCache(): Promise<number> {
   }
 }
 
+export async function getCacheStats(): Promise<{ count: number; sizeBytes: number; sizeMB: number }> {
+  try {
+    await ensureCacheDir()
+    const files = await readdir(TTS_CACHE_DIR)
+    let count = 0
+    let totalSize = 0
+    
+    for (const file of files) {
+      if (!file.endsWith('.mp3')) continue
+      
+      const filePath = join(TTS_CACHE_DIR, file)
+      const fileStat = await stat(filePath)
+      
+      if (Date.now() - fileStat.mtimeMs <= CACHE_TTL_MS) {
+        count++
+        totalSize += fileStat.size
+      }
+    }
+    
+    return {
+      count,
+      sizeBytes: totalSize,
+      sizeMB: Math.round(totalSize / (1024 * 1024) * 100) / 100
+    }
+  } catch {
+    return { count: 0, sizeBytes: 0, sizeMB: 0 }
+  }
+}
+
+export { generateCacheKey, ensureCacheDir, getCachedAudio, cacheAudio, getCacheSize, cleanupOldestFiles }
+
 export function createTTSRoutes(db: Database) {
   const app = new Hono()
 
   app.post('/synthesize', async (c) => {
+    const abortController = new AbortController()
+    
+    c.req.raw.signal.addEventListener('abort', () => {
+      logger.info('TTS request aborted by client')
+      abortController.abort()
+    })
+    
     try {
       const body = await c.req.json()
       const { text } = TTSRequestSchema.parse(body)
@@ -115,6 +211,10 @@ export function createTTSRoutes(db: Database) {
         })
       }
       
+      if (abortController.signal.aborted) {
+        return new Response(null, { status: 499 })
+      }
+      
       logger.info(`TTS cache miss, calling API: ${cacheKey.substring(0, 8)}...`)
       
       const response = await fetch(endpoint, {
@@ -130,6 +230,7 @@ export function createTTSRoutes(db: Database) {
           speed,
           response_format: 'mp3',
         }),
+        signal: abortController.signal,
       })
       
       if (!response.ok) {
@@ -151,6 +252,9 @@ export function createTTSRoutes(db: Database) {
         },
       })
     } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        return new Response(null, { status: 499 })
+      }
       logger.error('TTS synthesis failed:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid request', details: error.issues }, 400)
@@ -164,10 +268,16 @@ export function createTTSRoutes(db: Database) {
     const settingsService = new SettingsService(db)
     const settings = settingsService.getSettings(userId)
     const ttsConfig = settings.preferences.tts
+    const cacheStats = await getCacheStats()
     
     return c.json({
       enabled: ttsConfig?.enabled || false,
       configured: !!(ttsConfig?.apiKey),
+      cache: {
+        ...cacheStats,
+        maxSizeMB: MAX_CACHE_SIZE_MB,
+        ttlHours: CACHE_TTL_MS / (60 * 60 * 1000)
+      }
     })
   })
 
