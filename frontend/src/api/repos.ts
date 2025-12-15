@@ -115,6 +115,15 @@ export async function switchRepoConfig(id: number, configName: string): Promise<
   return response.json()
 }
 
+export class GitAuthError extends Error {
+  code: string
+  constructor(message: string, code: string) {
+    super(message)
+    this.name = 'GitAuthError'
+    this.code = code
+  }
+}
+
 export async function switchBranch(id: number, branch: string): Promise<Repo> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/switch`, {
     method: 'POST',
@@ -124,17 +133,38 @@ export async function switchBranch(id: number, branch: string): Promise<Repo> {
 
   if (!response.ok) {
     const error = await response.json()
+    if (error.code === 'AUTH_FAILED') {
+      throw new GitAuthError(error.error || 'Git authentication failed', error.code)
+    }
     throw new Error(error.error || 'Failed to switch branch')
   }
 
   return response.json()
 }
 
-export async function listBranches(id: number): Promise<{ local: string[], remote: string[], current: string | null }> {
+export async function listBranches(id: number): Promise<{ local: string[], all: string[], current: string | null }> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branches`)
 
   if (!response.ok) {
     throw new Error('Failed to list branches')
+  }
+
+  return response.json()
+}
+
+export async function createBranch(id: number, branch: string): Promise<Repo> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/create`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ branch }),
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    if (error.code === 'AUTH_FAILED') {
+      throw new GitAuthError(error.error || 'Git authentication failed', error.code)
+    }
+    throw new Error(error.error || 'Failed to create branch')
   }
 
   return response.json()

@@ -83,7 +83,7 @@ export function RepoCard({
               <Badge
                 className="text-xs px-2.5 py-0.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 border-purple-600/40"
               >
-                worktree
+								{branchToDisplay || "main"}
               </Badge>
             )}
             {repo.cloneStatus === "cloning" && (
@@ -120,17 +120,15 @@ export function RepoCard({
               Open
             </Button>
 
-            {!repo.isWorktree && (
-              <BranchSwitcher
-                repoId={repo.id}
-                currentBranch={branchToDisplay || ""}
-                isWorktree={repo.isWorktree}
-                repoUrl={repo.repoUrl}
-                repoLocalPath={repo.localPath}
-                iconOnly={true}
-                className="h-10 sm:h-9 w-10"
-              />
-            )}
+            <BranchSwitcher
+              repoId={repo.id}
+              currentBranch={branchToDisplay || ""}
+              isWorktree={repo.isWorktree}
+              repoUrl={repo.repoUrl}
+              repoLocalPath={repo.localPath}
+              iconOnly={true}
+              className="h-10 sm:h-9 w-10"
+            />
 
             <Button
               size="sm"

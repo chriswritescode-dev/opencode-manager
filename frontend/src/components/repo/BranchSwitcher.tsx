@@ -9,10 +9,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GitBranch, Check, Plus, GitCommit, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listBranches, switchBranch } from "@/api/repos";
+import { listBranches, switchBranch, GitAuthError } from "@/api/repos";
 import { useGitStatus } from "@/api/git";
 import { AddBranchWorkspaceDialog } from "@/components/repo/AddBranchWorkspaceDialog";
 import { GitChangesSheet } from "@/components/file-browser/GitChangesSheet";
+import { showToast } from "@/lib/toast";
 
 interface BranchSwitcherProps {
   repoId: number;
@@ -45,16 +46,22 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
 
   const switchBranchMutation = useMutation({
     mutationFn: (branch: string) => switchBranch(repoId, branch),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
+    onSuccess: (updatedRepo) => {
+      queryClient.setQueryData(["repo", repoId], updatedRepo);
       queryClient.invalidateQueries({ queryKey: ["branches", repoId] });
       queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
+    onError: (error) => {
+      if (error instanceof GitAuthError) {
+        showToast.error('Authentication failed. Please update your Git token in Settings or run "gh auth login".');
+      } else {
+        showToast.error(error.message || 'Failed to switch branch');
+      }
+    },
   });
 
-  if (isWorktree) {
-    return null;
-  }
+  const isCurrentBranchInList = branches?.all?.includes(currentBranch) ?? false;
+  const showLoading = switchBranchMutation.isPending || (branchesLoading && !isCurrentBranchInList);
 
   return (
     <>
@@ -66,7 +73,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             disabled={switchBranchMutation.isPending}
             className={`h-6 px-1 sm:px-2 text-[10px] sm:text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 hover:bg-accent gap-1 border border-blue-500/20 ${iconOnly ? 'w-6' : ''} ${className || ""}`}
           >
-            {switchBranchMutation.isPending ? (
+            {showLoading ? (
               <Loader2 className="w-3 h-3 animate-spin" />
             ) : (
               <GitBranch className="w-3 h-3" />
@@ -75,57 +82,85 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px]">
-          {branchesLoading ? (
-            <DropdownMenuItem disabled className="text-muted-foreground">
-              Loading branches...
-            </DropdownMenuItem>
-          ) : branches?.local && branches.local.length > 0 ? (
-            branches.local.map((branch: string) => (
-              <DropdownMenuItem
-                key={branch}
-                onClick={() => switchBranchMutation.mutate(branch)}
-                disabled={switchBranchMutation.isPending}
-                className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
-              >
+          {isWorktree ? (
+            <>
+              <DropdownMenuItem disabled className="text-muted-foreground">
                 <div className="flex items-center gap-2 w-full">
                   <GitBranch className="w-3 h-3" />
-                  <span className="flex-1">{branch}</span>
-                  {branch === currentBranch && <Check className="w-3 h-3 text-green-500" />}
+                  <span className="flex-1">Worktree: {currentBranch}</span>
                 </div>
               </DropdownMenuItem>
-            ))
-          ) : (
-            <DropdownMenuItem disabled className="text-muted-foreground">
-              No branches available
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => setGitChangesOpen(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
-          >
-            <div className="flex items-center gap-2 w-full">
-              <GitCommit className="w-3 h-3" />
-              <span className="flex-1">View Changes</span>
-              {gitStatus?.hasChanges && (
-                <span className="text-xs text-yellow-500">
-                  {gitStatus.files.length}
-                </span>
-              )}
-            </div>
-          </DropdownMenuItem>
-          {!isWorktree && repoUrl && (
-            <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onClick={() => setAddBranchOpen(true)}
+                onClick={() => setGitChangesOpen(true)}
                 className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
               >
                 <div className="flex items-center gap-2 w-full">
-                  <Plus className="w-3 h-3" />
-                  <span className="flex-1">Add Branch</span>
+                  <GitCommit className="w-3 h-3" />
+                  <span className="flex-1">View Changes</span>
+                  {gitStatus?.hasChanges && (
+                    <span className="text-xs text-yellow-500">
+                      {gitStatus.files.length}
+                    </span>
+                  )}
                 </div>
               </DropdownMenuItem>
+            </>
+          ) : (
+            <>
+              {branchesLoading ? (
+                <DropdownMenuItem disabled className="text-muted-foreground">
+                  Loading branches...
+                </DropdownMenuItem>
+              ) : branches?.all && branches.all.length > 0 ? (
+                branches.all.map((branch: string) => (
+                  <DropdownMenuItem
+                    key={branch}
+                    onClick={() => switchBranchMutation.mutate(branch)}
+                    disabled={switchBranchMutation.isPending}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 w-full">
+                      <GitBranch className="w-3 h-3" />
+                      <span className="flex-1">{branch}</span>
+                      {branch === currentBranch && <Check className="w-3 h-3 text-green-500" />}
+                    </div>
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem disabled className="text-muted-foreground">
+                  No branches available
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => setGitChangesOpen(true)}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+              >
+                <div className="flex items-center gap-2 w-full">
+                  <GitCommit className="w-3 h-3" />
+                  <span className="flex-1">View Changes</span>
+                  {gitStatus?.hasChanges && (
+                    <span className="text-xs text-yellow-500">
+                      {gitStatus.files.length}
+                    </span>
+                  )}
+                </div>
+              </DropdownMenuItem>
+              {repoUrl && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setAddBranchOpen(true)}
+                    className="text-muted-foreground hover:text-foreground hover:bg-accent cursor-pointer"
+                  >
+                    <div className="flex items-center gap-2 w-full">
+                      <Plus className="w-3 h-3" />
+                      <span className="flex-1">Add Branch</span>
+                    </div>
+                  </DropdownMenuItem>
+                </>
+              )}
             </>
           )}
         </DropdownMenuContent>
@@ -136,6 +171,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
           open={addBranchOpen}
           onOpenChange={setAddBranchOpen}
           repoUrl={repoUrl}
+          repoId={repoId}
         />
       )}
 

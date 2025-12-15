@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
 import { useTTSModels, useTTSVoices, useTTSDiscovery } from '@/api/tts'
-import { Loader2, Volume2, Square, CheckCircle, XCircle, RefreshCw } from 'lucide-react'
+import { Loader2, Volume2, Square, XCircle, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -49,7 +49,6 @@ export function TTSSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
   const { speak, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
   const { refreshAll } = useTTSDiscovery()
-  const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [isRefreshingDiscovery, setIsRefreshingDiscovery] = useState(false)
   
   const form = useForm<TTSFormValues>({
@@ -124,20 +123,12 @@ export function TTSSettings() {
     updateSettings({ tts: data })
   }
   
-  const handleTest = async () => {
-    setTestStatus('idle')
-    try {
-      await speak(TEST_PHRASE)
-      setTestStatus('success')
-      setTimeout(() => setTestStatus('idle'), 3000)
-    } catch {
-      setTestStatus('error')
-    }
+  const handleTest = () => {
+    speak(TEST_PHRASE)
   }
   
   const handleStopTest = () => {
     stop()
-    setTestStatus('idle')
   }
 
   if (isLoading) {
@@ -390,12 +381,6 @@ export function TTSSettings() {
                   {!ttsError && watchEnabled && watchApiKey && watchEndpoint && availableVoices.length === 0 && !isLoadingVoices && (
                     <p className="text-sm text-muted-foreground flex items-center gap-1">
                        Click "Refresh" to discover available voices, or check your API key and endpoint URL.
-                    </p>
-                  )}
-                  {testStatus === 'success' && (
-                    <p className="text-sm text-green-500 flex items-center gap-1">
-                      <CheckCircle className="h-4 w-4" />
-                      TTS is working
                     </p>
                   )}
                 </div>

@@ -5,9 +5,58 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
-import { createGitEnvForRepoUrl, createNoPromptGitEnv } from '../utils/git-auth'
+import { createGitEnvForRepoUrl, createNoPromptGitEnv, createGitHubGitEnv } from '../utils/git-auth'
 import { getReposPath } from '@opencode-manager/shared'
 import path from 'path'
+
+export class GitAuthenticationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'GitAuthenticationError'
+  }
+}
+
+function isAuthenticationError(error: any): boolean {
+  const message = error?.message?.toLowerCase() || ''
+  return message.includes('authentication failed') || 
+         message.includes('invalid username or token') ||
+         message.includes('could not read username')
+}
+
+interface GitCommandOptions {
+  cwd?: string
+  env?: Record<string, string>
+  silent?: boolean
+}
+
+async function executeGitWithFallback(
+  cmd: string[],
+  options: GitCommandOptions = {}
+): Promise<string> {
+  const { cwd, env = createNoPromptGitEnv(), silent } = options
+  
+  try {
+    return await executeCommand(cmd, { cwd, env, silent })
+  } catch (error: any) {
+    if (!isAuthenticationError(error)) {
+      throw error
+    }
+    
+    logger.warn(`Git command failed with auth, trying gh auth fallback`)
+    try {
+      const ghToken = (await executeCommand(['gh', 'auth', 'token'])).trim()
+      const ghEnv = createGitHubGitEnv(ghToken)
+      return await executeCommand(cmd, { cwd, env: ghEnv, silent })
+    } catch (ghError: any) {
+      if (!isAuthenticationError(ghError)) {
+        throw ghError
+      }
+      
+      logger.warn(`Git command failed with gh auth, trying without auth (public repo)`)
+      return await executeCommand(cmd, { cwd, env: createNoPromptGitEnv(), silent })
+    }
+  }
+}
 
 async function hasCommits(repoPath: string): Promise<boolean> {
   try {
@@ -182,7 +231,7 @@ export async function cloneRepo(
       const baseRepoPath = path.resolve(getReposPath(), baseRepoDirName)
       const worktreePath = path.resolve(getReposPath(), worktreeDirName)
       
-       await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], { env })
+       await executeGitWithFallback(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env })
 
       
       await createWorktreeSafely(baseRepoPath, worktreePath, branch)
@@ -216,8 +265,7 @@ export async function cloneRepo(
       }
       
       try {
-        const cloneCmd = ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
-        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
+        await executeGitWithFallback(['git', 'clone', '-b', branch, repoUrl, worktreeDirName], { cwd: getReposPath(), env })
       } catch (error: any) {
         if (error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
@@ -225,8 +273,7 @@ export async function cloneRepo(
         }
         
         logger.info(`Branch '${branch}' not found during clone, cloning default branch and creating branch locally`)
-        const cloneCmd = ['git', 'clone', repoUrl, worktreeDirName]
-        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
+        await executeGitWithFallback(['git', 'clone', repoUrl, worktreeDirName], { cwd: getReposPath(), env })
         let localBranchExists = 'missing'
         try {
           await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -250,7 +297,7 @@ export async function cloneRepo(
           
           if (branch) {
             logger.info(`Switching to branch: ${branch}`)
-             await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { env })
+             await executeGitWithFallback(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { cwd: getReposPath(), env })
 
             
             let remoteBranchExists = false
@@ -311,7 +358,7 @@ export async function cloneRepo(
           ? ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
           : ['git', 'clone', repoUrl, worktreeDirName]
         
-        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
+        await executeGitWithFallback(cloneCmd, { cwd: getReposPath(), env })
       } catch (error: any) {
         if (error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
@@ -320,8 +367,7 @@ export async function cloneRepo(
         
         if (branch && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
-const cloneCmd = ['git', 'clone', repoUrl, worktreeDirName]
-          await executeCommand(cloneCmd, { cwd: getReposPath(), env })
+          await executeGitWithFallback(['git', 'clone', repoUrl, worktreeDirName], { cwd: getReposPath(), env })
           let localBranchExists = 'missing'
           try {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -357,38 +403,42 @@ export async function getCurrentBranch(repo: Repo): Promise<string | null> {
   return branch || repo.branch || repo.defaultBranch || null
 }
 
-export async function listBranches(database: Database, repo: Repo): Promise<{ local: string[], remote: string[], current: string | null }> {
+export async function listBranches(database: Database, repo: Repo): Promise<{ local: string[], all: string[], current: string | null }> {
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
     const env = getGitEnv(database, repo.repoUrl)
 
     if (!repo.isLocal) {
-      await executeCommand(['git', '-C', repoPath, 'fetch', '--all'], { env })
+      try {
+        await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env })
+      } catch (error) {
+        logger.warn(`Failed to fetch remote for repo ${repo.id}, using cached branch info:`, error)
+      }
     }
     
     const localBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '--format=%(refname:short)'])
     const localBranches = localBranchesOutput.trim().split('\n').filter(b => b.trim())
     
     let remoteBranches: string[] = []
-    if (!repo.isLocal) {
-      try {
-        const remoteBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '-r', '--format=%(refname:short)'])
-        remoteBranches = remoteBranchesOutput.trim().split('\n')
-          .filter(b => b.trim() && !b.includes('HEAD'))
-          .map(b => b.replace('origin/', ''))
-      } catch (error) {
-        logger.warn(`Failed to get remote branches for repo ${repo.id}:`, error)
-        remoteBranches = []
-      }
+    try {
+      const remoteBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '-r', '--format=%(refname:short)'])
+      remoteBranches = remoteBranchesOutput.trim().split('\n')
+        .filter(b => b.trim() && !b.includes('HEAD') && b.includes('/'))
+    } catch (error) {
+      logger.warn(`Failed to get remote branches for repo ${repo.id}:`, error)
     }
     
     const current = await getCurrentBranch(repo)
     
-    const allBranches = new Set([...localBranches, ...remoteBranches])
+    const remoteOnlyBranches = remoteBranches
+      .map(b => b.replace(/^[^/]+\//, ''))
+      .filter(b => !localBranches.includes(b))
+    
+    const allBranches = [...localBranches, ...remoteOnlyBranches]
     
     return {
       local: localBranches,
-      remote: Array.from(allBranches),
+      all: allBranches,
       current
     }
   } catch (error: any) {
@@ -407,13 +457,18 @@ export async function switchBranch(database: Database, repoId: number, branch: s
     const repoPath = path.resolve(getReposPath(), repo.localPath)
     const env = getGitEnv(database, repo.repoUrl)
 
-    logger.info(`Switching to branch: ${branch} in ${repo.localPath}`)
+    const sanitizedBranch = branch
+      .replace(/^refs\/heads\//, '')
+      .replace(/^refs\/remotes\//, '')
+      .replace(/^origin\//, '')
 
-    await executeCommand(['git', '-C', repoPath, 'fetch', '--all'], { env })
+    logger.info(`Switching to branch: ${sanitizedBranch} in ${repo.localPath}`)
+
+    await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env })
     
     let localBranchExists = false
     try {
-      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/heads/${branch}`])
+      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/heads/${sanitizedBranch}`])
       localBranchExists = true
     } catch {
       localBranchExists = false
@@ -421,26 +476,49 @@ export async function switchBranch(database: Database, repoId: number, branch: s
     
     let remoteBranchExists = false
     try {
-      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${branch}`])
+      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${sanitizedBranch}`])
       remoteBranchExists = true
     } catch {
       remoteBranchExists = false
     }
     
     if (localBranchExists) {
-      logger.info(`Checking out existing local branch: ${branch}`)
-      await executeCommand(['git', '-C', repoPath, 'checkout', branch])
+      logger.info(`Checking out existing local branch: ${sanitizedBranch}`)
+      await executeCommand(['git', '-C', repoPath, 'checkout', sanitizedBranch])
     } else if (remoteBranchExists) {
-      logger.info(`Checking out remote branch: ${branch}`)
-      await executeCommand(['git', '-C', repoPath, 'checkout', '-b', branch, `origin/${branch}`])
+      logger.info(`Checking out remote branch: ${sanitizedBranch}`)
+      await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch, `origin/${sanitizedBranch}`])
     } else {
-      logger.info(`Creating new branch: ${branch}`)
-      await executeCommand(['git', '-C', repoPath, 'checkout', '-b', branch])
+      logger.info(`Creating new branch: ${sanitizedBranch}`)
+      await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
     }
     
-    logger.info(`Successfully switched to branch: ${branch}`)
+    logger.info(`Successfully switched to branch: ${sanitizedBranch}`)
   } catch (error: any) {
     logger.error(`Failed to switch branch for repo ${repoId}:`, error)
+    throw error
+  }
+}
+
+export async function createBranch(database: Database, repoId: number, branch: string): Promise<void> {
+  const repo = db.getRepoById(database, repoId)
+  if (!repo) {
+    throw new Error(`Repo not found: ${repoId}`)
+  }
+  
+  try {
+    const repoPath = path.resolve(getReposPath(), repo.localPath)
+    
+    const sanitizedBranch = branch
+      .replace(/^refs\/heads\//, '')
+      .replace(/^refs\/remotes\//, '')
+      .replace(/^origin\//, '')
+
+    logger.info(`Creating new branch: ${sanitizedBranch} in ${repo.localPath}`)
+    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
+    logger.info(`Successfully created and switched to branch: ${sanitizedBranch}`)
+  } catch (error: any) {
+    logger.error(`Failed to create branch for repo ${repoId}:`, error)
     throw error
   }
 }

@@ -7,6 +7,7 @@ import { SessionDetail } from './pages/SessionDetail'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
+import { TTSProvider } from './contexts/TTSContext'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -44,7 +45,9 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AppContent />
+      <TTSProvider>
+        <AppContent />
+      </TTSProvider>
     </QueryClientProvider>
   )
 }

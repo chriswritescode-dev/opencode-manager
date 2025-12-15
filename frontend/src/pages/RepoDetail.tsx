@@ -128,7 +128,7 @@ export function RepoDetail() {
                 />
               ) : branchToDisplay ? (
                 <Badge
-                  className={`text-xs px-2.5 py-0.5 ${
+                  className={`text-xs px-1.5 sm:px-2.5 py-0.5 ${
                     repo.isWorktree
                       ? "bg-purple-600/20 text-purple-400 border-purple-600/40"
                       : isNotMainBranch
@@ -137,8 +137,8 @@ export function RepoDetail() {
                   }`}
                   title={repo.isWorktree ? "Worktree" : branchToDisplay}
                 >
-                  {repo.isWorktree && <GitBranch className="h-3 w-3 mr-1" />}
-                  {branchToDisplay}
+                  {repo.isWorktree && <GitBranch className="h-3 w-3 sm:mr-1" />}
+                  <span className="hidden sm:inline">{branchToDisplay}</span>
                 </Badge>
               ) : null}
             </div>
