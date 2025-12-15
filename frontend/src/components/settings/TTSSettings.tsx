@@ -16,6 +16,16 @@ import { DEFAULT_TTS_CONFIG } from '@/api/types/settings'
 
 const TEST_PHRASE = 'Text to speech is working correctly.'
 
+const KOKORO_COMPOSITE_VOICE_SUGGESTIONS = [
+  { value: "am_adam+am_echo", label: "Composite: am_adam+am_echo" },
+  { value: "af_bella+af_nova", label: "Composite: af_bella+af_nova" },
+  { value: "bm_daniel+bm_george", label: "Composite: bm_daniel+bm_george" },
+]
+
+function isKokoroStyleVoice(voice: string): boolean {
+  return /^[a-z]{2}_/.test(voice)
+}
+
 const ttsFormSchema = z.object({
   enabled: z.boolean(),
   endpoint: z.string().url('Must be a valid URL').min(1, 'Endpoint is required'),
@@ -38,7 +48,7 @@ type TTSFormValues = z.infer<typeof ttsFormSchema>
 export function TTSSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
   const { speak, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
-  const { refreshModels, refreshVoices, refreshAll } = useTTSDiscovery()
+  const { refreshAll } = useTTSDiscovery()
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>('idle')
   const [isRefreshingDiscovery, setIsRefreshingDiscovery] = useState(false)
   
@@ -48,27 +58,29 @@ export function TTSSettings() {
   })
   
   const { reset, formState: { isDirty, isValid } } = form
-  const watchEnabled = form.watch('enabled')
-  const watchApiKey = form.watch('apiKey')
-  const watchEndpoint = form.watch('endpoint')
-  
-  const canTest = watchEnabled && watchApiKey && !isDirty
-  
   // Fetch available models and voices when TTS is configured
   const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useTTSModels(
-    preferences?.tts?.enabled && preferences?.tts?.apiKey ? undefined : 'default',
-    watchEnabled && !!watchApiKey && !!watchEndpoint
+    undefined, // Let the hook use default user
+    true // Always fetch if endpoint is available
   )
   
   const { data: voicesData, isLoading: isLoadingVoices, refetch: refetchVoices } = useTTSVoices(
-    preferences?.tts?.enabled && preferences?.tts?.apiKey ? undefined : 'default',
-    watchEnabled && !!watchApiKey && !!watchEndpoint
+    undefined, // Let the hook use default user
+    true // Always fetch if endpoint is available
   )
   
-  const availableModels = modelsData?.models || []
-  const availableVoices = voicesData?.voices || []
+  // Use data from API discovery first, fallback to stored preferences
+  const availableModels = modelsData?.models || preferences?.tts?.availableModels || []
+  const availableVoices = voicesData?.voices || preferences?.tts?.availableVoices || []
   const modelsCached = modelsData?.cached || false
   const voicesCached = voicesData?.cached || false
+  
+  const watchEnabled = form.watch('enabled')
+  const watchApiKey = form.watch('apiKey')
+  const watchEndpoint = form.watch('endpoint')
+  const watchVoice = form.watch('voice')
+  
+  const canTest = watchEnabled && watchApiKey && !isDirty && watchVoice && availableVoices.length > 0
   
   const handleRefreshDiscovery = async () => {
     setIsRefreshingDiscovery(true)
@@ -95,6 +107,18 @@ export function TTSSettings() {
       })
     }
   }, [preferences?.tts, reset])
+  
+  // Auto-fetch models and voices when endpoint or API key changes
+  useEffect(() => {
+    if (watchEnabled && watchApiKey && watchEndpoint) {
+      const timer = setTimeout(() => {
+        refetchModels()
+        refetchVoices()
+      }, 1000) // Debounce by 1 second to avoid rapid calls
+      
+      return () => clearTimeout(timer)
+    }
+  }, [watchEndpoint, watchApiKey, watchEnabled, refetchModels, refetchVoices])
   
   const onSubmit = (data: TTSFormValues) => {
     updateSettings({ tts: data })
@@ -125,10 +149,10 @@ export function TTSSettings() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-lg p-6">
+    <div className="bg-card border-t pt-4">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold text-foreground">Text-to-Speech</h2>
-        <Button 
+        <Button
           onClick={form.handleSubmit(onSubmit)}
           disabled={!isDirty || !isValid || isUpdating}
           size="sm"
@@ -174,16 +198,16 @@ export function TTSSettings() {
                 name="endpoint"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>TTS Endpoint</FormLabel>
+                    <FormLabel>TTS Server URL</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="https://api.openai.com/v1/audio/speech"
+                        placeholder="https://api.openai.com"
                         className="bg-background"
                         {...field}
                       />
                     </FormControl>
                     <FormDescription>
-                      OpenAI-compatible TTS API endpoint
+                      Base URL of your TTS service (e.g., https://x.x.x.x:Port)
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -215,18 +239,29 @@ export function TTSSettings() {
 <FormField
                 control={form.control}
                 name="voice"
-                render={({ field }) => (
+                render={({ field }) => {
+                  const hasKokoroVoices = availableVoices.some(isKokoroStyleVoice)
+                  const voiceOptions = [
+                    ...availableVoices.slice(0, 10).map((voice: string) => ({
+                      value: voice,
+                      label: voice
+                    })),
+                    ...(hasKokoroVoices ? KOKORO_COMPOSITE_VOICE_SUGGESTIONS : []),
+                    ...availableVoices.slice(10).map((voice: string) => ({
+                      value: voice,
+                      label: voice
+                    }))
+                  ]
+                  
+                  return (
                   <FormItem>
                     <FormLabel>Voice</FormLabel>
                     <FormControl>
                       <Combobox
                         value={field.value}
                         onChange={field.onChange}
-                        options={availableVoices.map(voice => ({
-                          value: voice,
-                          label: voice
-                        }))}
-                        placeholder="Select a voice or type custom name..."
+                        options={voiceOptions}
+                        placeholder={hasKokoroVoices ? "Select a voice or type custom name (e.g., am_adam+am_echo)..." : "Select a voice..."}
                         disabled={!watchEnabled || isLoadingVoices}
                         allowCustomValue={true}
                       />
@@ -234,11 +269,14 @@ export function TTSSettings() {
                     <FormDescription>
                       {isLoadingVoices ? 'Loading available voices...' : 
                        voicesCached ? `Available voices (${availableVoices.length}) - cached` :
-                       `Available voices (${availableVoices.length})`}
+                       availableVoices.length > 0 ? `Available voices (${availableVoices.length})${hasKokoroVoices ? ' - Support composite voices (e.g., am_adam+am_echo)' : ''}` :
+                       watchEnabled && watchApiKey ? 'No voices available - check endpoint and API key' :
+                       'Configure TTS to discover voices'}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
-                )}
+                  )
+                }}
               />
 
               <FormField
@@ -251,7 +289,7 @@ export function TTSSettings() {
                       <Combobox
                         value={field.value}
                         onChange={field.onChange}
-                        options={availableModels.map(model => ({
+                        options={availableModels.map((model: string) => ({
                           value: model,
                           label: model
                         }))}
@@ -260,11 +298,13 @@ export function TTSSettings() {
                         allowCustomValue={true}
                       />
                     </FormControl>
-                    <FormDescription>
-                      {isLoadingModels ? 'Loading available models...' : 
-                       modelsCached ? `Available models (${availableModels.length}) - cached` :
-                       `Available models (${availableModels.length})`}
-                    </FormDescription>
+<FormDescription>
+                       {isLoadingModels ? 'Loading available models...' : 
+                        modelsCached ? `Available models (${availableModels.length}) - cached` :
+                        availableModels.length > 0 ? `Available models (${availableModels.length})` :
+                        watchEnabled && watchApiKey ? 'No models available - check endpoint and API key' :
+                        'Configure TTS to discover models'}
+                     </FormDescription>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -339,6 +379,17 @@ export function TTSSettings() {
                     <p className="text-sm text-destructive flex items-center gap-1">
                       <XCircle className="h-4 w-4" />
                       {ttsError}
+                      {ttsError.includes("not found") && availableVoices.length > 0 && (
+                        <span className="text-xs block mt-1">
+                          Try selecting from: {availableVoices.slice(0, 5).join(", ")}
+                          {availableVoices.length > 5 && ` +${availableVoices.length - 5} more`}
+                        </span>
+                      )}
+                    </p>
+                  )}
+                  {!ttsError && watchEnabled && watchApiKey && watchEndpoint && availableVoices.length === 0 && !isLoadingVoices && (
+                    <p className="text-sm text-muted-foreground flex items-center gap-1">
+                       Click "Refresh" to discover available voices, or check your API key and endpoint URL.
                     </p>
                   )}
                   {testStatus === 'success' && (

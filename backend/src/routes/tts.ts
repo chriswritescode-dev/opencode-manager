@@ -23,6 +23,13 @@ function generateCacheKey(text: string, voice: string, model: string, speed: num
   return hash.digest('hex')
 }
 
+function normalizeToBaseUrl(endpoint: string): string {
+  return endpoint
+    .replace(/\/v1\/audio\/speech$/, '')
+    .replace(/\/audio\/speech$/, '')
+    .replace(/\/$/, '')
+}
+
 async function ensureCacheDir(): Promise<void> {
   await mkdir(TTS_CACHE_DIR, { recursive: true })
 }
@@ -85,11 +92,10 @@ function generateDiscoveryCacheKey(endpoint: string, apiKey: string, type: 'mode
 }
 
 async function fetchAvailableModels(endpoint: string, apiKey: string): Promise<string[]> {
-  // Try different endpoint formats for models
+  const baseUrl = normalizeToBaseUrl(endpoint)
   const endpointVariations = [
-    `${endpoint.replace(/\/audio\/speech$/, '')}/v1/models`,
-    `${endpoint.replace(/\/audio\/speech$/, '')}/models`,
-    `${endpoint.replace(/\/v1\/audio\/speech$/, '')}/v1/models`,
+    `${baseUrl}/v1/models`,
+    `${baseUrl}/models`,
   ]
   
   for (const modelEndpoint of endpointVariations) {
@@ -120,7 +126,7 @@ async function fetchAvailableModels(endpoint: string, apiKey: string): Promise<s
         }
       }
     } catch (error) {
-      logger.debug(`Failed to fetch models from ${modelEndpoint}:`, error)
+      logger.warn(`Failed to fetch models from ${modelEndpoint}:`, error)
       continue
     }
   }
@@ -129,12 +135,11 @@ async function fetchAvailableModels(endpoint: string, apiKey: string): Promise<s
 }
 
 async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<string[]> {
-  // Try different endpoint formats for voices
+  const baseUrl = normalizeToBaseUrl(endpoint)
   const endpointVariations = [
-    `${endpoint.replace(/\/audio\/speech$/, '')}/v1/audio/voices`,
-    `${endpoint.replace(/\/audio\/speech$/, '')}/voices`,
-    `${endpoint.replace(/\/v1\/audio\/speech$/, '')}/v1/audio/voices`,
-    `${endpoint.replace(/\/v1\/audio\/speech$/, '')}/audio/voices`,
+    `${baseUrl}/v1/audio/voices`,
+    `${baseUrl}/voices`,
+    `${baseUrl}/audio/voices`,
   ]
   
   for (const voiceEndpoint of endpointVariations) {
@@ -148,7 +153,7 @@ async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<s
       
       if (response.ok) {
         type VoiceItem = { id?: string; name?: string; voice?: string }
-        const data = await response.json() as { data?: VoiceItem[] } | (string | VoiceItem)[]
+        const data = await response.json() as { data?: VoiceItem[]; voices?: string[] } | (string | VoiceItem)[]
         
         // Handle different response formats
         if ('data' in data && Array.isArray(data.data)) {
@@ -156,6 +161,9 @@ async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<s
           return data.data
             .filter((voice) => voice.id || voice.name)
             .map((voice) => (voice.id || voice.name)!)
+        } else if ('voices' in data && Array.isArray(data.voices)) {
+          // Kokoro-style format: { "voices": ["af_alloy", "af_aoede", ...] }
+          return data.voices.filter((v): v is string => typeof v === 'string')
         } else if (Array.isArray(data)) {
           // Simple array format: ["alloy", "echo", ...] or [{ voice: "alloy" }, ...]
           return data.map((item) => {
@@ -165,7 +173,7 @@ async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<s
         }
       }
     } catch (error) {
-      logger.debug(`Failed to fetch voices from ${voiceEndpoint}:`, error)
+      logger.warn(`Failed to fetch voices from ${voiceEndpoint}:`, error)
       continue
     }
   }
@@ -244,7 +252,10 @@ export function createTTSRoutes(db: Database) {
       
       logger.info(`TTS cache miss, calling API: ${cacheKey.substring(0, 8)}...`)
       
-      const response = await fetch(endpoint, {
+      const baseUrl = normalizeToBaseUrl(endpoint)
+      const speechEndpoint = `${baseUrl}/v1/audio/speech`
+      
+      const response = await fetch(speechEndpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${apiKey}`,
@@ -263,7 +274,28 @@ export function createTTSRoutes(db: Database) {
         const errorText = await response.text()
         logger.error(`TTS API error: ${response.status} - ${errorText}`)
         const status = response.status >= 400 && response.status < 600 ? response.status as 400 | 500 : 500
-        return c.json({ error: 'TTS API request failed', details: errorText }, status)
+        
+        // Try to parse error details for better frontend display
+        let errorDetails = errorText
+        try {
+          const errorJson = JSON.parse(errorText)
+          if (errorJson.detail?.error?.message) {
+            errorDetails = errorJson.detail.error.message
+          } else if (errorJson.detail?.message) {
+            errorDetails = errorJson.detail.message
+          } else if (errorJson.message) {
+            errorDetails = errorJson.message
+          }
+        } catch {
+          // Use raw error text if parsing fails
+        }
+        
+        return c.json({ 
+          error: 'TTS API request failed', 
+          details: errorDetails,
+          voice: voice,
+          availableVoices: ttsConfig?.availableVoices || []
+        }, status)
       }
       
       const audioBuffer = Buffer.from(await response.arrayBuffer())
@@ -317,6 +349,15 @@ export function createTTSRoutes(db: Database) {
       const models = await fetchAvailableModels(ttsConfig.endpoint, ttsConfig.apiKey)
       await cacheDiscovery(cacheKey, models)
       
+      // Update user preferences with available models
+      await settingsService.updateSettings({
+        tts: {
+          ...ttsConfig,
+          availableModels: models,
+          lastModelsFetch: Date.now()
+        }
+      }, userId)
+      
       logger.info(`Fetched ${models.length} TTS models`)
       return c.json({ models, cached: false })
     } catch (error) {
@@ -355,6 +396,15 @@ export function createTTSRoutes(db: Database) {
       
       const voices = await fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey)
       await cacheDiscovery(cacheKey, voices)
+      
+      // Update user preferences with available voices
+      await settingsService.updateSettings({
+        tts: {
+          ...ttsConfig,
+          availableVoices: voices,
+          lastVoicesFetch: Date.now()
+        }
+      }, userId)
       
       logger.info(`Fetched ${voices.length} TTS voices`)
       return c.json({ voices, cached: false })

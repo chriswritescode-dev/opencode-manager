@@ -5,6 +5,9 @@ import { API_BASE_URL } from '@/config'
 const TTS_CACHE_NAME = 'tts-audio-cache'
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
 const PUNCTUATION_REGEX = /(?<=[.!?;])\s+/
+const AUDIO_PLAYBACK_MAX_RETRIES = 3
+const AUDIO_PLAYBACK_RETRY_DELAY_MS = 50
+const AUDIO_LOAD_TIMEOUT_MS = 5000
 
 function generateCacheKey(text: string, voice: string, model: string, speed: number): string {
   const data = `${text}|${voice}|${model}|${speed}`
@@ -158,36 +161,71 @@ export function useTTS() {
       
       if (!audioBlob || !isPlayingChunksRef.current) return
       
-      const audioUrl = URL.createObjectURL(audioBlob)
-      const audio = new Audio(audioUrl)
-      audioRef.current = audio
-      
-      audio.onplay = () => setState('playing')
-      audio.onpause = () => {
-        if (audio.currentTime < audio.duration) setState('paused')
-      }
-      audio.onended = () => {
-        URL.revokeObjectURL(audioUrl)
-        playNextChunk()
-      }
-      audio.onerror = () => {
-        const mediaError = audio.error
-        let errorMessage = 'Audio playback failed'
-        if (mediaError) {
-          switch (mediaError.code) {
-            case MediaError.MEDIA_ERR_ABORTED: errorMessage = 'Audio playback was aborted'; break
-            case MediaError.MEDIA_ERR_NETWORK: errorMessage = 'Network error during audio playback'; break
-            case MediaError.MEDIA_ERR_DECODE: errorMessage = 'Audio decoding failed'; break
-            case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED: errorMessage = 'Audio format not supported'; break
+      const playAudioBlob = async (blob: Blob, retries = AUDIO_PLAYBACK_MAX_RETRIES): Promise<void> => {
+        let lastError: Error | null = null
+        
+        for (let attempt = 1; attempt <= retries; attempt++) {
+          if (!isPlayingChunksRef.current) return
+          
+          const typedBlob = new Blob([blob], { type: 'audio/mpeg' })
+          const audioUrl = URL.createObjectURL(typedBlob)
+          const audio = new Audio()
+          
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const timeoutId = setTimeout(() => {
+                reject(new Error('Audio load timeout'))
+              }, AUDIO_LOAD_TIMEOUT_MS)
+              
+              audio.oncanplaythrough = () => {
+                clearTimeout(timeoutId)
+                resolve()
+              }
+              
+              audio.onerror = () => {
+                clearTimeout(timeoutId)
+                reject(new Error(audio.error?.message || 'Audio load failed'))
+              }
+              
+              audio.src = audioUrl
+              audio.load()
+            })
+            
+            if (!isPlayingChunksRef.current) {
+              URL.revokeObjectURL(audioUrl)
+              return
+            }
+            
+            audioRef.current = audio
+            
+            audio.onplay = () => setState('playing')
+            audio.onpause = () => {
+              if (audio.currentTime < audio.duration) setState('paused')
+            }
+            audio.onended = () => {
+              URL.revokeObjectURL(audioUrl)
+              playNextChunk()
+            }
+            audio.onerror = () => {
+              URL.revokeObjectURL(audioUrl)
+            }
+            
+            await audio.play()
+            return
+          } catch (err) {
+            URL.revokeObjectURL(audioUrl)
+            lastError = err instanceof Error ? err : new Error('Unknown error')
+            
+            if (attempt < retries) {
+              await new Promise(r => setTimeout(r, AUDIO_PLAYBACK_RETRY_DELAY_MS * attempt))
+            }
           }
         }
-        setError(errorMessage)
-        setState('error')
-        isPlayingChunksRef.current = false
-        URL.revokeObjectURL(audioUrl)
+        
+        throw lastError || new Error('Audio playback failed after retries')
       }
       
-      await audio.play()
+      await playAudioBlob(audioBlob)
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') {
         setState('idle')
