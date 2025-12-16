@@ -127,6 +127,16 @@ export class OpenCodeClient {
     return response.data
   }
 
+  async revertMessage(sessionID: string, data: { messageID: string, partID?: string }) {
+    const response = await this.client.post(`/session/${sessionID}/revert`, data)
+    return response.data
+  }
+
+  async unrevertSession(sessionID: string) {
+    const response = await this.client.post(`/session/${sessionID}/unrevert`)
+    return response.data
+  }
+
   getEventSourceURL() {
     const base = this.baseURL.startsWith('http') 
       ? this.baseURL 
