@@ -247,3 +247,23 @@ body {
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+
+/* Prevent iOS zoom on all input elements */
+@media (max-width: 768px) {
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="number"],
+  input[type="search"],
+  input[type="tel"],
+  input[type="url"],
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  
+  /* ContentEditable elements */
+  [contenteditable="true"] {
+    font-size: 16px !important;
+  }
+}
