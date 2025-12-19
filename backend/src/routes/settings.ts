@@ -138,6 +138,9 @@ export function createSettingsRoutes(db: Database) {
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid config data', details: error.issues }, 400)
       }
+      if (error instanceof Error && error.message.includes('already exists')) {
+        return c.json({ error: error.message }, 409)
+      }
       return c.json({ error: 'Failed to create OpenCode config' }, 500)
     }
   })

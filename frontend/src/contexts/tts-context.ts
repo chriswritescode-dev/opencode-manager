@@ -8,6 +8,7 @@ export interface TTSContextValue {
   state: TTSState
   error: string | null
   currentText: string | null
+  originalText: string | null
   isEnabled: boolean
   isPlaying: boolean
   isLoading: boolean
