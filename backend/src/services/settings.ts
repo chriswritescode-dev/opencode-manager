@@ -156,6 +156,12 @@ export class SettingsService {
     request: CreateOpenCodeConfigRequest,
     userId: string = 'default'
   ): OpenCodeConfigWithRaw {
+    // Check for existing config with the same name
+    const existing = this.getOpenCodeConfigByName(request.name, userId)
+    if (existing) {
+      throw new Error(`Config with name '${request.name}' already exists`)
+    }
+
     const rawContent = typeof request.content === 'string' 
       ? request.content 
       : JSON.stringify(request.content, null, 2)

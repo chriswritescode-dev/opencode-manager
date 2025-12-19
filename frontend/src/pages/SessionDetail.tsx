@@ -14,6 +14,7 @@ import { useSession, useSessions, useAbortSession, useUpdateSession, useOpenCode
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useSettings } from "@/hooks/useSettings";
+import { useModelSelection } from "@/hooks/useModelSelection";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { usePermissionRequests } from "@/hooks/usePermissionRequests";
@@ -81,6 +82,7 @@ export function SessionDetail() {
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
+  const { modelString } = useModelSelection(opcodeUrl, repoDirectory);
 
   useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
@@ -229,6 +231,7 @@ export function SessionDetail() {
               messages={messages}
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
+              model={modelString || undefined}
             />
           ) : null}
         </div>
