@@ -3,6 +3,7 @@ import { create } from 'zustand'
 export type SessionStatusType = 
   | { type: 'idle' }
   | { type: 'busy' }
+  | { type: 'compact' }
   | { type: 'retry'; attempt: number; message: string; next: number }
 
 interface SessionStatusStore {
