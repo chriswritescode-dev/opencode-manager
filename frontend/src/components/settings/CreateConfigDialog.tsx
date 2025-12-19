@@ -36,7 +36,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
       setIsDefault(false)
       setError('')
       setErrorLine(null)
-    } catch (error) {
+    } catch (error: unknown) {
       if (error instanceof SyntaxError) {
         const match = error.message.match(/line (\d+)/i)
         const line = match ? parseInt(match[1]) : null

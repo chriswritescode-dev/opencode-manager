@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
-import { toast } from '@/lib/toast'
+import { showToast } from '@/lib/toast'
 import type { MessageListResponse } from '@/api/types'
 
 interface UseRemoveMessageOptions {
@@ -46,7 +46,7 @@ export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveM
         )
       }
       
-      toast.error('Failed to remove message')
+      showToast.error('Failed to remove message')
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -117,7 +117,7 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
     },
     onError: (error) => {
       console.error('Failed to refresh message:', error)
-      toast.error('Failed to refresh message')
+      showToast.error('Failed to refresh message')
     }
   })
 }

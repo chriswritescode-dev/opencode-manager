@@ -31,6 +31,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const [state, setState] = useState<TTSState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [currentText, setCurrentText] = useState<string | null>(null)
+  const [originalText, setOriginalText] = useState<string | null>(null)
   
   const abortControllerRef = useRef<AbortController | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -67,6 +68,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     cleanup()
     setState('idle')
     setCurrentText(null)
+    setOriginalText(null)
     setError(null)
   }, [cleanup])
 
@@ -240,7 +242,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     stoppedRef.current = false
     setError(null)
 
-    // Store the sanitized text for playback
+    setOriginalText(text)
     setCurrentText(sanitizedText)
 
     abortControllerRef.current = new AbortController()
@@ -257,6 +259,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     state,
     error,
     currentText,
+    originalText,
     isEnabled,
     isPlaying: state === 'playing',
     isLoading: state === 'loading',

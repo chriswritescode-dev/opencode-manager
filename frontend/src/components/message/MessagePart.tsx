@@ -65,13 +65,13 @@ interface TTSButtonProps {
 }
 
 export function TTSButton({ content, className = "" }: TTSButtonProps) {
-  const { speak, stop, isEnabled, isPlaying, isLoading, currentText } = useTTS()
+  const { speak, stop, isEnabled, isPlaying, isLoading, originalText } = useTTS()
   
   if (!isEnabled || !content.trim()) {
     return null
   }
   
-  const isThisPlaying = (isPlaying || isLoading) && currentText === content
+  const isThisPlaying = (isPlaying || isLoading) && originalText === content
   
   const handleClick = () => {
     if (isThisPlaying) {
@@ -86,7 +86,7 @@ export function TTSButton({ content, className = "" }: TTSButtonProps) {
       onClick={handleClick}
       className={`p-1.5 rounded ${isThisPlaying ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'} ${className}`}
       title={isThisPlaying ? "Stop playback" : "Read aloud"}
-      disabled={isLoading && currentText !== content}
+      disabled={isLoading && originalText !== content}
     >
       {isLoading && isThisPlaying ? (
         <Loader2 className="w-4 h-4 animate-spin" />
