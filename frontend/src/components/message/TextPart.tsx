@@ -243,7 +243,7 @@ export function TextPart({ part }: TextPartProps) {
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, rehypeRaw]}
         components={{
-          code({ className, children, node, ...props }) {
+          code({ className, children, ...props }) {
             const isInline = !className || !className.includes('language-')
             
             if (className?.includes('language-mermaid') && mermaidComplete) {
