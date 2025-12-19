@@ -2,8 +2,10 @@ import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createOpenCodeClient } from '@/api/opencode'
 import { useCreateSession } from '@/hooks/useOpenCode'
+import { useModelSelection } from '@/hooks/useModelSelection'
 import { showToast } from '@/lib/toast'
 import type { components } from '@/api/opencode-types'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
 
 type CommandType = components['schemas']['Command']
 
@@ -30,6 +32,8 @@ export function useCommandHandler({
 }: CommandHandlerProps) {
   const navigate = useNavigate()
   const createSession = useCreateSession(opcodeUrl, directory)
+  const { model } = useModelSelection(opcodeUrl, directory)
+  const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const [loading, setLoading] = useState(false)
 
   const executeCommand = useCallback(async (command: CommandType, args: string = '') => {
@@ -96,11 +100,28 @@ export function useCommandHandler({
             onExportSession()
           }
           break
+
+        case 'compact':
+        case 'summarize': {
+          if (!model?.providerID || !model?.modelID) {
+            showToast.error('No model selected. Please select a provider and model first.')
+            break
+          }
+
+          showToast.info('Compacting session...', { duration: 2000 })
+
+          setSessionStatus(sessionID, { type: 'compact' })
+
+          await client.summarizeSession(
+            sessionID,
+            model.providerID,
+            model.modelID
+          )
+          break
+        }
           
         case 'share':
         case 'unshare':
-        case 'compact':
-        case 'summarize':
         case 'undo':
         case 'redo':
         case 'editor':
@@ -119,10 +140,12 @@ export function useCommandHandler({
       }
     } catch (error) {
       console.error('Failed to execute command:', error)
+      showToast.error(`Command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
+      setSessionStatus(sessionID, { type: 'idle' })
     } finally {
       setLoading(false)
     }
-  }, [sessionID, opcodeUrl, directory, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, createSession, navigate])
+  }, [sessionID, opcodeUrl, directory, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, createSession, navigate, model, setSessionStatus])
 
   return {
     executeCommand,

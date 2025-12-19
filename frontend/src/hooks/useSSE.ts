@@ -253,6 +253,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           if (!('sessionID' in event.properties)) break
           
           const { sessionID } = event.properties
+          setSessionStatus(sessionID, { type: 'idle' })
           queryClient.invalidateQueries({ 
             queryKey: ['opencode', 'messages', opcodeUrl, sessionID, directory] 
           })

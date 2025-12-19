@@ -19,7 +19,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   const [retryCountdown, setRetryCountdown] = useState(0)
   
   useEffect(() => {
-    if (status.type !== 'busy' && status.type !== 'retry') {
+    if (status.type !== 'busy' && status.type !== 'retry' && status.type !== 'compact') {
       return
     }
     
@@ -79,6 +79,13 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
       return 'bg-amber-500/20'
     }
     
+    if (statusType === 'compact') {
+      if (intensity > 0.8) return 'bg-purple-500'
+      if (intensity > 0.5) return 'bg-purple-500/70'
+      if (intensity > 0.2) return 'bg-purple-500/40'
+      return 'bg-purple-500/20'
+    }
+    
     if (intensity > 0.8) return 'bg-blue-500'
     if (intensity > 0.5) return 'bg-blue-500/70'
     if (intensity > 0.2) return 'bg-blue-500/40'
@@ -120,7 +127,7 @@ export const CompactStatusIndicator = memo(function CompactStatusIndicator({
   const [frame, setFrame] = useState(0)
   
   useEffect(() => {
-    if (status.type === 'idle') return
+    if (status.type !== 'busy' && status.type !== 'retry' && status.type !== 'compact') return
     
     const interval = setInterval(() => {
       setFrame(prev => (prev + 1) % 8)
@@ -134,13 +141,13 @@ export const CompactStatusIndicator = memo(function CompactStatusIndicator({
   }
   
   const pulseFrames = ['●', '◐', '○', '◑', '●', '◐', '○', '◑']
-  const color = status.type === 'retry' ? 'text-amber-500' : 'text-blue-500'
+  const color = status.type === 'retry' ? 'text-amber-500' : status.type === 'compact' ? 'text-purple-500' : 'text-blue-500'
   
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>
       <span className={`${color} text-sm font-mono`}>{pulseFrames[frame]}</span>
       <span className={`text-xs ${color}`}>
-        {status.type === 'retry' ? `Retry #${status.attempt}` : 'Working'}
+        {status.type === 'retry' ? `Retry #${status.attempt}` : status.type === 'compact' ? 'Compacting' : 'Working'}
       </span>
     </span>
   )
