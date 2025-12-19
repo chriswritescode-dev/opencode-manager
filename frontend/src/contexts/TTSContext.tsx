@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { API_BASE_URL } from '@/config'
 import { TTSContext, type TTSState } from './tts-context'
+import { sanitizeForTTS } from '@/lib/utils'
 
 export { TTSContext, type TTSContextValue, type TTSState } from './tts-context'
 
@@ -226,13 +227,24 @@ export function TTSProvider({ children }: TTSProviderProps) {
       return false
     }
 
+    // Sanitize markdown for clean TTS playback
+    const sanitizedText = sanitizeForTTS(text)
+    
+    if (!sanitizedText?.trim()) {
+      setError('No readable content after sanitization')
+      setState('error')
+      return false
+    }
+
     stop()
     stoppedRef.current = false
     setError(null)
-    setCurrentText(text)
+
+    // Store the sanitized text for playback
+    setCurrentText(sanitizedText)
 
     abortControllerRef.current = new AbortController()
-    chunksRef.current = splitIntoChunks(text)
+    chunksRef.current = splitIntoChunks(sanitizedText)
     
     playChunk(0)
     
