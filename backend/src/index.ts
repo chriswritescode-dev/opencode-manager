@@ -2,6 +2,8 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
+import os from 'os'
+import path from 'path'
 import { initializeDatabase } from './db/schema'
 import { createRepoRoutes } from './routes/repos'
 import { createSettingsRoutes } from './routes/settings'
@@ -10,7 +12,7 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
-import { ensureDirectoryExists, writeFileContent, fileExists } from './services/file-operations'
+import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { cleanupOrphanedDirectories } from './services/repo'
@@ -25,6 +27,7 @@ import {
   getDatabasePath,
   ENV
 } from '@opencode-manager/shared/config/env'
+import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 
 const { PORT, HOST } = ENV.SERVER
 const DB_PATH = getDatabasePath()
@@ -78,73 +81,77 @@ Prefer **uv** for Python package management:
 - Repository-specific instructions take precedence for their respective codebases
 `
 
-const DEFAULT_OPENCODE_CONFIG = {
-  $schema: 'https://opencode.ai/config.json',
-  theme: 'opencode',
-  autoupdate: true,
-  share: 'disabled',
-  keybinds: {
-    leader: 'ctrl+x',
-    app_exit: 'ctrl+c,ctrl+d,<leader>q',
-    editor_open: '<leader>e',
-    theme_list: '<leader>t',
-    sidebar_toggle: '<leader>b',
-    status_view: '<leader>s',
-    session_export: '<leader>x',
-    session_new: '<leader>n',
-    session_list: '<leader>l',
-    session_timeline: '<leader>g',
-    session_share: 'none',
-    session_unshare: 'none',
-    session_interrupt: 'escape',
-    session_compact: '<leader>c',
-    messages_page_up: 'pageup',
-    messages_page_down: 'pagedown',
-    messages_half_page_up: 'ctrl+alt+u',
-    messages_half_page_down: 'ctrl+alt+d',
-    messages_first: 'ctrl+g,home',
-    messages_last: 'ctrl+alt+g,end',
-    messages_copy: '<leader>y',
-    messages_undo: '<leader>u',
-    messages_redo: '<leader>r',
-    messages_toggle_conceal: '<leader>h',
-    model_list: '<leader>m',
-    model_cycle_recent: 'f2',
-    model_cycle_recent_reverse: 'shift+f2',
-    command_list: 'ctrl+p',
-    agent_list: '<leader>a',
-    agent_cycle: 'tab',
-    agent_cycle_reverse: 'shift+tab',
-    input_clear: 'ctrl+c',
-    input_paste: 'ctrl+v',
-    input_submit: 'return',
-    input_newline: 'shift+return,ctrl+j',
-    history_previous: 'up',
-    history_next: 'down',
-    session_child_cycle: '<leader>right',
-    session_child_cycle_reverse: '<leader>left',
-    terminal_suspend: 'ctrl+z',
-  },
-  permission: {
-    bash: {
-      '*': 'allow',
-    },
-  },
-}
-
 async function ensureDefaultConfigExists(): Promise<void> {
   const settingsService = new SettingsService(db)
-  const configs = settingsService.getOpenCodeConfigs()
+  const existingDbConfigs = settingsService.getOpenCodeConfigs()
   
-  if (configs.configs.length === 0) {
-    logger.info('No OpenCode configs found, creating default config')
-    settingsService.createOpenCodeConfig({
-      name: 'default',
-      content: DEFAULT_OPENCODE_CONFIG,
-      isDefault: true,
-    })
-    logger.info('Created default OpenCode config')
+  // Config already exists in database - nothing to do
+  if (existingDbConfigs.configs.length > 0) {
+    logger.info('OpenCode config already exists in database')
+    return
   }
+  
+  // Try to import from existing OpenCode installation (highest priority)
+  const homeConfigPath = path.join(os.homedir(), '.config/opencode/opencode.json')
+  if (await fileExists(homeConfigPath)) {
+    logger.info(`Found existing OpenCode config at ${homeConfigPath}, importing...`)
+    try {
+      const content = await readFileContent(homeConfigPath)
+      const parsed = JSON.parse(content)
+      const validation = OpenCodeConfigSchema.safeParse(parsed)
+      
+      if (!validation.success) {
+        logger.warn('Existing config has invalid structure, will try other sources', validation.error)
+      } else {
+        settingsService.createOpenCodeConfig({
+          name: 'default',
+          content: validation.data,
+          isDefault: true,
+        })
+        logger.info('Successfully imported existing OpenCode config')
+        return
+      }
+    } catch (error) {
+      logger.warn('Failed to import existing config, will try other sources', error)
+    }
+  }
+  
+  // Try to import from workspace config (if user reinstalls and workspace persists)
+  const workspaceConfigPath = getOpenCodeConfigFilePath()
+  if (await fileExists(workspaceConfigPath)) {
+    logger.info(`Found workspace config, importing...`)
+    try {
+      const content = await readFileContent(workspaceConfigPath)
+      const parsed = JSON.parse(content)
+      const validation = OpenCodeConfigSchema.safeParse(parsed)
+      
+      if (!validation.success) {
+        logger.warn('Workspace config has invalid structure, will use defaults', validation.error)
+      } else {
+        settingsService.createOpenCodeConfig({
+          name: 'default',
+          content: validation.data,
+          isDefault: true,
+        })
+        logger.info('Successfully imported workspace config')
+        return
+      }
+    } catch (error) {
+      logger.warn('Failed to import workspace config, will use defaults', error)
+    }
+  }
+  
+  // No existing config found - create minimal seed config
+  logger.info('No existing OpenCode config found, creating minimal seed config')
+  settingsService.createOpenCodeConfig({
+    name: 'default',
+    content: {
+      $schema: 'https://opencode.ai/config.json',
+      // Minimal seed - users can configure through Manager UI
+    },
+    isDefault: true,
+  })
+  logger.info('Created minimal seed OpenCode config')
 }
 
 async function syncDefaultConfigToDisk(): Promise<void> {

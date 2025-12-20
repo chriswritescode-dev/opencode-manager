@@ -117,14 +117,16 @@ export const OpenCodeConfigSchema = z.object({
   agent: z.record(z.string(), z.any()).optional(),
   command: z.record(z.string(), z.any()).optional(),
   keybinds: z.record(z.string(), z.any()).optional(),
-  autoupdate: z.boolean().optional(),
+  autoupdate: z.union([z.boolean(), z.literal("notify")]).optional(),
   formatter: z.record(z.string(), z.any()).optional(),
   permission: z.record(z.string(), z.any()).optional(),
   mcp: z.record(z.string(), z.any()).optional(),
   instructions: z.array(z.string()).optional(),
   disabled_providers: z.array(z.string()).optional(),
-  share: z.string().optional(),
+  share: z.enum(["manual", "auto", "disabled"]).optional(),
 });
+
+export type OpenCodeConfigContent = z.infer<typeof OpenCodeConfigSchema>;
 
 export const OpenCodeConfigMetadataSchema = z.object({
   id: z.number(),
