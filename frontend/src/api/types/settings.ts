@@ -3,9 +3,10 @@ import {
   DEFAULT_KEYBOARD_SHORTCUTS,
   DEFAULT_USER_PREFERENCES,
   type TTSConfig,
+  type OpenCodeConfigContent,
 } from '@opencode-manager/shared'
 
-export type { TTSConfig }
+export type { TTSConfig, OpenCodeConfigContent }
 export { DEFAULT_TTS_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES }
 
 export interface CustomCommand {
@@ -48,7 +49,7 @@ export interface UpdateSettingsRequest {
 export interface OpenCodeConfig {
   id: number
   name: string
-  content: Record<string, unknown>
+  content: OpenCodeConfigContent
   rawContent?: string
   isDefault: boolean
   createdAt: number
@@ -57,12 +58,12 @@ export interface OpenCodeConfig {
 
 export interface CreateOpenCodeConfigRequest {
   name: string
-  content: Record<string, unknown> | string
+  content: OpenCodeConfigContent | string
   isDefault?: boolean
 }
 
 export interface UpdateOpenCodeConfigRequest {
-  content: Record<string, unknown> | string
+  content: OpenCodeConfigContent | string
   isDefault?: boolean
 }
 
