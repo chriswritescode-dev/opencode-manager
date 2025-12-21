@@ -201,7 +201,7 @@ export function RepoList() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4 w-full">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4 w-full pb-24 md:pb-4">
               {filteredRepos.map((repo) => (
                 <RepoCard
                   key={repo.id}

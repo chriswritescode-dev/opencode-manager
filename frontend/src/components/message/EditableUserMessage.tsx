@@ -1,6 +1,7 @@
 import { memo, useState, useRef, useEffect } from 'react'
 import { Send, X, Pencil, Loader2 } from 'lucide-react'
 import { useRefreshMessage } from '@/hooks/useRemoveMessage'
+import { useUIState } from '@/stores/uiStateStore'
 
 interface EditableUserMessageProps {
   opcodeUrl: string
@@ -26,6 +27,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
   const [editedContent, setEditedContent] = useState(content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const refreshMessage = useRefreshMessage({ opcodeUrl, sessionId, directory })
+  const setIsEditingMessage = useUIState((state) => state.setIsEditingMessage)
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -76,6 +78,8 @@ export const EditableUserMessage = memo(function EditableUserMessage({
         value={editedContent}
         onChange={(e) => setEditedContent(e.target.value)}
         onKeyDown={handleKeyDown}
+        onFocus={() => setIsEditingMessage(true)}
+        onBlur={() => setIsEditingMessage(false)}
         className="w-full p-3 rounded-lg bg-background border border-primary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none resize-none min-h-[60px] text-sm"
         placeholder="Edit your message..."
         disabled={refreshMessage.isPending}
@@ -136,11 +140,11 @@ export const ClickableUserMessage = memo(function ClickableUserMessage({
   return (
     <button
       onClick={onClick}
-      className="text-left text-sm whitespace-pre-wrap break-words w-full group/edit hover:bg-blue-600/10 rounded p-1 -m-1 transition-colors"
+      className="text-left text-sm whitespace-pre-wrap break-words w-full group/edit hover:bg-blue-600/10 rounded p-1 -m-1 transition-colors flex items-start gap-2"
       title="Click to edit and resend"
     >
-      <span>{content}</span>
-      <Pencil className="w-3 h-3 inline-block ml-2 opacity-0 group-hover/edit:opacity-70 transition-opacity" />
+      <span className="flex-1">{content}</span>
+      <Pencil className="w-4 h-4 flex-shrink-0 mt-0.5 text-muted-foreground opacity-50 group-hover/edit:opacity-100 group-hover/edit:text-primary transition-all" />
     </button>
   )
 })

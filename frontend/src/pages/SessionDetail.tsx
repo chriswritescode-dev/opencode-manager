@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
-import { FloatingActionButton } from "@/components/ui/floating-action-button";
+import { X } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSession, useSessions, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
+import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -86,6 +87,7 @@ export function SessionDetail() {
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
   const { modelString } = useModelSelection(opcodeUrl, repoDirectory);
+  const isEditingMessage = useUIState((state) => state.isEditingMessage);
 
   useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
@@ -247,35 +249,44 @@ export function SessionDetail() {
             />
           ) : null}
         </div>
-        {opcodeUrl && repoDirectory && (
+        {opcodeUrl && repoDirectory && !isEditingMessage && (
           <div className="absolute bottom-0 left-0 right-0 flex justify-center">
-            <PromptInput
-              ref={promptInputRef}
-              opcodeUrl={opcodeUrl}
-              directory={repoDirectory}
-              sessionID={sessionId}
-              disabled={!isConnected}
-              showScrollButton={showScrollButton}
-              onScrollToBottom={scrollToBottom}
-              onShowModelsDialog={() => setModelDialogOpen(true)}
-              onShowSessionsDialog={() => setSessionsDialogOpen(true)}
-              onShowHelpDialog={() => {
-                openSettings()
-              }}
-              onToggleDetails={handleToggleDetails}
-              onExportSession={handleExportSession}
-              onPromptChange={setHasPromptContent}
-            />
+            <div className="relative w-[94%] md:max-w-4xl">
+              {hasPromptContent && (
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchEnd={(e) => {
+                    e.preventDefault()
+                    handleClearPrompt()
+                  }}
+                  onClick={handleClearPrompt}
+                  className="absolute -top-12 right-0 md:right-4 z-50 flex items-center justify-center p-2 rounded-full border shadow-lg backdrop-blur-sm transition-all duration-200 active:scale-95 bg-destructive/90 hover:bg-destructive text-destructive-foreground border-destructive"
+                  aria-label="Clear"
+                >
+                  <X className="w-6 h-6" />
+                  <span className="text-sm font-medium hidden sm:inline">Clear</span>
+                </button>
+              )}
+              <PromptInput
+                ref={promptInputRef}
+                opcodeUrl={opcodeUrl}
+                directory={repoDirectory}
+                sessionID={sessionId}
+                disabled={!isConnected}
+                showScrollButton={showScrollButton}
+                onScrollToBottom={scrollToBottom}
+                onShowModelsDialog={() => setModelDialogOpen(true)}
+                onShowSessionsDialog={() => setSessionsDialogOpen(true)}
+                onShowHelpDialog={() => {
+                  openSettings()
+                }}
+                onToggleDetails={handleToggleDetails}
+                onExportSession={handleExportSession}
+                onPromptChange={setHasPromptContent}
+              />
+            </div>
           </div>
         )}
-        
-        <FloatingActionButton
-          variant="clear"
-          visible={hasPromptContent}
-          onClick={handleClearPrompt}
-          position="top-right"
-          label="Clear"
-        />
       </div>
 
       <ModelSelectDialog

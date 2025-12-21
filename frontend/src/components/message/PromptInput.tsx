@@ -74,6 +74,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       setSelectedAgent(null)
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
+        textareaRef.current.focus()
       }
     }
   }), [])
@@ -485,11 +486,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
   
 
-  useEffect(() => {
-    if (textareaRef.current && !disabled) {
-      textareaRef.current.focus()
-    }
-  }, [disabled])
+  
 
   useEffect(() => {
     onPromptChange?.(prompt.trim().length > 0)
@@ -498,7 +495,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   
 
   return (
-    <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 md:mx-4 mb-4 md:mb-1 w-[94%] md:max-w-4xl">
+    <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full">
       
       
       <textarea
