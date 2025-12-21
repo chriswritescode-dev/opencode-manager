@@ -5,8 +5,10 @@ import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
 import { SettingsDialog } from './components/settings/SettingsDialog'
+import { FloatingActionButton } from './components/ui/floating-action-button'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
+import { useTTS } from './hooks/useTTS'
 import { TTSProvider } from './contexts/TTSContext'
 
 const queryClient = new QueryClient({
@@ -20,6 +22,7 @@ const queryClient = new QueryClient({
 
 function AppContent() {
   const { isOpen, close } = useSettingsDialog()
+  const { isPlaying, stop } = useTTS()
   useTheme()
 
   return (
@@ -31,6 +34,12 @@ function AppContent() {
         
       </Routes>
       <SettingsDialog open={isOpen} onOpenChange={close} />
+      <FloatingActionButton
+        variant="stop-audio"
+        visible={isPlaying}
+        onClick={stop}
+        position="top-left"
+      />
       <Toaster 
         position="bottom-right"
         expand={false}
