@@ -1,6 +1,7 @@
 import { memo, useMemo, useState, useCallback } from 'react'
 import { MessagePart } from './MessagePart'
 import { MessageActionButtons } from './MessageActionButtons'
+import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import type { MessageWithParts } from '@/api/types'
 
@@ -19,6 +20,7 @@ interface MessageThreadProps {
   messages?: MessageWithParts[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onUndoMessage?: (restoredPrompt: string) => void
   model?: string
   agent?: string
 }
@@ -28,20 +30,15 @@ const isMessageStreaming = (msg: MessageWithParts): boolean => {
   return !('completed' in msg.info.time && msg.info.time.completed)
 }
 
-const findPendingAssistantMessageId = (messages: MessageWithParts[]): string | undefined => {
+const findLastMessageByRole = (
+  messages: MessageWithParts[],
+  role: 'user' | 'assistant',
+  predicate?: (msg: MessageWithParts) => boolean
+): string | undefined => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.info.role === 'assistant' && isMessageStreaming(msg)) {
+    if (msg.info.role === role && (!predicate || predicate(msg))) {
       return msg.info.id
-    }
-  }
-  return undefined
-}
-
-const findLastAssistantMessageId = (messages: MessageWithParts[]): string | undefined => {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].info.role === 'assistant') {
-      return messages[i].info.id
     }
   }
   return undefined
@@ -69,6 +66,7 @@ export const MessageThread = memo(function MessageThread({
   messages, 
   onFileClick, 
   onChildSessionClick,
+  onUndoMessage,
   model,
   agent
 }: MessageThreadProps) {
@@ -77,12 +75,17 @@ export const MessageThread = memo(function MessageThread({
   
   const pendingAssistantId = useMemo(() => {
     if (!messages) return undefined
-    return findPendingAssistantMessageId(messages)
+    return findLastMessageByRole(messages, 'assistant', isMessageStreaming)
   }, [messages])
 
   const lastAssistantId = useMemo(() => {
     if (!messages) return undefined
-    return findLastAssistantMessageId(messages)
+    return findLastMessageByRole(messages, 'assistant')
+  }, [messages])
+
+  const lastUserMessageId = useMemo(() => {
+    if (!messages) return undefined
+    return findLastMessageByRole(messages, 'user')
   }, [messages])
 
   const isSessionBusy = !!pendingAssistantId
@@ -111,11 +114,13 @@ export const MessageThread = memo(function MessageThread({
         const streaming = isMessageStreaming(msg)
         const isQueued = msg.info.role === 'user' && pendingAssistantId && msg.info.id > pendingAssistantId
         const isLastAssistant = msg.info.id === lastAssistantId
+        const isLastUserMessage = msg.info.role === 'user' && msg.info.id === lastUserMessageId
         const messageTextContent = getMessageTextContent(msg)
         
         const nextAssistantMessage = messages.slice(index + 1).find(m => m.info.role === 'assistant')
         const isUserBeforeAssistant = msg.info.role === 'user' && nextAssistantMessage
         const canEditUserMessage = isUserBeforeAssistant && nextAssistantMessage?.info.id === lastAssistantId && !isSessionBusy
+        const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
         
         const userMessageContent = msg.info.role === 'assistant' 
           ? findUserMessageBeforeAssistant(messages, msg.info.id)
@@ -170,6 +175,20 @@ export const MessageThread = memo(function MessageThread({
                         handleStartEditUserMessage(userMsg.info.id, msg.info.id)
                       }
                     } : undefined}
+                    model={model}
+                    agent={agent}
+                  />
+                )}
+                
+                {canUndoUserMessage && (
+                  <UserMessageActionButtons
+                    opcodeUrl={opcodeUrl}
+                    sessionId={sessionID}
+                    directory={directory}
+                    userMessageId={msg.info.id}
+                    userMessageContent={messageTextContent}
+                    assistantMessageId={nextAssistantMessage.info.id}
+                    onUndo={onUndoMessage}
                     model={model}
                     agent={agent}
                   />

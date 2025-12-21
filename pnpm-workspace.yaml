@@ -2,3 +2,4 @@ packages:
   - 'shared'
   - 'backend'
   - 'frontend'
+  - '!workspace/**'
