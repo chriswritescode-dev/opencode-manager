@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, type KeyboardEvent } from 'react'
+import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, type KeyboardEvent } from 'react'
 import { useSendPrompt, useAbortSession, useMessages, useSendShell, useAgents } from '@/hooks/useOpenCode'
 import { useSettings } from '@/hooks/useSettings'
 import { useCommands } from '@/hooks/useCommands'
@@ -23,6 +23,11 @@ import type { MessageWithParts, FileInfo } from '@/api/types'
 
 type CommandType = components['schemas']['Command']
 
+export interface PromptInputHandle {
+  setPromptValue: (value: string) => void
+  clearPrompt: () => void
+}
+
 interface PromptInputProps {
   opcodeUrl: string
   directory?: string
@@ -35,9 +40,10 @@ interface PromptInputProps {
   onShowHelpDialog?: () => void
   onToggleDetails?: () => boolean
   onExportSession?: () => void
+  onPromptChange?: (hasContent: boolean) => void
 }
 
-export function PromptInput({ 
+export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   opcodeUrl,
   directory,
   sessionID, 
@@ -48,9 +54,29 @@ export function PromptInput({
   onShowModelsDialog,
   onShowHelpDialog,
   onToggleDetails,
-  onExportSession
-}: PromptInputProps) {
+  onExportSession,
+  onPromptChange
+}, ref) {
   const [prompt, setPrompt] = useState('')
+  
+  useImperativeHandle(ref, () => ({
+    setPromptValue: (value: string) => {
+      setPrompt(value)
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+        textareaRef.current.focus()
+      }
+    },
+    clearPrompt: () => {
+      setPrompt('')
+      setAttachedFiles(new Map())
+      setSelectedAgent(null)
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+      }
+    }
+  }), [])
   
   const [isBashMode, setIsBashMode] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
@@ -465,6 +491,10 @@ export function PromptInput({
     }
   }, [disabled])
 
+  useEffect(() => {
+    onPromptChange?.(prompt.trim().length > 0)
+  }, [prompt, onPromptChange])
+
   
 
   return (
@@ -573,4 +603,4 @@ export function PromptInput({
       />
     </div>
   )
-}
+})

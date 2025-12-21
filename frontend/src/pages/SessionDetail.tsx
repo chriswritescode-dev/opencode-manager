@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
-import { PromptInput } from "@/components/message/PromptInput";
+import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
+import { FloatingActionButton } from "@/components/ui/floating-action-button";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
@@ -33,11 +34,13 @@ export function SessionDetail() {
   const { preferences, updateSettings } = useSettings();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
+  const promptInputRef = useRef<PromptInputHandle>(null);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [hasPromptContent, setHasPromptContent] = useState(false);
   
   const handleSwipeBack = useCallback(() => {
     navigate(`/repos/${repoId}`);
@@ -176,6 +179,14 @@ export function SessionDetail() {
     showToast.success(`Exported to ${filename}`)
   }, [messages, session]);
 
+  const handleUndoMessage = useCallback((restoredPrompt: string) => {
+    promptInputRef.current?.setPromptValue(restoredPrompt)
+  }, []);
+
+  const handleClearPrompt = useCallback(() => {
+    promptInputRef.current?.clearPrompt()
+  }, []);
+
   
 
   if (!sessionId) {
@@ -231,6 +242,7 @@ export function SessionDetail() {
               messages={messages}
               onFileClick={handleFileClick}
               onChildSessionClick={handleChildSessionClick}
+              onUndoMessage={handleUndoMessage}
               model={modelString || undefined}
             />
           ) : null}
@@ -238,6 +250,7 @@ export function SessionDetail() {
         {opcodeUrl && repoDirectory && (
           <div className="absolute bottom-0 left-0 right-0 flex justify-center">
             <PromptInput
+              ref={promptInputRef}
               opcodeUrl={opcodeUrl}
               directory={repoDirectory}
               sessionID={sessionId}
@@ -251,9 +264,18 @@ export function SessionDetail() {
               }}
               onToggleDetails={handleToggleDetails}
               onExportSession={handleExportSession}
+              onPromptChange={setHasPromptContent}
             />
           </div>
         )}
+        
+        <FloatingActionButton
+          variant="clear"
+          visible={hasPromptContent}
+          onClick={handleClearPrompt}
+          position="top-right"
+          label="Clear"
+        />
       </div>
 
       <ModelSelectDialog
