@@ -36,7 +36,11 @@ export const SessionList = ({
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
     
-    const rootSessions = sessions.filter((session) => !session.parentID);
+    const rootSessions = sessions.filter((session) => {
+      if (session.parentID) return false;
+      if (directory && session.directory && session.directory !== directory) return false;
+      return true;
+    });
     
     if (!searchQuery.trim()) return rootSessions;
 
@@ -44,7 +48,7 @@ export const SessionList = ({
     return rootSessions.filter((session) =>
       (session.title || "Untitled Session").toLowerCase().includes(query),
     );
-  }, [sessions, searchQuery]);
+  }, [sessions, searchQuery, directory]);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
