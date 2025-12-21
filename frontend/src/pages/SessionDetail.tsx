@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
-import { X } from "lucide-react";
+import { X, VolumeX } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
@@ -22,6 +22,7 @@ import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { usePermissionRequests } from "@/hooks/usePermissionRequests";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSwipeBack } from "@/hooks/useMobile";
+import { useTTS } from "@/hooks/useTTS";
 import { useEffect, useRef, useCallback } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
@@ -88,6 +89,7 @@ export function SessionDetail() {
   const { open: openSettings } = useSettingsDialog();
   const { modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
+  const { isPlaying, stop } = useTTS();
 
   useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
@@ -265,6 +267,21 @@ export function SessionDetail() {
                 >
                   <X className="w-6 h-6" />
                   <span className="text-sm font-medium hidden sm:inline">Clear</span>
+                </button>
+              )}
+              {isPlaying && (
+                <button
+                  onMouseDown={(e) => e.preventDefault()}
+                  onTouchEnd={(e) => {
+                    e.preventDefault()
+                    stop()
+                  }}
+                  onClick={stop}
+                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center justify-center p-2 rounded-full border shadow-lg backdrop-blur-sm transition-all duration-200 active:scale-95 bg-destructive/90 hover:bg-destructive text-destructive-foreground border-destructive"
+                  aria-label="Stop Audio"
+                >
+                  <VolumeX className="w-6 h-6" />
+                  <span className="text-sm font-medium hidden sm:inline">Stop Audio</span>
                 </button>
               )}
               <PromptInput
