@@ -535,21 +535,21 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
                 <SessionStatusIndicator sessionID={sessionID} />
               </div>
             ) : (
-              !hideSecondaryButtons && (
-                <button
-                  onClick={onShowModelsDialog}
-                  className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate"
-                >
-                  {currentModel.length > 12 ? currentModel.substring(0, 10) + '...' : currentModel || 'Select model'}
-                </button>
-              )
+               !hideSecondaryButtons && (
+                 <button
+                   onClick={onShowModelsDialog}
+                   className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate dark:border-white/30"
+                 >
+                   {currentModel.length > 12 ? currentModel.substring(0, 10) + '...' : currentModel || 'Select model'}
+                 </button>
+               )
             )}
           
         </div>
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-          <button
+           <button
               onClick={onScrollToBottom}
-              className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors border border-transparent ${showScrollButton ? 'border-foreground/30 visible' : 'invisible'}`}
+              className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors border border-transparent dark:border-white/30 ${showScrollButton ? 'border-foreground/30 visible' : 'invisible'}`}
               title="Scroll to bottom"
             >
               <ChevronDown className="w-5 h-5" />
