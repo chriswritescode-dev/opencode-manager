@@ -549,7 +549,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
         <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
            <button
               onClick={onScrollToBottom}
-              className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-colors border border-transparent dark:border-white/30 ${showScrollButton ? 'border-foreground/30 visible' : 'invisible'}`}
+              className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md shadow-blue-500/20 hover:shadow-blue-500/30 border border-blue-500/30 hover:border-blue-500 dark:border-blue-400/30 dark:hover:border-blue-400 ring-1 ring-blue-500/20 hover:ring-blue-500/30 ${showScrollButton ? 'visible' : 'invisible'}`}
               title="Scroll to bottom"
             >
               <ChevronDown className="w-5 h-5" />

@@ -2,6 +2,7 @@ import { memo } from 'react'
 import { X, RefreshCw, Loader2 } from 'lucide-react'
 import { useUndoMessage } from '@/hooks/useUndoMessage'
 import { useRefreshMessage } from '@/hooks/useRemoveMessage'
+import { useMobile } from '@/hooks/useMobile'
 
 interface UserMessageActionButtonsProps {
   opcodeUrl: string
@@ -26,6 +27,7 @@ export const UserMessageActionButtons = memo(function UserMessageActionButtons({
   model,
   agent
 }: UserMessageActionButtonsProps) {
+  const isMobile = useMobile()
   const undoMessage = useUndoMessage({ 
     opcodeUrl, 
     sessionId, 
@@ -55,7 +57,7 @@ export const UserMessageActionButtons = memo(function UserMessageActionButtons({
   }
 
   return (
-    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div className={`flex items-center gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
       <button
         onClick={handleRefresh}
         disabled={isLoading}

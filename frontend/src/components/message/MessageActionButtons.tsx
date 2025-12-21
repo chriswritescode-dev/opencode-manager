@@ -1,6 +1,7 @@
 import { memo } from 'react'
 import { X, RefreshCw, Loader2 } from 'lucide-react'
 import { useRemoveMessage, useRefreshMessage } from '@/hooks/useRemoveMessage'
+import { useMobile } from '@/hooks/useMobile'
 import type { MessageWithParts } from '@/api/types'
 
 interface MessageActionButtonsProps {
@@ -26,6 +27,7 @@ export const MessageActionButtons = memo(function MessageActionButtons({
   model,
   agent
 }: MessageActionButtonsProps) {
+  const isMobile = useMobile()
   const removeMessage = useRemoveMessage({ opcodeUrl, sessionId, directory })
   const refreshMessage = useRefreshMessage({ opcodeUrl, sessionId, directory })
 
@@ -56,7 +58,7 @@ export const MessageActionButtons = memo(function MessageActionButtons({
   }
 
   return (
-    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div className={`flex items-center gap-1 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
       <button
         onClick={handleRemove}
         disabled={isLoading}

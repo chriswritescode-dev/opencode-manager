@@ -23,7 +23,7 @@ import { usePermissionRequests } from "@/hooks/usePermissionRequests";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSwipeBack } from "@/hooks/useMobile";
 import { useTTS } from "@/hooks/useTTS";
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { showToast } from "@/lib/toast";
@@ -67,8 +67,20 @@ export function SessionDetail() {
   
   const repoDirectory = repo?.fullPath;
 
-  const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
+  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
   const { data: sessions } = useSessions(opcodeUrl, repoDirectory);
+  const { data: session, isLoading: sessionLoading } = useSession(
+    opcodeUrl,
+    sessionId,
+    repoDirectory,
+  );
+
+  const messages = useMemo(() => {
+    if (!rawMessages) return undefined
+    const revertMessageID = session?.revert?.messageID
+    if (!revertMessageID) return rawMessages
+    return rawMessages.filter(msg => msg.info.id < revertMessageID)
+  }, [rawMessages, session?.revert?.messageID]);
 
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
@@ -77,11 +89,6 @@ export function SessionDetail() {
     onScrollStateChange: setShowScrollButton
   });
 
-  const { data: session, isLoading: sessionLoading } = useSession(
-    opcodeUrl,
-    sessionId,
-    repoDirectory,
-  );
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory);
   const { currentPermission, pendingCount, isFromDifferentSession, dismissPermission } = usePermissionRequests(sessionId);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);

@@ -2,6 +2,7 @@ import { memo, useState, useRef, useEffect } from 'react'
 import { Send, X, Pencil, Loader2 } from 'lucide-react'
 import { useRefreshMessage } from '@/hooks/useRemoveMessage'
 import { useUIState } from '@/stores/uiStateStore'
+import { useMobile } from '@/hooks/useMobile'
 
 interface EditableUserMessageProps {
   opcodeUrl: string
@@ -129,6 +130,8 @@ export const ClickableUserMessage = memo(function ClickableUserMessage({
   onClick,
   isEditable
 }: ClickableUserMessageProps) {
+  const isMobile = useMobile()
+  
   if (!isEditable) {
     return (
       <div className="text-sm whitespace-pre-wrap break-words">
@@ -144,7 +147,7 @@ export const ClickableUserMessage = memo(function ClickableUserMessage({
       title="Click to edit and resend"
     >
       <span className="flex-1">{content}</span>
-      <Pencil className="w-4 h-4 flex-shrink-0 mt-0.5 text-muted-foreground opacity-50 group-hover/edit:opacity-100 group-hover/edit:text-primary transition-all" />
+      <Pencil className={`w-4 h-4 flex-shrink-0 mt-0.5 text-muted-foreground transition-all ${isMobile ? 'opacity-100' : 'opacity-50 group-hover/edit:opacity-100 group-hover/edit:text-primary'}`} />
     </button>
   )
 })
