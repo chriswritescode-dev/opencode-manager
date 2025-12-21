@@ -262,7 +262,7 @@ export function SessionDetail() {
                     handleClearPrompt()
                   }}
                   onClick={handleClearPrompt}
-                  className="absolute -top-12 right-0 md:right-4 z-50 flex items-center justify-center p-2 rounded-full border shadow-lg backdrop-blur-sm transition-all duration-200 active:scale-95 bg-destructive/90 hover:bg-destructive text-destructive-foreground border-destructive"
+                  className="absolute -top-12 right-0 md:right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 hover:border-red-400 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-500/20 hover:ring-red-500/40"
                   aria-label="Clear"
                 >
                   <X className="w-6 h-6" />
@@ -277,7 +277,7 @@ export function SessionDetail() {
                     stop()
                   }}
                   onClick={stop}
-                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center justify-center p-2 rounded-full border shadow-lg backdrop-blur-sm transition-all duration-200 active:scale-95 bg-destructive/90 hover:bg-destructive text-destructive-foreground border-destructive"
+                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-br from-red-700 to-red-800 hover:from-red-600 hover:to-red-700 text-destructive-foreground border-2 border-red-600/80 hover:border-red-500 shadow-2xl shadow-red-600/40 hover:shadow-red-600/60 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-600/30 hover:ring-red-600/50 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"
                   aria-label="Stop Audio"
                 >
                   <VolumeX className="w-6 h-6" />

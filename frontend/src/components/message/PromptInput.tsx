@@ -473,7 +473,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
   const currentMode = preferences?.mode || 'build'
   const modeColor = currentMode === 'plan' ? 'text-yellow-600 dark:text-yellow-500' : 'text-green-600 dark:text-green-500'
-  const modeBg = currentMode === 'plan' ? 'bg-yellow-500/10 border-yellow-500/30' : 'bg-green-500/10 border-green-500/30'
+  const modeBg = currentMode === 'plan' ? 'bg-yellow-500/20 border-yellow-400 hover:bg-yellow-500/30 hover:border-yellow-300' : 'bg-green-500/20 border-green-400 hover:bg-green-500/30 hover:border-green-300'
+  const modeShadow = currentMode === 'plan' ? 'shadow-yellow-500/20 hover:shadow-yellow-500/30' : 'shadow-green-500/20 hover:shadow-green-500/30'
 
   const { modelString } = useModelSelection(opcodeUrl, directory)
   const currentModel = modelString || ''
@@ -519,13 +520,13 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       
       <div className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex gap-1.5 md:gap-2 items-center">
-          <button
+           <button
             onClick={handleModeToggle}
-            className={`px-2 py-1 rounded-md text-xs font-medium border w-14 ${
+            className={`px-3 md:px-3.5 py-1.5 md:py-2 rounded-lg text-sm font-medium border w-14 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${
               isBashMode 
-                ? 'bg-purple-500/10 border-purple-500/30 text-purple-600 dark:text-purple-400' 
-                : `${modeBg} ${modeColor}`
-            } hover:opacity-80 transition-opacity cursor-pointer`}
+                ? 'bg-purple-500/20 border-purple-400 text-purple-700 dark:text-purple-300 shadow-purple-500/20 hover:shadow-purple-500/30' 
+                : `${modeBg} ${modeColor} ${modeShadow}`
+            }`}
           >
             {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
@@ -557,21 +558,21 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
             <button
               onClick={handleStop}
               disabled={disabled}
-              className="p-1.5 px-4 md:p-2 rounded-lg transition-colors bg-destructive hover:bg-destructive/90 text-destructive-foreground"
+              className="p-1.5 px-4 md:p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
               title="Stop"
             >
               <Square className="w-4 h-4" />
             </button>
           )}
-          <button
-            data-submit-prompt
-            onClick={handleSubmit}
-            disabled={!prompt.trim() || disabled}
-            className="px-5 md:px-6 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground"
-            title={hasActiveStream ? 'Queue message' : 'Send'}
-          >
-            {hasActiveStream ? 'Queue' : 'Send'}
-          </button>
+           <button
+             data-submit-prompt
+             onClick={handleSubmit}
+             disabled={!prompt.trim() || disabled}
+             className="px-5 md:px-6 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground dark:border dark:border-white/30"
+             title={hasActiveStream ? 'Queue message' : 'Send'}
+           >
+             {hasActiveStream ? 'Queue' : 'Send'}
+           </button>
         </div>
       </div>
       

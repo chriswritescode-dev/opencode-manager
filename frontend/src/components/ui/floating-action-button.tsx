@@ -19,12 +19,12 @@ const variantConfig: Record<FloatingActionVariant, { icon: ReactNode; label: str
   'clear': {
     icon: <X className="w-5 h-5" />,
     label: 'Clear',
-    colors: 'bg-muted hover:bg-destructive/20 text-muted-foreground hover:text-destructive border-border hover:border-destructive/50'
+    colors: 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 border-2 border-red-500/60 hover:border-red-400 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 ring-2 ring-red-500/20 hover:ring-red-500/40 text-destructive-foreground'
   },
   'stop-audio': {
     icon: <VolumeX className="w-5 h-5" />,
     label: 'Stop Audio',
-    colors: 'bg-destructive/90 hover:bg-destructive text-destructive-foreground border-destructive'
+    colors: 'bg-gradient-to-br from-red-700 to-red-800 hover:from-red-600 hover:to-red-700 border-2 border-red-600/80 hover:border-red-500 shadow-2xl shadow-red-600/40 hover:shadow-red-600/60 ring-2 ring-red-600/30 hover:ring-red-600/50 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite] text-destructive-foreground',
   },
   'custom': {
     icon: null,
@@ -61,12 +61,13 @@ export const FloatingActionButton = memo(function FloatingActionButton({
       onClick={onClick}
       disabled={loading}
       className={cn(
-        'fixed z-50 flex items-center gap-2 px-4 py-3 rounded-full border shadow-lg backdrop-blur-sm transition-all duration-200',
+        'fixed z-50 flex items-center gap-2 px-4 py-2 rounded-full backdrop-blur-md transition-all duration-200',
         'min-w-[48px] min-h-[48px]',
-        'active:scale-95',
+        'active:scale-95 hover:scale-105',
+        'transition-transform',
         config.colors,
         positionClasses[position],
-        loading && 'opacity-70 cursor-not-allowed',
+        loading && 'opacity-70 cursor-not-allowed grayscale',
         className
       )}
       aria-label={displayLabel}
