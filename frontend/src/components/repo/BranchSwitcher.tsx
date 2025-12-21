@@ -38,6 +38,8 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
     staleTime: 1000 * 30,
   });
 
+  const activeBranch = branches?.current ?? currentBranch;
+
   const handleDropdownOpenChange = useCallback((open: boolean) => {
     if (open && repoId) {
       refetchBranches();
@@ -46,10 +48,11 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
 
   const switchBranchMutation = useMutation({
     mutationFn: (branch: string) => switchBranch(repoId, branch),
-    onSuccess: (updatedRepo) => {
+    onSuccess: async (updatedRepo) => {
       queryClient.setQueryData(["repo", repoId], updatedRepo);
-      queryClient.invalidateQueries({ queryKey: ["branches", repoId] });
       queryClient.invalidateQueries({ queryKey: ["repos"] });
+      await refetchBranches();
+      showToast.success(`Switched to branch: ${updatedRepo.currentBranch}`);
     },
     onError: (error) => {
       if (error instanceof GitAuthError) {
@@ -60,8 +63,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
     },
   });
 
-  const isCurrentBranchInList = branches?.all?.includes(currentBranch) ?? false;
-  const showLoading = switchBranchMutation.isPending || (branchesLoading && !isCurrentBranchInList);
+  const showLoading = switchBranchMutation.isPending || branchesLoading;
 
   return (
     <>
@@ -78,7 +80,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             ) : (
               <GitBranch className="w-3 h-3" />
             )}
-            {!iconOnly && <span className="truncate">{currentBranch}</span>}
+            {!iconOnly && <span className="truncate">{activeBranch}</span>}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px]">
@@ -87,7 +89,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
               <DropdownMenuItem disabled className="text-muted-foreground">
                 <div className="flex items-center gap-2 w-full">
                   <GitBranch className="w-3 h-3" />
-                  <span className="flex-1">Worktree: {currentBranch}</span>
+                  <span className="flex-1">Worktree: {activeBranch}</span>
                 </div>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -123,7 +125,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
                     <div className="flex items-center gap-2 w-full">
                       <GitBranch className="w-3 h-3" />
                       <span className="flex-1">{branch}</span>
-                      {branch === currentBranch && <Check className="w-3 h-3 text-green-500" />}
+                      {branch === activeBranch && <Check className="w-3 h-3 text-green-500" />}
                     </div>
                   </DropdownMenuItem>
                 ))
@@ -179,7 +181,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
         isOpen={gitChangesOpen}
         onClose={() => setGitChangesOpen(false)}
         repoId={repoId}
-        currentBranch={currentBranch}
+        currentBranch={activeBranch}
         repoLocalPath={repoLocalPath}
       />
     </>
