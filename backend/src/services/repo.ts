@@ -146,6 +146,8 @@ export async function initLocalRepo(
 
     await executeCommand(['git', 'init'], { cwd: fullPath })
     
+    await executeCommand(['git', '-C', fullPath, 'commit', '--allow-empty', '-m', 'Initial commit'])
+    
     if (branch && branch !== 'main') {
       await executeCommand(['git', '-C', fullPath, 'checkout', '-b', branch])
     }
