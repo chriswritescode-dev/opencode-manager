@@ -5,8 +5,10 @@ import { useUserBash } from '@/stores/userBashStore'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
+import { TodoListDisplay } from './TodoListDisplay'
 
 type ToolPart = components['schemas']['ToolPart']
+type Todo = components['schemas']['Todo']
 
 interface ToolCallPartProps {
   part: ToolPart
@@ -54,6 +56,17 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
+function parseTodoOutput(output: string): Todo[] | null {
+  try {
+    const parsed = JSON.parse(output)
+    if (Array.isArray(parsed)) return parsed
+    if (parsed && Array.isArray(parsed.todos)) return parsed.todos
+    return null
+  } catch {
+    return null
+  }
+}
+
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
@@ -62,7 +75,10 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     part.state.status === 'completed' &&
     typeof part.state.input?.command === 'string' &&
     userBashCommands.has(part.state.input.command)
-  const defaultExpanded = isUserBashCommand || (preferences?.expandToolCalls ?? false)
+  const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread'
+  
+  // Todo tools show expanded content by default, other tools use preference
+  const defaultExpanded = isUserBashCommand || isTodoTool || (preferences?.expandToolCalls ?? false)
   const [expanded, setExpanded] = useState(defaultExpanded)
 
   useEffect(() => {
@@ -120,13 +136,97 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         return (input.path as string) || '.'
       case 'task':
         return (input.description as string) || null
+      case 'todowrite':
+      case 'todoread':
+        return null
       default:
         return null
     }
   }
 
+  const getTodoData = () => {
+    if (part.tool !== 'todowrite' && part.tool !== 'todoread') {
+      return null
+    }
+
+    const state = part.state
+    
+    // For completed state - has output and metadata
+    if (state.status === 'completed') {
+      if (state.metadata?.todos && Array.isArray(state.metadata.todos)) {
+        return state.metadata.todos as Todo[]
+      }
+      if (state.output) {
+        const parsed = parseTodoOutput(state.output)
+        if (parsed) return parsed
+      }
+    }
+    
+    // For running state - might have metadata
+    if (state.status === 'running' && state.metadata?.todos && Array.isArray(state.metadata.todos)) {
+      return state.metadata.todos as Todo[]
+    }
+    
+    // For any state - try input (used by todowrite)
+    if (state.input?.todos && Array.isArray(state.input.todos)) {
+      return state.input.todos as Todo[]
+    }
+    
+    return null
+  }
+
   const previewText = getPreviewText()
+  const todoData = getTodoData()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
+
+  // For todo tools, render the TodoListDisplay directly without wrapper
+  if (isTodoTool) {
+    if (part.state.status === 'pending') {
+      return (
+        <div className="my-2 text-sm text-muted-foreground flex items-center gap-2">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>Preparing task list...</span>
+        </div>
+      )
+    }
+
+    if (part.state.status === 'running') {
+      return (
+        <div className="my-2">
+          <TodoListDisplay
+            todos={todoData || []}
+            title="Task List"
+            showCompleted={true}
+            scrollCurrentOnly={true}
+            isLoading={true}
+          />
+        </div>
+      )
+    }
+
+    if (part.state.status === 'completed') {
+      return (
+        <div className="my-2">
+          <TodoListDisplay
+            todos={todoData || []}
+            title="Task List"
+            showCompleted={true}
+            scrollCurrentOnly={true}
+          />
+        </div>
+      )
+    }
+
+    if (part.state.status === 'error') {
+      return (
+        <div className="my-2 text-sm text-red-600 dark:text-red-400">
+          Error updating tasks: {part.state.error}
+        </div>
+      )
+    }
+
+    return null
+  }
 
   if (isUserBashCommand) {
     const command = part.state.input.command as string
@@ -175,11 +275,13 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       >
         <span className={getStatusColor()}>{getStatusIcon()}</span>
         <span className="font-medium">{part.tool}</span>
+        
+        {/* Header preview text */}
         {previewText && isFileTool ? (
           <span
             onClick={(e) => {
               e.stopPropagation()
-              if (onFileClick) {
+              if (onFileClick && previewText) {
                 onFileClick(previewText)
               }
             }}
@@ -191,8 +293,12 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         ) : previewText ? (
           <span className="text-muted-foreground text-xs truncate">{previewText}</span>
         ) : null}
+        
         {part.tool === 'task' && (() => {
-          const sessionId = (part.metadata?.sessionId ?? (part.state.status !== 'pending' && part.state.metadata?.sessionId)) as string | undefined
+          let sessionId: string | undefined = part.metadata?.sessionId as string | undefined
+          if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
+            sessionId = part.state.metadata?.sessionId as string | undefined
+          }
           return sessionId ? (
             <span
               onClick={(e) => {
@@ -210,6 +316,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         <span className="text-muted-foreground text-xs ml-auto">({part.state.status})</span>
       </button>
 
+      {/* Expanded content for non-todo tools */}
       {expanded && (
         <div className="bg-card space-y-2 p-3">
           {part.state.status === 'pending' && (
@@ -222,7 +329,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               <span>Preparing tool call...</span>
             </div>
           )}
-          
+
           {part.state.status === 'running' && (
             <>
               {part.tool === 'bash' ? (
