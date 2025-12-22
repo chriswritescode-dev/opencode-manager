@@ -192,8 +192,8 @@ export function RepoList() {
           </DropdownMenu>
         </div>
 
-        <div className="border border-border rounded-lg bg-card/50 mx-2 md:mx-0">
-          <div className="h-[calc(100dvh-180px)] md:h-[calc(100vh-220px)] overflow-y-auto p-3 md:p-4">
+        <div className="mx-2 md:mx-0">
+          <div className="h-[calc(100dvh-180px)] md:h-[calc(100vh-220px)] overflow-y-auto py-2 md:py-0">
             {filteredRepos.length === 0 ? (
               <div className="text-center p-12">
                 <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />

@@ -564,15 +564,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
               <Square className="w-4 h-4" />
             </button>
           )}
-           <button
-             data-submit-prompt
-             onClick={handleSubmit}
-             disabled={!prompt.trim() || disabled}
-             className="px-5 md:px-6 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground dark:border dark:border-white/30"
-             title={hasActiveStream ? 'Queue message' : 'Send'}
-           >
-             {hasActiveStream ? 'Queue' : 'Send'}
-           </button>
+            <button
+              data-submit-prompt
+              onClick={handleSubmit}
+              disabled={!prompt.trim() || disabled}
+              className="px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground dark:border dark:border-white/30 flex-shrink-0 min-w-[52px]"
+              title={hasActiveStream ? 'Queue message' : 'Send'}
+            >
+              <span className="whitespace-nowrap">{hasActiveStream ? 'Queue' : 'Send'}</span>
+            </button>
         </div>
       </div>
       
