@@ -522,7 +522,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
         <div className="flex gap-1.5 md:gap-2 items-center">
            <button
             onClick={handleModeToggle}
-            className={`px-3 md:px-3.5 py-1.5 md:py-2 rounded-lg text-sm font-medium border w-14 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${
+            className={`px-3 md:px-3.5 py-1 md:py-2 rounded-lg text-sm font-medium border w-14 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${
               isBashMode 
                 ? 'bg-purple-500/20 border-purple-400 text-purple-700 dark:text-purple-300 shadow-purple-500/20 hover:shadow-purple-500/30' 
                 : `${modeBg} ${modeColor} ${modeShadow}`
@@ -531,7 +531,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
             {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
           {hasActiveStream ? (
-              <div className="px-2 py-1 rounded-md text-xs font-medium border bg-muted border-border text-muted-foreground max-w-[120px] md:max-w-[180px] truncate">
+              <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground max-w-[120px] md:max-w-[180px] dark:border-white/30">
                 <SessionStatusIndicator sessionID={sessionID} />
               </div>
             ) : (

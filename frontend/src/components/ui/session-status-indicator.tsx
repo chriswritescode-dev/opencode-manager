@@ -98,7 +98,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
         {Array.from({ length: SCANNER_SEGMENTS }).map((_, i) => (
           <div
             key={i}
-            className={`w-1 h-3 rounded-sm transition-colors duration-75 ${getSegmentColor(i, status.type)}`}
+            className={`w-1 h-4 rounded-sm transition-colors duration-75 ${getSegmentColor(i, status.type)}`}
           />
         ))}
       </div>
