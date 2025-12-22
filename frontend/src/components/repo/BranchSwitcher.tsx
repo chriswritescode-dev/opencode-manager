@@ -34,8 +34,8 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
   const { data: branches, isLoading: branchesLoading, refetch: refetchBranches } = useQuery({
     queryKey: ["branches", repoId],
     queryFn: () => listBranches(repoId),
-    enabled: !!repoId,
-    staleTime: 1000 * 30,
+    enabled: false,
+    staleTime: Infinity,
   });
 
   const activeBranch = branches?.current ?? currentBranch;
@@ -63,7 +63,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
     },
   });
 
-  const showLoading = switchBranchMutation.isPending || branchesLoading;
+  const showLoading = switchBranchMutation.isPending || (branchesLoading && !branches);
 
   return (
     <>
@@ -110,7 +110,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             </>
           ) : (
             <>
-              {branchesLoading ? (
+              {branchesLoading && !branches ? (
                 <DropdownMenuItem disabled className="text-muted-foreground">
                   Loading branches...
                 </DropdownMenuItem>
