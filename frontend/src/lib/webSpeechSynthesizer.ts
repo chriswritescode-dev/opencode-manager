@@ -221,9 +221,9 @@ export class WebSpeechSynthesizer {
         resolve();
       };
 
-      utterance.onerror = (event) => {
+      utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
         this.currentUtterance = null;
-        const errorMessage = (event as any).error || 'Speech synthesis error';
+        const errorMessage = event.error || 'Speech synthesis error';
         if (this.pendingReject) {
           this.pendingReject(new Error(errorMessage));
           this.pendingResolve = null;
