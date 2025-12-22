@@ -130,8 +130,8 @@ export function RepoList() {
 
   return (
     <>
-      <div className="p-2 md:p-4">
-        <div className="flex items-center gap-3 mb-6">
+      <div className="px-0 py-2 md:p-4">
+        <div className="flex items-center gap-3 mb-4 md:mb-6 px-2 md:px-0">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
             <Input
@@ -192,33 +192,35 @@ export function RepoList() {
           </DropdownMenu>
         </div>
 
-        <div className="h-[calc(100vh-200px)] overflow-y-auto">
-          {filteredRepos.length === 0 ? (
-            <div className="text-center p-12">
-              <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
-              <p className="text-zinc-500">
-                No repositories found matching "{searchQuery}"
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-4 w-full pb-24 md:pb-4">
-              {filteredRepos.map((repo) => (
-                <RepoCard
-                  key={repo.id}
-                  repo={repo}
-                  onDelete={(id) => {
-                    setRepoToDelete(id);
-                    setDeleteDialogOpen(true);
-                  }}
-                  isDeleting={
-                    deleteMutation.isPending && repoToDelete === repo.id
-                  }
-                  isSelected={selectedRepos.has(repo.id)}
-                  onSelect={handleSelectRepo}
-                />
-              ))}
-            </div>
-          )}
+        <div className="border border-border rounded-lg bg-card/50 mx-2 md:mx-0">
+          <div className="h-[calc(100dvh-180px)] md:h-[calc(100vh-220px)] overflow-y-auto p-3 md:p-4">
+            {filteredRepos.length === 0 ? (
+              <div className="text-center p-12">
+                <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
+                <p className="text-zinc-500">
+                  No repositories found matching "{searchQuery}"
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full pb-20 md:pb-0">
+                {filteredRepos.map((repo) => (
+                  <RepoCard
+                    key={repo.id}
+                    repo={repo}
+                    onDelete={(id) => {
+                      setRepoToDelete(id);
+                      setDeleteDialogOpen(true);
+                    }}
+                    isDeleting={
+                      deleteMutation.isPending && repoToDelete === repo.id
+                    }
+                    isSelected={selectedRepos.has(repo.id)}
+                    onSelect={handleSelectRepo}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
