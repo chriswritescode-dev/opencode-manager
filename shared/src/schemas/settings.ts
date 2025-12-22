@@ -8,6 +8,7 @@ export const CustomCommandSchema = z.object({
 
 export const TTSConfigSchema = z.object({
   enabled: z.boolean(),
+  provider: z.enum(['external', 'builtin']).default('external'),
   endpoint: z.string(),
   apiKey: z.string(),
   voice: z.string(),
@@ -27,6 +28,7 @@ export const CustomAgentSchema = z.object({
 
 export type TTSConfig = {
   enabled: boolean;
+  provider: 'external' | 'builtin';
   endpoint: string;
   apiKey: string;
   voice: string;
@@ -75,6 +77,7 @@ export const UserPreferencesSchema = z.object({
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   enabled: false,
+  provider: 'external',
   endpoint: "https://api.openai.com",
   apiKey: "",
   voice: "alloy",

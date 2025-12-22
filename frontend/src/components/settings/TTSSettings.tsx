@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
 import { useTTSModels, useTTSVoices, useTTSDiscovery } from '@/hooks/useTTSDiscovery'
-import { Loader2, Volume2, Square, XCircle, RefreshCw } from 'lucide-react'
+import { getAvailableVoiceNames, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
+import { Loader2, Volume2, Square, XCircle, RefreshCw, MonitorSpeaker, Globe, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -28,58 +29,121 @@ function isKokoroStyleVoice(voice: string): boolean {
 
 const ttsFormSchema = z.object({
   enabled: z.boolean(),
-  endpoint: z.string().url('Must be a valid URL').min(1, 'Endpoint is required'),
-  apiKey: z.string().min(1, 'API key is required when TTS is enabled').or(z.literal('')),
-  voice: z.string().min(1, 'Voice is required'),
-  model: z.string().min(1, 'Model is required'),
+  provider: z.enum(['external', 'builtin']),
+  endpoint: z.string(),
+  apiKey: z.string(),
+  voice: z.string(),
+  model: z.string(),
   speed: z.number().min(0.25).max(4.0),
-}).refine((data) => {
-  if (data.enabled && !data.apiKey) {
-    return false
+}).superRefine((data, ctx) => {
+  if (!data.enabled) return
+  
+  // External provider specific validation
+  if (data.provider === 'external') {
+    if (!data.apiKey || data.apiKey.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['apiKey'],
+        message: 'API key is required',
+      })
+    }
+    if (!data.endpoint || data.endpoint.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['endpoint'],
+        message: 'Endpoint is required',
+      })
+    }
   }
-  return true
-}, {
-  message: 'API key is required when TTS is enabled',
-  path: ['apiKey'],
+  
+  // Voice requirement depends on provider
+  if (!data.voice || data.voice.trim().length === 0) {
+    if (data.provider === 'builtin') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['voice'],
+        message: 'Please select a browser voice',
+      })
+    }
+  }
 })
 
 type TTSFormValues = z.infer<typeof ttsFormSchema>
 
 export function TTSSettings() {
-  const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
-  const { speak, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
+  const { preferences, updateSettings } = useSettings()
+  const { speakWithConfig, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
   const { refreshAll } = useTTSDiscovery()
   const [isRefreshingDiscovery, setIsRefreshingDiscovery] = useState(false)
+  const [browserVoices, setBrowserVoices] = useState<string[]>([])
+  const [isCheckingBuiltin, setIsCheckingBuiltin] = useState(false)
+  
+  // Auto-save state
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSavedDataRef = useRef<TTSFormValues | null>(null)
   
   const form = useForm<TTSFormValues>({
     resolver: zodResolver(ttsFormSchema),
     defaultValues: DEFAULT_TTS_CONFIG,
   })
   
-  const { reset, formState: { isDirty, isValid } } = form
-  // Fetch available models and voices when TTS is configured
+  const { reset, formState: { isDirty, isValid }, getValues } = form
+  
+  // Fetch available models and voices for external provider
   const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useTTSModels(
-    undefined, // Let the hook use default user
-    true // Always fetch if endpoint is available
+    undefined,
+    true
   )
   
   const { data: voicesData, isLoading: isLoadingVoices, refetch: refetchVoices } = useTTSVoices(
-    undefined, // Let the hook use default user
-    true // Always fetch if endpoint is available
+    undefined,
+    true
   )
   
-  // Use data from API discovery first, fallback to stored preferences
   const availableModels = modelsData?.models || preferences?.tts?.availableModels || []
   const availableVoices = voicesData?.voices || preferences?.tts?.availableVoices || []
   const modelsCached = modelsData?.cached || false
   const voicesCached = voicesData?.cached || false
   
   const watchEnabled = form.watch('enabled')
+  const watchProvider = form.watch('provider')
   const watchApiKey = form.watch('apiKey')
   const watchEndpoint = form.watch('endpoint')
   const watchVoice = form.watch('voice')
+  const watchModel = form.watch('model')
+  const watchSpeed = form.watch('speed')
   
-  const canTest = watchEnabled && watchApiKey && !isDirty && watchVoice && availableVoices.length > 0
+  // Check builtin Web Speech API support
+  const hasWebSpeechSupport = isWebSpeechSupported()
+  
+  // Determine if test button should be enabled
+  // With auto-save, we allow testing as long as settings are valid (no need to wait for save)
+  const canTest = (() => {
+    if (!watchEnabled) return false
+    
+    if (watchProvider === 'builtin') {
+      return hasWebSpeechSupport && browserVoices.length > 0 && !!watchVoice && !isCheckingBuiltin
+    } else {
+      return !!watchApiKey && !!watchVoice && !isLoadingVoices
+    }
+  })()
+  
+  // Load browser voices when provider is builtin
+  useEffect(() => {
+    if (watchProvider === 'builtin' && watchEnabled) {
+      setIsCheckingBuiltin(true)
+      getAvailableVoiceNames()
+        .then((voices) => {
+          setBrowserVoices(voices)
+          setIsCheckingBuiltin(false)
+        })
+        .catch(() => {
+          setBrowserVoices([])
+          setIsCheckingBuiltin(false)
+        })
+    }
+  }, [watchProvider, watchEnabled])
   
   const handleRefreshDiscovery = async () => {
     setIsRefreshingDiscovery(true)
@@ -94,73 +158,114 @@ export function TTSSettings() {
     }
   }
   
+  const handleCheckBuiltin = async () => {
+    setIsCheckingBuiltin(true)
+    try {
+      const voices = await getAvailableVoiceNames()
+      setBrowserVoices(voices)
+    } finally {
+      setIsCheckingBuiltin(false)
+    }
+  }
+  
+  // Load preferences into form
   useEffect(() => {
     if (preferences?.tts) {
       reset({
         enabled: preferences.tts.enabled ?? DEFAULT_TTS_CONFIG.enabled,
+        provider: preferences.tts.provider ?? DEFAULT_TTS_CONFIG.provider,
         endpoint: preferences.tts.endpoint ?? DEFAULT_TTS_CONFIG.endpoint,
         apiKey: preferences.tts.apiKey ?? DEFAULT_TTS_CONFIG.apiKey,
         voice: preferences.tts.voice ?? DEFAULT_TTS_CONFIG.voice,
         model: preferences.tts.model ?? DEFAULT_TTS_CONFIG.model,
         speed: preferences.tts.speed ?? DEFAULT_TTS_CONFIG.speed,
       })
+      lastSavedDataRef.current = preferences.tts
+      setSaveStatus('idle')
     }
   }, [preferences?.tts, reset])
   
-  // Auto-fetch models and voices when endpoint or API key changes
+  // Auto-save on change with debouncing
   useEffect(() => {
-    if (watchEnabled && watchApiKey && watchEndpoint) {
-      const timer = setTimeout(() => {
-        refetchModels()
-        refetchVoices()
-      }, 1000) // Debounce by 1 second to avoid rapid calls
-      
-      return () => clearTimeout(timer)
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
     }
-  }, [watchEndpoint, watchApiKey, watchEnabled, refetchModels, refetchVoices])
-  
-  const onSubmit = (data: TTSFormValues) => {
-    updateSettings({ tts: data })
-  }
+    
+    if (!isDirty) {
+      setSaveStatus('idle')
+      return
+    }
+    
+    if (!isValid) {
+      setSaveStatus('idle')
+      return
+    }
+    
+    setSaveStatus('saving')
+    
+    saveTimeoutRef.current = setTimeout(() => {
+      const formData = getValues()
+      
+      if (lastSavedDataRef.current && JSON.stringify(formData) === JSON.stringify(lastSavedDataRef.current)) {
+        setSaveStatus('idle')
+        return
+      }
+      
+      updateSettings({ tts: formData })
+      lastSavedDataRef.current = formData
+      setSaveStatus('saved')
+      
+      setTimeout(() => {
+        setSaveStatus('idle')
+      }, 1500)
+      
+    }, 800)
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [watchEnabled, watchProvider, watchApiKey, watchEndpoint, watchVoice, watchModel, watchSpeed, isValid, isDirty, getValues, updateSettings])
   
   const handleTest = () => {
-    speak(TEST_PHRASE)
+    const formData = getValues()
+    speakWithConfig(TEST_PHRASE, formData)
   }
   
   const handleStopTest = () => {
     stop()
   }
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
-
+  
   return (
     <div className="bg-card border-t pt-4">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold text-foreground">Text-to-Speech</h2>
-        <Button
-          onClick={form.handleSubmit(onSubmit)}
-          disabled={!isDirty || !isValid || isUpdating}
-          size="sm"
-        >
-          {isUpdating ? (
+        {/* Show auto-save status instead of save button */}
+        <div className="flex items-center gap-2 text-sm">
+          {saveStatus === 'saving' && (
             <>
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              Saving...
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-muted-foreground">Saving...</span>
             </>
-          ) : (
-            'Save'
           )}
-        </Button>
+          {saveStatus === 'saved' && (
+            <>
+              <CheckCircle2 className="h-4 w-4 text-green-500" />
+              <span className="text-green-600">Saved</span>
+            </>
+          )}
+          {saveStatus === 'idle' && isDirty && isValid && (
+            <span className="text-amber-600">Unsaved changes</span>
+          )}
+          {saveStatus === 'idle' && !isDirty && (
+            <span className="text-muted-foreground">All changes saved</span>
+          )}
+        </div>
       </div>
       
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+        <form className="space-y-6">
           <FormField
             control={form.control}
             name="enabled"
@@ -184,123 +289,297 @@ export function TTSSettings() {
 
           {watchEnabled && (
             <>
-              <FormField
-                control={form.control}
-                name="endpoint"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>TTS Server URL</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://api.openai.com"
-                        className="bg-background"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      Base URL of your TTS service (e.g., https://x.x.x.x:Port)
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    form.setValue('provider', 'builtin', { shouldDirty: true })
+                    form.setValue('apiKey', '', { shouldDirty: true })
+                    form.setValue('endpoint', '', { shouldDirty: true })
+                  }}
+                  className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
+                    watchProvider === 'builtin'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-border hover:border-blue-300'
+                  }`}
+                >
+                  <MonitorSpeaker className={`h-6 w-6 ${watchProvider === 'builtin' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                  <span className={`font-medium ${watchProvider === 'builtin' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                    Built-in Browser
+                  </span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    No API key or URL needed
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    form.setValue('provider', 'external', { shouldDirty: true })
+                  }}
+                  className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
+                    watchProvider === 'external'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-border hover:border-blue-300'
+                  }`}
+                >
+                  <Globe className={`h-6 w-6 ${watchProvider === 'external' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                  <span className={`font-medium ${watchProvider === 'external' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                    External API
+                  </span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    OpenAI, Kokoro, etc.
+                  </span>
+                </button>
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Choose how you want to generate speech. Built-in works offline with no setup required.
+              </div>
 
-              <FormField
-                control={form.control}
-                name="apiKey"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>API Key</FormLabel>
-                    <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="sk-..."
-                        className="bg-background"
-                        {...field}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      API key for the TTS service
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              {/* External Provider Settings */}
+              {watchProvider === 'external' && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="endpoint"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>TTS Server URL</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder="https://api.openai.com"
+                            className="bg-background"
+                            {...field}
+                            onChange={(e) => {
+                              field.onChange(e)
+                              // Auto-save will handle debounced save
+                            }}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Base URL of your TTS service (e.g., https://x.x.x.x:Port)
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-<FormField
-                control={form.control}
-                name="voice"
-                render={({ field }) => {
-                  const hasKokoroVoices = availableVoices.some(isKokoroStyleVoice)
-                  const voiceOptions = [
-                    ...availableVoices.slice(0, 10).map((voice: string) => ({
-                      value: voice,
-                      label: voice
-                    })),
-                    ...(hasKokoroVoices ? KOKORO_COMPOSITE_VOICE_SUGGESTIONS : []),
-                    ...availableVoices.slice(10).map((voice: string) => ({
-                      value: voice,
-                      label: voice
-                    }))
-                  ]
-                  
-                  return (
-                  <FormItem>
-                    <FormLabel>Voice</FormLabel>
-                    <FormControl>
-                      <Combobox
-                        value={field.value}
-                        onChange={field.onChange}
-                        options={voiceOptions}
-                        placeholder={hasKokoroVoices ? "Select a voice or type custom name (e.g., am_adam+am_echo)..." : "Select a voice..."}
-                        disabled={!watchEnabled || isLoadingVoices}
-                        allowCustomValue={true}
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      {isLoadingVoices ? 'Loading available voices...' : 
-                       voicesCached ? `Available voices (${availableVoices.length}) - cached` :
-                       availableVoices.length > 0 ? `Available voices (${availableVoices.length})${hasKokoroVoices ? ' - Support composite voices (e.g., am_adam+am_echo)' : ''}` :
-                       watchEnabled && watchApiKey ? 'No voices available - check endpoint and API key' :
-                       'Configure TTS to discover voices'}
-                    </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                  )
-                }}
-              />
+                  <FormField
+                    control={form.control}
+                    name="apiKey"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>API Key</FormLabel>
+                        <FormControl>
+                          <Input
+                            type="password"
+                            placeholder="sk-..."
+                            className="bg-background"
+                            {...field}
+                            onChange={(e) => {
+                              field.onChange(e)
+                              // Auto-save will handle debounced save
+                            }}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          API key for the TTS service
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
 
-              <FormField
-                control={form.control}
-                name="model"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Model</FormLabel>
-                    <FormControl>
-                      <Combobox
-                        value={field.value}
-                        onChange={field.onChange}
-                        options={availableModels.map((model: string) => ({
-                          value: model,
-                          label: model
-                        }))}
-                        placeholder="Select a model or type custom name..."
-                        disabled={!watchEnabled || isLoadingModels}
-                        allowCustomValue={true}
-                      />
-                    </FormControl>
-<FormDescription>
-                       {isLoadingModels ? 'Loading available models...' : 
-                        modelsCached ? `Available models (${availableModels.length}) - cached` :
-                        availableModels.length > 0 ? `Available models (${availableModels.length})` :
-                        watchEnabled && watchApiKey ? 'No models available - check endpoint and API key' :
-                        'Configure TTS to discover models'}
-                     </FormDescription>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+                  <FormField
+                    control={form.control}
+                    name="voice"
+                    render={({ field }) => {
+                      const hasKokoroVoices = availableVoices.some(isKokoroStyleVoice)
+                      const voiceOptions = [
+                        ...availableVoices.slice(0, 10).map((voice: string) => ({
+                          value: voice,
+                          label: voice
+                        })),
+                        ...(hasKokoroVoices ? KOKORO_COMPOSITE_VOICE_SUGGESTIONS : []),
+                        ...availableVoices.slice(10).map((voice: string) => ({
+                          value: voice,
+                          label: voice
+                        }))
+                      ]
+                      
+                      return (
+                      <FormItem>
+                        <FormLabel>Voice</FormLabel>
+                        <FormControl>
+                          <Combobox
+                            value={field.value}
+                            onChange={field.onChange}
+                            options={voiceOptions}
+                            placeholder={hasKokoroVoices ? "Select a voice or type custom name (e.g., am_adam+am_echo)..." : "Select a voice..."}
+                            disabled={!watchEnabled || isLoadingVoices}
+                            allowCustomValue={true}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {isLoadingVoices ? 'Loading available voices...' : 
+                           voicesCached ? `Available voices (${availableVoices.length}) - cached` :
+                           availableVoices.length > 0 ? `Available voices (${availableVoices.length})${hasKokoroVoices ? ' - Support composite voices (e.g., am_adam+am_echo)' : ''}` :
+                           watchEnabled && watchApiKey ? 'No voices available - check endpoint and API key' :
+                           'Configure TTS to discover voices'}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                      )
+                    }}
+                  />
 
+                  <FormField
+                    control={form.control}
+                    name="model"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Model</FormLabel>
+                        <FormControl>
+                          <Combobox
+                            value={field.value}
+                            onChange={field.onChange}
+                            options={availableModels.map((model: string) => ({
+                              value: model,
+                              label: model
+                            }))}
+                            placeholder="Select a model or type custom name..."
+                            disabled={!watchEnabled || isLoadingModels}
+                            allowCustomValue={true}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {isLoadingModels ? 'Loading available models...' : 
+                           modelsCached ? `Available models (${availableModels.length}) - cached` :
+                           availableModels.length > 0 ? `Available models (${availableModels.length})` :
+                           watchEnabled && watchApiKey ? 'No models available - check endpoint and API key' :
+                           'Configure TTS to discover models'}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+                    <div className="space-y-0.5">
+                      <div className="text-base font-medium">Refresh Discovery Data</div>
+                      <p className="text-sm text-muted-foreground">
+                        Force refresh available models and voices from the endpoint
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRefreshDiscovery}
+                      disabled={!watchEnabled || !watchApiKey || isRefreshingDiscovery}
+                    >
+                      {isRefreshingDiscovery ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          Refreshing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                          Refresh
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </>
+              )}
+
+              {/* Builtin Provider Settings */}
+              {watchProvider === 'builtin' && (
+                <>
+                  <FormField
+                    control={form.control}
+                    name="voice"
+                    render={({ field }) => {
+                      const voiceOptions = browserVoices.map((voice: string) => ({
+                        value: voice,
+                        label: voice
+                      }))
+                      
+                      return (
+                      <FormItem>
+                        <FormLabel>Browser Voice</FormLabel>
+                        <FormControl>
+                          <Combobox
+                            value={field.value}
+                            onChange={field.onChange}
+                            options={voiceOptions}
+                            placeholder={isCheckingBuiltin ? "Loading voices..." : "Select a voice..."}
+                            disabled={!watchEnabled || isCheckingBuiltin || browserVoices.length === 0}
+                            allowCustomValue={false}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {isCheckingBuiltin ? (
+                            <span className="flex items-center gap-1">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Checking for voices...
+                            </span>
+                          ) : browserVoices.length > 0 ? (
+                            `${browserVoices.length} voices available in your browser`
+                          ) : !hasWebSpeechSupport ? (
+                            <span className="text-destructive">Web Speech API not supported in this browser</span>
+                          ) : (
+                            'No voices found - try refreshing'
+                          )}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                      )
+                    }}
+                  />
+
+                  {!hasWebSpeechSupport && (
+                    <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-4">
+                      <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                        <strong>Browser Not Supported</strong>: Your browser doesn't support Web Speech API. 
+                        Please use Chrome, Safari, Firefox, or Edge, or switch to an external API provider.
+                      </div>
+                    </div>
+                  )}
+
+                  {hasWebSpeechSupport && browserVoices.length === 0 && (
+                    <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+                      <div className="space-y-0.5">
+                        <div className="text-base font-medium">Check for Voices</div>
+                        <p className="text-sm text-muted-foreground">
+                          Your browser may need permission to access voices
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={handleCheckBuiltin}
+                        disabled={isCheckingBuiltin}
+                      >
+                        {isCheckingBuiltin ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            Checking...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            Check for Voices
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Common Settings for both providers */}
               <FormField
                 control={form.control}
                 name="speed"
@@ -318,12 +597,12 @@ export function TTSSettings() {
                         max={4.0}
                         step={0.25}
                         value={[field.value]}
-                        onValueChange={([value]) => field.onChange(value)}
+                        onValueChange={(values) => field.onChange(values[0])}
                         className="w-full"
                       />
                     </FormControl>
                     <FormDescription>
-                      Playback speed (0.25x to 4.0x)
+                      Playback speed (0.25x to 4.0x). Note: Web Speech API has limited speed control.
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -332,55 +611,20 @@ export function TTSSettings() {
 
               <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                 <div className="space-y-0.5">
-                  <div className="text-base font-medium">Refresh Discovery Data</div>
-                  <p className="text-sm text-muted-foreground">
-                    Force refresh available models and voices from the endpoint
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRefreshDiscovery}
-                  disabled={!watchEnabled || !watchApiKey || isRefreshingDiscovery}
-                >
-                  {isRefreshingDiscovery ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Refreshing...
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="h-4 w-4 mr-2" />
-                      Refresh
-                    </>
-                  )}
-                </Button>
-              </div>
-
-              <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
-                <div className="space-y-0.5">
                   <div className="text-base font-medium">Test TTS</div>
                   <p className="text-sm text-muted-foreground">
-                    {isDirty 
-                      ? 'Save changes before testing' 
-                      : 'Verify your TTS configuration works'}
+                    Verify your TTS configuration works
                   </p>
                   {ttsError && (
                     <p className="text-sm text-destructive flex items-center gap-1">
                       <XCircle className="h-4 w-4" />
                       {ttsError}
-                      {ttsError.includes("not found") && availableVoices.length > 0 && (
-                        <span className="text-xs block mt-1">
-                          Try selecting from: {availableVoices.slice(0, 5).join(", ")}
-                          {availableVoices.length > 5 && ` +${availableVoices.length - 5} more`}
-                        </span>
-                      )}
                     </p>
                   )}
-                  {!ttsError && watchEnabled && watchApiKey && watchEndpoint && availableVoices.length === 0 && !isLoadingVoices && (
-                    <p className="text-sm text-muted-foreground flex items-center gap-1">
-                       Click "Refresh" to discover available voices, or check your API key and endpoint URL.
+                  {watchProvider === 'builtin' && !hasWebSpeechSupport && (
+                    <p className="text-sm text-destructive flex items-center gap-1">
+                      <XCircle className="h-4 w-4" />
+                      Web Speech API is not available
                     </p>
                   )}
                 </div>

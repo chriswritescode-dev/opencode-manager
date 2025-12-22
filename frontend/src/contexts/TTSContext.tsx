@@ -1,10 +1,11 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { API_BASE_URL } from '@/config'
-import { TTSContext, type TTSState } from './tts-context'
+import { TTSContext, type TTSState, type TTSConfig } from './tts-context'
 import { sanitizeForTTS } from '@/lib/utils'
+import { getWebSpeechSynthesizer, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
 
-export { TTSContext, type TTSContextValue, type TTSState } from './tts-context'
+export { TTSContext, type TTSContextValue, type TTSState, type TTSConfig } from './tts-context'
 
 const SENTENCE_REGEX = /(?<=[.!?])\s+/
 const SENTENCES_PER_CHUNK = 2
@@ -40,16 +41,43 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const chunkIndexRef = useRef(0)
   const prefetchedBlobsRef = useRef<Map<number, Blob>>(new Map())
   const fetchingIndexRef = useRef<number>(-1)
+  
+  // Web Speech API reference
+  const webSpeechSynthRef = useRef<ReturnType<typeof getWebSpeechSynthesizer> | null>(null)
 
   const ttsConfig = preferences?.tts
-  const isEnabled = !!(ttsConfig?.enabled && ttsConfig?.apiKey)
+  const isBuiltin = ttsConfig?.provider === 'builtin'
+  const isEnabled = (() => {
+    if (!ttsConfig?.enabled) return false
+    if (isBuiltin) {
+      return isWebSpeechSupported()
+    }
+    // External requires apiKey
+    return !!ttsConfig?.apiKey
+  })()
+
+  // Initialize Web Speech synthesizer on demand
+  const getSynthesizer = useCallback(() => {
+    if (!webSpeechSynthRef.current) {
+      webSpeechSynthRef.current = getWebSpeechSynthesizer();
+    }
+    return webSpeechSynthRef.current;
+  }, []);
 
   const cleanup = useCallback(() => {
+    // Stop external audio
     if (audioRef.current) {
       audioRef.current.pause()
       audioRef.current.src = ''
       audioRef.current = null
     }
+    
+    // Stop Web Speech API
+    if (webSpeechSynthRef.current && isBuiltin) {
+      webSpeechSynthRef.current.stop()
+      webSpeechSynthRef.current.clearCallbacks()
+    }
+    
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
@@ -61,7 +89,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     chunksRef.current = []
     chunkIndexRef.current = 0
     fetchingIndexRef.current = -1
-  }, [])
+  }, [isBuiltin])
 
   const stop = useCallback(() => {
     stoppedRef.current = true
@@ -79,7 +107,8 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
   }, [cleanup])
 
-  const synthesize = useCallback(async (text: string, signal?: AbortSignal): Promise<Blob | null> => {
+  // External API synthesis
+  const synthesizeExternal = useCallback(async (text: string, signal?: AbortSignal): Promise<Blob | null> => {
     if (stoppedRef.current) return null
 
     try {
@@ -135,7 +164,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     fetchingIndexRef.current = index
     
     try {
-      const blob = await synthesize(chunksRef.current[index], abortControllerRef.current?.signal)
+      const blob = await synthesizeExternal(chunksRef.current[index], abortControllerRef.current?.signal)
       if (blob && !stoppedRef.current) {
         prefetchedBlobsRef.current.set(index, blob)
         fetchNextChunk(index + 1)
@@ -145,7 +174,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
     
     fetchingIndexRef.current = -1
-  }, [synthesize])
+  }, [synthesizeExternal])
 
   const playChunk = useCallback(async (index: number) => {
     if (stoppedRef.current || index >= chunksRef.current.length) {
@@ -163,7 +192,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
       
       if (!blob) {
         setState('loading')
-        const fetched = await synthesize(chunksRef.current[index], abortControllerRef.current?.signal)
+        const fetched = await synthesizeExternal(chunksRef.current[index], abortControllerRef.current?.signal)
         if (fetched && !stoppedRef.current) {
           blob = fetched
         }
@@ -202,17 +231,12 @@ export function TTSProvider({ children }: TTSProviderProps) {
       setError(err instanceof Error ? err.message : 'TTS failed')
       setState('error')
     }
-  }, [synthesize, fetchNextChunk])
+  }, [synthesizeExternal, fetchNextChunk])
 
-  const speak = useCallback(async (text: string): Promise<boolean> => {
-    if (!ttsConfig?.enabled) {
-      setError('TTS is not enabled')
-      setState('error')
-      return false
-    }
-
-    if (!ttsConfig?.apiKey) {
-      setError('API key not configured')
+  // Builtin Web Speech synthesis - takes explicit config
+  const speakBuiltinWithConfig = useCallback(async (text: string, config: TTSConfig): Promise<boolean> => {
+    if (!isWebSpeechSupported()) {
+      setError('Web Speech API not supported in this browser')
       setState('error')
       return false
     }
@@ -223,13 +247,6 @@ export function TTSProvider({ children }: TTSProviderProps) {
       return false
     }
 
-    if (!ttsConfig.voice || !ttsConfig.model) {
-      setError('Voice or model not configured')
-      setState('error')
-      return false
-    }
-
-    // Sanitize markdown for clean TTS playback
     const sanitizedText = sanitizeForTTS(text)
     
     if (!sanitizedText?.trim()) {
@@ -244,17 +261,126 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     setOriginalText(text)
     setCurrentText(sanitizedText)
+    setState('loading')
 
-    abortControllerRef.current = new AbortController()
-    chunksRef.current = splitIntoChunks(sanitizedText)
+    const synth = getSynthesizer()
+    await synth.waitForVoices()
+
+    const voiceName = config.voice || ''
     
-    playChunk(0)
+    synth.clearCallbacks()
     
-    return true
-  }, [ttsConfig, stop, playChunk])
+    synth.onEnd(() => {
+      if (!stoppedRef.current) {
+        setState('idle')
+        setCurrentText(null)
+      }
+    })
+
+    synth.onError((err) => {
+      if (!stoppedRef.current) {
+        setError(err)
+        setState('error')
+      }
+    })
+
+    try {
+      setState('playing')
+      
+      const rate = config.speed || 1.0
+      
+      await synth.speakChunked(sanitizedText, 200, {
+        voice: voiceName || undefined,
+        rate: rate,
+      })
+      
+      return true
+    } catch (err) {
+      if (stoppedRef.current) return false
+      setError(err instanceof Error ? err.message : 'TTS failed')
+      setState('error')
+      return false
+    }
+  }, [stop, getSynthesizer])
+
+  // Config-aware speak function - takes explicit config
+  const speakWithConfig = useCallback(async (text: string, config: TTSConfig): Promise<boolean> => {
+    if (!config.enabled) {
+      setError('TTS is not enabled')
+      setState('error')
+      return false
+    }
+
+    const configIsBuiltin = config.provider === 'builtin'
+
+    if (configIsBuiltin) {
+      if (!isWebSpeechSupported()) {
+        setError('Web Speech API not supported in this browser')
+        setState('error')
+        return false
+      }
+      return speakBuiltinWithConfig(text, config)
+    } else {
+      if (!config.apiKey) {
+        setError('API key not configured')
+        setState('error')
+        return false
+      }
+
+      if (!config.voice || !config.model) {
+        setError('Voice or model not configured')
+        setState('error')
+        return false
+      }
+
+      const sanitizedText = sanitizeForTTS(text)
+      
+      if (!sanitizedText?.trim()) {
+        setError('No readable content after sanitization')
+        setState('error')
+        return false
+      }
+
+      stop()
+      stoppedRef.current = false
+      setError(null)
+
+      setOriginalText(text)
+      setCurrentText(sanitizedText)
+
+      abortControllerRef.current = new AbortController()
+      chunksRef.current = splitIntoChunks(sanitizedText)
+      
+      playChunk(0)
+      
+      return true
+    }
+  }, [speakBuiltinWithConfig, stop, playChunk])
+
+  // Main speak function - uses stored preferences
+  const speak = useCallback(async (text: string): Promise<boolean> => {
+    if (!ttsConfig) {
+      setError('TTS is not configured')
+      setState('error')
+      return false
+    }
+
+    const config: TTSConfig = {
+      enabled: ttsConfig.enabled ?? false,
+      provider: ttsConfig.provider ?? 'external',
+      endpoint: ttsConfig.endpoint ?? '',
+      apiKey: ttsConfig.apiKey ?? '',
+      voice: ttsConfig.voice ?? '',
+      model: ttsConfig.model ?? '',
+      speed: ttsConfig.speed ?? 1.0,
+    }
+
+    return speakWithConfig(text, config)
+  }, [ttsConfig, speakWithConfig])
 
   const value = {
     speak,
+    speakWithConfig,
     stop,
     state,
     error,

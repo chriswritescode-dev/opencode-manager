@@ -14,8 +14,37 @@ export function useSettings(userId = 'default') {
   const updateMutation = useMutation({
     mutationFn: (updates: Partial<UserPreferences>) =>
       settingsApi.updateSettings({ preferences: updates }, userId),
-    onSuccess: (newData) => {
-      queryClient.setQueryData(['settings', userId], newData)
+    onMutate: async (updates) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: ['settings', userId] })
+      
+      // Snapshot current value
+      const previousData = queryClient.getQueryData(['settings', userId])
+      
+      // Optimistically update cache immediately
+      queryClient.setQueryData(['settings', userId], (old: typeof data) => {
+        if (!old) return old
+        return {
+          ...old,
+          preferences: {
+            ...old.preferences,
+            ...updates,
+          },
+          updatedAt: Date.now(),
+        }
+      })
+      
+      return { previousData }
+    },
+    onError: (_err, _updates, context) => {
+      // Rollback on error
+      if (context?.previousData) {
+        queryClient.setQueryData(['settings', userId], context.previousData)
+      }
+    },
+    onSettled: () => {
+      // Refetch to ensure server state
+      queryClient.invalidateQueries({ queryKey: ['settings', userId] })
     },
   })
 
