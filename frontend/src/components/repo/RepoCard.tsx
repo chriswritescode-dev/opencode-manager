@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Trash2, ExternalLink, Download } from "lucide-react";
+import { Loader2, Trash2, Download, GitBranch, FolderOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { downloadRepo } from "@/api/repos";
 import { showToast } from "@/lib/toast";
@@ -41,85 +41,81 @@ export function RepoCard({
     : repo.localPath || "Local Repo";
   const branchToDisplay = repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
+  const isCloning = repo.cloneStatus === "cloning";
+
+  const handleCardClick = () => {
+    if (isReady) {
+      navigate(`/repos/${repo.id}`);
+    }
+  };
+
+  const handleActionClick = (e: React.MouseEvent, action: () => void) => {
+    e.stopPropagation();
+    action();
+  };
 
   return (
     <div
-      className={`group relative bg-gradient-to-br from-card to-card-hover border rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg w-full ${
+      onClick={handleCardClick}
+      className={`relative border rounded-xl overflow-hidden transition-all duration-200 w-full ${
+        isReady ? "cursor-pointer active:scale-[0.98] hover:border-blue-500/50 hover:bg-accent/50 hover:shadow-md" : "cursor-default"
+      } ${
         isSelected
-          ? "border-blue-500 shadow-lg shadow-blue-900/30"
-          : "border-border hover:border-border hover:shadow-blue-900/20"
+          ? "border-blue-500 bg-blue-500/5"
+          : "border-border bg-card"
       }`}
     >
-      <div className="p-2 sm:p-6">
-         <div className="mb-4">
-           <div className="flex items-center gap-2 mb-2">
-{onSelect && (
-                <Checkbox
-                  id="select-repo"
-                  checked={isSelected}
-                  onCheckedChange={(checked) => {
-                    onSelect(repo.id, checked === true);
-                  }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                  }}
-                  className="w-5 h-5"
-                />
-              )}
-<h3 
-                 onClick={(e) => {
-                   e.stopPropagation();
-                   if (onSelect) {
-                     onSelect(repo.id, !isSelected);
-                   }
-                 }}
-                 className={`font-semibold text-lg text-foreground truncate group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors ${
-                   onSelect ? "cursor-pointer" : "cursor-not-allowed opacity-60"
-                 }`}
-               >
-                 {repoName}
-               </h3>
-             {repo.isWorktree && (
-              <Badge
-                className="text-xs px-2.5 py-0.5 bg-purple-600/20 text-purple-600 dark:text-purple-400 border-purple-600/40"
-              >
-								{branchToDisplay || "main"}
-              </Badge>
-            )}
-            {repo.cloneStatus === "cloning" && (
-              <Badge
-                className="text-xs px-2.5 py-0.5 bg-blue-600/20 text-blue-600 dark:text-blue-400 border-blue-600/40"
-              >
-                cloning
-              </Badge>
-            )}
-          </div>
-          
-        </div>
-
-        
-
-        <div className="flex flex-col gap-2">
-          {repo.cloneStatus === "cloning" && (
-            <div className="text-sm text-muted-foreground flex items-center gap-2">
-              <Loader2 className="w-3 h-3 animate-spin text-blue-600 dark:text-blue-400" />
-              <span>Cloning repository...</span>
+      <div className="p-4">
+        <div className="flex items-start gap-3">
+          {onSelect && (
+            <div 
+              className="pt-0.5"
+              onClick={(e) => handleActionClick(e, () => onSelect(repo.id, !isSelected))}
+            >
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={(checked) => onSelect(repo.id, checked === true)}
+                className="w-5 h-5"
+              />
             </div>
           )}
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/repos/${repo.id}`);
-              }}
-              disabled={!isReady}
-              className="cursor-pointer flex-1 h-10 sm:h-9 px-3"
-            >
-              <ExternalLink className="w-4 h-4 mr-2" />
-              Open
-            </Button>
+          
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-base text-foreground truncate">
+                {repoName}
+              </h3>
+              {repo.isWorktree && (
+                <Badge variant="secondary" className="text-xs px-1.5 py-0 shrink-0">
+                  worktree
+                </Badge>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              {isCloning ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                  Cloning...
+                </span>
+              ) : (
+                <>
+                  <span className="flex items-center gap-1">
+                    <GitBranch className="w-3.5 h-3.5" />
+                    {branchToDisplay || "main"}
+                  </span>
+                  {repo.isLocal && (
+                    <span className="flex items-center gap-1">
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Local
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
+          <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
             <BranchSwitcher
               repoId={repo.id}
               currentBranch={branchToDisplay || ""}
@@ -127,14 +123,13 @@ export function RepoCard({
               repoUrl={repo.repoUrl}
               repoLocalPath={repo.localPath}
               iconOnly={true}
-              className="h-10 sm:h-9 w-10"
+              className="h-8 w-8"
             />
 
             <Button
               size="sm"
-              variant="outline"
-              onClick={async (e) => {
-                e.stopPropagation();
+              variant="ghost"
+              onClick={(e) => handleActionClick(e, async () => {
                 setIsDownloading(true);
                 try {
                   await downloadRepo(repo.id, repoName);
@@ -144,10 +139,9 @@ export function RepoCard({
                 } finally {
                   setIsDownloading(false);
                 }
-              }}
+              })}
               disabled={!isReady || isDownloading}
-              className="h-10 sm:h-9 w-10 p-0"
-              title="Download as ZIP (excludes gitignored files)"
+              className="h-8 w-8 p-0"
             >
               {isDownloading ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -158,13 +152,10 @@ export function RepoCard({
 
             <Button
               size="sm"
-              variant="destructive"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(repo.id);
-              }}
+              variant="ghost"
+              onClick={(e) => handleActionClick(e, () => onDelete(repo.id))}
               disabled={isDeleting}
-              className="h-10 sm:h-9 w-10 p-0"
+              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
             >
               {isDeleting ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
@@ -175,8 +166,6 @@ export function RepoCard({
           </div>
         </div>
       </div>
-
-      
     </div>
   );
 }
