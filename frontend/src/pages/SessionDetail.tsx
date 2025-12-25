@@ -12,7 +12,7 @@ import { PermissionRequestDialog } from "@/components/session/PermissionRequestD
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSession, useSessions, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages } from "@/hooks/useOpenCode";
-import { OPENCODE_API_ENDPOINT } from "@/config";
+import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
@@ -28,6 +28,7 @@ import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { showToast } from "@/lib/toast";
 import type { PermissionResponse } from "@/api/types";
+import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
@@ -40,6 +41,7 @@ export function SessionDetail() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
@@ -60,6 +62,15 @@ export function SessionDetail() {
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
     enabled: !!repoId,
+  });
+
+  const { data: settings } = useQuery({
+    queryKey: ["opencode-config"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
+      if (!response.ok) throw new Error("Failed to fetch config");
+      return response.json();
+    },
   });
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
@@ -237,6 +248,7 @@ export function SessionDetail() {
         parentSessionId={session?.parentID}
         onFileBrowserOpen={() => setFileBrowserOpen(true)}
         onSettingsOpen={openSettings}
+        onMcpDialogOpen={() => setMcpDialogOpen(true)}
         onSessionTitleUpdate={handleSessionTitleUpdate}
         onParentSessionClick={handleParentSessionClick}
       />
@@ -346,6 +358,13 @@ export function SessionDetail() {
         basePath={repo.localPath}
         repoName={repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}
         initialSelectedFile={selectedFilePath}
+      />
+
+      <RepoMcpDialog
+        open={mcpDialogOpen}
+        onOpenChange={setMcpDialogOpen}
+        config={settings}
+        directory={repoDirectory}
       />
 
       <PermissionRequestDialog

@@ -4,6 +4,7 @@ import { MessageActionButtons } from './MessageActionButtons'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import type { MessageWithParts } from '@/api/types'
+import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 
 function getMessageTextContent(msg: MessageWithParts): string {
   return msg.parts
@@ -30,6 +31,10 @@ const isMessageStreaming = (msg: MessageWithParts): boolean => {
   return !('completed' in msg.info.time && msg.info.time.completed)
 }
 
+function isSessionInRetry(sessionStatus: { type?: string }): boolean {
+  return sessionStatus?.type === 'retry'
+}
+
 const findLastMessageByRole = (
   messages: MessageWithParts[],
   role: 'user' | 'assistant',
@@ -39,21 +44,6 @@ const findLastMessageByRole = (
     const msg = messages[i]
     if (msg.info.role === role && (!predicate || predicate(msg))) {
       return msg.info.id
-    }
-  }
-  return undefined
-}
-
-const findUserMessageBeforeAssistant = (
-  messages: MessageWithParts[],
-  assistantMessageId: string
-): string | undefined => {
-  const assistantIndex = messages.findIndex(m => m.info.id === assistantMessageId)
-  if (assistantIndex <= 0) return undefined
-  
-  for (let i = assistantIndex - 1; i >= 0; i--) {
-    if (messages[i].info.role === 'user') {
-      return getMessageTextContent(messages[i])
     }
   }
   return undefined
@@ -72,6 +62,7 @@ export const MessageThread = memo(function MessageThread({
 }: MessageThreadProps) {
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null)
   const [editingForAssistantId, setEditingForAssistantId] = useState<string | null>(null)
+  const sessionStatus = useSessionStatusForSession(sessionID)
   
   const pendingAssistantId = useMemo(() => {
     if (!messages) return undefined
@@ -88,7 +79,7 @@ export const MessageThread = memo(function MessageThread({
     return findLastMessageByRole(messages, 'user')
   }, [messages])
 
-  const isSessionBusy = !!pendingAssistantId
+  const isSessionBusy = !!pendingAssistantId || isSessionInRetry(sessionStatus)
 
   const handleStartEditUserMessage = useCallback((userMessageId: string, assistantMessageId: string) => {
     setEditingUserMessageId(userMessageId)
@@ -113,7 +104,6 @@ export const MessageThread = memo(function MessageThread({
       {messages.map((msg, index) => {
         const streaming = isMessageStreaming(msg)
         const isQueued = msg.info.role === 'user' && pendingAssistantId && msg.info.id > pendingAssistantId
-        const isLastAssistant = msg.info.id === lastAssistantId
         const isLastUserMessage = msg.info.role === 'user' && msg.info.id === lastUserMessageId
         const messageTextContent = getMessageTextContent(msg)
         
@@ -121,10 +111,6 @@ export const MessageThread = memo(function MessageThread({
         const isUserBeforeAssistant = msg.info.role === 'user' && nextAssistantMessage
         const canEditUserMessage = isUserBeforeAssistant && nextAssistantMessage?.info.id === lastAssistantId && !isSessionBusy
         const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
-        
-        const userMessageContent = msg.info.role === 'assistant' 
-          ? findUserMessageBeforeAssistant(messages, msg.info.id)
-          : undefined
 
         const isEditingThisMessage = editingUserMessageId === msg.info.id
         
@@ -161,22 +147,12 @@ export const MessageThread = memo(function MessageThread({
                   )}
                 </div>
                 
-                {msg.info.role === 'assistant' && !streaming && !isSessionBusy && (
+                {msg.info.role === 'assistant' && !streaming && !isSessionBusy && !isSessionInRetry(sessionStatus) && (
                   <MessageActionButtons
                     opcodeUrl={opcodeUrl}
                     sessionId={sessionID}
                     directory={directory}
                     message={msg}
-                    isLastAssistantMessage={isLastAssistant}
-                    userMessageContent={userMessageContent}
-                    onEditUserMessage={userMessageContent ? () => {
-                      const userMsg = messages.slice(0, index).reverse().find(m => m.info.role === 'user')
-                      if (userMsg) {
-                        handleStartEditUserMessage(userMsg.info.id, msg.info.id)
-                      }
-                    } : undefined}
-                    model={model}
-                    agent={agent}
                   />
                 )}
                 
@@ -187,10 +163,7 @@ export const MessageThread = memo(function MessageThread({
                     directory={directory}
                     userMessageId={msg.info.id}
                     userMessageContent={messageTextContent}
-                    assistantMessageId={nextAssistantMessage.info.id}
                     onUndo={onUndoMessage}
-                    model={model}
-                    agent={agent}
                   />
                 )}
               </div>

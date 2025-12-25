@@ -1,6 +1,7 @@
-import { memo, useState, useEffect } from 'react'
+import { memo, useEffect, useState } from 'react'
 import type { components } from '@/api/opencode-types'
 import { RefreshCw, AlertTriangle } from 'lucide-react'
+import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 
 type RetryPartType = components['schemas']['RetryPart']
 
@@ -9,17 +10,29 @@ interface RetryPartProps {
 }
 
 export const RetryPart = memo(function RetryPart({ part }: RetryPartProps) {
-  const [countdown, setCountdown] = useState(5)
+  const sessionStatus = useSessionStatusForSession(part.sessionID)
+  const nextTimestamp = sessionStatus.type === 'retry' ? sessionStatus.next : 0
+  const initialCountdown = sessionStatus.type === 'retry' && nextTimestamp > 0
+    ? Math.max(0, Math.ceil((nextTimestamp - Date.now()) / 1000))
+    : 0
+  const [countdown, setCountdown] = useState(initialCountdown)
   
   useEffect(() => {
-    if (countdown <= 0) return
+    if (sessionStatus.type !== 'retry' || nextTimestamp === 0) {
+      setCountdown(0)
+      return
+    }
     
     const timer = setInterval(() => {
-      setCountdown(prev => Math.max(0, prev - 1))
+      const remaining = Math.max(0, Math.ceil((nextTimestamp - Date.now()) / 1000))
+      setCountdown(remaining)
+      if (remaining <= 0) {
+        clearInterval(timer)
+      }
     }, 1000)
     
     return () => clearInterval(timer)
-  }, [countdown])
+  }, [sessionStatus.type, nextTimestamp])
   
   const errorMessage = part.error?.data?.message || 'An error occurred'
   
@@ -36,9 +49,13 @@ export const RetryPart = memo(function RetryPart({ part }: RetryPartProps) {
           <span className="text-sm font-medium text-amber-600 dark:text-amber-400">
             Retry attempt {part.attempt}
           </span>
-          {countdown > 0 && (
+          {countdown > 0 ? (
             <span className="text-xs text-amber-500/80">
               (retrying in {countdown}s)
+            </span>
+          ) : (
+            <span className="text-xs text-amber-500/80">
+              (retrying...)
             </span>
           )}
         </div>

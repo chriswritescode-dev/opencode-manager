@@ -2,7 +2,7 @@ import { BackButton } from "@/components/ui/back-button";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { Button } from "@/components/ui/button";
-import { Loader2, Settings, FolderOpen, CornerUpLeft } from "lucide-react";
+import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen } from "lucide-react";
 import { useState } from "react";
 
 interface Repo {
@@ -28,6 +28,7 @@ interface SessionDetailHeaderProps {
   parentSessionId?: string;
   onFileBrowserOpen: () => void;
   onSettingsOpen: () => void;
+  onMcpDialogOpen: () => void;
   onSessionTitleUpdate: (newTitle: string) => void;
   onParentSessionClick?: () => void;
 }
@@ -44,6 +45,7 @@ export function SessionDetailHeader({
   parentSessionId,
   onFileBrowserOpen,
   onSettingsOpen,
+  onMcpDialogOpen,
   onSessionTitleUpdate,
   onParentSessionClick,
 }: SessionDetailHeaderProps) {
@@ -133,13 +135,13 @@ export function SessionDetailHeader({
               </form>
             ) : (
               <h1 
-                className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
+                className="text-xs text-green-500 sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
                 onClick={handleTitleClick}
               >
                 {sessionTitle}
               </h1>
             )}
-            <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
+            <p className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 truncate">
               {repoName}
             </p>
           </div>
@@ -161,33 +163,44 @@ export function SessionDetailHeader({
             className="max-w-[80px] sm:w-[140px] sm:max-w-[140px]"
             iconOnly
           />
-          <div className="flex items-center gap-1 sm:gap-2">
-            <div
-              className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
-                isConnected 
-                  ? "bg-green-500" 
-                  : isReconnecting 
-                    ? "bg-yellow-500 animate-pulse" 
-                    : "bg-red-500"
-              }`}
-            />
-            <span className="text-xs text-muted-foreground hidden sm:inline">
-              {isConnected ? "Connected" : isReconnecting ? "Reconnecting..." : "Disconnected"}
-            </span>
-          </div>
+           <div className="flex items-center gap-1 sm:gap-2">
+             <div
+               className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
+                 isConnected 
+                   ? "bg-green-500" 
+                   : isReconnecting 
+                     ? "bg-yellow-500 animate-pulse" 
+                     : "bg-red-500"
+               }`}
+             />
+             <span className="text-xs text-muted-foreground hidden sm:inline">
+               {isConnected ? "Connected" : isReconnecting ? "Reconnecting..." : "Disconnected"}
+             </span>
+           </div>
           <Button
             variant="ghost"
             size="icon"
             onClick={onFileBrowserOpen}
             className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            title="Files"
           >
             <FolderOpen className="w-4 h-4" />
           </Button>
           <Button
             variant="ghost"
             size="icon"
+            onClick={onMcpDialogOpen}
+            className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            title="MCP Servers"
+          >
+            <Plug className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onSettingsOpen}
             className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            title="Settings"
           >
             <Settings className="w-4 h-4" />
           </Button>

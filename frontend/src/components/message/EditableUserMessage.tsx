@@ -95,7 +95,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
           <button
             onClick={onCancel}
             disabled={refreshMessage.isPending}
-            className="flex items-center gap-1 px-3 py-1.5 rounded text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            className="flex items-center gap-1 px-3 py-1.5 rounded text-sm border border-muted-foreground/40 bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:border-muted-foreground/60 transition-colors disabled:opacity-50"
           >
             <X className="w-4 h-4" />
             Cancel
