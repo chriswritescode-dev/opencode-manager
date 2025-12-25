@@ -173,9 +173,9 @@ export function OpenCodeConfigManager() {
       await fetchConfigs()
       
       if (isDefault) {
-        showToast.loading('Restarting server...', { id: 'restart-server' })
+        showToast.loading('Restarting server...', { id: 'create-config' })
         await restartServerMutation.mutateAsync()
-        showToast.success('Configuration created and server restarted', { id: 'restart-server' })
+        showToast.success('Configuration created and server restarted', { id: 'create-config' })
       } else {
         showToast.success('Configuration created', { id: 'create-config' })
       }
