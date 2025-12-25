@@ -120,6 +120,13 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           }
           break
 
+        case 'session.status': {
+          if (!('sessionID' in event.properties && 'status' in event.properties)) break
+          const { sessionID, status } = event.properties
+          setSessionStatus(sessionID, status)
+          break
+        }
+
         case 'message.part.updated':
         case 'messagev2.part.updated': {
           if (!('part' in event.properties)) break
@@ -127,16 +134,6 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           const { part } = event.properties
           const sessionID = part.sessionID
           const messageID = part.messageID
-          
-          if (part.type === 'retry') {
-            const retryPart = part as { attempt: number; error: { data: { message: string } } }
-            setSessionStatus(sessionID, { 
-              type: 'retry', 
-              attempt: retryPart.attempt,
-              message: retryPart.error?.data?.message || 'Retrying...',
-              next: Date.now() + 5000
-            })
-          }
           
           const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
           if (!currentData) return
@@ -378,11 +375,22 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
         const eventSource = new EventSource(eventSourceUrl)
         eventSourceRef.current = eventSource
 
-        eventSource.onopen = () => {
+        eventSource.onopen = async () => {
           if (!mountedRef.current) return
           setIsConnected(true)
           setError(null)
           resetReconnectDelay()
+          
+          try {
+            const statuses = await client.getSessionStatuses()
+            if (statuses && mountedRef.current) {
+              Object.entries(statuses).forEach(([sessionID, status]) => {
+                setSessionStatus(sessionID, status)
+              })
+            }
+          } catch (err) {
+            console.error('Failed to fetch initial session statuses:', err)
+          }
         }
 
         eventSource.onerror = () => {

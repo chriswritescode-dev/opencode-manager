@@ -15,6 +15,7 @@ import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
+import { showToast } from '@/lib/toast'
 import type { OpenCodeConfig } from '@/api/types/settings'
 
 interface Command {
@@ -68,17 +69,6 @@ export function OpenCodeConfigManager() {
   
   const scrollToSection = (ref: React.RefObject<HTMLButtonElement | null>) => {
     if (ref.current) {
-      const rect = ref.current.getBoundingClientRect()
-      
-      console.log('Scroll check:', {
-        section: ref.current.textContent?.trim(),
-        rectTop: rect.top,
-        rectBottom: rect.bottom,
-        viewportHeight: window.innerHeight
-      })
-      
-      // Always scroll to ensure the section is at the top when expanded
-      console.log('Scrolling to section:', ref.current.textContent?.trim())
       ref.current.scrollIntoView({ 
         behavior: 'smooth', 
         block: 'start',
@@ -91,13 +81,11 @@ export function OpenCodeConfigManager() {
     mutationFn: async () => {
       return await settingsApi.restartOpenCodeServer()
     },
-    onSuccess: (data) => {
-      console.log('OpenCode server restarted successfully:', data.message)
-      // Invalidate agents cache after server restart
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     },
-    onError: (error) => {
-      console.error('Failed to restart OpenCode server:', error)
+    onError: () => {
+      showToast.error('Failed to restart OpenCode server')
     },
   })
 
@@ -135,13 +123,18 @@ export function OpenCodeConfigManager() {
       // Auto-restart server if agents were modified
       const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
       if (restartServer || agentsChanged) {
-        restartServerMutation.mutate()
+        showToast.loading('Restarting server...', { id: 'update-restart' })
+        await restartServerMutation.mutateAsync()
+        showToast.success('Config updated and server restarted', { id: 'update-restart' })
+      } else {
+        showToast.success('Configuration updated')
       }
       
       // Invalidate agents cache so @ mentions get updated
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to update config:', error)
+      showToast.error('Failed to update config')
     } finally {
       setIsUpdating(false)
     }
@@ -159,6 +152,7 @@ export function OpenCodeConfigManager() {
   }, [configs, selectedConfig])
 
   const createConfig = async (name: string, rawContent: string, isDefault: boolean) => {
+    showToast.loading('Creating configuration...', { id: 'create-config' })
     try {
       setIsUpdating(true)
       const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
@@ -176,10 +170,20 @@ export function OpenCodeConfigManager() {
       })
       
       setIsCreateDialogOpen(false)
-      fetchConfigs()
+      await fetchConfigs()
+      
+      if (isDefault) {
+        showToast.loading('Restarting server...', { id: 'restart-server' })
+        await restartServerMutation.mutateAsync()
+        showToast.success('Configuration created and server restarted', { id: 'restart-server' })
+      } else {
+        showToast.success('Configuration created', { id: 'create-config' })
+      }
+      
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to create config:', error)
+      showToast.error('Failed to create configuration', { id: 'create-config' })
       throw error
     } finally {
       setIsUpdating(false)
@@ -204,12 +208,16 @@ export function OpenCodeConfigManager() {
   }
 
   const setDefaultConfig = async (config: OpenCodeConfig) => {
+    showToast.loading('Setting default config and restarting server...', { id: 'set-default' })
     try {
       setIsUpdating(true)
       await settingsApi.setDefaultOpenCodeConfig(config.name)
-      fetchConfigs()
+      await fetchConfigs()
+      await restartServerMutation.mutateAsync()
+      showToast.success('Default config updated and server restarted', { id: 'set-default' })
     } catch (error) {
       console.error('Failed to set default config:', error)
+      showToast.error('Failed to set default config', { id: 'set-default' })
     } finally {
       setIsUpdating(false)
     }
@@ -250,7 +258,10 @@ export function OpenCodeConfigManager() {
         <div className="flex gap-2 ">
           <Button
             variant="outline"
-            onClick={() => restartServerMutation.mutate()}
+            onClick={() => {
+              showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
+              restartServerMutation.mutate()
+            }}
             disabled={restartServerMutation.isPending}
           >
             {restartServerMutation.isPending ? (
@@ -349,14 +360,23 @@ export function OpenCodeConfigManager() {
         onClose={() => setIsEditDialogOpen(false)}
         onUpdate={async (rawContent) => {
           if (!editingConfig) return
-          const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
-          const agentsChanged = JSON.stringify(editingConfig.content.agent) !== JSON.stringify(parsedContent.agent)
-          await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
-          await fetchConfigs()
-          if (agentsChanged) {
-            restartServerMutation.mutate()
+          showToast.loading('Saving configuration...', { id: 'edit-config' })
+          try {
+            const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
+            const agentsChanged = JSON.stringify(editingConfig.content.agent) !== JSON.stringify(parsedContent.agent)
+            await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
+            await fetchConfigs()
+            if (agentsChanged) {
+              showToast.loading('Restarting server...', { id: 'restart-server' })
+              await restartServerMutation.mutateAsync()
+              showToast.success('Config updated and server restarted', { id: 'restart-server' })
+            } else {
+              showToast.success('Configuration saved', { id: 'edit-config' })
+            }
+            queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+          } catch {
+            showToast.error('Failed to save configuration', { id: 'edit-config' })
           }
-          queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
         }}
         isUpdating={isUpdating}
       />
@@ -427,10 +447,8 @@ export function OpenCodeConfigManager() {
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
                         onClick={() => {
                           const isExpanding = !expandedSections.commands
-                          console.log('Commands clicked, expanding:', isExpanding)
                           setExpandedSections(prev => ({ ...prev, commands: isExpanding }))
                           
-                          // Only scroll when expanding, not collapsing
                           if (isExpanding) {
                             setTimeout(() => scrollToSection(commandsRef), 100)
                           }
@@ -466,10 +484,8 @@ export function OpenCodeConfigManager() {
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
                         onClick={() => {
                           const isExpanding = !expandedSections.agents
-                          console.log('Agents clicked, expanding:', isExpanding)
                           setExpandedSections(prev => ({ ...prev, agents: isExpanding }))
                           
-                          // Only scroll when expanding, not collapsing
                           if (isExpanding) {
                             setTimeout(() => scrollToSection(agentsRef), 100)
                           }
@@ -505,10 +521,8 @@ export function OpenCodeConfigManager() {
                         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
                         onClick={() => {
                           const isExpanding = !expandedSections.mcp
-                          console.log('MCP clicked, expanding:', isExpanding)
                           setExpandedSections(prev => ({ ...prev, mcp: isExpanding }))
                           
-                          // Only scroll when expanding, not collapsing
                           if (isExpanding) {
                             setTimeout(() => scrollToSection(mcpRef), 100)
                           }

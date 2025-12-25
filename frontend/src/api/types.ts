@@ -123,6 +123,23 @@ export interface SSESessionIdleEvent {
   }
 }
 
+export interface SSESessionStatusEvent {
+  type: 'session.status'
+  properties: {
+    sessionID: string
+    status: {
+      type: 'idle'
+    } | {
+      type: 'busy'
+    } | {
+      type: 'retry'
+      attempt: number
+      message: string
+      next: number
+    }
+  }
+}
+
 export type SSEEvent =
   | SSEMessagePartUpdatedEvent
   | SSEMessageUpdatedEvent
@@ -132,6 +149,7 @@ export type SSEEvent =
   | SSESessionDeletedEvent
   | SSESessionCompactedEvent
   | SSESessionIdleEvent
+  | SSESessionStatusEvent
   | SSETodoUpdatedEvent
   | SSEPermissionUpdatedEvent
   | SSEPermissionRepliedEvent

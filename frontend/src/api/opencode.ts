@@ -145,6 +145,11 @@ export class OpenCodeClient {
     return response.data
   }
 
+  async getSessionStatuses() {
+    const response = await this.client.get<Record<string, { type: 'idle' } | { type: 'busy' } | { type: 'retry'; attempt: number; message: string; next: number }>>('/session/status')
+    return response.data
+  }
+
   getEventSourceURL() {
     const base = this.baseURL.startsWith('http') 
       ? this.baseURL 

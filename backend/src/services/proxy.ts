@@ -66,3 +66,44 @@ export async function proxyRequest(request: Request) {
     })
   }
 }
+
+export async function proxyToOpenCodeWithDirectory(
+  path: string,
+  method: string,
+  directory: string | undefined,
+  body?: string,
+  headers?: Record<string, string>
+): Promise<Response> {
+  const url = new URL(`${OPENCODE_SERVER_URL}${path}`)
+  
+  if (directory) {
+    url.searchParams.set('directory', directory)
+  }
+  
+  try {
+    const response = await fetch(url.toString(), {
+      method,
+      headers: headers || { 'Content-Type': 'application/json' },
+      body,
+    })
+    
+    const responseHeaders: Record<string, string> = {}
+    response.headers.forEach((value, key) => {
+      if (!['connection', 'transfer-encoding'].includes(key.toLowerCase())) {
+        responseHeaders[key] = value
+      }
+    })
+    
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    })
+  } catch (error) {
+    logger.error(`Proxy to OpenCode failed for ${path}:`, error)
+    return new Response(JSON.stringify({ error: 'Proxy request failed' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+}

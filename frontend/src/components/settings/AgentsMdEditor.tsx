@@ -28,7 +28,7 @@ export function AgentsMdEditor() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['agents-md'] })
       setHasChanges(false)
-      showToast.success('AGENTS.md saved successfully')
+      showToast.success('AGENTS.md saved and server restarted')
     },
     onError: () => {
       showToast.error('Failed to save AGENTS.md')
@@ -45,7 +45,7 @@ export function AgentsMdEditor() {
       queryClient.invalidateQueries({ queryKey: ['agents-md'] })
       setContent(defaultContent)
       setHasChanges(false)
-      showToast.success('AGENTS.md reset to default')
+      showToast.success('AGENTS.md reset to default and server restarted')
     },
     onError: () => {
       showToast.error('Failed to reset AGENTS.md')

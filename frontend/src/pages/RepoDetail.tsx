@@ -6,14 +6,15 @@ import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
+import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { BackButton } from "@/components/ui/back-button";
 import { useCreateSession } from "@/hooks/useOpenCode";
-import { OPENCODE_API_ENDPOINT } from "@/config";
+import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSwipeBack } from "@/hooks/useMobile";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, FolderOpen, GitBranch } from "lucide-react";
+import { Loader2, Plus, FolderOpen, GitBranch, Plug } from "lucide-react";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
@@ -22,6 +23,7 @@ export function RepoDetail() {
   const repoId = parseInt(id || "0");
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [switchConfigOpen, setSwitchConfigOpen] = useState(false);
+  const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   
   const handleSwipeBack = useCallback(() => {
@@ -42,7 +44,14 @@ export function RepoDetail() {
     enabled: !!repoId,
   });
 
-  
+  const { data: settings } = useQuery({
+    queryKey: ["opencode-config"],
+    queryFn: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
+      if (!response.ok) throw new Error("Failed to fetch config");
+      return response.json();
+    },
+  });
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
@@ -144,26 +153,33 @@ export function RepoDetail() {
             </div>
           </div>
            <div className="flex items-center gap-2">
-             
-
-             <Button
-               variant="outline"
-               onClick={() => setFileBrowserOpen(true)}
-               size="sm"
-               className="text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-             >
-               <FolderOpen className="w-4 h-4 sm:mr-2" />
-               <span className="hidden sm:inline">Files</span>
-             </Button>
               <Button
-                onClick={() => handleCreateSession()}
-                disabled={!opcodeUrl || createSessionMutation.isPending}
+                variant="outline"
+                onClick={() => setMcpDialogOpen(true)}
                 size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+                className="text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
               >
-                <Plus className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">New Session</span>
+                <Plug className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">MCP</span>
               </Button>
+              <Button
+                variant="outline"
+                onClick={() => setFileBrowserOpen(true)}
+                size="sm"
+                className="text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+              >
+                <FolderOpen className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Files</span>
+              </Button>
+               <Button
+                 onClick={() => handleCreateSession()}
+                 disabled={!opcodeUrl || createSessionMutation.isPending}
+                 size="sm"
+                 className="bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+               >
+                 <Plus className="w-4 h-4 sm:mr-2" />
+                 <span className="hidden sm:inline">New Session</span>
+               </Button>
            </div>
         </div>
       </div>
@@ -183,6 +199,13 @@ export function RepoDetail() {
         onClose={() => setFileBrowserOpen(false)}
         basePath={repo.localPath}
         repoName={displayName}
+      />
+
+      <RepoMcpDialog
+        open={mcpDialogOpen}
+        onOpenChange={setMcpDialogOpen}
+        config={settings}
+        directory={repoDirectory}
       />
 
 {repo && (

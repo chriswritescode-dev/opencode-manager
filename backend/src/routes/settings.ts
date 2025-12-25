@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
-import { patchOpenCodeConfig } from '../services/proxy'
+import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
 import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import { 
   UserPreferencesSchema, 
@@ -49,6 +49,17 @@ const UpdateCustomCommandSchema = z.object({
 const ValidateGitTokenSchema = z.object({
   gitToken: z.string(),
 })
+
+const ConnectMcpDirectorySchema = z.object({
+  directory: z.string().min(1),
+})
+
+async function extractOpenCodeError(response: Response, defaultError: string): Promise<string> {
+  const errorObj = await response.json().catch(() => null)
+  return (errorObj && typeof errorObj === 'object' && 'error' in errorObj)
+    ? String(errorObj.error)
+    : defaultError
+}
 
 export function createSettingsRoutes(db: Database) {
   const app = new Hono()
@@ -445,6 +456,115 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to validate token' }, 500)
+    }
+  })
+
+  // MCP directory-aware endpoints
+  app.post('/mcp/:name/connectdirectory', async (c) => {
+    try {
+      const serverName = c.req.param('name')
+      const body = await c.req.json()
+      const { directory } = ConnectMcpDirectorySchema.parse(body)
+      
+      const response = await proxyToOpenCodeWithDirectory(
+        `/mcp/${encodeURIComponent(serverName)}/connect`,
+        'POST',
+        directory
+      )
+      
+      if (!response.ok) {
+        const errorMsg = await extractOpenCodeError(response, 'Failed to connect MCP server')
+        return c.json({ error: errorMsg }, 400)
+      }
+      
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to connect MCP server for directory:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to connect MCP server' }, 500)
+    }
+  })
+
+  app.post('/mcp/:name/disconnectdirectory', async (c) => {
+    try {
+      const serverName = c.req.param('name')
+      const body = await c.req.json()
+      const { directory } = ConnectMcpDirectorySchema.parse(body)
+      
+      const response = await proxyToOpenCodeWithDirectory(
+        `/mcp/${encodeURIComponent(serverName)}/disconnect`,
+        'POST',
+        directory
+      )
+      
+      if (!response.ok) {
+        const errorMsg = await extractOpenCodeError(response, 'Failed to disconnect MCP server')
+        return c.json({ error: errorMsg }, 400)
+      }
+      
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to disconnect MCP server for directory:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to disconnect MCP server' }, 500)
+    }
+  })
+
+  app.post('/mcp/:name/authdirectedir', async (c) => {
+    try {
+      const serverName = c.req.param('name')
+      const body = await c.req.json()
+      const { directory } = ConnectMcpDirectorySchema.parse(body)
+      
+      const response = await proxyToOpenCodeWithDirectory(
+        `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
+        'POST',
+        directory
+      )
+      
+      if (!response.ok) {
+        const errorMsg = await extractOpenCodeError(response, 'Failed to authenticate MCP server')
+        return c.json({ error: errorMsg }, 400)
+      }
+      
+      return c.json(await response.json())
+    } catch (error) {
+      logger.error('Failed to authenticate MCP server for directory:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to authenticate MCP server' }, 500)
+    }
+  })
+
+  app.delete('/mcp/:name/authdir', async (c) => {
+    try {
+      const serverName = c.req.param('name')
+      const body = await c.req.json()
+      const { directory } = ConnectMcpDirectorySchema.parse(body)
+      
+      const response = await proxyToOpenCodeWithDirectory(
+        `/mcp/${encodeURIComponent(serverName)}/auth`,
+        'DELETE',
+        directory
+      )
+      
+      if (!response.ok) {
+        const errorMsg = await extractOpenCodeError(response, 'Failed to remove MCP auth')
+        return c.json({ error: errorMsg }, 400)
+      }
+      
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to remove MCP auth for directory:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to remove MCP auth' }, 500)
     }
   })
 

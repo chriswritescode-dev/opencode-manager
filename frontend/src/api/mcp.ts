@@ -124,4 +124,64 @@ export const mcpApi = {
     }
     return response.json()
   },
+
+  async getStatusFor(directory: string): Promise<McpStatusMap> {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp?directory=${encodeURIComponent(directory)}`)
+    if (!response.ok) {
+      throw new Error(`Failed to get MCP status for directory: ${response.statusText}`)
+    }
+    return response.json()
+  },
+
+  async connectDirectory(name: string, directory: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/connectdirectory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory }),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(error.error || `Failed to connect MCP server for directory: ${response.statusText}`)
+    }
+    return response.json()
+  },
+
+  async disconnectDirectory(name: string, directory: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/disconnectdirectory`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory }),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(error.error || `Failed to disconnect MCP server for directory: ${response.statusText}`)
+    }
+    return response.json()
+  },
+
+  async authenticateDirectory(name: string, directory: string): Promise<McpStatus> {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/authdirectedir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory }),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(error.error || `Failed to authenticate MCP server for directory: ${response.statusText}`)
+    }
+    return response.json()
+  },
+
+  async removeAuthDirectory(name: string, directory: string): Promise<{ success: true }> {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/authdir`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory }),
+    })
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(error.error || `Failed to remove MCP auth for directory: ${response.statusText}`)
+    }
+    return response.json()
+  },
 }

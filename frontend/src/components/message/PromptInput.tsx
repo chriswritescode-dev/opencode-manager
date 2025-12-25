@@ -476,8 +476,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const modeBg = currentMode === 'plan' ? 'bg-yellow-500/20 border-yellow-400 hover:bg-yellow-500/30 hover:border-yellow-300' : 'bg-green-500/20 border-green-400 hover:bg-green-500/30 hover:border-green-300'
   const modeShadow = currentMode === 'plan' ? 'shadow-yellow-500/20 hover:shadow-yellow-500/30' : 'shadow-green-500/20 hover:shadow-green-500/30'
 
-  const { modelString } = useModelSelection(opcodeUrl, directory)
+  const { model, modelString } = useModelSelection(opcodeUrl, directory)
   const currentModel = modelString || ''
+  const displayModelName = model?.modelID || currentModel
   const isMobile = useMobile()
   const sessionStatus = useSessionStatusForSession(sessionID)
   const showStopButton = hasActiveStream && (sessionStatus.type === 'busy' || sessionStatus.type === 'retry')
@@ -538,9 +539,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
                !hideSecondaryButtons && (
                  <button
                    onClick={onShowModelsDialog}
-                   className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[120px] md:max-w-[180px] truncate dark:border-white/30"
+                   className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[150px] md:max-w-[220px] truncate dark:border-white/30"
                  >
-                   {currentModel.length > 12 ? currentModel.substring(0, 10) + '...' : currentModel || 'Select model'}
+                   {displayModelName || 'Select model'}
                  </button>
                )
             )}
