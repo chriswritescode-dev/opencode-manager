@@ -18,6 +18,8 @@ interface PermissionRequestDialogProps {
   sessionTitle?: string
   onRespond: (permissionID: string, sessionID: string, response: PermissionResponse) => Promise<void>
   onDismiss: (permissionID: string, sessionID?: string) => void
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 function getPermissionTypeLabel(type: string): string {
@@ -113,11 +115,14 @@ export function PermissionRequestDialog({
   sessionTitle,
   onRespond,
   onDismiss,
+  open: parentOpen,
+  onOpenChange,
 }: PermissionRequestDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [loadingAction, setLoadingAction] = useState<PermissionResponse | null>(null)
 
   if (!permission) return null
+  if (parentOpen === false) return null
 
   const handleResponse = async (response: PermissionResponse) => {
     setIsLoading(true)
@@ -139,8 +144,8 @@ export function PermissionRequestDialog({
   const displaySessionName = sessionTitle || `Session ${permission.sessionID.slice(0, 8)}...`
 
   return (
-    <Dialog open={true} onOpenChange={() => {}}>
-      <DialogContent hideCloseButton className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+    <Dialog open={parentOpen ?? true} onOpenChange={onOpenChange ?? (() => {})}>
+      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             Permission Request

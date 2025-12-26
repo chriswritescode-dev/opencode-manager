@@ -8,10 +8,10 @@ import { X, VolumeX } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
-import { PermissionRequestDialog } from "@/components/session/PermissionRequestDialog";
+
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useSessions, useAbortSession, useUpdateSession, useOpenCodeClient, useMessages } from "@/hooks/useOpenCode";
+import { useSession, useAbortSession, useUpdateSession, useMessages } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
@@ -19,7 +19,6 @@ import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
-import { usePermissionRequests } from "@/hooks/usePermissionRequests";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSwipeBack } from "@/hooks/useMobile";
 import { useTTS } from "@/hooks/useTTS";
@@ -27,7 +26,6 @@ import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { showToast } from "@/lib/toast";
-import type { PermissionResponse } from "@/api/types";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 
 export function SessionDetail() {
@@ -74,12 +72,10 @@ export function SessionDetail() {
   });
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
-  const openCodeClient = useOpenCodeClient(opcodeUrl, repo?.fullPath);
   
   const repoDirectory = repo?.fullPath;
 
   const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
-  const { data: sessions } = useSessions(opcodeUrl, repoDirectory);
   const { data: session, isLoading: sessionLoading } = useSession(
     opcodeUrl,
     sessionId,
@@ -101,7 +97,6 @@ export function SessionDetail() {
   });
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory);
-  const { currentPermission, pendingCount, isFromDifferentSession, dismissPermission } = usePermissionRequests(sessionId);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const { open: openSettings } = useSettingsDialog();
@@ -174,15 +169,6 @@ export function SessionDetail() {
       navigate(`/repos/${repoId}/sessions/${session.parentID}`)
     }
   }, [navigate, repoId, session?.parentID]);
-
-  const handlePermissionResponse = useCallback(async (
-    permissionID: string, 
-    permissionSessionID: string, 
-    response: PermissionResponse
-  ) => {
-    if (!openCodeClient) return
-    await openCodeClient.respondToPermission(permissionSessionID, permissionID, response)
-  }, [openCodeClient]);
 
   const handleToggleDetails = useCallback(() => {
     const newValue = !preferences?.expandToolCalls
@@ -281,7 +267,7 @@ export function SessionDetail() {
                     handleClearPrompt()
                   }}
                   onClick={handleClearPrompt}
-                  className="absolute -top-12 right-0 md:right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 hover:border-red-400 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-500/20 hover:ring-red-500/40"
+                  className="absolute -top-12 right-0 md:right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 hover:border-red-400 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-500/20 hover:ring-red-500/40"
                   aria-label="Clear"
                 >
                   <X className="w-6 h-6" />
@@ -296,7 +282,7 @@ export function SessionDetail() {
                     stop()
                   }}
                   onClick={stop}
-                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-br from-red-700 to-red-800 hover:from-red-600 hover:to-red-700 text-destructive-foreground border-2 border-red-600/80 hover:border-red-500 shadow-2xl shadow-red-600/40 hover:shadow-red-600/60 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-600/30 hover:ring-red-600/50 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"
+                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-red-700 to-red-800 hover:from-red-600 hover:to-red-700 text-destructive-foreground border-2 border-red-600/80 hover:border-red-500 shadow-2xl shadow-red-600/40 hover:shadow-red-600/60 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-600/30 hover:ring-red-600/50 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"
                   aria-label="Stop Audio"
                 >
                   <VolumeX className="w-6 h-6" />
@@ -365,15 +351,6 @@ export function SessionDetail() {
         onOpenChange={setMcpDialogOpen}
         config={settings}
         directory={repoDirectory}
-      />
-
-      <PermissionRequestDialog
-        permission={currentPermission}
-        pendingCount={pendingCount}
-        isFromDifferentSession={isFromDifferentSession}
-        sessionTitle={currentPermission ? sessions?.find(s => s.id === currentPermission.sessionID)?.title : undefined}
-        onRespond={handlePermissionResponse}
-        onDismiss={dismissPermission}
       />
     </div>
   );

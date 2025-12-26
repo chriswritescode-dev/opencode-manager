@@ -8,6 +8,9 @@ import { SettingsDialog } from './components/settings/SettingsDialog'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
+import { PermissionProvider } from '@/contexts/PermissionContext'
+import { PermissionRequestDialog } from '@/components/session/PermissionRequestDialog'
+import { usePermissionContext } from '@/contexts/PermissionContext'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +41,30 @@ function AppContent() {
         closeButton
       />
     </BrowserRouter>
+)
+}
+
+function PermissionDialogWrapper() {
+  const {
+    currentPermission,
+    pendingCount,
+    isFromDifferentSession,
+    respondToPermission,
+    dismissPermission,
+    showDialog,
+    setShowDialog,
+  } = usePermissionContext()
+
+  return (
+    <PermissionRequestDialog
+      permission={currentPermission}
+      pendingCount={pendingCount}
+      isFromDifferentSession={isFromDifferentSession}
+      onRespond={respondToPermission}
+      onDismiss={dismissPermission}
+      open={showDialog}
+      onOpenChange={setShowDialog}
+    />
   )
 }
 
@@ -46,7 +73,10 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TTSProvider>
-        <AppContent />
+        <PermissionProvider>
+          <AppContent />
+          <PermissionDialogWrapper />
+        </PermissionProvider>
       </TTSProvider>
     </QueryClientProvider>
   )

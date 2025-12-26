@@ -35,7 +35,7 @@ function rowToRepo(row: RepoRow): Repo {
 }
 
 export function createRepo(db: Database, repo: CreateRepoInput): Repo {
-  const normalizedPath = repo.localPath.replace(/\/+$/, '')
+  const normalizedPath = repo.localPath.trim().replace(/\/+$/, '')
   
   const existing = repo.isLocal 
     ? getRepoByLocalPath(db, normalizedPath)

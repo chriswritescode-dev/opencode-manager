@@ -1,4 +1,4 @@
-import { Settings } from "lucide-react";
+import { Settings, Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { BackButton } from "@/components/ui/back-button";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
@@ -9,9 +9,11 @@ interface HeaderProps {
   title: string;
   backTo?: string;
   action?: ReactNode;
+  pendingPermissions?: number;
+  onPendingPermissionsClick?: () => void;
 }
 
-export function Header({ title, backTo, action }: HeaderProps) {
+export function Header({ title, backTo, action, pendingPermissions, onPendingPermissionsClick }: HeaderProps) {
   const { open: openSettings } = useSettingsDialog();
   const theme = useTheme();
 
@@ -37,6 +39,22 @@ export function Header({ title, backTo, action }: HeaderProps) {
           </div>
           <div className="flex items-center gap-2">
             {action && <div>{action}</div>}
+            {pendingPermissions !== undefined && pendingPermissions > 0 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onPendingPermissionsClick}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 relative"
+                title={`${pendingPermissions} pending permission${pendingPermissions > 1 ? 's' : ''}`}
+              >
+                <Bell className="w-10 h-10" />
+                {pendingPermissions > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+                    {pendingPermissions > 9 ? '9+' : pendingPermissions}
+                  </span>
+                )}
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"

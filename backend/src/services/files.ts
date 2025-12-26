@@ -233,7 +233,8 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
 }
 
 function validatePath(userPath: string): string {
-  const normalized = path.normalize(userPath).replace(/^(\.\.(\/|\\|$))+/, '')
+  const trimmed = userPath.trim()
+  const normalized = path.normalize(trimmed).replace(/^(\.\.(\/|\\|$))+/, '')
   const fullPath = path.join(SHARED_WORKSPACE_BASE, normalized)
   const resolved = path.resolve(fullPath)
   
