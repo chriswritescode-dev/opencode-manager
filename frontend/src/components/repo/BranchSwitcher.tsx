@@ -83,7 +83,7 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
             {!iconOnly && <span className="truncate">{activeBranch}</span>}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px]">
+        <DropdownMenuContent sideOffset={0} align="end" className="bg-card border-border min-w-[200px] max-w-[95vw] sm:max-w-none max-h-[70vh] overflow-y-auto">
           {isWorktree ? (
             <>
               <DropdownMenuItem disabled className="text-muted-foreground">
