@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { RepoList } from "@/components/repo/RepoList";
+import { usePermissionContext } from "@/contexts/PermissionContext";
 import { AddRepoDialog } from "@/components/repo/AddRepoDialog";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/layout/Header";
@@ -9,6 +10,7 @@ import { Plus, FolderOpen } from "lucide-react";
 export function Repos() {
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const { pendingCount, setShowDialog } = usePermissionContext();
 
   const handleCloseFileBrowser = () => {
     setFileBrowserOpen(false);
@@ -18,6 +20,8 @@ export function Repos() {
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-background">
       <Header
         title="OpenCode"
+        pendingPermissions={pendingCount}
+        onPendingPermissionsClick={() => setShowDialog(true)}
         action={
           <div className="flex items-center gap-2">
             <Button

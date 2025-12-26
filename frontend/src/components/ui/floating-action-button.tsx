@@ -61,7 +61,7 @@ export const FloatingActionButton = memo(function FloatingActionButton({
       onClick={onClick}
       disabled={loading}
       className={cn(
-        'fixed z-50 flex items-center gap-2 px-4 py-2 rounded-full backdrop-blur-md transition-all duration-200',
+        'fixed z-50 flex items-center gap-2 px-4 py-2 rounded-xl backdrop-blur-md transition-all duration-200',
         'min-w-[48px] min-h-[48px]',
         'active:scale-95 hover:scale-105',
         'transition-transform',

@@ -496,10 +496,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
   
 
-  return (
+return (
     <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full">
-      
-      
+      {showStopButton && (
+        <button
+          onClick={handleStop}
+          disabled={disabled}
+          className="fixed bottom-19 right-0 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
+          title="Stop"
+        >
+          <Square className="w-5 h-5" />
+        </button>
+      )}
+       
       <textarea
         ref={textareaRef}
         value={prompt}
@@ -523,7 +532,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
         <div className="flex gap-1.5 md:gap-2 items-center">
            <button
             onClick={handleModeToggle}
-            className={`px-3 md:px-3.5 py-1 md:py-2 rounded-lg text-sm font-medium border w-14 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${
+            className={`px-3 md:px-3.5 py-1 h-[36px] rounded-lg text-sm font-medium border w-14 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${
               isBashMode 
                 ? 'bg-purple-500/20 border-purple-400 text-purple-700 dark:text-purple-300 shadow-purple-500/20 hover:shadow-purple-500/30' 
                 : `${modeBg} ${modeColor} ${modeShadow}`
@@ -532,14 +541,14 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
             {isBashMode ? 'BASH' : currentMode.toUpperCase()} 
           </button>
           {hasActiveStream ? (
-              <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground max-w-[120px] md:max-w-[180px] dark:border-white/30">
+              <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
                 <SessionStatusIndicator sessionID={sessionID} />
               </div>
             ) : (
                !hideSecondaryButtons && (
                  <button
                    onClick={onShowModelsDialog}
-                   className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[150px] md:max-w-[220px] truncate dark:border-white/30"
+                   className="px-2.5 py-1.5 md:px-3 h-[36px] rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[150px] md:max-w-[220px] truncate dark:border-white/30"
                  >
                    {displayModelName || 'Select model'}
                  </button>
@@ -559,10 +568,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
             <button
               onClick={handleStop}
               disabled={disabled}
-              className="p-1.5 px-4 md:p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
+              className="hidden md:block p-1.5 px-5 md:p-2 md:px-6 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
               title="Stop"
             >
-              <Square className="w-4 h-4" />
+              <Square className="w-4 h-4 md:w-5 md:h-5" />
             </button>
           )}
             <button

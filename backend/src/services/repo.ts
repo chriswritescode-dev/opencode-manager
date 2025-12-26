@@ -108,7 +108,7 @@ export async function initLocalRepo(
   localPath: string,
   branch?: string
 ): Promise<Repo> {
-  const normalizedPath = localPath.replace(/\/+$/, '')
+  const normalizedPath = localPath.trim().replace(/\/+$/, '')
   const fullPath = path.resolve(getReposPath(), normalizedPath)
   
   const existing = db.getRepoByLocalPath(database, normalizedPath)
