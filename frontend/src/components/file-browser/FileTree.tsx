@@ -170,7 +170,8 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
                 if (e.key === 'Enter') handleRenameSubmit()
                 if (e.key === 'Escape') handleRenameCancel()
               }}
-              className="h-6 text-sm"
+              onClick={(e) => e.stopPropagation()}
+              className="h-10"
               autoFocus
             />
           ) : (

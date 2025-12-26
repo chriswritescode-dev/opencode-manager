@@ -98,7 +98,7 @@ export function RepoDetailHeader({
             <DropdownMenuContent align="end">
               {!isWorktree && currentBranch && (
                 <>
-                  <DropdownMenuItem onClick={(e) => e.stopPropagation()}>
+                  <div className="px-2 py-1.5">
                     <BranchSwitcher
                       repoId={repoId}
                       currentBranch={currentBranch}
@@ -107,7 +107,7 @@ export function RepoDetailHeader({
                       iconOnly={false}
                       className="w-full"
                     />
-                  </DropdownMenuItem>
+                  </div>
                   <div className="h-px bg-border my-1" />
                 </>
               )}

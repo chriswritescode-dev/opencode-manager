@@ -6,9 +6,11 @@ interface ContextUsageIndicatorProps {
   opcodeUrl: string | null
   sessionID: string | undefined
   directory?: string
+  isConnected: boolean
+  isReconnecting?: boolean
 }
 
-export function ContextUsageIndicator({ opcodeUrl, sessionID, directory }: ContextUsageIndicatorProps) {
+export function ContextUsageIndicator({ opcodeUrl, sessionID, directory, isConnected, isReconnecting }: ContextUsageIndicatorProps) {
   const { totalTokens, contextLimit, usagePercentage, currentModel, isLoading } = useContextUsage(opcodeUrl, sessionID, directory)
   const [modelName, setModelName] = useState<string>('')
 
@@ -46,6 +48,14 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory }: Conte
     )
   }
 
+  if (isReconnecting) {
+    return <span className="text-xs text-yellow-700 dark:text-yellow-400 font-medium">Reconnecting...</span>
+  }
+
+  if (!isConnected) {
+    return <span className="text-xs text-muted-foreground font-medium">Disconnected</span>
+  }
+
   if (!modelName) {
     return (
       <div className="flex items-center gap-2">
@@ -54,16 +64,14 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory }: Conte
     )
   }
 
-  const getUsageColor = (percentage: number) => {
-    if (percentage < 50) return 'bg-green-700 dark:bg-green-400'
-    if (percentage < 80) return 'bg-yellow-700 dark:bg-yellow-400'
-    return 'bg-red-700 dark:bg-red-400'
-  }
-
   const getUsageTextColor = (percentage: number) => {
     if (percentage < 50) return 'text-green-700 dark:text-green-400'
     if (percentage < 80) return 'text-yellow-700 dark:text-yellow-400'
     return 'text-red-700 dark:text-red-400'
+  }
+
+  if (isReconnecting) {
+    return null
   }
 
   if (!contextLimit) {
@@ -77,12 +85,6 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory }: Conte
   return (
     <div className="flex items-center gap-2">
       <div className="flex items-center gap-2 min-w-0">
-        <div className="w-16 h-2 bg-muted rounded-full overflow-hidden border border-border">
-          <div 
-            className={`h-full transition-all duration-300 ${getUsageColor(usagePercentage || 0)}`}
-            style={{ width: `${Math.min(usagePercentage || 0, 100)}%` }}
-          />
-        </div>
         <span className={`text-xs font-medium whitespace-nowrap ${getUsageTextColor(usagePercentage || 0)}`}>
           {totalTokens.toLocaleString()} / {contextLimit.toLocaleString()}
         </span>

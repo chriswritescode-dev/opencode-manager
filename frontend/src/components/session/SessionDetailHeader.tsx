@@ -2,7 +2,8 @@ import { BackButton } from "@/components/ui/back-button";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { Button } from "@/components/ui/button";
-import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical } from "lucide-react";
 import { useState } from "react";
 
 interface Repo {
@@ -147,11 +148,13 @@ export function SessionDetailHeader({
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 flex-shrink-0">
-          <div className="hidden sm:block">
+          <div>
             <ContextUsageIndicator
               opcodeUrl={opcodeUrl}
               sessionID={sessionId}
               directory={repoDirectory}
+              isConnected={isConnected}
+              isReconnecting={isReconnecting}
             />
           </div>
           <BranchSwitcher
@@ -163,25 +166,11 @@ export function SessionDetailHeader({
             className="max-w-[80px] sm:w-[140px] sm:max-w-[140px]"
             iconOnly
           />
-           <div className="flex items-center gap-1 sm:gap-2">
-             <div
-               className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${
-                 isConnected 
-                   ? "bg-green-500" 
-                   : isReconnecting 
-                     ? "bg-yellow-500 animate-pulse" 
-                     : "bg-red-500"
-               }`}
-             />
-             <span className="text-xs text-muted-foreground hidden sm:inline">
-               {isConnected ? "Connected" : isReconnecting ? "Reconnecting..." : "Disconnected"}
-             </span>
-           </div>
           <Button
             variant="ghost"
             size="icon"
             onClick={onFileBrowserOpen}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
             title="Files"
           >
             <FolderOpen className="w-4 h-4" />
@@ -190,7 +179,7 @@ export function SessionDetailHeader({
             variant="ghost"
             size="icon"
             onClick={onMcpDialogOpen}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
             title="MCP Servers"
           >
             <Plug className="w-4 h-4" />
@@ -199,11 +188,46 @@ export function SessionDetailHeader({
             variant="ghost"
             size="icon"
             onClick={onSettingsOpen}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
             title="Settings"
           >
             <Settings className="w-4 h-4" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="sm:hidden text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+                title="Options"
+              >
+                <MoreVertical className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <div className="px-2 py-1.5">
+                <BranchSwitcher
+                  repoId={repoId}
+                  currentBranch={currentBranch}
+                  isWorktree={repo.isWorktree}
+                  repoUrl={repo.repoUrl}
+                  repoLocalPath={repo.localPath}
+                  iconOnly={false}
+                  className="w-full"
+                />
+              </div>
+              <div className="h-px bg-border my-1" />
+              <DropdownMenuItem onClick={onFileBrowserOpen}>
+                <FolderOpen className="w-4 h-4 mr-2" /> Files
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onMcpDialogOpen}>
+                <Plug className="w-4 h-4 mr-2" /> MCP
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onSettingsOpen}>
+                <Settings className="w-4 h-4 mr-2" /> Settings
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
     </div>
