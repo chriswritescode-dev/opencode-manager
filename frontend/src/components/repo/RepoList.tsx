@@ -5,7 +5,7 @@ import { DeleteDialog } from "@/components/ui/delete-dialog";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Loader2, GitBranch, Search, Trash2, MoreHorizontal } from "lucide-react";
+import { Loader2, GitBranch, Search, Trash2, MoreVertical } from "lucide-react";
 import { RepoCard } from "./RepoCard";
 
 export function RepoList() {
@@ -169,7 +169,7 @@ export function RepoList() {
                 className="md:hidden"
                 disabled={filteredRepos.length === 0}
               >
-                <MoreHorizontal className="w-4 h-4" />
+                <MoreVertical className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">

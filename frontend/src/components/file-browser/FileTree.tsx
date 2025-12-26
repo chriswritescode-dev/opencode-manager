@@ -10,7 +10,7 @@ import {
   FolderOpen, 
   ChevronRight, 
   ChevronDown,
-  MoreHorizontal,
+  MoreVertical,
   Trash2,
   Edit3,
   Download
@@ -185,7 +185,7 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
               size="sm"
               className={`w-6 h-6 p-0 ${isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
             >
-              <MoreHorizontal className="w-3 h-3" />
+              <MoreVertical className="w-3 h-3" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
