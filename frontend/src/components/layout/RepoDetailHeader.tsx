@@ -105,6 +105,7 @@ export function RepoDetailHeader({
                       isWorktree={isWorktree}
                       repoUrl={repoUrl}
                       iconOnly={false}
+                      className="w-full"
                     />
                   </DropdownMenuItem>
                   <div className="h-px bg-border my-1" />
