@@ -469,7 +469,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     return !('completed' in msg.info.time && msg.info.time.completed)
   }
 
-  const hasActiveStream = messages?.some(msg => isMessageStreaming(msg)) || false
+  const hasIncompleteMessages = messages?.some(msg => isMessageStreaming(msg)) || false
 
   const currentMode = preferences?.mode || 'build'
   const modeColor = currentMode === 'plan' ? 'text-yellow-600 dark:text-yellow-500' : 'text-green-600 dark:text-green-500'
@@ -481,7 +481,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const displayModelName = model?.modelID || currentModel
   const isMobile = useMobile()
   const sessionStatus = useSessionStatusForSession(sessionID)
-  const showStopButton = hasActiveStream && (sessionStatus.type === 'busy' || sessionStatus.type === 'retry')
+  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry'
+  const hasActiveStream = hasIncompleteMessages && isSessionActive
+  const showStopButton = isSessionActive
   const hideSecondaryButtons = isMobile && hasActiveStream
 
   

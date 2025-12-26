@@ -47,6 +47,12 @@ export const EditableUserMessage = memo(function EditableUserMessage({
     }
   }, [editedContent])
 
+  useEffect(() => {
+    return () => {
+      setIsEditingMessage(false)
+    }
+  }, [setIsEditingMessage])
+
   const handleSubmit = () => {
     if (!editedContent.trim() || refreshMessage.isPending) return
     
