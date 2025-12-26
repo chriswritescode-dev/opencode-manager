@@ -4,17 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
-import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
+import { RepoDetailHeader } from "@/components/layout/RepoDetailHeader";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
-import { BackButton } from "@/components/ui/back-button";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSwipeBack } from "@/hooks/useMobile";
 
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, FolderOpen, GitBranch, Plug } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
@@ -109,8 +106,7 @@ export function RepoDetail() {
     : repo.localPath || "Local Repository";
   const branchToDisplay = repo.currentBranch || repo.branch;
   const displayName = branchToDisplay ? `${repoName} (${branchToDisplay})` : repoName;
-  const isNotMainBranch = branchToDisplay && branchToDisplay !== repo.defaultBranch;
-  const currentBranch = repo.currentBranch || "main";
+  const currentBranch = repo.currentBranch || repo.branch || "main";
 
   return (
     <div 
@@ -118,71 +114,17 @@ export function RepoDetail() {
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
       style={swipeStyles}
     >
-      <div className="flex-shrink-0 z-10 border-b border-border bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-4 py-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <BackButton />
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-                {repoName}
-              </h1>
-              {!repo.isWorktree && branchToDisplay ? (
-                <BranchSwitcher
-                  repoId={repoId}
-                  currentBranch={currentBranch}
-                  isWorktree={repo.isWorktree}
-                  repoUrl={repo.repoUrl}
-                  className="sm:w-[140px] sm:max-w-[140px]"
-                  iconOnly
-                />
-              ) : branchToDisplay ? (
-                <Badge
-                  className={`text-xs px-1.5 sm:px-2.5 py-0.5 ${
-                    repo.isWorktree
-                      ? "bg-purple-600/20 text-purple-400 border-purple-600/40"
-                      : isNotMainBranch
-                      ? "bg-blue-600/20 text-blue-400 border-blue-600/40"
-                      : "bg-zinc-600/20 text-zinc-400 border-zinc-600/40"
-                  }`}
-                  title={repo.isWorktree ? "Worktree" : branchToDisplay}
-                >
-                  {repo.isWorktree && <GitBranch className="h-3 w-3 sm:mr-1" />}
-                  <span className="hidden sm:inline">{branchToDisplay}</span>
-                </Badge>
-              ) : null}
-            </div>
-          </div>
-           <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setMcpDialogOpen(true)}
-                size="sm"
-                className="text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <Plug className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">MCP</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setFileBrowserOpen(true)}
-                size="sm"
-                className="text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <FolderOpen className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Files</span>
-              </Button>
-               <Button
-                 onClick={() => handleCreateSession()}
-                 disabled={!opcodeUrl || createSessionMutation.isPending}
-                 size="sm"
-                 className="bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
-               >
-                 <Plus className="w-4 h-4 sm:mr-2" />
-                 <span className="hidden sm:inline">New Session</span>
-               </Button>
-           </div>
-        </div>
-      </div>
+<RepoDetailHeader
+        repoName={repoName}
+        repoId={repoId}
+        currentBranch={currentBranch}
+        isWorktree={repo.isWorktree || false}
+        repoUrl={repo.repoUrl}
+        onMcpClick={() => setMcpDialogOpen(true)}
+        onFilesClick={() => setFileBrowserOpen(true)}
+        onNewSession={handleCreateSession}
+        disabledNewSession={!opcodeUrl || createSessionMutation.isPending}
+      />
 
       <div className="flex-1 flex flex-col min-h-0">
         {opcodeUrl && repoDirectory && (
