@@ -114,7 +114,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       }
       return <TextPart part={part} />
     case 'patch':
-      return <PatchPart part={part} />
+      return <PatchPart part={part} onFileClick={onFileClick} />
     case 'tool':
       return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} />
     case 'reasoning':

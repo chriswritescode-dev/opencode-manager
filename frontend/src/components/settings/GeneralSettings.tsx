@@ -136,6 +136,20 @@ export function GeneralSettings() {
           />
         </div>
 
+        <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+          <div className="space-y-0.5">
+            <Label htmlFor="expandDiffs" className="text-base">Expand diffs</Label>
+            <p className="text-sm text-muted-foreground">
+              Show file diffs expanded by default for edit operations
+            </p>
+          </div>
+          <Switch
+            id="expandDiffs"
+            checked={preferences?.expandDiffs ?? true}
+            onCheckedChange={(checked) => updateSettings({ expandDiffs: checked })}
+          />
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="gitToken">GitHub Personal Access Token</Label>
           <div className="flex gap-2">

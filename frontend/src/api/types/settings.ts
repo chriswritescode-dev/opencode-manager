@@ -29,6 +29,7 @@ export interface UserPreferences {
   autoScroll: boolean
   showReasoning: boolean
   expandToolCalls: boolean
+  expandDiffs: boolean
   keyboardShortcuts: Record<string, string>
   customCommands: CustomCommand[]
   customAgents: CustomAgent[]

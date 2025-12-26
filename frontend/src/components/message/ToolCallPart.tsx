@@ -6,6 +6,7 @@ import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TodoListDisplay } from './TodoListDisplay'
+import { getToolSpecificRender } from './FileToolRender'
 
 type ToolPart = components['schemas']['ToolPart']
 type Todo = components['schemas']['Todo']
@@ -71,15 +72,12 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const outputRef = useRef<HTMLDivElement>(null)
-  const isUserBashCommand = part.tool === 'bash' && 
+  const isUserBashCommand = part.tool === 'bash' &&
     part.state.status === 'completed' &&
     typeof part.state.input?.command === 'string' &&
     userBashCommands.has(part.state.input.command)
   const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread'
-  
-  // Todo tools show expanded content by default, other tools use preference
-  const defaultExpanded = isUserBashCommand || isTodoTool || (preferences?.expandToolCalls ?? false)
-  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [expanded, setExpanded] = useState(isUserBashCommand || isTodoTool || (preferences?.expandToolCalls ?? false))
 
   useEffect(() => {
     if (part.tool === 'bash' && expanded && outputRef.current) {
@@ -117,7 +115,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
   const getPreviewText = () => {
     if (part.state.status === 'pending') return null
-    
+
     const input = part.state.input as Record<string, unknown>
     if (!input) return null
 
@@ -150,8 +148,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     }
 
     const state = part.state
-    
-    // For completed state - has output and metadata
+
     if (state.status === 'completed') {
       if (state.metadata?.todos && Array.isArray(state.metadata.todos)) {
         return state.metadata.todos as Todo[]
@@ -161,17 +158,15 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         if (parsed) return parsed
       }
     }
-    
-    // For running state - might have metadata
+
     if (state.status === 'running' && state.metadata?.todos && Array.isArray(state.metadata.todos)) {
       return state.metadata.todos as Todo[]
     }
-    
-    // For any state - try input (used by todowrite)
+
     if (state.input?.todos && Array.isArray(state.input.todos)) {
       return state.input.todos as Todo[]
     }
-    
+
     return null
   }
 
@@ -179,7 +174,6 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const todoData = getTodoData()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
 
-  // For todo tools, render the TodoListDisplay directly without wrapper
   if (isTodoTool) {
     if (part.state.status === 'pending') {
       return (
@@ -228,6 +222,11 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     return null
   }
 
+  const toolSpecificRender = getToolSpecificRender(part, onFileClick)
+  if (toolSpecificRender) {
+    return toolSpecificRender
+  }
+
   if (isUserBashCommand) {
     const command = part.state.input.command as string
     const output = part.state.status === 'completed' ? part.state.output : ''
@@ -243,7 +242,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
             </span>
           )}
         </div>
-        <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors" 
+        <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors"
              onClick={() => navigator.clipboard.writeText(output)}
              title="Click to copy output">
           {output}
@@ -275,8 +274,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       >
         <span className={getStatusColor()}>{getStatusIcon()}</span>
         <span className="font-medium">{part.tool}</span>
-        
-        {/* Header preview text */}
+
         {previewText && isFileTool ? (
           <span
             onClick={(e) => {
@@ -293,7 +291,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         ) : previewText ? (
           <span className="text-muted-foreground text-xs truncate">{previewText}</span>
         ) : null}
-        
+
         {part.tool === 'task' && (() => {
           let sessionId: string | undefined = part.metadata?.sessionId as string | undefined
           if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
@@ -316,7 +314,6 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         <span className="text-muted-foreground text-xs ml-auto">({part.state.status})</span>
       </button>
 
-      {/* Expanded content for non-todo tools */}
       {expanded && (
         <div className="bg-card space-y-2 p-3">
           {part.state.status === 'pending' && (
@@ -336,9 +333,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 <div className="text-sm">
                   <div className="flex items-center gap-2 mb-1">
                     <div className="text-muted-foreground">Command:</div>
-                    <CopyButton 
-                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''} 
-                      title="Copy command" 
+                    <CopyButton
+                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                      title="Copy command"
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
@@ -368,9 +365,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 <div className="text-sm">
                   <div className="flex items-center gap-2 mb-1">
                     <div className="text-muted-foreground">Command:</div>
-                    <CopyButton 
-                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''} 
-                      title="Copy command" 
+                    <CopyButton
+                      content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                      title="Copy command"
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
@@ -385,7 +382,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               )}
               <div className="text-sm">
                 <div className="text-muted-foreground mb-1">Output:</div>
-                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all cursor-pointer hover:bg-accent/80 transition-colors" 
+                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all cursor-pointer hover:bg-accent/80 transition-colors"
                      onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
                      title="Click to copy output">
                   {part.state.status === 'completed' ? part.state.output : ''}
