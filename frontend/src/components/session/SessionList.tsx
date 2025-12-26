@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
-import { Trash2, Clock, Search, MoreHorizontal } from "lucide-react";
+import { Trash2, Clock, Search, MoreVertical } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface SessionListProps {
@@ -161,7 +161,7 @@ export const SessionList = ({
                 className="md:hidden"
                 disabled={filteredSessions.length === 0}
               >
-                <MoreHorizontal className="w-4 h-4" />
+                <MoreVertical className="w-4 h-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
