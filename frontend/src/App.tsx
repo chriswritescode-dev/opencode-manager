@@ -11,6 +11,7 @@ import { TTSProvider } from './contexts/TTSContext'
 import { PermissionProvider } from '@/contexts/PermissionContext'
 import { PermissionRequestDialog } from '@/components/session/PermissionRequestDialog'
 import { usePermissionContext } from '@/contexts/PermissionContext'
+import { GlobalPermissionNotification } from '@/components/permissions/GlobalPermissionNotification'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,23 +26,24 @@ function AppContent() {
   const { isOpen, close } = useSettingsDialog()
   useTheme()
 
-  return (
+return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Repos />} />
         <Route path="/repos/:id" element={<RepoDetail />} />
         <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-        
+
       </Routes>
+      <GlobalPermissionNotification />
       <SettingsDialog open={isOpen} onOpenChange={close} />
-      <Toaster 
+      <Toaster
         position="bottom-right"
         expand={false}
         richColors
         closeButton
       />
     </BrowserRouter>
-)
+  )
 }
 
 function PermissionDialogWrapper() {

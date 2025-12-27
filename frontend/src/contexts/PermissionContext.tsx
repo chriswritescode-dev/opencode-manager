@@ -27,6 +27,8 @@ interface PermissionContextValue {
   showDialog: boolean
   setShowDialog: (show: boolean) => void
   currentSessionId: string | null
+  getPermissionForCallID: (callID: string, sessionID: string) => Permission | null
+  hasPermissionsForSession: (sessionID: string) => boolean
 }
 
 const PermissionContext = createContext<PermissionContextValue | null>(null)
@@ -132,6 +134,8 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
     pendingCount,
     isFromDifferentSession,
     dismissPermission: dismiss,
+    getPermissionForCallID,
+    hasPermissionsForSession,
   } = usePermissionRequests()
 
   useEffect(() => {
@@ -200,6 +204,7 @@ prevPendingCountRef.current = pendingCount
 
   useEffect(() => {
     const currentRefs = eventSourceRefs.current
+    const currentClients = clientsRef.current
     const newKeys = new Set(activeRepos.map((r) => `${r.url}|${r.directory ?? ''}`))
     const existingKeys = new Set(currentRefs.keys())
 
@@ -209,6 +214,9 @@ prevPendingCountRef.current = pendingCount
         if (es) {
           es.close()
           currentRefs.delete(key)
+        }
+        if (currentClients.has(key)) {
+          currentClients.delete(key)
         }
       }
     })
@@ -311,6 +319,8 @@ prevPendingCountRef.current = pendingCount
       showDialog,
       setShowDialog,
       currentSessionId,
+      getPermissionForCallID,
+      hasPermissionsForSession,
     }),
     [
       currentPermission,
@@ -320,6 +330,8 @@ prevPendingCountRef.current = pendingCount
       dismiss,
       showDialog,
       currentSessionId,
+      getPermissionForCallID,
+      hasPermissionsForSession,
     ],
 )
 
