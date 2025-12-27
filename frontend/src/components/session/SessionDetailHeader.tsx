@@ -163,7 +163,7 @@ export function SessionDetailHeader({
             isWorktree={repo.isWorktree}
             repoUrl={repo.repoUrl}
             repoLocalPath={repo.localPath}
-            className="max-w-[80px] sm:w-[140px] sm:max-w-[140px]"
+            className="hidden sm:flex max-w-[80px] sm:w-[140px] sm:max-w-[140px]"
             iconOnly
           />
           <Button
