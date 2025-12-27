@@ -91,10 +91,12 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 <td><img src="https://github.com/user-attachments/assets/5fe34443-1d06-4847-a397-ef472aae0932" alt="chat-desktop" /></td>
 </tr>
 <tr>
-<td colspan="2"><strong>Inline Diff View</strong></td>
+<td><strong>Inline Diff View</strong></td>
+<td></td>
 </tr>
 <tr>
-<td colspan="2"><img src="https://github.com/user-attachments/assets/b94c0ca0-d960-4888-8a25-a31ed6d5068d" alt="inline-diff-view" width="500" height="300" /></td>
+<td><img src="https://github.com/user-attachments/assets/b94c0ca0-d960-4888-8a25-a31ed6d5068d" alt="inline-diff-view" width="250" /></td>
+<td></td>
 </tr>
 </table>
 
