@@ -36,6 +36,7 @@ const PermissionContext = createContext<PermissionContextValue | null>(null)
 function useActiveRepos(queryClient: ReturnType<typeof useQueryClient>): ActiveRepo[] {
   const [activeRepos, setActiveRepos] = useState<ActiveRepo[]>([])
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastProcessedRef = useRef<string[]>([])
 
   useEffect(() => {
     const checkRepos = () => {
@@ -102,8 +103,19 @@ function useActiveRepos(queryClient: ReturnType<typeof useQueryClient>): ActiveR
             sessions: Array.from(sessionIds).map((id) => ({ id })),
           }))
 
-        setActiveRepos(repos)
-      }, 0)
+        const currentKeys = repos.map(r => `${r.url}|${r.directory ?? ''}`)
+        const prevKeys = lastProcessedRef.current
+        const currentSet = new Set(currentKeys)
+        const prevSet = new Set(prevKeys)
+        
+        const hasChanged = currentSet.size !== prevSet.size || 
+          currentKeys.some(k => !prevSet.has(k))
+        
+        if (hasChanged) {
+          setActiveRepos(repos)
+          lastProcessedRef.current = currentKeys
+        }
+      }, 100)
     }
 
     checkRepos()

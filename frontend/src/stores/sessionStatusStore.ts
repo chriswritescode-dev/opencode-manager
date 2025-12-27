@@ -8,6 +8,7 @@ export type SessionStatusType =
 
 interface SessionStatusStore {
   statuses: Map<string, SessionStatusType>
+  statusCache: Map<string, string>
   setStatus: (sessionID: string, status: SessionStatusType) => void
   getStatus: (sessionID: string) => SessionStatusType
   clearStatus: (sessionID: string) => void
@@ -15,14 +16,29 @@ interface SessionStatusStore {
 
 const DEFAULT_STATUS: SessionStatusType = { type: 'idle' }
 
+const getStatusHash = (status: SessionStatusType): string => {
+  if (status.type === 'retry') {
+    return `${status.type}:${status.attempt}:${status.message}:${status.next}`
+  }
+  return status.type
+}
+
 export const useSessionStatus = create<SessionStatusStore>((set, get) => ({
   statuses: new Map(),
+  statusCache: new Map(),
   
   setStatus: (sessionID: string, status: SessionStatusType) => {
+    const hash = getStatusHash(status)
+    const previousHash = get().statusCache.get(sessionID)
+    
+    if (previousHash === hash) return
+    
     set((state) => {
       const newMap = new Map(state.statuses)
+      const newCache = new Map(state.statusCache)
       newMap.set(sessionID, status)
-      return { statuses: newMap }
+      newCache.set(sessionID, hash)
+      return { statuses: newMap, statusCache: newCache }
     })
   },
   
@@ -31,10 +47,15 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => ({
   },
   
   clearStatus: (sessionID: string) => {
+    const previousHash = get().statusCache.get(sessionID)
+    if (!previousHash) return
+    
     set((state) => {
       const newMap = new Map(state.statuses)
+      const newCache = new Map(state.statusCache)
       newMap.delete(sessionID)
-      return { statuses: newMap }
+      newCache.delete(sessionID)
+      return { statuses: newMap, statusCache: newCache }
     })
   },
 }))

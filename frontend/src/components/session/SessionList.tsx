@@ -35,19 +35,21 @@ export const SessionList = ({
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
-    
-    const rootSessions = sessions.filter((session) => {
+
+    let filtered = sessions.filter((session) => {
       if (session.parentID) return false;
       if (directory && session.directory && session.directory !== directory) return false;
       return true;
     });
-    
-    if (!searchQuery.trim()) return rootSessions;
 
-    const query = searchQuery.toLowerCase();
-    return rootSessions.filter((session) =>
-      (session.title || "Untitled Session").toLowerCase().includes(query),
-    );
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filtered = filtered.filter((session) =>
+        (session.title || "Untitled Session").toLowerCase().includes(query),
+      );
+    }
+
+    return filtered.sort((a, b) => b.time.updated - a.time.updated);
   }, [sessions, searchQuery, directory]);
 
   if (isLoading) {
