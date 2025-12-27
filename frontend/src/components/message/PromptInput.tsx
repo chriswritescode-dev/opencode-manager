@@ -9,6 +9,7 @@ import { useModelSelection } from '@/hooks/useModelSelection'
 import { useUserBash } from '@/stores/userBashStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
+import { usePermissionContext } from '@/contexts/PermissionContext'
 import { ChevronDown, Square } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
@@ -464,12 +465,13 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     }
   }
 
-  const isMessageStreaming = (msg: MessageWithParts): boolean => {
+  const isMessageIncomplete = (msg: MessageWithParts): boolean => {
     if (msg.info.role !== 'assistant') return false
     return !('completed' in msg.info.time && msg.info.time.completed)
   }
 
-  const hasIncompleteMessages = messages?.some(msg => isMessageStreaming(msg)) || false
+  const lastAssistantMessage = messages?.filter(msg => msg.info.role === 'assistant').at(-1)
+  const hasIncompleteMessages = lastAssistantMessage ? isMessageIncomplete(lastAssistantMessage) : false
 
   const currentMode = preferences?.mode || 'build'
   const modeColor = currentMode === 'plan' ? 'text-yellow-600 dark:text-yellow-500' : 'text-green-600 dark:text-green-500'
@@ -480,10 +482,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const currentModel = modelString || ''
   const displayModelName = model?.modelID || currentModel
   const isMobile = useMobile()
+  const { setShowDialog, hasPermissionsForSession } = usePermissionContext()
+  const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const sessionStatus = useSessionStatusForSession(sessionID)
   const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry'
   const hasActiveStream = hasIncompleteMessages && isSessionActive
-  const showStopButton = isSessionActive
+  const showStopButton = isSessionActive && hasIncompleteMessages
   const hideSecondaryButtons = isMobile && hasActiveStream
 
   
@@ -499,7 +503,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   
 
 return (
-    <div className="relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full">
+    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-orange-500/50 ring-1 ring-orange-500/30' : ''}`}>
       {showStopButton && (
         <button
           onClick={handleStop}
@@ -578,12 +582,16 @@ return (
           )}
             <button
               data-submit-prompt
-              onClick={handleSubmit}
-              disabled={!prompt.trim() || disabled}
-              className="px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground dark:border dark:border-white/30 flex-shrink-0 min-w-[52px]"
-              title={hasActiveStream ? 'Queue message' : 'Send'}
+              onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
+              disabled={hasPendingPermissionForSession ? false : (!prompt.trim() || disabled)}
+              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
+                hasPendingPermissionForSession
+                  ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
+                  : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
+              }`}
+              title={hasPendingPermissionForSession ? 'View pending permission' : (hasActiveStream ? 'Queue message' : 'Send')}
             >
-              <span className="whitespace-nowrap">{hasActiveStream ? 'Queue' : 'Send'}</span>
+              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (hasActiveStream ? 'Queue' : 'Send')}</span>
             </button>
         </div>
       </div>

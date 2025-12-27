@@ -54,7 +54,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     queryKey: ["opencode", "messages", opcodeUrl, sessionID, directory],
     queryFn: () => client!.listMessages(sessionID!),
     enabled: !!client && !!sessionID,
-    refetchOnMount: false,
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     staleTime: 30000,

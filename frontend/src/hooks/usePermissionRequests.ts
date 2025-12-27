@@ -116,11 +116,23 @@ export function usePermissionRequests(currentSessionID?: string) {
     setPermissionsBySession({})
   }, [])
 
+  const getPermissionForCallID = useCallback((callID: string, sessionID: string): Permission | null => {
+    const sessionPermissions = permissionsBySession[sessionID] ?? []
+    return sessionPermissions.find(p => p.callID === callID) ?? null
+  }, [permissionsBySession])
+
+  const hasPermissionsForSession = useCallback((sessionID: string): boolean => {
+    const sessionPermissions = permissionsBySession[sessionID] ?? []
+    return sessionPermissions.length > 0
+  }, [permissionsBySession])
+
   return {
     currentPermission,
     pendingCount: allPermissions.length,
     isFromDifferentSession,
     dismissPermission,
-    clearAllPermissions
+    clearAllPermissions,
+    getPermissionForCallID,
+    hasPermissionsForSession
   }
 }
