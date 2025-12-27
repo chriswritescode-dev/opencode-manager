@@ -94,7 +94,7 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 <td colspan="2"><strong>Inline Diff View</strong></td>
 </tr>
 <tr>
-<td colspan="2"><img src="https://github.com/user-attachments/assets/b94c0ca0-d960-4888-8a25-a31ed6d5068d" alt="inline-diff-view" /></td>
+<td colspan="2"><img src="https://github.com/user-attachments/assets/b94c0ca0-d960-4888-8a25-a31ed6d5068d" alt="inline-diff-view" width="800" /></td>
 </tr>
 </table>
 
