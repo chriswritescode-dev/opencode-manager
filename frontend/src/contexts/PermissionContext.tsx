@@ -49,7 +49,7 @@ function useActiveRepos(queryClient: ReturnType<typeof useQueryClient>): ActiveR
         queries.forEach((query) => {
           const key = query.queryKey
           
-          if (key[0] === 'opencode' && key[1] === 'sessions') {
+          if (key[0] === 'opencode' && key[1] === 'sessions' && key.length >= 4) {
             const url = key[2] as string
             const directory = key[3] as string | undefined
             
@@ -66,7 +66,7 @@ function useActiveRepos(queryClient: ReturnType<typeof useQueryClient>): ActiveR
                 repoMap.get(repoKey)!.sessionIds.add(session.id)
               })
             }
-          } else if (key[0] === 'opencode' && key[1] === 'session' && key[4] !== undefined) {
+          } else if (key[0] === 'opencode' && key[1] === 'session' && key.length >= 5) {
             const url = key[2] as string
             const directory = key[4] as string | undefined
             const sessionData = query.state.data as { id: string } | undefined
@@ -150,10 +150,11 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
         },
       })
     }
-    prevPendingCountRef.current = pendingCount
+prevPendingCountRef.current = pendingCount
   }, [pendingCount, showDialog])
 
   const getClient = useCallback((sessionID: string): OpenCodeClient | null => {
+    
     for (const repo of activeRepos) {
       if (repo.sessions.some((s) => s.id === sessionID)) {
         const clientKey = `${repo.url}|${repo.directory ?? ''}`
@@ -165,8 +166,37 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
         return client
       }
     }
+    
+    if (activeRepos.length === 0) {
+      const cache = queryClient.getQueryCache()
+      const queries = cache.getAll()
+      
+      for (const query of queries) {
+        const key = query.queryKey
+        
+        if (key[0] === 'opencode' && key.length >= 5 && key[1] === 'session') {
+          const sessionData = query.state.data as { id: string } | undefined
+          if (sessionData?.id === sessionID) {
+            const url = key[2] as string
+            const directory = key[4] as string | undefined
+            
+            if (!url || typeof url !== 'string') continue
+            
+            const clientKey = `${url}|${directory ?? ''}`
+            let client = clientsRef.current.get(clientKey)
+            if (!client) {
+              client = new OpenCodeClient(url, directory)
+              clientsRef.current.set(clientKey, client)
+            }
+            console.log('[PermissionContext] Created client from query cache for fallback')
+            return client
+          }
+        }
+      }
+    }
+    
     return null
-}, [activeRepos])
+  }, [activeRepos, queryClient])
 
   useEffect(() => {
     const currentRefs = eventSourceRefs.current
