@@ -73,13 +73,30 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 
 ## Screenshots
 
-### Files
-
-<img width="250" alt="files-mobile" src="https://github.com/user-attachments/assets/24243e5e-ab02-44ff-a719-263f61c3178b" /> <img width="500" alt="files-desktop" src="https://github.com/user-attachments/assets/0a37feb0-391c-48a1-8bda-44a046aad913" />
-
-### Chat
-
-<img width="250" alt="chat-mobile" src="https://github.com/user-attachments/assets/a48cc728-e540-4247-879a-c5f36c3fd6de" /> <img width="500" alt="chat-desktop" src="https://github.com/user-attachments/assets/5fe34443-1d06-4847-a397-ef472aae0932" />
+<table>
+<tr>
+<td><strong>Files (Mobile)</strong></td>
+<td><strong>Files (Desktop)</strong></td>
+</tr>
+<tr>
+<td><img src="https://github.com/user-attachments/assets/24243e5e-ab02-44ff-a719-263f61c3178b" alt="files-mobile" /></td>
+<td><img src="https://github.com/user-attachments/assets/0a37feb0-391c-48a1-8bda-44a046aad913" alt="files-desktop" /></td>
+</tr>
+<tr>
+<td><strong>Chat (Mobile)</strong></td>
+<td><strong>Chat (Desktop)</strong></td>
+</tr>
+<tr>
+<td><img src="https://github.com/user-attachments/assets/a48cc728-e540-4247-879a-c5f36c3fd6de" alt="chat-mobile" /></td>
+<td><img src="https://github.com/user-attachments/assets/5fe34443-1d06-4847-a397-ef472aae0932" alt="chat-desktop" /></td>
+</tr>
+<tr>
+<td colspan="2"><strong>Inline Diff View</strong></td>
+</tr>
+<tr>
+<td colspan="2"><img src="https://github.com/user-attachments/assets/6ebbc593-12f3-451b-a36e-081ddb4c8839" alt="inline-diff-view" /></td>
+</tr>
+</table>
 
 ## Coming Soon
 
