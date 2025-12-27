@@ -108,7 +108,7 @@ export function useCommandHandler({
             break
           }
 
-          showToast.info('Compacting session...', { duration: 2000 })
+          showToast.loading('Compacting session...', { id: `compact-${sessionID}` })
 
           setSessionStatus(sessionID, { type: 'compact' })
 

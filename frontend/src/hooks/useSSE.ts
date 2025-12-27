@@ -251,6 +251,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           
           const { sessionID } = event.properties
           setSessionStatus(sessionID, { type: 'idle' })
+          showToast.dismiss(`compact-${sessionID}`)
+          showToast.success('Session compacted')
           queryClient.invalidateQueries({ 
             queryKey: ['opencode', 'messages', opcodeUrl, sessionID, directory] 
           })
