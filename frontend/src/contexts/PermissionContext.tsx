@@ -29,6 +29,8 @@ interface PermissionContextValue {
   currentSessionId: string | null
   getPermissionForCallID: (callID: string, sessionID: string) => Permission | null
   hasPermissionsForSession: (sessionID: string) => boolean
+  currentRepoDirectory: string | null
+  getRepoForSession: (sessionID: string) => ActiveRepo | null
 }
 
 const PermissionContext = createContext<PermissionContextValue | null>(null)
@@ -321,6 +323,21 @@ prevPendingCountRef.current = pendingCount
     [getClient, dismiss],
   )
 
+  const getRepoForSession = useCallback((sessionID: string): ActiveRepo | null => {
+    for (const repo of activeRepos) {
+      if (repo.sessions.some((s) => s.id === sessionID)) {
+        return repo
+      }
+    }
+    return null
+  }, [activeRepos])
+
+  const currentRepoDirectory = useMemo(() => {
+    if (!currentPermission) return null
+    const repo = getRepoForSession(currentPermission.sessionID)
+    return repo?.directory ?? null
+  }, [currentPermission, getRepoForSession])
+
   const value: PermissionContextValue = useMemo(
     () => ({
       currentPermission,
@@ -333,6 +350,8 @@ prevPendingCountRef.current = pendingCount
       currentSessionId,
       getPermissionForCallID,
       hasPermissionsForSession,
+      currentRepoDirectory,
+      getRepoForSession,
     }),
     [
       currentPermission,
@@ -344,6 +363,8 @@ prevPendingCountRef.current = pendingCount
       currentSessionId,
       getPermissionForCallID,
       hasPermissionsForSession,
+      currentRepoDirectory,
+      getRepoForSession,
     ],
 )
 

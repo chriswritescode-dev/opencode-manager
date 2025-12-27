@@ -3,7 +3,7 @@ set -e
 
 export HOME=/home/node
 export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:/usr/local/bin:$PATH"
 
 echo "🔍 Checking Bun installation..."
 
@@ -20,23 +20,6 @@ if ! command -v bun >/dev/null 2>&1; then
 else
   BUN_VERSION=$(bun --version 2>&1 || echo "unknown")
   echo "✅ Bun is installed (version: $BUN_VERSION)"
-fi
-
-echo "🔍 Checking uv installation..."
-
-if ! command -v uv >/dev/null 2>&1; then
-  echo "❌ uv not found. Installing..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  
-  if ! command -v uv >/dev/null 2>&1; then
-    echo "❌ Failed to install uv. Exiting."
-    exit 1
-  fi
-  
-  echo "✅ uv installed successfully"
-else
-  UV_VERSION=$(uv --version 2>&1 || echo "unknown")
-  echo "✅ uv is installed (version: $UV_VERSION)"
 fi
 
 echo "🔍 Checking OpenCode installation..."

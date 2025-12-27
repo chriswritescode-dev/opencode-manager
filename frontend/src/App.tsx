@@ -54,6 +54,7 @@ function PermissionDialogWrapper() {
     respondToPermission,
     showDialog,
     setShowDialog,
+    currentRepoDirectory,
   } = usePermissionContext()
 
   return (
@@ -64,6 +65,7 @@ function PermissionDialogWrapper() {
       onRespond={respondToPermission}
       open={showDialog}
       onOpenChange={setShowDialog}
+      repoDirectory={currentRepoDirectory}
     />
   )
 }
