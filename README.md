@@ -71,20 +71,15 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 - **Floating Controls** - Persistent stop button for audio control
 - **Custom Endpoints** - Connect to local or self-hosted TTS services
 
-## Demo Videos
+## Screenshots
 
-### Demo
-![Demo](https://github.com/chriswritescode-dev/opencode-web/releases/download/0.3.0/Chat.gif)
+### Files
 
-### File Editing
-![File Editing](https://github.com/chriswritescode-dev/opencode-web/releases/download/0.3.0/git-file-edit.gif)
+<img width="250" alt="files-mobile" src="https://github.com/user-attachments/assets/24243e5e-ab02-44ff-a719-263f61c3178b" /> <img width="500" alt="files-desktop" src="https://github.com/user-attachments/assets/0a37feb0-391c-48a1-8bda-44a046aad913" />
 
-### File Context
-![File Context](https://github.com/chriswritescode-dev/opencode-web/releases/download/0.2.5/file-context.gif)
+### Chat
 
-## Mobile Screenshots
-
-<img width="250" alt="Mobile Repository List" src="https://github.com/user-attachments/assets/4a854373-9e4d-41ac-9a6c-c0eb37b0ac42" /> <img width="250" alt="Mobile Chat Interface" src="https://github.com/user-attachments/assets/57fe81c1-b169-43eb-b95f-6e027d7bea10" /> <img width="250" alt="Mobile OpenCode Configuration" src="https://github.com/user-attachments/assets/fcb16958-3134-434f-8c78-fb07259f5ce1" />
+<img width="250" alt="chat-mobile" src="https://github.com/user-attachments/assets/a48cc728-e540-4247-879a-c5f36c3fd6de" /> <img width="500" alt="chat-desktop" src="https://github.com/user-attachments/assets/5fe34443-1d06-4847-a397-ef472aae0932" />
 
 ## Coming Soon
 
