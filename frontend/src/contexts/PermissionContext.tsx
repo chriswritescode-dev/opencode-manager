@@ -48,6 +48,7 @@ function useActiveRepos(queryClient: ReturnType<typeof useQueryClient>): ActiveR
 
         queries.forEach((query) => {
           const key = query.queryKey
+          
           if (key[0] === 'opencode' && key[1] === 'sessions') {
             const url = key[2] as string
             const directory = key[3] as string | undefined
@@ -64,6 +65,21 @@ function useActiveRepos(queryClient: ReturnType<typeof useQueryClient>): ActiveR
               sessionsData.forEach((session) => {
                 repoMap.get(repoKey)!.sessionIds.add(session.id)
               })
+            }
+          } else if (key[0] === 'opencode' && key[1] === 'session' && key[4] !== undefined) {
+            const url = key[2] as string
+            const directory = key[4] as string | undefined
+            const sessionData = query.state.data as { id: string } | undefined
+            
+            if (!url || typeof url !== 'string') return
+
+            const repoKey = `${url}|${directory ?? ''}`
+            if (!repoMap.has(repoKey)) {
+              repoMap.set(repoKey, { directory, sessionIds: new Set() })
+            }
+
+            if (sessionData && sessionData.id) {
+              repoMap.get(repoKey)!.sessionIds.add(sessionData.id)
             }
           }
         })
