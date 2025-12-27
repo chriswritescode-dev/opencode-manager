@@ -11,10 +11,11 @@ import { SessionList } from "@/components/session/SessionList";
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useAbortSession, useUpdateSession, useMessages } from "@/hooks/useOpenCode";
+import { useSession, useAbortSession, useUpdateSession, useMessages, useOpenCodeClient } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
+import { useSessionStatus } from "@/stores/sessionStatusStore";
 import { useSettings } from "@/hooks/useSettings";
 import { useModelSelection } from "@/hooks/useModelSelection";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
@@ -103,6 +104,29 @@ export function SessionDetail() {
   const { modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isPlaying, stop } = useTTS();
+  const clearSessionStatus = useSessionStatus((state) => state.clearStatus);
+  const setSessionStatus = useSessionStatus((state) => state.setStatus);
+  const client = useOpenCodeClient(opcodeUrl, repoDirectory);
+
+  useEffect(() => {
+    if (client && sessionId) {
+      client.getSessionStatuses().then((statuses) => {
+        if (statuses && sessionId in statuses) {
+          setSessionStatus(sessionId, statuses[sessionId]);
+        } else {
+          setSessionStatus(sessionId, { type: 'idle' });
+        }
+      }).catch(() => {
+        setSessionStatus(sessionId, { type: 'idle' });
+      });
+    }
+    
+    return () => {
+      if (sessionId) {
+        clearSessionStatus(sessionId);
+      }
+    };
+  }, [client, sessionId, setSessionStatus, clearSessionStatus]);
 
   useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),

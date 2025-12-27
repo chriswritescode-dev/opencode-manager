@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button'
 import type { Permission, PermissionResponse } from '@/api/types'
 import { cn } from '@/lib/utils'
+import { showToast } from '@/lib/toast'
 
 interface PermissionRequestDialogProps {
   permission: Permission | null
@@ -17,7 +18,6 @@ interface PermissionRequestDialogProps {
   isFromDifferentSession?: boolean
   sessionTitle?: string
   onRespond: (permissionID: string, sessionID: string, response: PermissionResponse) => Promise<void>
-  onDismiss: (permissionID: string, sessionID?: string) => void
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }
@@ -114,7 +114,6 @@ export function PermissionRequestDialog({
   isFromDifferentSession,
   sessionTitle,
   onRespond,
-  onDismiss,
   open: parentOpen,
   onOpenChange,
 }: PermissionRequestDialogProps) {
@@ -131,7 +130,7 @@ export function PermissionRequestDialog({
       await onRespond(permission.id, permission.sessionID, response)
     } catch (error) {
       console.error('Failed to respond to permission:', error)
-      onDismiss(permission.id, permission.sessionID)
+      showToast.error('Failed to respond to permission. Please try again.')
     } finally {
       setIsLoading(false)
       setLoadingAction(null)

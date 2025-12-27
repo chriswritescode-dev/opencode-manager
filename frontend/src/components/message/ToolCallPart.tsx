@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
+import { usePermissionContext } from '@/contexts/PermissionContext'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
@@ -71,6 +72,7 @@ function parseTodoOutput(output: string): Todo[] | null {
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
+  const { getPermissionForCallID } = usePermissionContext()
   const outputRef = useRef<HTMLDivElement>(null)
   const isUserBashCommand = part.tool === 'bash' &&
     part.state.status === 'completed' &&
@@ -78,6 +80,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     userBashCommands.has(part.state.input.command)
   const isTodoTool = part.tool === 'todowrite' || part.tool === 'todoread'
   const [expanded, setExpanded] = useState(isUserBashCommand || isTodoTool || (preferences?.expandToolCalls ?? false))
+
+  const pendingPermission = getPermissionForCallID(part.callID, part.sessionID)
+  const isWaitingPermission = part.state.status === 'running' && !!pendingPermission
 
   useEffect(() => {
     if (part.tool === 'bash' && expanded && outputRef.current) {
@@ -92,7 +97,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       case 'error':
         return 'text-red-600 dark:text-red-400'
       case 'running':
-        return 'text-yellow-600 dark:text-yellow-400'
+        return isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'
       default:
         return 'text-muted-foreground'
     }
@@ -254,7 +259,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const getBorderStyle = () => {
     switch (part.state.status) {
       case 'running':
-        return 'border-yellow-500/50 shadow-sm shadow-yellow-500/10'
+        return isWaitingPermission ? 'border-orange-500/50 shadow-sm shadow-orange-500/20' : 'border-yellow-500/50 shadow-sm shadow-yellow-500/10'
       case 'pending':
         return 'border-blue-500/30'
       case 'error':
@@ -311,7 +316,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
             </span>
           ) : null
         })()}
-        <span className="text-muted-foreground text-xs ml-auto">({part.state.status})</span>
+         <span className="text-muted-foreground text-xs ml-auto">({isWaitingPermission ? 'waiting' : part.state.status})</span>
       </button>
 
       {expanded && (
@@ -341,18 +346,18 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
                     <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
                   </div>
-                  <div className="flex items-center gap-2 mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                  <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Running...</span>
+                    <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
                   </div>
                 </div>
               ) : (
                 <div className="text-sm">
                   <div className="text-muted-foreground mb-1">Input:</div>
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-                  <div className="flex items-center gap-2 mt-2 text-xs text-yellow-600 dark:text-yellow-400">
+                  <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>Running...</span>
+                    <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
                   </div>
                 </div>
               )}
