@@ -26,11 +26,14 @@ export async function patchOpenCodeConfig(config: Record<string, unknown>): Prom
 
 export async function proxyRequest(request: Request) {
   const url = new URL(request.url)
-  const path = url.pathname + url.search
   
-  // Remove /api/opencode prefix before forwarding to OpenCode server
-  const cleanPath = path.replace(/^\/api\/opencode/, '')
-  const targetUrl = `${OPENCODE_SERVER_URL}${cleanPath}`
+  // Remove /api/opencode prefix from pathname before forwarding
+  const cleanPathname = url.pathname.replace(/^\/api\/opencode/, '')
+  const targetUrl = `${OPENCODE_SERVER_URL}${cleanPathname}${url.search}`
+  
+  if (url.pathname.includes('/permissions/')) {
+    logger.info(`Proxying permission request: ${url.pathname}${url.search} -> ${targetUrl}`)
+  }
   
   try {
     const headers: Record<string, string> = {}
@@ -59,7 +62,7 @@ export async function proxyRequest(request: Request) {
       headers: responseHeaders,
     })
   } catch (error) {
-    logger.error(`Proxy request failed for ${path}:`, error)
+    logger.error(`Proxy request failed for ${url.pathname}${url.search}:`, error)
     return new Response(JSON.stringify({ error: 'Proxy request failed' }), {
       status: 502,
       headers: { 'Content-Type': 'application/json' },
