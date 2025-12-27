@@ -180,7 +180,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       )
     }
 
-    if (!file.content) return null
+    if (file.content === undefined) return null
 
     if (isTextFile) {
       if (viewMode === 'edit') {
@@ -201,6 +201,13 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       
       try {
         const textContent = decodeBase64(file.content)
+        if (!textContent) {
+          return (
+            <div className="text-center text-muted-foreground py-8">
+              Empty file - click Edit to add content
+            </div>
+          )
+        }
         const lines = textContent.split('\n')
         return (
           <div className={`pb-[200px] text-sm bg-muted text-foreground rounded font-mono ${
