@@ -83,16 +83,19 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
           </div>
 
           {repoType === 'remote' ? (
-            <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Repository URL</label>
-              <Input
-                placeholder="https://github.com/user/repo.git"
-                value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
-                disabled={mutation.isPending}
-                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
-              />
-            </div>
+             <div className="space-y-2">
+               <label className="text-sm text-zinc-400">Repository URL</label>
+               <Input
+                 placeholder="owner/repo or https://github.com/user/repo.git"
+                 value={repoUrl}
+                 onChange={(e) => setRepoUrl(e.target.value)}
+                 disabled={mutation.isPending}
+                 className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
+               />
+               <p className="text-xs text-zinc-500">
+                 Full URL or GitHub shorthand format (owner/repo)
+               </p>
+             </div>
           ) : (
             <div className="space-y-2">
               <label className="text-sm text-zinc-400">Local Path</label>

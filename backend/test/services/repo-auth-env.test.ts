@@ -68,8 +68,8 @@ describe('repoService.cloneRepo auth env', () => {
 
     expect(executeCommand).toHaveBeenNthCalledWith(
       3,
-      ['git', 'clone', repoUrl, 'forge'],
-      { cwd: getReposPath(), env: expectedEnv }
+      ['git', 'clone', 'https://github.com/acme/forge', 'forge'],
+      { cwd: getReposPath(), env: expectedEnv, silent: undefined }
     )
 
     expect(ensureDirectoryExists).toHaveBeenCalledWith(getReposPath())

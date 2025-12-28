@@ -192,15 +192,15 @@ export async function cloneRepo(
   branch?: string,
   useWorktree: boolean = false
 ): Promise<Repo> {
-  const repoName = extractRepoName(repoUrl)
+  const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(repoUrl)
   const baseRepoDirName = repoName
   const worktreeDirName = branch && useWorktree ? `${repoName}-${branch.replace(/[\\/]/g, '-')}` : repoName
   const localPath = worktreeDirName
   
-  const existing = db.getRepoByUrlAndBranch(database, repoUrl, branch)
+  const existing = db.getRepoByUrlAndBranch(database, normalizedRepoUrl, branch)
   
   if (existing) {
-    logger.info(`Repo branch already exists: ${repoUrl}${branch ? `#${branch}` : ''}`)
+    logger.info(`Repo branch already exists: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`)
     return existing
   }
   
@@ -210,7 +210,7 @@ export async function cloneRepo(
   const shouldUseWorktree = useWorktree && branch && baseRepoExists.trim() === 'exists'
   
   const createRepoInput: CreateRepoInput = {
-    repoUrl,
+    repoUrl: normalizedRepoUrl,
     localPath,
     branch: branch || undefined,
     defaultBranch: branch || 'main',
@@ -225,7 +225,7 @@ export async function cloneRepo(
   const repo = db.createRepo(database, createRepoInput)
   
   try {
-    const env = getGitEnv(database, repoUrl)
+    const env = getGitEnv(database, normalizedRepoUrl)
 
     if (shouldUseWorktree) {
       logger.info(`Creating worktree for branch: ${branch}`)
@@ -267,7 +267,7 @@ export async function cloneRepo(
       }
       
       try {
-        await executeGitWithFallback(['git', 'clone', '-b', branch, repoUrl, worktreeDirName], { cwd: getReposPath(), env })
+        await executeGitWithFallback(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
       } catch (error: any) {
         if (error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
@@ -275,7 +275,7 @@ export async function cloneRepo(
         }
         
         logger.info(`Branch '${branch}' not found during clone, cloning default branch and creating branch locally`)
-        await executeGitWithFallback(['git', 'clone', repoUrl, worktreeDirName], { cwd: getReposPath(), env })
+        await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
         let localBranchExists = 'missing'
         try {
           await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -295,7 +295,7 @@ export async function cloneRepo(
         const isValidRepo = await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--git-dir'], path.resolve(getReposPath())).then(() => 'valid').catch(() => 'invalid')
         
         if (isValidRepo.trim() === 'valid') {
-          logger.info(`Valid repository found: ${repoUrl}`)
+          logger.info(`Valid repository found: ${normalizedRepoUrl}`)
           
           if (branch) {
             logger.info(`Switching to branch: ${branch}`)
@@ -338,7 +338,7 @@ export async function cloneRepo(
         }
       }
       
-      logger.info(`Cloning repo: ${repoUrl}${branch ? ` to branch ${branch}` : ''}`)
+      logger.info(`Cloning repo: ${normalizedRepoUrl}${branch ? ` to branch ${branch}` : ''}`)
       
       const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], getReposPath())
       if (worktreeExists.trim() === 'exists') {
@@ -357,8 +357,8 @@ export async function cloneRepo(
       
       try {
         const cloneCmd = branch
-          ? ['git', 'clone', '-b', branch, repoUrl, worktreeDirName]
-          : ['git', 'clone', repoUrl, worktreeDirName]
+          ? ['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName]
+          : ['git', 'clone', normalizedRepoUrl, worktreeDirName]
         
         await executeGitWithFallback(cloneCmd, { cwd: getReposPath(), env })
       } catch (error: any) {
@@ -369,7 +369,7 @@ export async function cloneRepo(
         
         if (branch && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
-          await executeGitWithFallback(['git', 'clone', repoUrl, worktreeDirName], { cwd: getReposPath(), env })
+          await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
           let localBranchExists = 'missing'
           try {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -390,10 +390,10 @@ export async function cloneRepo(
     }
     
     db.updateRepoStatus(database, repo.id, 'ready')
-    logger.info(`Repo ready: ${repoUrl}${branch ? `#${branch}` : ''}${shouldUseWorktree ? ' (worktree)' : ''}`)
+    logger.info(`Repo ready: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}${shouldUseWorktree ? ' (worktree)' : ''}`)
     return { ...repo, cloneStatus: 'ready' }
   } catch (error: any) {
-    logger.error(`Failed to create repo: ${repoUrl}${branch ? `#${branch}` : ''}`, error)
+    logger.error(`Failed to create repo: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`, error)
     db.deleteRepo(database, repo.id)
     throw error
   }
@@ -567,7 +567,7 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     
     // If this is a worktree, properly remove it from git first
     if (repo.isWorktree && repo.branch && repo.repoUrl) {
-      const repoName = extractRepoName(repo.repoUrl)
+      const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
       const baseRepoPath = path.resolve(getReposPath(), repoName)
       
       logger.info(`Removing worktree: ${dirName} from base repo: ${baseRepoPath}`)
@@ -611,7 +611,7 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     
     // If this was a worktree, also prune the base repo to clean up any remaining references
     if (repo.isWorktree && repo.branch && repo.repoUrl) {
-      const repoName = extractRepoName(repo.repoUrl)
+      const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
       const baseRepoPath = path.resolve(getReposPath(), repoName)
       
       try {
@@ -630,9 +630,30 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
   }
 }
 
-function extractRepoName(url: string): string {
-  const match = url.match(/\/([^\/]+?)(\.git)?$/)
-  return match?.[1] ?? `repo-${Date.now()}`
+function normalizeRepoUrl(url: string): { url: string; name: string } {
+  const shorthandMatch = url.match(/^([^\/]+)\/([^\/]+)$/)
+  if (shorthandMatch) {
+    const [, owner, repoName] = shorthandMatch as [string, string, string]
+    return {
+      url: `https://github.com/${owner}/${repoName}`,
+      name: repoName
+    }
+  }
+
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    const httpsUrl = url.replace(/^http:/, 'https:')
+    const urlWithoutGit = httpsUrl.replace(/\.git$/, '')
+    const match = urlWithoutGit.match(/\/([^\/]+)$/)
+    return {
+      url: urlWithoutGit,
+      name: match?.[1] || `repo-${Date.now()}`
+    }
+  }
+
+  return {
+    url,
+    name: `repo-${Date.now()}`
+  }
 }
 
 export async function cleanupOrphanedDirectories(database: Database): Promise<void> {
