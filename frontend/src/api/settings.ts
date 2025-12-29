@@ -98,8 +98,13 @@ export const settingsApi = {
     }
   },
 
-  restartOpenCodeServer: async (): Promise<{ success: boolean; message: string }> => {
+  restartOpenCodeServer: async (): Promise<{ success: boolean; message: string; details?: string }> => {
     const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-restart`)
+    return data
+  },
+
+  rollbackOpenCodeConfig: async (): Promise<{ success: boolean; message: string; configName?: string }> => {
+    const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-rollback`)
     return data
   },
 

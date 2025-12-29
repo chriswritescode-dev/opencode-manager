@@ -74,6 +74,7 @@ export const UserPreferencesSchema = z.object({
   customAgents: z.array(CustomAgentSchema),
   gitToken: z.string().optional(),
   tts: TTSConfigSchema.optional(),
+  lastKnownGoodConfig: z.string().optional(),
 });
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {

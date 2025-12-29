@@ -14,6 +14,7 @@ import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useServerHealth } from '@/hooks/useServerHealth'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
 import type { OpenCodeConfig } from '@/api/types/settings'
@@ -47,6 +48,7 @@ interface Agent {
 
 export function OpenCodeConfigManager() {
   const queryClient = useQueryClient()
+  const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -83,9 +85,30 @@ export function OpenCodeConfigManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      showToast.success('Server restarted successfully', { id: 'update-restart' })
+    },
+    onError: (error: unknown) => {
+      const errorMessage = error && typeof error === 'object' && 'response' in error
+        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
+           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
+           || 'Failed to restart OpenCode server')
+        : 'Failed to restart OpenCode server'
+      showToast.error(errorMessage, { id: 'update-restart' })
+    },
+  })
+
+  const rollbackMutation = useMutation({
+    mutationFn: async () => {
+      return await settingsApi.rollbackOpenCodeConfig()
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      showToast.success(data.message, { id: 'rollback-config' })
+      fetchConfigs()
     },
     onError: () => {
-      showToast.error('Failed to restart OpenCode server')
+      showToast.error('Failed to rollback to previous config', { id: 'rollback-config' })
     },
   })
 
@@ -105,32 +128,27 @@ export function OpenCodeConfigManager() {
     try {
       setIsUpdating(true)
       const previousContent = configs.find(c => c.name === configName)?.content
-      
+
       await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
-      
-      // Update the local state
-      setConfigs(prev => prev.map(config => 
-        config.name === configName 
+
+      setConfigs(prev => prev.map(config =>
+        config.name === configName
           ? { ...config, content: newContent, updatedAt: Date.now() }
           : config
       ))
-      
-      // Update selected config if it's the one being edited
+
       if (selectedConfig && selectedConfig.name === configName) {
         setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: Date.now() })
       }
-      
-      // Auto-restart server if agents were modified
+
       const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
       if (restartServer || agentsChanged) {
         showToast.loading('Restarting server...', { id: 'update-restart' })
         await restartServerMutation.mutateAsync()
-        showToast.success('Config updated and server restarted', { id: 'update-restart' })
       } else {
         showToast.success('Configuration updated')
       }
-      
-      // Invalidate agents cache so @ mentions get updated
+
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to update config:', error)
@@ -156,30 +174,29 @@ export function OpenCodeConfigManager() {
     try {
       setIsUpdating(true)
       const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
-      
+
       const forbiddenFields = ['id', 'createdAt', 'updatedAt']
       const foundForbidden = forbiddenFields.filter(field => field in parsedContent)
       if (foundForbidden.length > 0) {
         throw new Error(`Invalid fields found: ${foundForbidden.join(', ')}. These fields are managed automatically.`)
       }
-      
+
       await settingsApi.createOpenCodeConfig({
         name: name.trim(),
         content: rawContent,
         isDefault,
       })
-      
+
       setIsCreateDialogOpen(false)
       await fetchConfigs()
-      
+
       if (isDefault) {
         showToast.loading('Restarting server...', { id: 'create-config' })
         await restartServerMutation.mutateAsync()
-        showToast.success('Configuration created and server restarted', { id: 'create-config' })
       } else {
-        showToast.success('Configuration created', { id: 'create-config' })
+        showToast.success('Configuration created')
       }
-      
+
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to create config:', error)
@@ -217,7 +234,12 @@ export function OpenCodeConfigManager() {
       showToast.success('Default config updated and server restarted', { id: 'set-default' })
     } catch (error) {
       console.error('Failed to set default config:', error)
-      showToast.error('Failed to set default config', { id: 'set-default' })
+      const errorMessage = error && typeof error === 'object' && 'response' in error
+        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
+           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
+           || 'Failed to set default config')
+        : 'Failed to set default config'
+      showToast.error(errorMessage, { id: 'set-default' })
     } finally {
       setIsUpdating(false)
     }
@@ -252,37 +274,81 @@ export function OpenCodeConfigManager() {
     )
   }
 
+  const isUnhealthy = health?.opencode !== 'healthy'
+
   return (
     <div className="space-y-6 overflow-y-auto">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-2 ">
-          <Button
-            variant="outline"
-            onClick={() => {
-              showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
-              restartServerMutation.mutate()
-            }}
-            disabled={restartServerMutation.isPending}
-          >
-            {restartServerMutation.isPending ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <RotateCcw className="h-4 w-4 mr-2" />
-            )}
-            Restart Server
-          </Button>
-<Button type="button" onClick={() => setIsCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            New Config
-          </Button>
-          <CreateConfigDialog
-            isOpen={isCreateDialogOpen}
-            onOpenChange={setIsCreateDialogOpen}
-            onCreate={createConfig}
-            isUpdating={isUpdating}
-          />
-        </div>
-      </div>
+      {health && (
+        <Card className={isUnhealthy ? 'border-destructive' : ''}>
+          <CardContent className="p-3">
+            <div className="flex flex-col sm:flex-row sm:items-center items-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
+                <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
+                <p className="font-medium text-sm sm:text-base">
+                  Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
+                </p>
+                {health.error && (
+                  <p className="text-xs text-destructive">
+                    {health.error}
+                  </p>
+                )}
+                {health.opencodeVersion && (
+                  <p className="text-xs text-muted-foreground">
+                    v{health.opencodeVersion}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2 justify-center sm:justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
+                    restartServerMutation.mutate()
+                  }}
+                  disabled={restartServerMutation.isPending}
+                >
+                  {restartServerMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  )}
+                  <span className="text-xs sm:text-sm">Restart</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    showToast.loading('Rolling back to previous config...', { id: 'rollback-config' })
+                    rollbackMutation.mutate()
+                  }}
+                  disabled={rollbackMutation.isPending}
+                >
+                  {rollbackMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  )}
+                  <span className="text-xs sm:text-sm">Rollback</span>
+                </Button>
+                <Button 
+                  size="sm"
+                  onClick={() => setIsCreateDialogOpen(true)}
+                >
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  <span className="text-xs sm:text-sm">New Config</span>
+                </Button>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+      <CreateConfigDialog
+        isOpen={isCreateDialogOpen}
+        onOpenChange={setIsCreateDialogOpen}
+        onCreate={createConfig}
+        isUpdating={isUpdating}
+      />
 
       {configs.length === 0 ? (
         <Card>

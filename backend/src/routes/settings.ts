@@ -208,17 +208,19 @@ export function createSettingsRoutes(db: Database) {
     try {
       const userId = c.req.query('userId') || 'default'
       const configName = c.req.param('name')
-      
+
+      settingsService.saveLastKnownGoodConfig(userId)
+
       const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
       }
-      
+
       const configPath = getOpenCodeConfigFilePath()
       const configContent = JSON.stringify(config.content, null, 2)
       await writeFileContent(configPath, configContent)
       logger.info(`Wrote default config '${configName}' to: ${configPath}`)
-      
+
       await patchOpenCodeConfig(config.content)
       
       return c.json(config)
@@ -247,11 +249,75 @@ export function createSettingsRoutes(db: Database) {
   app.post('/opencode-restart', async (c) => {
     try {
       logger.info('Manual OpenCode server restart requested')
+      opencodeServerManager.clearStartupError()
       await opencodeServerManager.restart()
       return c.json({ success: true, message: 'OpenCode server restarted successfully' })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
-      return c.json({ error: 'Failed to restart OpenCode server' }, 500)
+      const startupError = opencodeServerManager.getLastStartupError()
+      return c.json({
+        error: 'Failed to restart OpenCode server',
+        details: startupError || (error instanceof Error ? error.message : 'Unknown error')
+      }, 500)
+    }
+  })
+
+  app.post('/opencode-rollback', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      logger.info('OpenCode config rollback requested')
+
+      const rollbackConfig = settingsService.rollbackToLastKnownGoodHealth(userId)
+      if (!rollbackConfig) {
+        return c.json({ error: 'No previous working config available for rollback' }, 404)
+      }
+
+      const configPath = getOpenCodeConfigFilePath()
+      const config = settingsService.getDefaultOpenCodeConfig(userId)
+      if (!config) {
+        return c.json({ error: 'Failed to get default config after rollback' }, 500)
+      }
+
+      const configContent = JSON.stringify(config.content, null, 2)
+      await writeFileContent(configPath, configContent)
+      logger.info(`Rolled back to config '${rollbackConfig}'`)
+
+      opencodeServerManager.clearStartupError()
+      try {
+        await opencodeServerManager.restart()
+      } catch (restartError) {
+        logger.error('Rollback config also failed to start server, attempting fallback:', restartError)
+
+        const deleted = settingsService.deleteFilesystemConfig()
+        if (deleted) {
+          logger.info('Deleted filesystem config, attempting restart with fallback')
+          await new Promise(r => setTimeout(r, 1000))
+
+          opencodeServerManager.clearStartupError()
+          await opencodeServerManager.restart()
+
+          return c.json({
+            success: true,
+            message: `Server restarted after deleting problematic config. DB config '${rollbackConfig}' preserved for manual recovery.`,
+            fallback: true,
+            configName: rollbackConfig
+          })
+        }
+
+        return c.json({
+          error: 'Failed to rollback and could not delete filesystem config',
+          details: restartError instanceof Error ? restartError.message : 'Unknown error'
+        }, 500)
+      }
+
+      return c.json({
+        success: true,
+        message: `Server restarted with previous working config: ${rollbackConfig}`,
+        configName: rollbackConfig
+      })
+    } catch (error) {
+      logger.error('Failed to rollback OpenCode config:', error)
+      return c.json({ error: 'Failed to rollback OpenCode config' }, 500)
     }
   })
 

@@ -9,10 +9,13 @@ export function createHealthRoutes(db: Database) {
     try {
       const dbCheck = db.prepare('SELECT 1').get()
       const opencodeHealthy = await opencodeServerManager.checkHealth()
-      
-      const status = dbCheck && opencodeHealthy ? 'healthy' : 'degraded'
-      
-      return c.json({
+      const startupError = opencodeServerManager.getLastStartupError()
+
+      const status = startupError && !opencodeHealthy
+        ? 'unhealthy'
+        : (dbCheck && opencodeHealthy ? 'healthy' : 'degraded')
+
+      const response: Record<string, unknown> = {
         status,
         timestamp: new Date().toISOString(),
         database: dbCheck ? 'connected' : 'disconnected',
@@ -21,7 +24,13 @@ export function createHealthRoutes(db: Database) {
         opencodeVersion: opencodeServerManager.getVersion(),
         opencodeMinVersion: opencodeServerManager.getMinVersion(),
         opencodeVersionSupported: opencodeServerManager.isVersionSupported()
-      })
+      }
+
+      if (startupError && !opencodeHealthy) {
+        response.error = startupError
+      }
+
+      return c.json(response)
     } catch (error) {
       return c.json({
         status: 'unhealthy',

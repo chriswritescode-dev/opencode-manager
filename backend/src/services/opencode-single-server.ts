@@ -10,6 +10,7 @@ const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
 const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
 const MIN_OPENCODE_VERSION = '1.0.137'
+const MAX_STDERR_SIZE = 10240
 
 function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.split('.').map(Number)
@@ -31,6 +32,7 @@ class OpenCodeServerManager {
   private isHealthy: boolean = false
   private db: Database | null = null
   private version: string | null = null
+  private lastStartupError: string | null = null
 
   private constructor() {}
 
@@ -105,13 +107,15 @@ class OpenCodeServerManager {
 
     const gitEnv = gitToken ? createGitHubGitEnv(gitToken) : createNoPromptGitEnv()
 
+    let stderrOutput = ''
+
     this.serverProcess = spawn(
-      'opencode', 
+      'opencode',
       ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', '127.0.0.1'],
       {
         cwd: OPENCODE_SERVER_DIRECTORY,
         detached: !isDevelopment,
-        stdio: isDevelopment ? 'inherit' : 'ignore',
+        stdio: isDevelopment ? 'inherit' : ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
           ...gitEnv,
@@ -122,12 +126,32 @@ class OpenCodeServerManager {
       }
     )
 
+    if (!isDevelopment && this.serverProcess.stderr) {
+      this.serverProcess.stderr.on('data', (data) => {
+        stderrOutput += data.toString()
+        if (stderrOutput.length > MAX_STDERR_SIZE) {
+          stderrOutput = stderrOutput.slice(-MAX_STDERR_SIZE)
+        }
+      })
+    }
+
+    this.serverProcess.on('exit', (code, signal) => {
+      if (code !== null && code !== 0) {
+        this.lastStartupError = `Server exited with code ${code}${stderrOutput ? `: ${stderrOutput.slice(-500)}` : ''}`
+        logger.error('OpenCode server process exited:', this.lastStartupError)
+      } else if (signal) {
+        this.lastStartupError = `Server terminated by signal ${signal}`
+        logger.error('OpenCode server process terminated:', this.lastStartupError)
+      }
+    })
+
     this.serverPid = this.serverProcess.pid ?? null
 
     logger.info(`OpenCode server started with PID ${this.serverPid}`)
 
     const healthy = await this.waitForHealth(30000)
     if (!healthy) {
+      this.lastStartupError = `Server failed to become healthy after 30s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
       throw new Error('OpenCode server failed to become healthy')
     }
 
@@ -189,6 +213,14 @@ class OpenCodeServerManager {
   isVersionSupported(): boolean {
     if (!this.version) return false
     return compareVersions(this.version, MIN_OPENCODE_VERSION) >= 0
+  }
+
+  getLastStartupError(): string | null {
+    return this.lastStartupError
+  }
+
+  clearStartupError(): void {
+    this.lastStartupError = null
   }
 
   async checkHealth(): Promise<boolean> {

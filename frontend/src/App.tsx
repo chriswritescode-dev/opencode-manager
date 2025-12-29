@@ -9,9 +9,9 @@ import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
 import { PermissionProvider } from '@/contexts/PermissionContext'
-import { PermissionRequestDialog } from '@/components/session/PermissionRequestDialog'
-import { usePermissionContext } from '@/contexts/PermissionContext'
-import { GlobalPermissionNotification } from '@/components/permissions/GlobalPermissionNotification'
+import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
+import { usePermissionContext } from './contexts/PermissionContext'
+import { GlobalPermissionNotification } from './components/permissions/GlobalPermissionNotification'
 
 const queryClient = new QueryClient({
   defaultOptions: {

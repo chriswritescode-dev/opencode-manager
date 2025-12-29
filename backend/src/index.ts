@@ -201,16 +201,19 @@ try {
   await ensureDirectoryExists(getReposPath())
   await ensureDirectoryExists(getConfigPath())
   logger.info('Workspace directories initialized')
-  
+
   await cleanupOrphanedDirectories(db)
   logger.info('Orphaned directory cleanup completed')
-  
+
   await cleanupExpiredCache()
-  
+
   await ensureDefaultConfigExists()
   await syncDefaultConfigToDisk()
   await ensureDefaultAgentsMdExists()
-  
+
+  const settingsService = new SettingsService(db)
+  settingsService.initializeLastKnownGoodConfig()
+
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)

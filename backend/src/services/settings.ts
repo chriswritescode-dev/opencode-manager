@@ -1,4 +1,6 @@
 import { Database } from 'bun:sqlite'
+import { unlinkSync, existsSync } from 'fs'
+import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
 import stripJsonComments from 'strip-json-comments'
 import type { 
@@ -28,7 +30,24 @@ function parseJsonc(content: string): unknown {
 }
 
 export class SettingsService {
+  private static lastKnownGoodConfigContent: string | null = null
+
   constructor(private db: Database) {}
+
+  initializeLastKnownGoodConfig(userId: string = 'default'): void {
+    const settings = this.getSettings(userId)
+    if (settings.preferences.lastKnownGoodConfig) {
+      SettingsService.lastKnownGoodConfigContent = settings.preferences.lastKnownGoodConfig
+      logger.info('Initialized last known good config from database')
+    }
+  }
+
+  persistLastKnownGoodConfig(userId: string = 'default'): void {
+    if (SettingsService.lastKnownGoodConfigContent) {
+      this.updateSettings({ lastKnownGoodConfig: SettingsService.lastKnownGoodConfigContent }, userId)
+      logger.info('Persisted last known good config to database')
+    }
+  }
 
   getSettings(userId: string = 'default'): SettingsResponse {
     const row = this.db
@@ -439,6 +458,64 @@ export class SettingsService {
           .run(userId, firstConfig.config_name)
         logger.info(`Auto-set '${firstConfig.config_name}' as default (only config)`)
       }
+    }
+  }
+
+  saveLastKnownGoodConfig(userId: string = 'default'): void {
+    const config = this.getDefaultOpenCodeConfig(userId)
+    if (config) {
+      SettingsService.lastKnownGoodConfigContent = config.rawContent
+      this.persistLastKnownGoodConfig(userId)
+      logger.info(`Saved last known good config: ${config.name}`)
+    }
+  }
+
+  restoreToLastKnownGoodConfig(userId: string = 'default'): { configName: string; content: string } | null {
+    if (!SettingsService.lastKnownGoodConfigContent) {
+      logger.warn('No last known good config available for rollback')
+      return null
+    }
+
+    const configs = this.getOpenCodeConfigs(userId)
+    const defaultConfig = configs.defaultConfig
+
+    if (!defaultConfig) {
+      logger.error('Cannot rollback: no default config found')
+      return null
+    }
+
+    logger.info(`Restoring to last known good config for: ${defaultConfig.name}`)
+    return {
+      configName: defaultConfig.name,
+      content: SettingsService.lastKnownGoodConfigContent
+    }
+  }
+
+  rollbackToLastKnownGoodHealth(userId: string = 'default'): string | null {
+    const lastGood = this.restoreToLastKnownGoodConfig(userId)
+    if (!lastGood) {
+      return null
+    }
+
+    this.updateOpenCodeConfig(lastGood.configName, { content: lastGood.content }, userId)
+    return lastGood.configName
+  }
+
+  deleteFilesystemConfig(): boolean {
+    const configPath = getOpenCodeConfigFilePath()
+
+    if (!existsSync(configPath)) {
+      logger.warn('Config file does not exist:', configPath)
+      return false
+    }
+
+    try {
+      unlinkSync(configPath)
+      logger.info('Deleted filesystem config to allow server startup:', configPath)
+      return true
+    } catch (error) {
+      logger.error('Failed to delete config file:', error)
+      return false
     }
   }
 }
