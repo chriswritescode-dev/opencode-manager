@@ -159,9 +159,17 @@ export type SSEEvent =
 export type ContentPart = 
   | { type: 'text', content: string }
   | { type: 'file', path: string, name: string }
+  | { type: 'image', id: string, filename: string, mime: string, dataUrl: string }
 
 export interface FileInfo {
   path: string
   name: string
   mime?: string
+}
+
+export interface ImageAttachment {
+  id: string
+  filename: string
+  mime: string
+  dataUrl: string
 }

@@ -10,7 +10,7 @@ import { useUserBash } from '@/stores/userBashStore'
 import { useMobile } from '@/hooks/useMobile'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { usePermissionContext } from '@/contexts/PermissionContext'
-import { ChevronDown, Square } from 'lucide-react'
+import { ChevronDown, Square, Upload, X } from 'lucide-react'
 
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
@@ -19,7 +19,10 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 
 
 import type { components } from '@/api/opencode-types'
-import type { MessageWithParts, FileInfo } from '@/api/types'
+import type { MessageWithParts, FileInfo, ImageAttachment } from '@/api/types'
+
+const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 
 type CommandType = components['schemas']['Command']
@@ -27,6 +30,7 @@ type CommandType = components['schemas']['Command']
 export interface PromptInputHandle {
   setPromptValue: (value: string) => void
   clearPrompt: () => void
+  triggerFileUpload: () => void
 }
 
 interface PromptInputProps {
@@ -72,11 +76,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     clearPrompt: () => {
       setPrompt('')
       setAttachedFiles(new Map())
+      setImageAttachments([])
       setSelectedAgent(null)
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
         textareaRef.current.focus()
       }
+    },
+    triggerFileUpload: () => {
+      fileInputRef.current?.click()
     }
   }), [])
   
@@ -84,6 +92,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
   const [attachedFiles, setAttachedFiles] = useState(new Map<string, FileInfo>())
+  const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
+  const [isDragging, setIsDragging] = useState(false)
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false)
   const [mentionQuery, setMentionQuery] = useState('')
   const [mentionRange, setMentionRange] = useState<{ start: number, end: number } | null>(null)
@@ -92,6 +102,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
@@ -145,10 +156,11 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const { addUserBashCommand } = useUserBash()
 
   const handleSubmit = () => {
-    if (!prompt.trim() || disabled) return
-    
+    if (disabled) return
+    if (!prompt.trim() && imageAttachments.length === 0) return
+
     if (hasActiveStream) {
-      const parts = parsePromptToParts(prompt, attachedFiles)
+      const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
       sendPrompt.mutate({
         sessionID,
         parts,
@@ -157,6 +169,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       })
       setPrompt('')
       setAttachedFiles(new Map())
+      setImageAttachments([])
       setSelectedAgent(null)
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
@@ -197,8 +210,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       }
     }
 
-    const parts = parsePromptToParts(prompt, attachedFiles)
-    
+    const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
+
     sendPrompt.mutate({
       sessionID,
       parts,
@@ -208,6 +221,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
     setPrompt('')
     setAttachedFiles(new Map())
+    setImageAttachments([])
     setSelectedAgent(null)
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -319,6 +333,83 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     updateSettings({ mode: newMode })
   }
 
+  const addImageAttachment = (file: File) => {
+    if (!ACCEPTED_FILE_TYPES.includes(file.type)) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result as string
+      const attachment: ImageAttachment = {
+        id: crypto.randomUUID(),
+        filename: file.name,
+        mime: file.type,
+        dataUrl,
+      }
+      setImageAttachments((prev) => [...prev, attachment])
+    }
+    reader.onerror = () => {
+      console.error('Failed to read file:', file.name)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImageAttachment = (id: string) => {
+    setImageAttachments((prev) => prev.filter((a) => a.id !== id))
+  }
+
+  const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardData = event.clipboardData
+    if (!clipboardData) return
+
+    const items = Array.from(clipboardData.items)
+    const imageItems = items.filter((item) => ACCEPTED_FILE_TYPES.includes(item.type))
+
+    if (imageItems.length > 0) {
+      event.preventDefault()
+      for (const item of imageItems) {
+        const file = item.getAsFile()
+        if (file) addImageAttachment(file)
+      }
+    }
+  }
+
+  const handleDragOver = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer?.types.includes('Files')) {
+      setIsDragging(true)
+    }
+  }
+
+  const handleDragLeave = (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragging(false)
+  }
+
+  const handleDrop = async (event: React.DragEvent<HTMLTextAreaElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setIsDragging(false)
+
+    const files = event.dataTransfer?.files
+    if (files) {
+      for (const file of Array.from(files)) {
+        if (ACCEPTED_FILE_TYPES.includes(file.type)) {
+          addImageAttachment(file)
+        }
+      }
+    }
+  }
+
+  const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0]
+    if (file) {
+      addImageAttachment(file)
+    }
+    event.currentTarget.value = ''
+  }
+
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (isBashMode && e.key === 'Escape') {
       e.preventDefault()
@@ -405,6 +496,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       setMentionQuery('')
       setMentionRange(null)
       setPrompt('')
+      setImageAttachments([])
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
       }
@@ -514,26 +606,50 @@ return (
           <Square className="w-5 h-5" />
         </button>
       )}
-       
+
       <textarea
         ref={textareaRef}
         value={prompt}
         onChange={handleInput}
         onKeyDown={handleKeyDown}
+        onPaste={handlePaste}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
         placeholder={
-          isBashMode 
-            ? "Enter bash command..." 
+          isBashMode
+            ? "Enter bash command..."
             : "Send a message..."
         }
         disabled={disabled}
-        className={`w-full bg-muted/50 px-2 md:px-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
-          isBashMode 
-            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10' 
-            : ''
+        className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
+          isBashMode
+            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10'
+            : isDragging ? 'border-blue-500/50 border-dashed bg-blue-500/5' : ''
         }`}
         rows={1}
       />
-      
+
+      {imageAttachments.length > 0 && (
+        <div className="flex flex-wrap gap-2 px-2 py-2 mb-2">
+          {imageAttachments.map((attachment) => (
+            <div
+              key={attachment.id}
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-muted/80 border border-border text-xs text-muted-foreground"
+            >
+              <span className="max-w-[120px] truncate">{attachment.filename}</span>
+              <button
+                type="button"
+                onClick={() => removeImageAttachment(attachment.id)}
+                className="p-0.5 rounded hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <div className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex gap-1.5 md:gap-2 items-center">
            <button
@@ -562,14 +678,14 @@ return (
             )}
           
         </div>
-        <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-           <button
-              onClick={onScrollToBottom}
-              className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md shadow-blue-500/20 hover:shadow-blue-500/30 border border-blue-500/30 hover:border-blue-500 dark:border-blue-400/30 dark:hover:border-blue-400 ring-1 ring-blue-500/20 hover:ring-blue-500/30 ${showScrollButton ? 'visible' : 'invisible'}`}
-              title="Scroll to bottom"
-            >
-              <ChevronDown className="w-5 h-5" />
-            </button>
+<div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+            <button
+               onClick={onScrollToBottom}
+               className={`p-1.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md shadow-blue-500/20 hover:shadow-blue-500/30 border border-blue-500/30 hover:border-blue-500 dark:border-blue-400/30 dark:hover:border-blue-400 ring-1 ring-blue-500/20 hover:ring-blue-500/30 ${showScrollButton ? 'visible' : 'invisible'}`}
+               title="Scroll to bottom"
+             >
+               <ChevronDown className="w-5 h-5" />
+             </button>
 {showStopButton && (
             <button
               onClick={handleStop}
@@ -579,19 +695,34 @@ return (
             >
               <Square className="w-4 h-4 md:w-5 md:h-5" />
             </button>
-          )}
+)}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_FILE_TYPES.join(',')}
+            className="hidden"
+            onChange={handleFileInputChange}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="hidden md:block p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-border"
+            title="Upload image or PDF"
+          >
+            <Upload className="w-5 h-5" />
+          </button>
             <button
-              data-submit-prompt
-              onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : (!prompt.trim() || disabled)}
-              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
-                hasPendingPermissionForSession
-                  ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
-                  : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
-              }`}
-              title={hasPendingPermissionForSession ? 'View pending permission' : (hasActiveStream ? 'Queue message' : 'Send')}
-            >
-              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (hasActiveStream ? 'Queue' : 'Send')}</span>
+               data-submit-prompt
+               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
+               disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled)}
+               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
+                 hasPendingPermissionForSession
+                   ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
+                   : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
+               }`}
+               title={hasPendingPermissionForSession ? 'View pending permission' : (hasActiveStream ? 'Queue message' : 'Send')}
+             >
+               <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (hasActiveStream ? 'Queue' : 'Send')}</span>
             </button>
         </div>
       </div>

@@ -195,6 +195,10 @@ export function SessionDetail() {
     promptInputRef.current?.clearPrompt()
   }, []);
 
+  const handleAttachFile = useCallback(() => {
+    promptInputRef.current?.triggerFileUpload()
+  }, []);
+
   
 
   if (!sessionId) {
@@ -237,6 +241,7 @@ export function SessionDetail() {
         onMcpDialogOpen={() => setMcpDialogOpen(true)}
         onSessionTitleUpdate={handleSessionTitleUpdate}
         onParentSessionClick={handleParentSessionClick}
+        onAttachFile={handleAttachFile}
       />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
