@@ -3,7 +3,7 @@ import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicato
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical } from "lucide-react";
+import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical, Upload } from "lucide-react";
 import { useState } from "react";
 
 interface Repo {
@@ -32,6 +32,7 @@ interface SessionDetailHeaderProps {
   onMcpDialogOpen: () => void;
   onSessionTitleUpdate: (newTitle: string) => void;
   onParentSessionClick?: () => void;
+  onAttachFile?: () => void;
 }
 
 export function SessionDetailHeader({
@@ -49,6 +50,7 @@ export function SessionDetailHeader({
   onMcpDialogOpen,
   onSessionTitleUpdate,
   onParentSessionClick,
+  onAttachFile,
 }: SessionDetailHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(sessionTitle);
@@ -220,6 +222,11 @@ export function SessionDetailHeader({
               <DropdownMenuItem onClick={onFileBrowserOpen}>
                 <FolderOpen className="w-4 h-4 mr-2" /> Files
               </DropdownMenuItem>
+              {onAttachFile && (
+                <DropdownMenuItem onClick={onAttachFile}>
+                  <Upload className="w-4 h-4 mr-2" /> Upload
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={onMcpDialogOpen}>
                 <Plug className="w-4 h-4 mr-2" /> MCP
               </DropdownMenuItem>
