@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Plug, XCircle, AlertCircle } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Loader2, Plug, XCircle, AlertCircle, Search } from 'lucide-react'
 import { mcpApi, type McpStatus } from '@/api/mcp'
 import { useMutation } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
@@ -79,9 +80,17 @@ function getStatusBadge(status?: McpStatus) {
 export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcpDialogProps) {
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
   
   const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> | undefined || {}
   const serverIds = Object.keys(mcpServers)
+  const filteredServerIds = serverIds.filter((serverId) => {
+    const displayName = getServerDisplayName(serverId).toLowerCase()
+    const description = getServerDescription(mcpServers[serverId]).toLowerCase()
+    const query = searchQuery.toLowerCase()
+    return displayName.includes(query) || description.includes(query)
+  })
   
   const fetchStatus = useCallback(async () => {
     if (!directory || serverIds.length === 0) return
@@ -125,6 +134,10 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
   useEffect(() => {
     if (open && directory) {
       fetchStatus()
+      searchInputRef.current?.focus()
+    }
+    if (!open) {
+      setSearchQuery('')
     }
   }, [open, directory, serverIds.length, fetchStatus])
   
@@ -132,8 +145,8 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95%] sm:max-w-[500px] p-0 gap-0">
-        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 border-b border-border">
+      <DialogContent className="max-w-[95%] sm:max-w-[500px] p-0 gap-0 h-[90vh] sm:h-[80vh] flex flex-col">
+        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 shrink-0 border-b border-border">
           <div className="flex items-center gap-2">
             <Plug className="w-4 h-4 text-muted-foreground" />
             <DialogTitle className="text-base sm:text-lg">MCP for This Location</DialogTitle>
@@ -143,7 +156,20 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
           </p>
         </DialogHeader>
         
-        <div className="px-4 sm:px-6 py-3 sm:py-4 max-h-[60vh] overflow-y-auto">
+        <div className="px-4 sm:px-6 py-3 border-b border-border shrink-0">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              ref={searchInputRef}
+              placeholder="Search MCP servers..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        </div>
+        
+        <div className="px-4 sm:px-6 py-3 sm:py-4 flex-1 overflow-y-auto min-h-0">
           {serverIds.length === 0 ? (
             <div className="text-center py-6 sm:py-8">
               <Plug className="w-10 h-10 mx-auto text-muted-foreground mb-3 opacity-50" />
@@ -154,13 +180,20 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
                 Add them in Settings first
               </p>
             </div>
-          ) : isLoadingStatus ? (
+          ) : filteredServerIds.length === 0 ? (
+              <div className="text-center py-6 sm:py-8">
+                <Search className="w-10 h-10 mx-auto text-muted-foreground mb-3 opacity-50" />
+                <p className="text-sm text-muted-foreground">
+                  No MCP servers match "{searchQuery}"
+                </p>
+              </div>
+            ) : isLoadingStatus ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
             <div className="space-y-3">
-              {serverIds.map((serverId) => {
+              {filteredServerIds.map((serverId) => {
                 const serverConfig = mcpServers[serverId]
                 const status = localStatus[serverId]
                 const isConnected = status?.status === 'connected'
