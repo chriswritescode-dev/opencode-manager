@@ -85,17 +85,16 @@ export function OpenCodeConfigManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
-      showToast.success('Server restarted successfully', { id: 'update-restart' })
-    },
-    onError: (error: unknown) => {
-      const errorMessage = error && typeof error === 'object' && 'response' in error
-        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
-           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-           || 'Failed to restart OpenCode server')
-        : 'Failed to restart OpenCode server'
-      showToast.error(errorMessage, { id: 'update-restart' })
     },
   })
+
+  const getRestartErrorMessage = (error: unknown): string => {
+    return error && typeof error === 'object' && 'response' in error
+      ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
+         || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
+         || 'Failed to restart OpenCode server')
+      : 'Failed to restart OpenCode server'
+  }
 
   const rollbackMutation = useMutation({
     mutationFn: async () => {
@@ -144,7 +143,13 @@ export function OpenCodeConfigManager() {
       const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
       if (restartServer || agentsChanged) {
         showToast.loading('Restarting server...', { id: 'update-restart' })
-        await restartServerMutation.mutateAsync()
+        try {
+          await restartServerMutation.mutateAsync()
+          showToast.success('Configuration updated and server restarted', { id: 'update-restart' })
+        } catch (error) {
+          showToast.error(getRestartErrorMessage(error), { id: 'update-restart' })
+          throw error
+        }
       } else {
         showToast.success('Configuration updated')
       }
@@ -152,7 +157,7 @@ export function OpenCodeConfigManager() {
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to update config:', error)
-      showToast.error('Failed to update config')
+      showToast.error('Failed to update config', { id: 'update-restart' })
     } finally {
       setIsUpdating(false)
     }
@@ -192,9 +197,15 @@ export function OpenCodeConfigManager() {
 
       if (isDefault) {
         showToast.loading('Restarting server...', { id: 'create-config' })
-        await restartServerMutation.mutateAsync()
+        try {
+          await restartServerMutation.mutateAsync()
+          showToast.success('Configuration created and server restarted', { id: 'create-config' })
+        } catch (error) {
+          showToast.error(getRestartErrorMessage(error), { id: 'create-config' })
+          throw error
+        }
       } else {
-        showToast.success('Configuration created')
+        showToast.success('Configuration created', { id: 'create-config' })
       }
 
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
@@ -302,9 +313,14 @@ export function OpenCodeConfigManager() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
+                  onClick={async () => {
                     showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
-                    restartServerMutation.mutate()
+                    try {
+                      await restartServerMutation.mutateAsync()
+                      showToast.success('Server restarted successfully', { id: 'manual-restart' })
+                    } catch (error) {
+                      showToast.error(getRestartErrorMessage(error), { id: 'manual-restart' })
+                    }
                   }}
                   disabled={restartServerMutation.isPending}
                 >
@@ -433,15 +449,19 @@ export function OpenCodeConfigManager() {
             await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
             await fetchConfigs()
             if (agentsChanged) {
-              showToast.loading('Restarting server...', { id: 'restart-server' })
+              showToast.loading('Restarting server...', { id: 'edit-config' })
               await restartServerMutation.mutateAsync()
-              showToast.success('Config updated and server restarted', { id: 'restart-server' })
+              showToast.success('Config updated and server restarted', { id: 'edit-config' })
             } else {
               showToast.success('Configuration saved', { id: 'edit-config' })
             }
             queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
-          } catch {
-            showToast.error('Failed to save configuration', { id: 'edit-config' })
+          } catch (error) {
+            if (error instanceof Error && error.message.includes('restart')) {
+              showToast.error(getRestartErrorMessage(error), { id: 'edit-config' })
+            } else {
+              showToast.error('Failed to save configuration', { id: 'edit-config' })
+            }
           }
         }}
         isUpdating={isUpdating}
