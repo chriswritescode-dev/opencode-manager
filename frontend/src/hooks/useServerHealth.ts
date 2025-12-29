@@ -14,6 +14,7 @@ interface HealthResponse {
   opencodeVersion: string | null
   opencodeMinVersion: string
   opencodeVersionSupported: boolean
+  opencodeManagerVersion: string | null
   error?: string
 }
 

@@ -343,7 +343,12 @@ export function OpenCodeConfigManager() {
                 )}
                 {health.opencodeVersion && (
                   <p className="text-xs text-muted-foreground">
-                    v{health.opencodeVersion}
+                    OpenCode v{health.opencodeVersion}
+                  </p>
+                )}
+                {health.opencodeManagerVersion && (
+                  <p className="text-xs text-muted-foreground">
+                    Manager v{health.opencodeManagerVersion}
                   </p>
                 )}
               </div>

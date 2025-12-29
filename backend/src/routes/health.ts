@@ -1,12 +1,25 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
+import { readFile } from 'fs/promises'
 import { opencodeServerManager } from '../services/opencode-single-server'
+
+const opencodeManagerVersionPromise = (async (): Promise<string | null> => {
+  try {
+    const packageUrl = new URL('../../../package.json', import.meta.url)
+    const packageJsonRaw = await readFile(packageUrl, 'utf-8')
+    const packageJson = JSON.parse(packageJsonRaw) as { version?: unknown }
+    return typeof packageJson.version === 'string' ? packageJson.version : null
+  } catch {
+    return null
+  }
+})()
 
 export function createHealthRoutes(db: Database) {
   const app = new Hono()
 
   app.get('/', async (c) => {
     try {
+      const opencodeManagerVersion = await opencodeManagerVersionPromise
       const dbCheck = db.prepare('SELECT 1').get()
       const opencodeHealthy = await opencodeServerManager.checkHealth()
       const startupError = opencodeServerManager.getLastStartupError()
@@ -23,7 +36,8 @@ export function createHealthRoutes(db: Database) {
         opencodePort: opencodeServerManager.getPort(),
         opencodeVersion: opencodeServerManager.getVersion(),
         opencodeMinVersion: opencodeServerManager.getMinVersion(),
-        opencodeVersionSupported: opencodeServerManager.isVersionSupported()
+        opencodeVersionSupported: opencodeServerManager.isVersionSupported(),
+        opencodeManagerVersion,
       }
 
       if (startupError && !opencodeHealthy) {
@@ -32,9 +46,11 @@ export function createHealthRoutes(db: Database) {
 
       return c.json(response)
     } catch (error) {
+      const opencodeManagerVersion = await opencodeManagerVersionPromise
       return c.json({
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
+        opencodeManagerVersion,
         error: error instanceof Error ? error.message : 'Unknown error'
       }, 503)
     }
