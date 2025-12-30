@@ -44,15 +44,30 @@ install_from_fork() {
   echo "Installing dependencies..."
   bun install
   
-  echo "Building OpenCode..."
+  echo "Building OpenCode (single target for current platform)..."
   cd packages/opencode
-  bun run build
+  bun run build --single
   
-  mkdir -p "$HOME/.opencode/bin"
-  ln -sf "$OPENCODE_DIR/packages/opencode/dist/opencode" "$HOME/.opencode/bin/opencode"
-  chmod +x "$HOME/.opencode/bin/opencode"
+  # Find the built binary (opencode-linux-x64 or opencode-linux-arm64)
+  ARCH=$(uname -m)
+  if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    BINARY_NAME="opencode-linux-arm64"
+  else
+    BINARY_NAME="opencode-linux-x64"
+  fi
   
-  echo "OpenCode installed from fork successfully"
+  BINARY_PATH="$OPENCODE_DIR/packages/opencode/dist/$BINARY_NAME/bin/opencode"
+  
+  if [ -f "$BINARY_PATH" ]; then
+    mkdir -p "$HOME/.opencode/bin"
+    cp "$BINARY_PATH" "$HOME/.opencode/bin/opencode"
+    chmod +x "$HOME/.opencode/bin/opencode"
+    echo "OpenCode installed from fork successfully"
+  else
+    echo "ERROR: Built binary not found at $BINARY_PATH"
+    ls -la "$OPENCODE_DIR/packages/opencode/dist/" 2>/dev/null || echo "dist directory not found"
+    exit 1
+  fi
 }
 
 install_official() {
