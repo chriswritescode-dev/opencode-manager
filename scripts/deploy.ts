@@ -303,9 +303,10 @@ async function deployToVM(ip: string) {
   const sshOpts = "-o StrictHostKeyChecking=no";
   const sshCmd = `ssh ${sshOpts} ${config.adminUser}@${ip}`;
 
-  // Clone opencode-manager
-  console.log("Cloning opencode-manager...");
-  exec(`${sshCmd} "git clone https://github.com/chriswritescode-dev/opencode-manager.git 2>/dev/null || (cd opencode-manager && git pull)"`, { quiet: true });
+  // Clone opencode-manager (use VibeTechnologies fork which has the context overflow fix)
+  const managerRepo = process.env.OPENCODE_MANAGER_REPO || "VibeTechnologies/opencode-manager";
+  console.log(`Cloning opencode-manager from ${managerRepo}...`);
+  exec(`${sshCmd} "git clone https://github.com/${managerRepo}.git opencode-manager 2>/dev/null || (cd opencode-manager && git pull)"`, { quiet: true });
 
   // Pull caddy image first to generate password hash
   console.log("Generating password hash...");
@@ -835,6 +836,14 @@ async function updateOpencode(ip: string) {
   console.log("Updating opencode-manager to latest version...");
   const sshOpts = "-o StrictHostKeyChecking=no";
   const sshCmd = `ssh ${sshOpts} ${config.adminUser}@${ip}`;
+
+  // Check if we need to change the remote URL
+  const managerRepo = process.env.OPENCODE_MANAGER_REPO || "VibeTechnologies/opencode-manager";
+  const currentRemote = execOutput(`${sshCmd} "cd ~/opencode-manager && git remote get-url origin 2>/dev/null || echo ''"`);
+  if (currentRemote && !currentRemote.includes(managerRepo)) {
+    console.log(`Changing remote to ${managerRepo}...`);
+    exec(`${sshCmd} "cd ~/opencode-manager && git remote set-url origin https://github.com/${managerRepo}.git"`, { quiet: true });
+  }
 
   // Pull latest code
   console.log("Pulling latest code from GitHub...");
