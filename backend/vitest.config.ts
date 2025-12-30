@@ -22,6 +22,8 @@ export default defineConfig({
         statements: 80
       }
     },
-    setupFiles: ['./test/setup.ts']
+    setupFiles: ['./test/setup.ts'],
+    include: ['test/**/*.test.ts'],
+    exclude: ['test/integration/**']
   }
 })
