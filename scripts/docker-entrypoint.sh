@@ -29,6 +29,8 @@ fi
 install_from_fork() {
   echo "Installing OpenCode from fork: $OPENCODE_FORK_REPO (branch: $OPENCODE_FORK_BRANCH)"
   
+  local ORIG_DIR=$(pwd)
+  
   if [ -d "$OPENCODE_DIR" ]; then
     echo "Updating existing clone..."
     cd "$OPENCODE_DIR"
@@ -66,8 +68,11 @@ install_from_fork() {
   else
     echo "ERROR: Built binary not found at $BINARY_PATH"
     ls -la "$OPENCODE_DIR/packages/opencode/dist/" 2>/dev/null || echo "dist directory not found"
+    cd "$ORIG_DIR"
     exit 1
   fi
+  
+  cd "$ORIG_DIR"
 }
 
 install_official() {
