@@ -57,13 +57,6 @@ RUN pnpm --filter frontend build
 
 FROM base AS runner
 
-ARG TARGETARCH
-
-RUN ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
-    curl -fsSL "https://github.com/VibeTechnologies/opencode/releases/download/latest/opencode-linux-${ARCH}" \
-      -o /usr/local/bin/opencode && \
-    chmod +x /usr/local/bin/opencode
-
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5003
