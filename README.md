@@ -23,6 +23,21 @@ Our fork includes the fix from PR #6234 which implements intelligent file persis
 
 This fix is essential for production use cases where AI agents frequently fetch documentation, analyze large codebases, or work with verbose tool outputs.
 
+**Implementation Details:**
+
+1. **VibeTechnologies/opencode fork** (branch: `dev`) contains two fixes:
+   - Large tool outputs (>30k chars) are saved to disk instead of context (`packages/opencode/src/session/prompt.ts`)
+   - Auto-allow read access to OpenCode storage directory to avoid permission prompts for reading saved tool results (`packages/opencode/src/tool/read.ts`)
+
+2. **opencode-manager** deploys the fork at container startup via:
+   - `docker-compose.yml` - `OPENCODE_FORK_REPO` and `OPENCODE_FORK_BRANCH` env vars
+   - `scripts/docker-entrypoint.sh` - `install_from_fork()` function
+
+**Test Results** (all 3 integration tests pass):
+- 883,082 character output saved to file successfully
+- No retry loop / sessions didn't get stuck
+- Sessions can continue conversation after context-heavy operations
+
 ### Staying Up-to-Date
 
 We regularly sync our fork with upstream sst/opencode to incorporate new features and fixes. Once PR #6234 is merged upstream, we plan to switch back to the official release.  
@@ -135,7 +150,7 @@ We regularly sync our fork with upstream sst/opencode to incorporate new feature
 
 ```bash
 # Clone the repository
-git clone https://github.com/chriswritescode-dev/opencode-manager.git
+git clone https://github.com/VibeTechnologies/opencode-manager.git
 cd opencode-manager
 
 # Start with Docker Compose (single container)
@@ -214,11 +229,130 @@ OpenCode Manager creates a default `AGENTS.md` file in the workspace config dire
 
 This file is merged with any repository-specific `AGENTS.md` files, with repository instructions taking precedence for their respective codebases.
 
-### Option 2: Local Development
+### Option 2: Azure VM Deployment (Quick Start)
+
+Deploy OpenCode Manager to an Azure VM with a single command. Includes automatic HTTPS via Cloudflare tunnel and Basic Auth protection.
+
+**Prerequisites:**
+- [Azure CLI](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli) installed and logged in (`az login`)
+- [Bun](https://bun.sh/) installed
+- SSH keys configured (`~/.ssh/id_rsa.pub`)
+
+**Quick Deploy:**
 
 ```bash
 # Clone the repository
-git clone https://github.com/chriswritescode-dev/opencode-manager.git
+git clone https://github.com/VibeTechnologies/opencode-manager.git
+cd opencode-manager
+
+# Install dependencies
+bun install
+
+# Deploy to Azure (creates VM, configures Docker, sets up tunnel)
+bun run scripts/deploy.ts
+```
+
+The script will:
+1. Create an Azure resource group and VM (Standard_D2s_v5 by default)
+2. Install Docker and deploy OpenCode Manager
+3. Set up Caddy reverse proxy with Basic Auth
+4. Create a Cloudflare tunnel for HTTPS access
+5. Enable YOLO mode (auto-approve all AI permissions)
+
+**After deployment, you'll receive:**
+- Tunnel URL: `https://xxx-xxx.trycloudflare.com`
+- Username: `admin` (default)
+- Password: Auto-generated or prompted
+
+**Environment Variables (optional):**
+
+Create a `.env` file before deploying to configure:
+
+```bash
+# Basic Auth
+AUTH_USERNAME=admin
+AUTH_PASSWORD=your-secure-password
+
+# Azure Configuration
+AZURE_LOCATION=westus2
+AZURE_VM_SIZE=Standard_D2s_v5
+
+# GitHub Token (for cloning private repos)
+GITHUB_TOKEN=ghp_xxx
+
+# AI Provider Keys (optional - can also configure via OAuth in UI)
+ANTHROPIC_API_KEY=sk-ant-xxx
+OPENAI_API_KEY=sk-xxx
+GEMINI_API_KEY=xxx
+
+# OpenCode Fork (for context overflow fix - default)
+OPENCODE_FORK_REPO=VibeTechnologies/opencode
+OPENCODE_FORK_BRANCH=dev
+```
+
+**Deployment Commands:**
+
+```bash
+# Deploy new VM
+bun run scripts/deploy.ts
+
+# Check status (shows tunnel URL, credentials, container status)
+bun run scripts/deploy.ts --status
+
+# Update to latest code (pulls from GitHub, rebuilds containers)
+bun run scripts/deploy.ts --update
+
+# Sync local OpenCode auth to VM (GitHub Copilot, Anthropic OAuth)
+bun run scripts/deploy.ts --sync-auth
+
+# Update environment variables
+bun run scripts/deploy.ts --update-env
+
+# Change Basic Auth password
+bun run scripts/deploy.ts --update-auth
+
+# Re-enable YOLO mode (auto-approve permissions)
+bun run scripts/deploy.ts --yolo
+
+# Destroy all Azure resources
+bun run scripts/deploy.ts --destroy
+```
+
+**Syncing Authentication:**
+
+If you have GitHub Copilot or Anthropic OAuth configured locally, sync it to your VM:
+
+```bash
+# First, authenticate locally with OpenCode
+opencode
+/connect github-copilot
+
+# Then sync to your Azure VM
+bun run scripts/deploy.ts --sync-auth
+```
+
+**SSH Access:**
+
+```bash
+# Get VM IP and SSH command
+bun run scripts/deploy.ts --status
+
+# SSH into VM
+ssh azureuser@<VM_IP>
+
+# View container logs
+ssh azureuser@<VM_IP> "sudo docker logs opencode-manager -f"
+```
+
+**Cost Estimate:**
+- Standard_D2s_v5 (2 vCPU, 8GB RAM): ~$70/month
+- Use `--destroy` when not in use to avoid charges
+
+### Option 3: Local Development
+
+```bash
+# Clone the repository
+git clone https://github.com/VibeTechnologies/opencode-manager.git
 cd opencode-manager
 
 # Install dependencies (uses Bun workspaces)
