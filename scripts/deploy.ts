@@ -26,6 +26,10 @@
  *   OPENROUTER_API_KEY - OpenRouter API key
  *   OPENCODE_CONFIG_FILE - Path to local opencode.json config to upload
  * 
+ * OpenCode fork (for context overflow fix):
+ *   OPENCODE_FORK_REPO - GitHub repo (e.g., "VibeTechnologies/opencode")
+ *   OPENCODE_FORK_BRANCH - Branch to use (default: main)
+ * 
  * Auth sync (--sync-auth):
  *   Syncs both OpenCode auth and GitHub token to the remote VM:
  *   - ~/.local/share/opencode/auth.json (GitHub Copilot, Anthropic OAuth, etc.)
@@ -62,6 +66,9 @@ let config = {
   openrouterApiKey: "",
   // OpenCode config file path
   opencodeConfigFile: "",
+  // OpenCode fork (for context overflow fix)
+  opencodeForkRepo: "",
+  opencodeForkBranch: "main",
 };
 
 function exec(cmd: string, options?: { quiet?: boolean }): string {
@@ -122,6 +129,9 @@ function initConfig() {
     openrouterApiKey: process.env.OPENROUTER_API_KEY || "",
     // OpenCode config file path
     opencodeConfigFile: process.env.OPENCODE_CONFIG_FILE || "",
+    // OpenCode fork (for context overflow fix)
+    opencodeForkRepo: process.env.OPENCODE_FORK_REPO || "",
+    opencodeForkBranch: process.env.OPENCODE_FORK_BRANCH || "main",
   };
 }
 
@@ -364,7 +374,7 @@ volumes:
   const composeBase64 = Buffer.from(composeOverride).toString("base64");
   exec(`${sshCmd} "echo '${composeBase64}' | base64 -d > ~/opencode-manager/docker-compose.override.yml"`, { quiet: true });
 
-  // Create .env file with GitHub token and OpenCode provider keys if provided
+  // Create .env file with GitHub token, OpenCode provider keys, and fork config
   const envLines: string[] = [];
   if (config.githubToken) {
     envLines.push(`GITHUB_TOKEN=${config.githubToken}`);
@@ -380,6 +390,10 @@ volumes:
   }
   if (config.openrouterApiKey) {
     envLines.push(`OPENROUTER_API_KEY=${config.openrouterApiKey}`);
+  }
+  if (config.opencodeForkRepo) {
+    envLines.push(`OPENCODE_FORK_REPO=${config.opencodeForkRepo}`);
+    envLines.push(`OPENCODE_FORK_BRANCH=${config.opencodeForkBranch}`);
   }
 
   if (envLines.length > 0) {
@@ -510,6 +524,10 @@ async function updateEnv(ip: string) {
   }
   if (config.openrouterApiKey) {
     envLines.push(`OPENROUTER_API_KEY=${config.openrouterApiKey}`);
+  }
+  if (config.opencodeForkRepo) {
+    envLines.push(`OPENCODE_FORK_REPO=${config.opencodeForkRepo}`);
+    envLines.push(`OPENCODE_FORK_BRANCH=${config.opencodeForkBranch}`);
   }
 
   if (envLines.length === 0 && !config.opencodeConfigFile) {
@@ -825,6 +843,25 @@ async function updateOpencode(ip: string) {
   // Patch Dockerfile to add Chrome and browser dependencies
   console.log("Patching Dockerfile to add Chrome...");
   patchDockerfile(ip);
+
+  // Update .env with fork settings if configured
+  if (config.opencodeForkRepo) {
+    console.log(`Configuring OpenCode fork: ${config.opencodeForkRepo}...`);
+    let existingEnv = "";
+    try {
+      existingEnv = execOutput(`${sshCmd} "cat ~/opencode-manager/.env 2>/dev/null || echo ''"`);
+    } catch {}
+
+    const envLines = existingEnv.split("\n").filter(line => 
+      line.trim() && !line.startsWith("OPENCODE_FORK_REPO=") && !line.startsWith("OPENCODE_FORK_BRANCH=")
+    );
+    envLines.push(`OPENCODE_FORK_REPO=${config.opencodeForkRepo}`);
+    envLines.push(`OPENCODE_FORK_BRANCH=${config.opencodeForkBranch}`);
+    
+    const envContent = envLines.join("\n");
+    const envBase64 = Buffer.from(envContent).toString("base64");
+    exec(`${sshCmd} "echo '${envBase64}' | base64 -d > ~/opencode-manager/.env"`, { quiet: true });
+  }
 
   // Update docker-compose.override.yml (without custom Dockerfile since we patched the original)
   console.log("Updating docker-compose.override.yml...");

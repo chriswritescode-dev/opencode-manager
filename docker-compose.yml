@@ -26,6 +26,8 @@ services:
       - SANDBOX_TTL_HOURS=24
       - CLEANUP_INTERVAL_MINUTES=60
       - DEBUG=false
+      - OPENCODE_FORK_REPO=${OPENCODE_FORK_REPO:-}
+      - OPENCODE_FORK_BRANCH=${OPENCODE_FORK_BRANCH:-main}
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
