@@ -15,6 +15,9 @@ importers:
         specifier: ^17.2.3
         version: 17.2.3
     devDependencies:
+      axios:
+        specifier: ^1.13.2
+        version: 1.13.2
       concurrently:
         specifier: ^9.1.0
         version: 9.2.1
@@ -58,6 +61,9 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      axios:
+        specifier: ^1.9.0
+        version: 1.13.2
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.1)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)
