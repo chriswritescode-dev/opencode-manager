@@ -55,12 +55,24 @@ COPY frontend/index.html frontend/vite.config.ts frontend/tsconfig*.json fronten
 
 RUN pnpm --filter frontend build
 
+FROM base AS opencode-builder
+
+WORKDIR /opencode-src
+
+ARG TARGETARCH
+
+RUN git clone --depth 1 https://github.com/VibeTechnologies/opencode.git . && \
+    bun install && \
+    cd packages/opencode && \
+    bun install && \
+    bun run build --single && \
+    ARCH=$([ "$TARGETARCH" = "arm64" ] && echo "arm64" || echo "x64") && \
+    cp dist/opencode-linux-${ARCH}/bin/opencode /tmp/opencode-binary
+
 FROM base AS runner
 
-RUN curl -fsSL https://opencode.ai/install | bash && \
-    mv /root/.opencode /opt/opencode && \
-    chmod -R 755 /opt/opencode && \
-    ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
+COPY --from=opencode-builder /tmp/opencode-binary /usr/local/bin/opencode
+RUN chmod +x /usr/local/bin/opencode
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
