@@ -1,0 +1,50 @@
+# Custom opencode-manager image with browser and development tools
+# Extends the locally built opencode-manager image to add persistent dependencies
+# This requires the base image to be built first via docker compose build
+
+FROM opencode-manager-app:latest
+
+# Switch to root to install packages
+USER root
+
+# Install Chromium and all required dependencies for headless browser testing
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libatspi2.0-0 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libdrm2 \
+    libgbm1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libx11-6 \
+    libxcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxkbcommon0 \
+    libxrandr2 \
+    xdg-utils \
+    # Additional useful tools
+    curl \
+    git \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Puppeteer to use system Chromium
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/usr/bin/chromium
+
+# Switch back to the original user (if there was one, otherwise stay as root)
+# The base image may run as a non-root user, check and preserve that
+# For now, we'll let the base image's entrypoint handle the user
