@@ -15,9 +15,6 @@ importers:
         specifier: ^17.2.3
         version: 17.2.3
     devDependencies:
-      axios:
-        specifier: ^1.13.2
-        version: 1.13.2
       concurrently:
         specifier: ^9.1.0
         version: 9.2.1
