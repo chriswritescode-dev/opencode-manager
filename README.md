@@ -1,6 +1,31 @@
 # OpenCode Manager
 
-Mobile-first web interface for OpenCode AI agents. Manage, control, and code with OpenCode from any device - your phone, tablet, or desktop. Features Git integration, file management, and real-time chat in a responsive PWA. Deploy with Docker for instant setup. View diffs, edit files and much more.  
+Mobile-first web interface for OpenCode AI agents. Manage, control, and code with OpenCode from any device - your phone, tablet, or desktop. Features Git integration, file management, and real-time chat in a responsive PWA. Deploy with Docker for instant setup. View diffs, edit files and much more.
+
+## Why We Use a Fork of OpenCode
+
+This project builds OpenCode from [VibeTechnologies/opencode](https://github.com/VibeTechnologies/opencode), a fork of the official [sst/opencode](https://github.com/sst/opencode) repository. We maintain this fork to include critical fixes that haven't yet been merged upstream.
+
+### Current Fork Enhancements
+
+**File Persistence for Large Tool Outputs** ([PR #6234](https://github.com/sst/opencode/pull/6234))
+
+The official OpenCode has a known issue where large tool outputs (WebFetch, Bash, MCP tools) can overflow the context window, causing:
+- "prompt is too long" errors (e.g., `202744 tokens > 200000 maximum`)
+- Sessions becoming stuck/unresponsive
+- Loss of work when context overflows mid-conversation
+
+Our fork includes the fix from PR #6234 which implements intelligent file persistence:
+- Tool outputs exceeding 30,000 characters are saved to disk instead of the context
+- The AI model receives a file path with instructions to explore the data using Read/Grep/jq
+- Context stays small, preventing overflow errors
+- Files are automatically cleaned up when sessions are deleted
+
+This fix is essential for production use cases where AI agents frequently fetch documentation, analyze large codebases, or work with verbose tool outputs.
+
+### Staying Up-to-Date
+
+We regularly sync our fork with upstream sst/opencode to incorporate new features and fixes. Once PR #6234 is merged upstream, we plan to switch back to the official release.  
 
 ## Features
 
