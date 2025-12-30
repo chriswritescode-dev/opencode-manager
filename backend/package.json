@@ -10,7 +10,8 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.5",
@@ -26,6 +27,7 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "latest",
     "@vitest/ui": "^3.2.4",
+    "axios": "^1.9.0",
     "vitest": "^3.2.4"
   },
   "peerDependencies": {
