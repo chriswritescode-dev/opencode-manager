@@ -28,9 +28,11 @@ services:
       - DEBUG=false
       - OPENCODE_FORK_REPO=${OPENCODE_FORK_REPO:-}
       - OPENCODE_FORK_BRANCH=${OPENCODE_FORK_BRANCH:-main}
+      - KUBECONFIG=/home/node/.kube/vibe.config
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
+      - ~/.kube:/home/node/.kube:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]

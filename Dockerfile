@@ -23,6 +23,11 @@ RUN apt-get update && apt-get install -y \
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
+
 RUN curl -fsSL https://bun.sh/install | bash && \
     mv /root/.bun /opt/bun && \
     chmod -R 755 /opt/bun && \
