@@ -108,6 +108,35 @@ function getGitEnv(database: Database): Record<string, string> {
   }
 }
 
+interface GitIdentity {
+  name: string
+  email: string
+}
+
+function getGitIdentity(database: Database): GitIdentity {
+  const defaultIdentity: GitIdentity = {
+    name: 'OpenCode User',
+    email: 'opencode@localhost'
+  }
+
+  try {
+    const settingsService = new SettingsService(database)
+    const settings = settingsService.getSettings('default')
+    const identity = settings.preferences.gitIdentity
+
+    if (identity?.name && identity?.email) {
+      return identity
+    }
+
+    return {
+      name: identity?.name || defaultIdentity.name,
+      email: identity?.email || defaultIdentity.email
+    }
+  } catch {
+    return defaultIdentity
+  }
+}
+
 export async function initLocalRepo(
   database: Database,
   localPath: string,
@@ -150,6 +179,25 @@ export async function initLocalRepo(
     logger.info(`Initializing git repository: ${fullPath}`)
 
     await executeCommand(['git', 'init'], { cwd: fullPath })
+    
+    const hasGlobalEmail = await executeCommand(['git', 'config', '--global', 'user.email'], { silent: true })
+      .then(email => email.trim().length > 0)
+      .catch(() => false)
+    const hasGlobalName = await executeCommand(['git', 'config', '--global', 'user.name'], { silent: true })
+      .then(name => name.trim().length > 0)
+      .catch(() => false)
+    
+    if (!hasGlobalEmail || !hasGlobalName) {
+      const identity = getGitIdentity(database)
+      if (!hasGlobalEmail) {
+        await executeCommand(['git', 'config', '--global', 'user.email', identity.email])
+        logger.info(`Set global git user.email: ${identity.email}`)
+      }
+      if (!hasGlobalName) {
+        await executeCommand(['git', 'config', '--global', 'user.name', identity.name])
+        logger.info(`Set global git user.name: ${identity.name}`)
+      }
+    }
     
     await executeCommand(['git', '-C', fullPath, 'commit', '--allow-empty', '-m', 'Initial commit'])
     

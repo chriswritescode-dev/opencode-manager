@@ -12,10 +12,10 @@ import {
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../index'
-import { exec } from 'child_process'
+import { execFile } from 'child_process'
 import { promisify } from 'util'
 
-const execAsync = promisify(exec)
+const execFileAsync = promisify(execFile)
 
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
@@ -90,6 +90,24 @@ export function createSettingsRoutes(db: Database) {
           logger.info('Git credentials changed, restarting OpenCode server')
           await opencodeServerManager.restart()
           serverRestarted = true
+        }
+      }
+
+      if (validated.preferences.gitIdentity !== undefined) {
+        const identity = validated.preferences.gitIdentity
+        if (identity.name) {
+          await execFileAsync('git', ['config', '--global', 'user.name', identity.name])
+          logger.info(`Set global git user.name: ${identity.name}`)
+        } else {
+          await execFileAsync('git', ['config', '--global', '--unset', 'user.name']).catch(() => {})
+          logger.info('Unset global git user.name')
+        }
+        if (identity.email) {
+          await execFileAsync('git', ['config', '--global', 'user.email', identity.email])
+          logger.info(`Set global git user.email: ${identity.email}`)
+        } else {
+          await execFileAsync('git', ['config', '--global', '--unset', 'user.email']).catch(() => {})
+          logger.info('Unset global git user.email')
         }
       }
 

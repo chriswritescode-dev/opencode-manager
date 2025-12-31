@@ -28,6 +28,11 @@ export interface GitCredential {
   username?: string
 }
 
+export interface GitIdentity {
+  name: string
+  email: string
+}
+
 export interface UserPreferences {
   theme: 'dark' | 'light' | 'system'
   mode: 'plan' | 'build'
@@ -41,6 +46,7 @@ export interface UserPreferences {
   customCommands: CustomCommand[]
   customAgents: CustomAgent[]
   gitCredentials?: GitCredential[]
+  gitIdentity?: GitIdentity
   tts?: TTSConfig
 }
 
