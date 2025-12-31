@@ -121,6 +121,7 @@ export function RepoDetail() {
         isWorktree={repo.isWorktree || false}
         repoUrl={repo.repoUrl}
         onMcpClick={() => setMcpDialogOpen(true)}
+        onTerminalClick={() => navigate(`/repos/${repoId}/terminal`)}
         onFilesClick={() => setFileBrowserOpen(true)}
         onNewSession={handleCreateSession}
         disabledNewSession={!opcodeUrl || createSessionMutation.isPending}

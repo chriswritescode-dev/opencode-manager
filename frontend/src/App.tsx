@@ -4,6 +4,7 @@ import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
+import { TerminalPage } from './pages/Terminal'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
@@ -32,7 +33,7 @@ return (
         <Route path="/" element={<Repos />} />
         <Route path="/repos/:id" element={<RepoDetail />} />
         <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
-
+        <Route path="/repos/:id/terminal" element={<TerminalPage />} />
       </Routes>
       <GlobalPermissionNotification />
       <SettingsDialog open={isOpen} onOpenChange={close} />

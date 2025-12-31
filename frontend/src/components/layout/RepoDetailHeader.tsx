@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { BackButton } from "@/components/ui/back-button";
-import { Plus, FolderOpen, GitBranch, Plug, MoreVertical } from "lucide-react";
+import { Plus, FolderOpen, GitBranch, Plug, MoreVertical, Terminal } from "lucide-react";
 
 interface RepoDetailHeaderProps {
   repoName: string;
@@ -13,6 +13,7 @@ interface RepoDetailHeaderProps {
   repoUrl: string | null;
   onMcpClick: () => void;
   onFilesClick: () => void;
+  onTerminalClick: () => void;
   onNewSession: () => void;
   disabledNewSession?: boolean;
 }
@@ -25,6 +26,7 @@ export function RepoDetailHeader({
   repoUrl,
   onMcpClick,
   onFilesClick,
+  onTerminalClick,
   onNewSession,
   disabledNewSession,
 }: RepoDetailHeaderProps) {
@@ -78,6 +80,15 @@ export function RepoDetailHeader({
           </Button>
           <Button
             variant="outline"
+            onClick={onTerminalClick}
+            size="sm"
+            className="hidden sm:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+          >
+            <Terminal className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Terminal</span>
+          </Button>
+          <Button
+            variant="outline"
             onClick={onFilesClick}
             size="sm"
             className="hidden sm:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
@@ -113,6 +124,9 @@ export function RepoDetailHeader({
               )}
               <DropdownMenuItem onClick={onMcpClick}>
                 <Plug className="w-4 h-4 mr-2" /> MCP
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onTerminalClick}>
+                <Terminal className="w-4 h-4 mr-2" /> Terminal
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onFilesClick}>
                 <FolderOpen className="w-4 h-4 mr-2" /> Files
