@@ -3,7 +3,7 @@ import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicato
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical, Upload } from "lucide-react";
+import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical, Upload, Terminal } from "lucide-react";
 import { useState } from "react";
 
 interface Repo {
@@ -33,6 +33,7 @@ interface SessionDetailHeaderProps {
   onSessionTitleUpdate: (newTitle: string) => void;
   onParentSessionClick?: () => void;
   onAttachFile?: () => void;
+  onTerminalOpen?: () => void;
 }
 
 export function SessionDetailHeader({
@@ -51,6 +52,7 @@ export function SessionDetailHeader({
   onSessionTitleUpdate,
   onParentSessionClick,
   onAttachFile,
+  onTerminalOpen,
 }: SessionDetailHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(sessionTitle);
@@ -186,6 +188,17 @@ export function SessionDetailHeader({
           >
             <Plug className="w-4 h-4" />
           </Button>
+          {onTerminalOpen && (
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onTerminalOpen}
+              className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+              title="Terminal"
+            >
+              <Terminal className="w-4 h-4" />
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="icon"
@@ -230,6 +243,11 @@ export function SessionDetailHeader({
               <DropdownMenuItem onClick={onMcpDialogOpen}>
                 <Plug className="w-4 h-4 mr-2" /> MCP
               </DropdownMenuItem>
+              {onTerminalOpen && (
+                <DropdownMenuItem onClick={onTerminalOpen}>
+                  <Terminal className="w-4 h-4 mr-2" /> Terminal
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={onSettingsOpen}>
                 <Settings className="w-4 h-4 mr-2" /> Settings
               </DropdownMenuItem>

@@ -275,7 +275,38 @@ prevPendingCountRef.current = pendingCount
         try {
           const event = JSON.parse(e.data)
           if ('id' in event.properties && 'sessionID' in event.properties) {
-            permissionEvents.emit({ type: 'add', permission: event.properties })
+            const permission = event.properties
+            
+            // Auto-approve: immediately respond to permission requests
+            const clientKey = `${repo.url}|${repo.directory ?? ''}`
+            let client = clientsRef.current.get(clientKey)
+            if (!client) {
+              client = new OpenCodeClient(repo.url, repo.directory)
+              clientsRef.current.set(clientKey, client)
+            }
+            
+            const autoApprove = async (retries = 3) => {
+              for (let i = 0; i < retries; i++) {
+                try {
+                  await client!.respondToPermission(permission.sessionID, permission.id, 'always')
+                  console.log(`[Auto-approve] Approved permission ${permission.id} (attempt ${i + 1})`)
+                  return true
+                } catch (err) {
+                  console.warn(`[Auto-approve] Attempt ${i + 1} failed:`, err)
+                  if (i < retries - 1) {
+                    await new Promise(r => setTimeout(r, 500 * (i + 1)))
+                  }
+                }
+              }
+              return false
+            }
+            
+            autoApprove().then(success => {
+              if (!success) {
+                console.error(`[Auto-approve] All retries failed, showing dialog`)
+                permissionEvents.emit({ type: 'add', permission })
+              }
+            })
           }
         } catch (err) {
           console.error('Failed to parse permission.updated event:', err)
@@ -315,9 +346,15 @@ prevPendingCountRef.current = pendingCount
     async (permissionID: string, sessionID: string, response: PermissionResponse) => {
       const client = getClient(sessionID)
       if (!client) {
+        dismiss(permissionID, sessionID)
         throw new Error('No client found for session')
       }
-      await client.respondToPermission(sessionID, permissionID, response)
+      try {
+        await client.respondToPermission(sessionID, permissionID, response)
+      } catch (error) {
+        dismiss(permissionID, sessionID)
+        throw error
+      }
       dismiss(permissionID, sessionID)
     },
     [getClient, dismiss],

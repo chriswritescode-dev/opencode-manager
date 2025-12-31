@@ -132,7 +132,7 @@ export function PermissionRequestDialog({
       await onRespond(permission.id, permission.sessionID, response)
     } catch (error) {
       console.error('Failed to respond to permission:', error)
-      showToast.error('Failed to respond to permission. Please try again.')
+      showToast.error('Permission request expired or session ended. Dismissed.')
     } finally {
       setIsLoading(false)
       setLoadingAction(null)

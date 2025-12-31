@@ -10,6 +10,7 @@ import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
 import { SessionList } from "@/components/session/SessionList";
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
+import { TerminalPanel } from "@/components/terminal/TerminalPanel";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { useSession, useAbortSession, useUpdateSession, useMessages } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
@@ -40,6 +41,7 @@ export function SessionDetail() {
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [terminalOpen, setTerminalOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
@@ -242,6 +244,7 @@ export function SessionDetail() {
         onSessionTitleUpdate={handleSessionTitleUpdate}
         onParentSessionClick={handleParentSessionClick}
         onAttachFile={handleAttachFile}
+        onTerminalOpen={() => setTerminalOpen(true)}
       />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
@@ -356,6 +359,12 @@ export function SessionDetail() {
         onOpenChange={setMcpDialogOpen}
         config={settings}
         directory={repoDirectory}
+      />
+
+      <TerminalPanel
+        cwd={repoDirectory}
+        isOpen={terminalOpen}
+        onClose={() => setTerminalOpen(false)}
       />
     </div>
   );

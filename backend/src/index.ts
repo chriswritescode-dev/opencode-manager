@@ -2,6 +2,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
+import { createNodeWebSocket } from '@hono/node-ws'
 import os from 'os'
 import path from 'path'
 import { initializeDatabase } from './db/schema'
@@ -12,6 +13,8 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
+import { createTerminalRoutes, registerTerminalWebSocket } from './routes/terminal'
+import { terminalService } from './services/terminal'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
@@ -33,6 +36,8 @@ const { PORT, HOST } = ENV.SERVER
 const DB_PATH = getDatabasePath()
 
 const app = new Hono()
+
+const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
 
 app.use('/*', cors({
   origin: '*',
@@ -228,6 +233,8 @@ app.route('/api/files', createFileRoutes(db))
 app.route('/api/providers', createProvidersRoutes())
 app.route('/api/oauth', createOAuthRoutes())
 app.route('/api/tts', createTTSRoutes(db))
+app.route('/api/terminal', createTerminalRoutes())
+registerTerminalWebSocket(app, upgradeWebSocket)
 
 app.all('/api/opencode/*', async (c) => {
   const request = c.req.raw
@@ -262,6 +269,7 @@ if (isProduction) {
         sessions: '/api/sessions',
         files: '/api/files',
         providers: '/api/providers',
+        terminal: '/api/terminal',
         opencode_proxy: '/api/opencode/*'
       }
     })
@@ -300,6 +308,8 @@ const shutdown = async (signal: string) => {
   
   logger.info(`${signal} received, shutting down gracefully...`)
   try {
+    terminalService.destroyAllSessions()
+    logger.info('Terminal sessions destroyed')
     await opencodeServerManager.stop()
     logger.info('OpenCode server stopped')
   } catch (error) {
@@ -311,10 +321,12 @@ const shutdown = async (signal: string) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
 
-serve({
+const server = serve({
   fetch: app.fetch,
   port: PORT,
   hostname: HOST,
 })
+
+injectWebSocket(server)
 
 logger.info(`🚀 OpenCode WebUI API running on http://${HOST}:${PORT}`)
