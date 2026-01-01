@@ -1,14 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { API_BASE_URL } from '@/config'
-
-interface TerminalMessage {
-  type: 'output' | 'exit' | 'input' | 'resize'
-  data?: string
-  exitCode?: number
-  signal?: number
-  cols?: number
-  rows?: number
-}
+import { io, Socket } from 'socket.io-client'
 
 interface UseTerminalOptions {
   sessionId: string
@@ -18,26 +10,31 @@ interface UseTerminalOptions {
   onExit?: (exitCode: number, signal?: number) => void
   onConnect?: () => void
   onDisconnect?: () => void
-  onError?: (error: Event) => void
+  onError?: (error: Error) => void
 }
 
-function getWebSocketUrl(sessionId: string, cwd?: string): string {
-  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  
-  let wsHost: string
-  if (API_BASE_URL && API_BASE_URL.length > 0) {
-    wsHost = API_BASE_URL.replace(/^https?:\/\//, '')
-  } else {
-    wsHost = `${window.location.hostname}:5001`
+function getSocketUrl(): string {
+  // Check if we're running behind a proxy/tunnel (like Cloudflare or ngrok)
+  const isTunnel = window.location.hostname.endsWith('.trycloudflare.com') || 
+                  window.location.hostname.endsWith('.ngrok.io') ||
+                  window.location.hostname.endsWith('.ngrok-free.app');
+
+  if (!isTunnel && API_BASE_URL && API_BASE_URL.startsWith('http')) {
+    return API_BASE_URL
   }
   
-  const wsUrl = new URL(`${wsProtocol}//${wsHost}/api/terminal/ws/${sessionId}`)
+  // If we are in a tunnel, or no API_BASE_URL is set, use the current origin
+  // This ensures that if the page is loaded via https, the WSS connection also uses SSL
   
-  if (cwd) {
-    wsUrl.searchParams.set('cwd', cwd)
+  // Make sure to strip credentials from the origin if present (e.g. user:pass@host)
+  try {
+    const url = new URL(window.location.href)
+    url.username = ''
+    url.password = ''
+    return url.origin
+  } catch (e) {
+    return window.location.origin
   }
-  
-  return wsUrl.toString()
 }
 
 export function useTerminal(options: UseTerminalOptions) {
@@ -45,76 +42,85 @@ export function useTerminal(options: UseTerminalOptions) {
   const optionsRef = useRef(options)
   optionsRef.current = options
   
-  const wsRef = useRef<WebSocket | null>(null)
+  const socketRef = useRef<Socket | null>(null)
   const [isConnected, setIsConnected] = useState(false)
   const connectingRef = useRef(false)
 
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN || connectingRef.current) {
+    if (socketRef.current?.connected || connectingRef.current) {
+      console.log('[Terminal] Already connected or connecting')
       return
     }
 
     connectingRef.current = true
-    const wsUrl = getWebSocketUrl(sessionId, cwd)
-    const ws = new WebSocket(wsUrl)
-    wsRef.current = ws
-
-    ws.onopen = () => {
+    const socketUrl = getSocketUrl()
+    console.log('[Terminal] Connecting to Socket.IO at:', socketUrl)
+    
+    // Explicitly configure path to match backend configuration
+    const socket = io(socketUrl, {
+      path: '/api/terminal/socket.io',
+      query: {
+        sessionId,
+        cwd
+      },
+      transports: ['polling', 'websocket'], // Start with polling for better reliability behind tunnels
+      withCredentials: true, // Required for Cloudflare Tunnel / Access to send cookies
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+      forceNew: true // Ensure a new connection is created for each session
+    })
+    
+    socketRef.current = socket
+    
+    socket.on('connect', () => {
+      console.log('[Terminal] Socket.IO Connected!', socket.id)
       connectingRef.current = false
       setIsConnected(true)
       optionsRef.current.onConnect?.()
-    }
+    })
 
-    ws.onmessage = (event) => {
-      try {
-        const message: TerminalMessage = JSON.parse(event.data)
-        
-        switch (message.type) {
-          case 'output':
-            if (message.data) {
-              optionsRef.current.onData?.(message.data)
-            }
-            break
-          case 'exit':
-            optionsRef.current.onExit?.(message.exitCode ?? 0, message.signal)
-            break
-        }
-      } catch (error) {
-        console.error('Failed to parse terminal message:', error)
-      }
-    }
+    socket.on('output', (data: string) => {
+      optionsRef.current.onData?.(data)
+    })
 
-    ws.onclose = () => {
+    socket.on('exit', (data: { exitCode: number, signal?: number }) => {
+      optionsRef.current.onExit?.(data.exitCode, data.signal)
+    })
+
+    socket.on('disconnect', (reason) => {
+      console.log('[Terminal] Socket.IO Disconnected:', reason)
       connectingRef.current = false
       setIsConnected(false)
       optionsRef.current.onDisconnect?.()
-      wsRef.current = null
-    }
+    })
 
-    ws.onerror = (error) => {
+    socket.on('connect_error', (error) => {
+      console.error('[Terminal] Socket.IO Connection Error:', error)
       connectingRef.current = false
       optionsRef.current.onError?.(error)
-    }
+    })
+
   }, [sessionId, cwd])
 
   const disconnect = useCallback(() => {
     connectingRef.current = false
-    if (wsRef.current) {
-      wsRef.current.close()
-      wsRef.current = null
+    if (socketRef.current) {
+      socketRef.current.disconnect()
+      socketRef.current = null
     }
     setIsConnected(false)
   }, [])
 
   const write = useCallback((data: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'input', data }))
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('input', data)
     }
   }, [])
 
   const resize = useCallback((cols: number, rows: number) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'resize', cols, rows }))
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('resize', { cols, rows })
     }
   }, [])
 

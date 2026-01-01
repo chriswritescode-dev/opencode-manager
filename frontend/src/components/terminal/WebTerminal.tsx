@@ -72,6 +72,8 @@ export function WebTerminal({
       cursorStyle: 'bar',
       fontSize: 14,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+      // rendererType is not valid in standard xterm.js options, but we are using dom renderer by default in recent versions
+      // or we can remove it if it's causing type errors and rely on default
       theme: {
         background: '#0a0a0a',
         foreground: '#e4e4e7',

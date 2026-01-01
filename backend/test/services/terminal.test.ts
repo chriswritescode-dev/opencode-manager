@@ -54,21 +54,21 @@ describe('Terminal Service', () => {
 
   it('should handle resizing session', () => {
     const session = terminalService.createSession(sessionId)
-    const resizeSpy = vi.spyOn(session.pty, 'resize')
+    const writeSpy = vi.spyOn(session.process.stdin, 'write')
     
     const result = terminalService.resizeSession(sessionId, 100, 40)
     
     expect(result).toBe(true)
-    expect(resizeSpy).toHaveBeenCalledWith(100, 40)
+    expect(writeSpy).toHaveBeenCalledWith(JSON.stringify({ type: 'resize', cols: 100, rows: 40 }) + '\n')
   })
 
   it('should handle writing to session', () => {
     const session = terminalService.createSession(sessionId)
-    const writeSpy = vi.spyOn(session.pty, 'write')
+    const writeSpy = vi.spyOn(session.process.stdin, 'write')
     
     const result = terminalService.writeToSession(sessionId, 'ls -la')
     
     expect(result).toBe(true)
-    expect(writeSpy).toHaveBeenCalledWith('ls -la')
+    expect(writeSpy).toHaveBeenCalledWith(JSON.stringify({ type: 'input', data: 'ls -la' }) + '\n')
   })
 })

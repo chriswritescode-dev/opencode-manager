@@ -2,7 +2,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
-import { createNodeWebSocket } from '@hono/node-ws'
+import { Server as SocketIOServer } from 'socket.io'
 import os from 'os'
 import path from 'path'
 import { initializeDatabase } from './db/schema'
@@ -13,7 +13,7 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
-import { createTerminalRoutes, registerTerminalWebSocket } from './routes/terminal'
+import { createTerminalRoutes, registerTerminalSocketIO } from './routes/terminal'
 import { terminalService } from './services/terminal'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -37,12 +37,11 @@ const DB_PATH = getDatabasePath()
 
 const app = new Hono()
 
-const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
-
 app.use('/*', cors({
-  origin: '*',
+  origin: (origin) => origin || '', // Reflect the origin to support credentials
+  credentials: true,
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'x-forwarded-proto', 'x-forwarded-host'],
 }))
 
 const db = initializeDatabase(DB_PATH)
@@ -234,7 +233,6 @@ app.route('/api/providers', createProvidersRoutes())
 app.route('/api/oauth', createOAuthRoutes())
 app.route('/api/tts', createTTSRoutes(db))
 app.route('/api/terminal', createTerminalRoutes())
-registerTerminalWebSocket(app, upgradeWebSocket)
 
 app.all('/api/opencode/*', async (c) => {
   const request = c.req.raw
@@ -327,6 +325,15 @@ const server = serve({
   hostname: HOST,
 })
 
-injectWebSocket(server)
+const io = new SocketIOServer(server as any, {
+  path: '/api/terminal/socket.io',
+  cors: {
+    origin: true, // Reflect the request origin
+    credentials: true,
+    methods: ['GET', 'POST']
+  }
+})
+
+registerTerminalSocketIO(io)
 
 logger.info(`🚀 OpenCode WebUI API running on http://${HOST}:${PORT}`)

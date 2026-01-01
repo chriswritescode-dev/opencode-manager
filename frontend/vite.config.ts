@@ -19,6 +19,11 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       port: 5173,
       proxy: {
+        "/api/terminal/socket.io": {
+          target: `http://localhost:${backendPort}`,
+          ws: true,
+          changeOrigin: true,
+        },
         "/api": {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,

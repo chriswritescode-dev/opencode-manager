@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import type { UpgradeWebSocket } from 'hono/ws'
 import { terminalService } from '../services/terminal'
 import { logger } from '../utils/logger'
+import { Server, Socket } from 'socket.io'
 
 export function createTerminalRoutes() {
   const app = new Hono()
@@ -37,67 +37,50 @@ export function createTerminalRoutes() {
   return app
 }
 
-export function registerTerminalWebSocket(app: Hono, upgradeWebSocket: UpgradeWebSocket) {
-  app.get(
-    '/api/terminal/ws/:id',
-    upgradeWebSocket((c) => {
-      const sessionId = c.req.param('id')
-      const cwd = c.req.query('cwd') || undefined
+export function registerTerminalSocketIO(io: Server) {
+  io.on('connection', (socket: Socket) => {
+    const sessionId = socket.handshake.query.sessionId as string
+    const cwd = (socket.handshake.query.cwd as string) || undefined
+    
+    if (!sessionId) {
+      logger.error('Socket connection missing sessionId')
+      socket.disconnect()
+      return
+    }
 
-      return {
-        onOpen(_evt, ws) {
-          logger.info(`WebSocket connection opened for terminal: ${sessionId}`)
-          
-          const session = terminalService.createSession(sessionId, cwd)
-          
-          session.pty.onData((data: string) => {
-            try {
-              ws.send(JSON.stringify({ type: 'output', data }))
-            } catch (error) {
-              logger.error(`Failed to send data to WebSocket:`, error)
-            }
-          })
+    logger.info(`Socket.IO connection for terminal: ${sessionId}`)
+    socket.join(sessionId)
 
-          session.pty.onExit(({ exitCode, signal }) => {
-            try {
-              ws.send(JSON.stringify({ type: 'exit', exitCode, signal }))
-              ws.close()
-            } catch (error) {
-              logger.error(`Failed to send exit event:`, error)
-            }
-            terminalService.destroySession(sessionId)
-          })
-        },
+    // Create session if it doesn't exist
+    terminalService.createSession(sessionId, cwd)
 
-        onMessage(evt, ws) {
-          try {
-            const message = JSON.parse(evt.data.toString())
-            
-            switch (message.type) {
-              case 'input':
-                terminalService.writeToSession(sessionId, message.data)
-                break
-              case 'resize':
-                terminalService.resizeSession(sessionId, message.cols, message.rows)
-                break
-              default:
-                logger.warn(`Unknown message type: ${message.type}`)
-            }
-          } catch (error) {
-            logger.error(`Failed to parse WebSocket message:`, error)
-          }
-        },
-
-        onClose() {
-          logger.info(`WebSocket connection closed for terminal: ${sessionId}`)
-          terminalService.destroySession(sessionId)
-        },
-
-        onError(evt) {
-          logger.error(`WebSocket error for terminal ${sessionId}:`, evt)
-          terminalService.destroySession(sessionId)
-        },
-      }
+    // Handle incoming data from client
+    socket.on('input', (data: string) => {
+      terminalService.writeToSession(sessionId, data)
     })
-  )
+
+    socket.on('resize', (size: { cols: number; rows: number }) => {
+      terminalService.resizeSession(sessionId, size.cols, size.rows)
+    })
+
+    // Setup PTY listeners for this socket
+    // We need to be careful not to duplicate listeners if multiple sockets connect to the same session
+    // For now, we'll just add new listeners and rely on the service to broadcast to all
+    
+    terminalService.setOnData(sessionId, (data: string) => {
+      io.to(sessionId).emit('output', data)
+    })
+
+    terminalService.setOnExit(sessionId, (exitCode: number, signal?: number) => {
+      io.to(sessionId).emit('exit', { exitCode, signal })
+      terminalService.destroySession(sessionId)
+      socket.disconnect()
+    })
+
+    socket.on('disconnect', () => {
+      logger.info(`Socket.IO disconnected for terminal: ${sessionId}`)
+      // We don't destroy the session on disconnect to allow reconnection
+      // The session will be destroyed when the PTY exits or manually via API
+    })
+  })
 }

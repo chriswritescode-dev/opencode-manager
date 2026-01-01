@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "node-pty": "^1.1.0",
+    "ws": "^8.18.3"
   }
 }
