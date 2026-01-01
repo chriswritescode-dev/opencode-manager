@@ -35,7 +35,7 @@ class TerminalService {
     } else {
       // Default to local path and let it fail with a clear error later if not found
       this.ptyWorkerPath = localWorkerPath
-      logger.warn(`Could not find pty-worker.cjs at ${localWorkerPath} or ${bundleWorkerPath}`)
+      logger.warn(`Could not find pty-worker.cjs. Checked: \n - ${localWorkerPath}\n - ${bundleWorkerPath}`)
     }
   }
 
