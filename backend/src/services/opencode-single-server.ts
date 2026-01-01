@@ -237,10 +237,21 @@ class OpenCodeServerManager {
   async fetchVersion(): Promise<string | null> {
     try {
       const result = execSync('opencode --version 2>&1', { encoding: 'utf8' })
-      const match = result.match(/(\d+\.\d+\.\d+)/)
-      if (match && match[1]) {
-        this.version = match[1]
-        return this.version
+      // Use a stricter regex to avoid matching IP addresses (e.g., 0.0.0.0) in debug output
+      // We look for a version number at the end of a line or standing alone
+      const lines = result.split('\n')
+      for (const line of lines) {
+        const match = line.match(/(?:^|\s|v)(\d+\.\d+\.\d+)(?:\s|$)/)
+        if (match && match[1]) {
+          // Verify it's not part of an IP address (heuristic: check if followed by another dot)
+          const fullMatch = match[0]
+          const index = line.indexOf(fullMatch)
+          const nextChar = line[index + fullMatch.length]
+          if (nextChar === '.') continue
+          
+          this.version = match[1]
+          return this.version
+        }
       }
     } catch (error) {
       logger.warn('Failed to get OpenCode version:', error)
