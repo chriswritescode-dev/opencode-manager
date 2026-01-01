@@ -1013,6 +1013,54 @@ async function main() {
     return;
   }
 
+  // 1. Use existing host if provided via env var
+  const targetHost = process.env.TARGET_HOST;
+
+  if (targetHost && !args.includes("--destroy") && !args.includes("--status")) {
+    console.log(`ℹ️  TARGET_HOST is set to '${targetHost}'. Using existing server.`);
+    console.log(`Checking SSH access...`);
+    
+    // Validate SSH access
+    try {
+      exec(`ssh -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 ${config.adminUser}@${targetHost} "echo ready"`, { quiet: true });
+    } catch (e) {
+      console.error(`❌ Could not connect to ${targetHost}. Make sure you have SSH access with user '${config.adminUser}'.`);
+      process.exit(1);
+    }
+    
+    // Wait for Docker to be ready (or install it if missing? For now, assume pre-provisioned or use waitForDocker logic if it installs it)
+    // Actually, let's verify docker exists, or install it using setup-dev.sh
+    console.log("Checking for Docker...");
+    try {
+      exec(`ssh -o StrictHostKeyChecking=no ${config.adminUser}@${targetHost} "docker --version"`, { quiet: true });
+    } catch {
+      console.log("Docker not found. Installing dependencies...");
+      exec(`ssh -o StrictHostKeyChecking=no ${config.adminUser}@${targetHost} "curl -sL https://raw.githubusercontent.com/dzianisv/opencode-manager/main/scripts/setup-dev.sh | bash"`, { quiet: false });
+    }
+
+    // Reuse deploy logic
+    if (args.includes("--update")) {
+      await updateOpencode(targetHost);
+    } else if (args.includes("--update-env")) {
+      await updateEnv(targetHost);
+    } else if (args.includes("--sync-auth")) {
+      await syncAuth(targetHost);
+    } else if (args.includes("--yolo")) {
+      await enableYoloMode(targetHost);
+    } else {
+       // Standard deploy
+       await deployToVM(targetHost);
+       console.log("\nDeployment to existing host complete!");
+       // Show tunnel URL if available
+       try {
+        const tunnelLogs = execOutput(`ssh -o StrictHostKeyChecking=no ${config.adminUser}@${targetHost} "sudo docker logs cloudflared-tunnel 2>&1"`);
+        const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+        if (urlMatch) console.log(`\nTunnel URL: ${urlMatch[0]}`);
+       } catch {}
+    }
+    return;
+  }
+
   // Check Azure login
   if (!checkAzureLogin()) {
     console.error("Not logged into Azure. Run: az login");
