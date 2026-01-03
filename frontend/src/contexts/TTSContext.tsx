@@ -204,28 +204,42 @@ export function TTSProvider({ children }: TTSProviderProps) {
       prefetchedBlobsRef.current.delete(index)
       
       const url = URL.createObjectURL(blob)
-      const audio = new Audio(url)
-      audioRef.current = audio
-
-      audio.onended = () => {
-        URL.revokeObjectURL(url)
-        audioRef.current = null
-        if (!stoppedRef.current) {
-          playChunk(index + 1)
+      let urlRevoked = false
+      const revokeUrl = () => {
+        if (!urlRevoked) {
+          urlRevoked = true
+          URL.revokeObjectURL(url)
         }
       }
+      
+      try {
+        const audio = new Audio(url)
+        audioRef.current = audio
 
-      audio.onerror = () => {
-        URL.revokeObjectURL(url)
-        audioRef.current = null
-        if (!stoppedRef.current) {
-          setError('Audio playback failed')
-          setState('error')
+        audio.onended = () => {
+          revokeUrl()
+          audioRef.current = null
+          if (!stoppedRef.current) {
+            playChunk(index + 1)
+          }
         }
-      }
 
-      setState('playing')
-      await audio.play()
+        audio.onerror = () => {
+          revokeUrl()
+          audioRef.current = null
+          if (!stoppedRef.current) {
+            setError('Audio playback failed')
+            setState('error')
+          }
+        }
+
+        setState('playing')
+        await audio.play()
+      } catch (playErr) {
+        revokeUrl()
+        audioRef.current = null
+        throw playErr
+      }
     } catch (err) {
       if (stoppedRef.current) return
       setError(err instanceof Error ? err.message : 'TTS failed')

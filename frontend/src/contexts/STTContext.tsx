@@ -5,6 +5,8 @@ import { STTContext, type STTState } from './stt-context'
 
 export { STTContext, type STTContextValue, type STTState, type STTConfig } from './stt-context'
 
+const MAX_RECORDING_DURATION_MS = 5 * 60 * 1000
+
 interface STTProviderProps {
   children: ReactNode
 }
@@ -20,6 +22,9 @@ export function STTProvider({ children }: STTProviderProps) {
   const streamRef = useRef<MediaStream | null>(null)
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startTimeRef = useRef<number>(0)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const maxDurationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const isMountedRef = useRef(true)
 
   const sttConfig = preferences?.stt
   const isEnabled = sttConfig?.enabled ?? false
@@ -28,6 +33,16 @@ export function STTProvider({ children }: STTProviderProps) {
     if (durationIntervalRef.current) {
       clearInterval(durationIntervalRef.current)
       durationIntervalRef.current = null
+    }
+    
+    if (maxDurationTimeoutRef.current) {
+      clearTimeout(maxDurationTimeoutRef.current)
+      maxDurationTimeoutRef.current = null
+    }
+    
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
     }
 
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
@@ -45,7 +60,9 @@ export function STTProvider({ children }: STTProviderProps) {
   }, [])
 
   useEffect(() => {
+    isMountedRef.current = true
     return () => {
+      isMountedRef.current = false
       cleanup()
     }
   }, [cleanup])
@@ -99,6 +116,13 @@ export function STTProvider({ children }: STTProviderProps) {
       durationIntervalRef.current = setInterval(() => {
         setRecordingDuration(Math.floor((Date.now() - startTimeRef.current) / 1000))
       }, 100)
+      
+      maxDurationTimeoutRef.current = setTimeout(() => {
+        if (isMountedRef.current && mediaRecorderRef.current?.state === 'recording') {
+          setError('Maximum recording duration reached (5 minutes)')
+          mediaRecorderRef.current.stop()
+        }
+      }, MAX_RECORDING_DURATION_MS)
 
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to access microphone'
@@ -152,15 +176,24 @@ export function STTProvider({ children }: STTProviderProps) {
         setState('transcribing')
 
         try {
+          abortControllerRef.current = new AbortController()
           const result = await sttApi.transcribe(audioBlob, 'default', {
             model: sttConfig?.model,
-            language: sttConfig?.language
+            language: sttConfig?.language,
+            signal: abortControllerRef.current.signal
           })
+          abortControllerRef.current = null
 
           setState('idle')
           setRecordingDuration(0)
           resolve(result.text)
         } catch (err) {
+          abortControllerRef.current = null
+          if (err instanceof Error && err.name === 'CanceledError') {
+            setState('idle')
+            resolve(null)
+            return
+          }
           const message = err instanceof Error ? err.message : 'Transcription failed'
           setError(message)
           setState('error')

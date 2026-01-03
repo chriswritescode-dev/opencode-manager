@@ -5,8 +5,11 @@ import { SettingsService } from '../services/settings'
 import { whisperServerManager } from '../services/whisper'
 import { logger } from '../utils/logger'
 
+const MAX_AUDIO_SIZE_MB = 25
+const MAX_AUDIO_SIZE_BYTES = MAX_AUDIO_SIZE_MB * 1024 * 1024
+
 const TranscribeRequestSchema = z.object({
-  audio: z.string().min(1),
+  audio: z.string().min(1).max(MAX_AUDIO_SIZE_BYTES * 1.37),
   format: z.string().optional().default('webm'),
   language: z.string().optional(),
   model: z.string().optional()
@@ -40,6 +43,10 @@ export function createSTTRoutes(db: Database) {
       }
 
       const audioBuffer = Buffer.from(audioData, 'base64')
+      
+      if (audioBuffer.length > MAX_AUDIO_SIZE_BYTES) {
+        return c.json({ error: `Audio exceeds maximum size of ${MAX_AUDIO_SIZE_MB}MB` }, 400)
+      }
 
       const result = await whisperServerManager.transcribe(audioBuffer, {
         model: model || sttConfig.model,
@@ -47,7 +54,7 @@ export function createSTTRoutes(db: Database) {
         format
       })
 
-      logger.info(`STT transcription completed: ${result.text.substring(0, 50)}...`)
+      logger.info(`STT transcription completed (${result.duration?.toFixed(1)}s audio)`)
 
       return c.json({
         text: result.text,

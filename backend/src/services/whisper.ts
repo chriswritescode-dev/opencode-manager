@@ -222,6 +222,7 @@ class WhisperServerManager {
 
     const base64Audio = audioData.toString('base64')
     
+    const TRANSCRIBE_TIMEOUT_MS = 120000
     const response = await fetch(`${this.getBaseUrl()}/transcribe-base64`, {
       method: 'POST',
       headers: {
@@ -232,7 +233,8 @@ class WhisperServerManager {
         model: options.model || WHISPER_DEFAULT_MODEL,
         language: options.language,
         format: options.format || 'webm'
-      })
+      }),
+      signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS)
     })
 
     if (!response.ok) {

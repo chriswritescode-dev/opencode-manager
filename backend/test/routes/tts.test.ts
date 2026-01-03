@@ -1,26 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-const mockMkdir = vi.fn()
-const mockReadFile = vi.fn()
-const mockWriteFile = vi.fn()
-const mockReaddir = vi.fn()
-const mockStat = vi.fn()
-const mockUnlink = vi.fn()
-
-const mockLogger = {
-  info: vi.fn(),
-  error: vi.fn(),
-  warn: vi.fn(),
-}
-
 vi.mock('fs/promises', async () => {
   return {
-    mkdir: mockMkdir,
-    readFile: mockReadFile,
-    writeFile: mockWriteFile,
-    readdir: mockReaddir,
-    stat: mockStat,
-    unlink: mockUnlink,
+    mkdir: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    readdir: vi.fn(),
+    stat: vi.fn(),
+    unlink: vi.fn(),
   }
 })
 
@@ -32,11 +19,43 @@ vi.mock('../../src/services/settings', () => ({
 }))
 vi.mock('../../src/utils/logger', async () => {
   return {
-    logger: mockLogger,
+    logger: {
+      info: vi.fn(),
+      error: vi.fn(),
+      warn: vi.fn(),
+      debug: vi.fn(),
+    },
   }
 })
 
+vi.mock('../../src/services/chatterbox', () => ({
+  chatterboxServerManager: {
+    getStatus: vi.fn().mockReturnValue({
+      running: false,
+      port: 5553,
+      host: '127.0.0.1',
+      device: null,
+      cudaAvailable: false,
+      error: null
+    }),
+    start: vi.fn(),
+    stop: vi.fn(),
+    synthesize: vi.fn(),
+    getVoices: vi.fn().mockResolvedValue({ voices: ['default'], voiceDetails: [] }),
+    uploadVoice: vi.fn(),
+    deleteVoice: vi.fn(),
+  }
+}))
+
+import * as fsPromises from 'fs/promises'
+
 import { createTTSRoutes, cleanupExpiredCache, getCacheStats, generateCacheKey, ensureCacheDir, getCachedAudio, getCacheSize, cleanupOldestFiles } from '../../src/routes/tts'
+
+const mockMkdir = fsPromises.mkdir as ReturnType<typeof vi.fn>
+const mockReadFile = fsPromises.readFile as ReturnType<typeof vi.fn>
+const mockReaddir = fsPromises.readdir as ReturnType<typeof vi.fn>
+const mockStat = fsPromises.stat as ReturnType<typeof vi.fn>
+const mockUnlink = fsPromises.unlink as ReturnType<typeof vi.fn>
 
 describe('TTS Routes', () => {
   let mockDb: any

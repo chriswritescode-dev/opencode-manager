@@ -48,7 +48,17 @@ RUN python3 -m venv /opt/whisper-venv && \
     uvicorn \
     python-multipart
 
+RUN python3 -m venv /opt/chatterbox-venv && \
+    /opt/chatterbox-venv/bin/pip install --no-cache-dir \
+    torch \
+    torchaudio \
+    chatterbox-tts \
+    fastapi \
+    uvicorn \
+    python-multipart
+
 ENV WHISPER_VENV=/opt/whisper-venv
+ENV CHATTERBOX_VENV=/opt/chatterbox-venv
 
 WORKDIR /app
 
@@ -86,10 +96,13 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=base /opt/whisper-venv /opt/whisper-venv
+COPY --from=base /opt/chatterbox-venv /opt/chatterbox-venv
 COPY scripts/whisper-server.py ./scripts/whisper-server.py
+COPY scripts/chatterbox-server.py ./scripts/chatterbox-server.py
 COPY package.json pnpm-workspace.yaml ./
 
 ENV WHISPER_VENV=/opt/whisper-venv
+ENV CHATTERBOX_VENV=/opt/chatterbox-venv
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
     ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
