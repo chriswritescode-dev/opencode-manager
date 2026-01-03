@@ -12,6 +12,36 @@
 - `cd backend && vitest --coverage` - Coverage report (80% threshold)
 - `cd frontend && npm run lint` - Frontend linting
 
+## Voice E2E Tests
+
+Test STT (Speech-to-Text) and TTS (Text-to-Speech) functionality:
+
+```bash
+# Local development (no auth required)
+bun run scripts/test-voice-e2e.ts
+
+# Remote deployment (with auth)
+bun run scripts/test-voice-e2e.ts --url https://your-url.com --user admin --pass secret
+
+# Using environment variables
+OPENCODE_URL=https://your-url.com OPENCODE_USER=admin OPENCODE_PASS=secret bun run scripts/test-voice-e2e.ts
+
+# Custom test phrase
+bun run scripts/test-voice-e2e.ts --text "Your custom phrase to transcribe"
+```
+
+Requirements for STT test:
+- macOS with `say` command (for audio generation)
+- `ffmpeg` installed (for audio conversion)
+- Whisper server running (auto-starts with backend)
+
+Tests performed:
+1. Health endpoint connectivity
+2. Voice settings (TTS, STT, TalkMode config)
+3. STT server status and available models
+4. STT transcription with generated audio
+5. TTS voices and synthesis endpoints
+
 ## Code Style
 
 - No comments, self-documenting code only

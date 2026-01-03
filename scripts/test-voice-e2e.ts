@@ -21,8 +21,8 @@ interface TestResult {
 }
 
 const DEFAULT_CONFIG: TestConfig = {
-  baseUrl: process.env.OPENCODE_URL || 'http://localhost:5003',
-  username: process.env.OPENCODE_USER || 'admin',
+  baseUrl: process.env.OPENCODE_URL || 'http://localhost:5001',
+  username: process.env.OPENCODE_USER || '',
   password: process.env.OPENCODE_PASS || '',
   testText: process.env.TEST_TEXT || 'Create a TypeScript hello world application for Bun. The file should be called hello.ts and print Hello World to the console.'
 }
@@ -37,16 +37,15 @@ class VoiceE2ETest {
   }
 
   private async fetch(path: string, options: RequestInit = {}): Promise<Response> {
-    const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')
     const url = `${this.config.baseUrl}${path}`
+    const headers: Record<string, string> = { ...(options.headers as Record<string, string> || {}) }
     
-    return fetch(url, {
-      ...options,
-      headers: {
-        ...options.headers,
-        'Authorization': `Basic ${auth}`
-      }
-    })
+    if (this.config.username && this.config.password) {
+      const auth = Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')
+      headers['Authorization'] = `Basic ${auth}`
+    }
+    
+    return fetch(url, { ...options, headers })
   }
 
   private async runTest(name: string, testFn: () => Promise<{ passed: boolean; details?: string }>): Promise<TestResult> {
@@ -387,8 +386,8 @@ Examples:
     }
   }
 
-  if (!config.password) {
-    console.error('Error: Password is required. Use --pass <password> or set OPENCODE_PASS')
+  if (!config.baseUrl.includes('localhost') && !config.baseUrl.includes('127.0.0.1') && !config.password) {
+    console.error('Error: Password is required for remote URLs. Use --pass <password> or set OPENCODE_PASS')
     process.exit(1)
   }
 
