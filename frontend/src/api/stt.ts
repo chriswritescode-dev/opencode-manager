@@ -35,7 +35,7 @@ export const sttApi = {
   transcribe: async (
     audioBlob: Blob,
     userId = 'default',
-    options?: { model?: string; language?: string }
+    options?: { model?: string; language?: string; signal?: AbortSignal }
   ): Promise<STTTranscribeResponse> => {
     const base64 = await blobToBase64(audioBlob)
     
@@ -48,7 +48,9 @@ export const sttApi = {
         language: options?.language
       },
       {
-        params: { userId }
+        params: { userId },
+        signal: options?.signal,
+        timeout: 120000
       }
     )
     return data
@@ -57,7 +59,7 @@ export const sttApi = {
   transcribeBase64: async (
     base64Audio: string,
     format: string,
-    options?: { model?: string; language?: string },
+    options?: { model?: string; language?: string; signal?: AbortSignal },
     userId = 'default'
   ): Promise<STTTranscribeResponse> => {
     const { data } = await axios.post(
@@ -69,20 +71,25 @@ export const sttApi = {
         language: options?.language
       },
       {
-        params: { userId }
+        params: { userId },
+        signal: options?.signal,
+        timeout: 120000
       }
     )
     return data
   },
 
   getModels: async (): Promise<STTModelsResponse> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/stt/models`)
+    const { data } = await axios.get(`${API_BASE_URL}/api/stt/models`, {
+      timeout: 10000
+    })
     return data
   },
 
   getStatus: async (userId = 'default'): Promise<STTStatusResponse> => {
     const { data } = await axios.get(`${API_BASE_URL}/api/stt/status`, {
-      params: { userId }
+      params: { userId },
+      timeout: 10000
     })
     return data
   }

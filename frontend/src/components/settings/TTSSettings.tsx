@@ -6,7 +6,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
 import { useTTSModels, useTTSVoices, useTTSDiscovery } from '@/hooks/useTTSDiscovery'
 import { getAvailableVoiceNames, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
-import { Loader2, Volume2, Square, XCircle, RefreshCw, MonitorSpeaker, Globe, CheckCircle2 } from 'lucide-react'
+import { Loader2, Volume2, Square, XCircle, RefreshCw, MonitorSpeaker, Globe, CheckCircle2, Cpu, Play, StopCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -14,6 +14,8 @@ import { Slider } from '@/components/ui/slider'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Combobox } from '@/components/ui/combobox'
 import { DEFAULT_TTS_CONFIG } from '@/api/types/settings'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { apiClient } from '@/api/client'
 
 const TEST_PHRASE = 'Text to speech is working correctly.'
 
@@ -29,16 +31,17 @@ function isKokoroStyleVoice(voice: string): boolean {
 
 const ttsFormSchema = z.object({
   enabled: z.boolean(),
-  provider: z.enum(['external', 'builtin']),
+  provider: z.enum(['external', 'builtin', 'chatterbox']),
   endpoint: z.string(),
   apiKey: z.string(),
   voice: z.string(),
   model: z.string(),
   speed: z.number().min(0.25).max(4.0),
+  chatterboxExaggeration: z.number().min(0).max(1).optional(),
+  chatterboxCfgWeight: z.number().min(0).max(1).optional(),
 }).superRefine((data, ctx) => {
   if (!data.enabled) return
   
-  // External provider specific validation
   if (data.provider === 'external') {
     if (!data.apiKey || data.apiKey.trim().length === 0) {
       ctx.addIssue({
@@ -56,7 +59,6 @@ const ttsFormSchema = z.object({
     }
   }
   
-  // Voice requirement depends on provider
   if (!data.voice || data.voice.trim().length === 0) {
     if (data.provider === 'builtin') {
       ctx.addIssue({
@@ -70,6 +72,22 @@ const ttsFormSchema = z.object({
 
 type TTSFormValues = z.infer<typeof ttsFormSchema>
 
+interface ChatterboxStatus {
+  running: boolean
+  port: number
+  host: string
+  device: string | null
+  cudaAvailable: boolean
+  error: string | null
+}
+
+interface ChatterboxVoice {
+  id: string
+  name: string
+  description: string
+  is_custom?: boolean
+}
+
 export function TTSSettings() {
   const { preferences, updateSettings } = useSettings()
   const { speakWithConfig, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
@@ -78,19 +96,21 @@ export function TTSSettings() {
   const [browserVoices, setBrowserVoices] = useState<string[]>([])
   const [isCheckingBuiltin, setIsCheckingBuiltin] = useState(false)
   
-  // Auto-save state
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSavedDataRef = useRef<TTSFormValues | null>(null)
   
   const form = useForm<TTSFormValues>({
     resolver: zodResolver(ttsFormSchema),
-    defaultValues: DEFAULT_TTS_CONFIG,
+    defaultValues: {
+      ...DEFAULT_TTS_CONFIG,
+      chatterboxExaggeration: 0.5,
+      chatterboxCfgWeight: 0.5,
+    },
   })
   
   const { reset, formState: { isDirty, isValid }, getValues } = form
   
-  // Fetch available models and voices for external provider
   const { data: modelsData, isLoading: isLoadingModels, refetch: refetchModels } = useTTSModels(
     undefined,
     true
@@ -100,6 +120,45 @@ export function TTSSettings() {
     undefined,
     true
   )
+  
+  const { data: chatterboxStatus, refetch: refetchChatterboxStatus } = useQuery<ChatterboxStatus>({
+    queryKey: ['chatterbox', 'status'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/tts/chatterbox/status')
+      return response.data
+    },
+    refetchInterval: 10000,
+  })
+  
+  const { data: chatterboxVoices, refetch: refetchChatterboxVoices } = useQuery<{ voices: string[], voiceDetails: ChatterboxVoice[] }>({
+    queryKey: ['chatterbox', 'voices'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/tts/chatterbox/voices')
+      return response.data
+    },
+    enabled: chatterboxStatus?.running === true,
+  })
+  
+  const startChatterboxMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post('/api/tts/chatterbox/start')
+      return response.data
+    },
+    onSuccess: () => {
+      refetchChatterboxStatus()
+      refetchChatterboxVoices()
+    },
+  })
+  
+  const stopChatterboxMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post('/api/tts/chatterbox/stop')
+      return response.data
+    },
+    onSuccess: () => {
+      refetchChatterboxStatus()
+    },
+  })
   
   const availableModels = modelsData?.models || preferences?.tts?.availableModels || []
   const availableVoices = voicesData?.voices || preferences?.tts?.availableVoices || []
@@ -113,17 +172,18 @@ export function TTSSettings() {
   const watchVoice = form.watch('voice')
   const watchModel = form.watch('model')
   const watchSpeed = form.watch('speed')
+  const watchChatterboxExaggeration = form.watch('chatterboxExaggeration')
+  const watchChatterboxCfgWeight = form.watch('chatterboxCfgWeight')
   
-  // Check builtin Web Speech API support
   const hasWebSpeechSupport = isWebSpeechSupported()
   
-  // Determine if test button should be enabled
-  // With auto-save, we allow testing as long as settings are valid (no need to wait for save)
   const canTest = (() => {
     if (!watchEnabled) return false
     
     if (watchProvider === 'builtin') {
       return hasWebSpeechSupport && browserVoices.length > 0 && !!watchVoice && !isCheckingBuiltin
+    } else if (watchProvider === 'chatterbox') {
+      return chatterboxStatus?.running === true
     } else {
       return !!watchApiKey && !!watchVoice && !isLoadingVoices
     }
@@ -179,8 +239,10 @@ export function TTSSettings() {
         voice: preferences.tts.voice ?? DEFAULT_TTS_CONFIG.voice,
         model: preferences.tts.model ?? DEFAULT_TTS_CONFIG.model,
         speed: preferences.tts.speed ?? DEFAULT_TTS_CONFIG.speed,
+        chatterboxExaggeration: preferences.tts.chatterboxExaggeration ?? 0.5,
+        chatterboxCfgWeight: preferences.tts.chatterboxCfgWeight ?? 0.5,
       })
-      lastSavedDataRef.current = preferences.tts
+      lastSavedDataRef.current = preferences.tts as unknown as TTSFormValues
       setSaveStatus('idle')
     }
   }, [preferences?.tts, reset])
@@ -226,7 +288,7 @@ export function TTSSettings() {
         clearTimeout(saveTimeoutRef.current)
       }
     }
-  }, [watchEnabled, watchProvider, watchApiKey, watchEndpoint, watchVoice, watchModel, watchSpeed, isValid, isDirty, getValues, updateSettings])
+  }, [watchEnabled, watchProvider, watchApiKey, watchEndpoint, watchVoice, watchModel, watchSpeed, watchChatterboxExaggeration, watchChatterboxCfgWeight, isValid, isDirty, getValues, updateSettings])
   
   const handleTest = () => {
     const formData = getValues()
@@ -289,7 +351,7 @@ export function TTSSettings() {
 
           {watchEnabled && (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-3 gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -308,7 +370,29 @@ export function TTSSettings() {
                     Built-in Browser
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
-                    No API key or URL needed
+                    No setup required
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    form.setValue('provider', 'chatterbox', { shouldDirty: true })
+                    form.setValue('apiKey', '', { shouldDirty: true })
+                    form.setValue('endpoint', '', { shouldDirty: true })
+                    form.setValue('voice', 'default', { shouldDirty: true })
+                  }}
+                  className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
+                    watchProvider === 'chatterbox'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-border hover:border-blue-300'
+                  }`}
+                >
+                  <Cpu className={`h-6 w-6 ${watchProvider === 'chatterbox' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                  <span className={`font-medium ${watchProvider === 'chatterbox' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                    Chatterbox
+                  </span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    Local AI voice
                   </span>
                 </button>
                 <button
@@ -332,8 +416,165 @@ export function TTSSettings() {
                 </button>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                Choose how you want to generate speech. Built-in works offline with no setup required.
+                Choose how you want to generate speech. Built-in and Chatterbox work locally without external API.
               </div>
+
+              {/* Chatterbox Provider Settings */}
+              {watchProvider === 'chatterbox' && (
+                <>
+                  <div className="rounded-lg border border-border p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium">Chatterbox Server</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {chatterboxStatus?.running ? (
+                            <span className="text-green-600 dark:text-green-400">
+                              Running on {chatterboxStatus.device || 'CPU'}
+                              {chatterboxStatus.cudaAvailable && ' (CUDA available)'}
+                            </span>
+                          ) : (
+                            <span className="text-yellow-600 dark:text-yellow-400">
+                              {chatterboxStatus?.error || 'Not running'}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {chatterboxStatus?.running ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => stopChatterboxMutation.mutate()}
+                            disabled={stopChatterboxMutation.isPending}
+                          >
+                            {stopChatterboxMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <StopCircle className="h-4 w-4 mr-2" />
+                            )}
+                            Stop
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => startChatterboxMutation.mutate()}
+                            disabled={startChatterboxMutation.isPending}
+                          >
+                            {startChatterboxMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Start
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {startChatterboxMutation.isPending && (
+                      <div className="text-sm text-muted-foreground">
+                        Starting server... This may take a minute on first run to download the model.
+                      </div>
+                    )}
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="voice"
+                    render={({ field }) => {
+                      const voiceOptions = (chatterboxVoices?.voiceDetails || []).map((v) => ({
+                        value: v.id,
+                        label: `${v.name}${v.is_custom ? ' (custom)' : ''}`
+                      }))
+                      
+                      return (
+                        <FormItem>
+                          <FormLabel>Voice</FormLabel>
+                          <FormControl>
+                            <Combobox
+                              value={field.value}
+                              onChange={field.onChange}
+                              options={voiceOptions.length > 0 ? voiceOptions : [{ value: 'default', label: 'Default Voice' }]}
+                              placeholder="Select a voice..."
+                              disabled={!chatterboxStatus?.running}
+                              allowCustomValue={false}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {chatterboxStatus?.running 
+                              ? `${chatterboxVoices?.voices?.length || 1} voice(s) available. Upload audio samples to add custom voices.`
+                              : 'Start the Chatterbox server to see available voices'}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )
+                    }}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="chatterboxExaggeration"
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className="flex justify-between">
+                          <FormLabel>Expressiveness</FormLabel>
+                          <span className="text-sm text-muted-foreground">
+                            {(field.value ?? 0.5).toFixed(2)}
+                          </span>
+                        </div>
+                        <FormControl>
+                          <Slider
+                            min={0}
+                            max={1}
+                            step={0.1}
+                            value={[field.value ?? 0.5]}
+                            onValueChange={(values) => field.onChange(values[0])}
+                            className="w-full"
+                            disabled={!chatterboxStatus?.running}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Controls emotional expressiveness. Higher values = more expressive speech.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="chatterboxCfgWeight"
+                    render={({ field }) => (
+                      <FormItem>
+                        <div className="flex justify-between">
+                          <FormLabel>CFG Weight</FormLabel>
+                          <span className="text-sm text-muted-foreground">
+                            {(field.value ?? 0.5).toFixed(2)}
+                          </span>
+                        </div>
+                        <FormControl>
+                          <Slider
+                            min={0}
+                            max={1}
+                            step={0.1}
+                            value={[field.value ?? 0.5]}
+                            onValueChange={(values) => field.onChange(values[0])}
+                            className="w-full"
+                            disabled={!chatterboxStatus?.running}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Classifier-free guidance weight. Higher = more adherence to text.
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </>
+              )}
 
               {/* External Provider Settings */}
               {watchProvider === 'external' && (

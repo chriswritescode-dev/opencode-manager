@@ -1,5 +1,43 @@
 import { z } from "zod";
 
+const ALLOWED_TTS_HOSTS = [
+  'api.openai.com',
+  'api.anthropic.com',
+  'api.elevenlabs.io',
+  'api.deepgram.com',
+  'localhost',
+  '127.0.0.1',
+];
+
+const isAllowedTTSEndpoint = (endpoint: string): boolean => {
+  if (!endpoint) return true;
+  try {
+    const url = new URL(endpoint);
+    const hostname = url.hostname.toLowerCase();
+    if (ALLOWED_TTS_HOSTS.includes(hostname)) return true;
+    if (hostname.endsWith('.openai.com')) return true;
+    if (hostname.endsWith('.anthropic.com')) return true;
+    if (hostname.endsWith('.elevenlabs.io')) return true;
+    if (hostname.endsWith('.deepgram.com')) return true;
+    if (url.protocol !== 'https:' && !hostname.startsWith('localhost') && hostname !== '127.0.0.1') {
+      return false;
+    }
+    const privateRanges = [
+      /^10\./,
+      /^172\.(1[6-9]|2[0-9]|3[0-1])\./,
+      /^192\.168\./,
+      /^169\.254\./,
+      /^0\./,
+    ];
+    if (privateRanges.some(range => range.test(hostname))) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const CustomCommandSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -8,8 +46,10 @@ export const CustomCommandSchema = z.object({
 
 export const TTSConfigSchema = z.object({
   enabled: z.boolean(),
-  provider: z.enum(['external', 'builtin']).default('external'),
-  endpoint: z.string(),
+  provider: z.enum(['external', 'builtin', 'chatterbox']).default('external'),
+  endpoint: z.string().refine(isAllowedTTSEndpoint, {
+    message: 'TTS endpoint must be a valid HTTPS URL from an allowed provider',
+  }),
   apiKey: z.string(),
   voice: z.string(),
   model: z.string(),
@@ -18,6 +58,8 @@ export const TTSConfigSchema = z.object({
   availableModels: z.array(z.string()).optional(),
   lastVoicesFetch: z.number().optional(),
   lastModelsFetch: z.number().optional(),
+  chatterboxExaggeration: z.number().min(0).max(1).optional(),
+  chatterboxCfgWeight: z.number().min(0).max(1).optional(),
 });
 
 export const STTConfigSchema = z.object({
@@ -43,7 +85,7 @@ export const CustomAgentSchema = z.object({
 
 export type TTSConfig = {
   enabled: boolean;
-  provider: 'external' | 'builtin';
+  provider: 'external' | 'builtin' | 'chatterbox';
   endpoint: string;
   apiKey: string;
   voice: string;
@@ -53,6 +95,8 @@ export type TTSConfig = {
   availableModels?: string[];
   lastVoicesFetch?: number;
   lastModelsFetch?: number;
+  chatterboxExaggeration?: number;
+  chatterboxCfgWeight?: number;
 };
 
 export type STTConfig = {
@@ -121,6 +165,8 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   availableModels: [],
   lastVoicesFetch: 0,
   lastModelsFetch: 0,
+  chatterboxExaggeration: 0.5,
+  chatterboxCfgWeight: 0.5,
 };
 
 export const DEFAULT_STT_CONFIG: STTConfig = {

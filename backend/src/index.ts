@@ -23,6 +23,7 @@ import { opencodeServerManager } from './services/opencode-single-server'
 import { cleanupOrphanedDirectories } from './services/repo'
 import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
+import { chatterboxServerManager } from './services/chatterbox'
 import { 
   getWorkspacePath, 
   getReposPath, 
@@ -230,6 +231,13 @@ try {
   } catch (error) {
     logger.warn('Whisper server failed to start (STT will be unavailable):', error)
   }
+
+  try {
+    await chatterboxServerManager.start()
+    logger.info(`Chatterbox TTS server running on port ${chatterboxServerManager.getPort()}`)
+  } catch (error) {
+    logger.warn('Chatterbox server failed to start (TTS will be unavailable):', error)
+  }
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }
@@ -320,6 +328,8 @@ const shutdown = async (signal: string) => {
     logger.info('Terminal sessions destroyed')
     await whisperServerManager.stop()
     logger.info('Whisper server stopped')
+    await chatterboxServerManager.stop()
+    logger.info('Chatterbox server stopped')
     await opencodeServerManager.stop()
     logger.info('OpenCode server stopped')
   } catch (error) {
