@@ -212,6 +212,29 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+async function updateSecretsWithTunnelUrl(ip: string): Promise<string | null> {
+  const sshOpts = "-o StrictHostKeyChecking=no";
+  const tunnelLogs = execOutput(
+    `ssh ${sshOpts} ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
+  );
+  
+  const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+  if (urlMatch) {
+    const url = urlMatch[0];
+    const secrets = getLatestSecrets();
+    const password = secrets?.password || config.authPassword || "(see previous secrets file)";
+    const username = config.authUsername;
+    
+    saveSecrets(url, username, password);
+    console.log(`Tunnel URL: ${url}`);
+    console.log(`Credentials: ${username} / ${password}`);
+    return url;
+  }
+  
+  console.log("Could not detect tunnel URL from cloudflared logs");
+  return null;
+}
+
 function createResourceGroup() {
   console.log(`Creating resource group: ${config.resourceGroup}`);
   exec(`az group create --name ${config.resourceGroup} --location ${config.location}`, { quiet: true });
@@ -461,12 +484,19 @@ async function showStatus() {
     
     const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
     if (urlMatch) {
-      console.log(`\nTunnel URL: ${urlMatch[0]}`);
+      const currentUrl = urlMatch[0];
+      console.log(`\nTunnel URL: ${currentUrl}`);
       console.log(`Username: ${config.authUsername}`);
       
       const secrets = getLatestSecrets();
       if (secrets && secrets.password) {
         console.log(`Password: ${secrets.password}`);
+        
+        // Update secrets file if URL changed
+        if (secrets.url !== currentUrl) {
+          console.log(`\n(URL changed from ${secrets.url})`);
+          saveSecrets(currentUrl, config.authUsername, secrets.password);
+        }
       } else {
         console.log(`(Password was set during deployment - check .secrets/ folder)`);
       }
@@ -956,6 +986,11 @@ volumes:
 
   // Enable YOLO mode
   await enableYoloMode(ip);
+
+  // Wait for tunnel and save secrets
+  console.log("\nWaiting for tunnel URL...");
+  await sleep(10000);
+  await updateSecretsWithTunnelUrl(ip);
 
   console.log("\nUpdate complete! opencode-manager is now running the latest version with YOLO mode.");
 }
