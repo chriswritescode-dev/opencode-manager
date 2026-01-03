@@ -22,7 +22,7 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 import type { components } from '@/api/opencode-types'
 import type { MessageWithParts, FileInfo, ImageAttachment } from '@/api/types'
 
-const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 
@@ -335,33 +335,53 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   }
 
   const addImageAttachment = (file: File) => {
-    const isValidType = ACCEPTED_FILE_TYPES.includes(file.type) || 
-                        file.type.startsWith('image/') || 
-                        file.size > 0
-    
-    if (!isValidType) {
-      console.error('Invalid file type:', file.type, 'File:', file)
-      return
+    const generateId = () => {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID()
+      }
+      return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
     }
 
     try {
       const reader = new FileReader()
-      reader.onload = () => {
-        const dataUrl = reader.result as string
-        const attachment: ImageAttachment = {
-          id: crypto.randomUUID(),
-          filename: file.name,
-          mime: file.type,
-          dataUrl,
+      
+      reader.onloadend = () => {
+        try {
+          if (reader.readyState !== 2) return
+          
+          const dataUrl = reader.result as string
+          
+          if (!dataUrl) {
+            const blobUrl = URL.createObjectURL(file)
+            const attachment: ImageAttachment = {
+              id: generateId(),
+              filename: file.name,
+              mime: file.type || 'image/png',
+              dataUrl: blobUrl,
+            }
+            setImageAttachments((prev) => [...prev, attachment])
+            return
+          }
+          
+          const attachment: ImageAttachment = {
+            id: generateId(),
+            filename: file.name,
+            mime: file.type || 'image/png',
+            dataUrl,
+          }
+          setImageAttachments((prev) => [...prev, attachment])
+        } catch (innerError) {
+          console.error('Error inside onloadend:', innerError)
         }
-        setImageAttachments((prev) => [...prev, attachment])
       }
-      reader.onerror = (error) => {
-        console.error('Failed to read file:', file.name, error)
+      
+      reader.onerror = () => {
+        console.error('FileReader error:', reader.error?.message)
       }
+      
       reader.readAsDataURL(file)
     } catch (error) {
-      console.error('Error reading file:', file.name, error)
+      console.error('Error reading file:', error)
     }
   }
 
@@ -378,21 +398,15 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
     if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
       event.preventDefault()
-      console.log('iOS paste detected, attempting to read clipboard')
       try {
         const clipboardItems = await navigator.clipboard.read()
-        console.log('Clipboard items:', clipboardItems.length)
         
         for (const item of clipboardItems) {
-          console.log('Item types:', item.types)
           for (const type of item.types) {
             if (ACCEPTED_FILE_TYPES.includes(type) || type.startsWith('image/')) {
               try {
-                console.log('Processing clipboard type:', type)
                 const blob = await item.getType(type)
-                console.log('Blob size:', blob.size)
                 const file = new File([blob], `pasted-${Date.now()}.${type.split('/')[1]}`, { type })
-                console.log('File created:', file.name, file.type, file.size)
                 addImageAttachment(file)
               } catch (err) {
                 console.error('Failed to read clipboard item type:', err)
@@ -468,7 +482,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
     if (file) {
-      console.log('File selected:', file.name, file.type, file.size)
       addImageAttachment(file)
     }
     event.currentTarget.value = ''
@@ -656,9 +669,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     onPromptChange?.(prompt.trim().length > 0)
   }, [prompt, onPromptChange])
 
-  useEffect(() => {
-    console.log('Image attachments changed:', imageAttachments.length, imageAttachments)
-  }, [imageAttachments])
+  
 
   
 
@@ -767,7 +778,7 @@ return (
           <input
             ref={fileInputRef}
             type="file"
-            accept={ACCEPTED_FILE_TYPES.join(',')}
+            accept="*/*"
             className="hidden"
             onChange={handleFileInputChange}
           />
