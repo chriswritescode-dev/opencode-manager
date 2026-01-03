@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EditSessionTitleDialog } from "@/components/session/EditSessionTitleDialog";
 import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical, Upload, X } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMobile } from "@/hooks/useMobile";
 
 interface Repo {
@@ -29,6 +29,7 @@ interface SessionDetailHeaderProps {
   opcodeUrl: string | null;
   repoDirectory: string | undefined;
   parentSessionId?: string;
+  isTitleGenerating?: boolean;
   onFileBrowserOpen: () => void;
   onSettingsOpen: () => void;
   onMcpDialogOpen: () => void;
@@ -47,6 +48,7 @@ export function SessionDetailHeader({
   opcodeUrl,
   repoDirectory,
   parentSessionId,
+  isTitleGenerating,
   onFileBrowserOpen,
   onSettingsOpen,
   onMcpDialogOpen,
@@ -57,6 +59,12 @@ export function SessionDetailHeader({
   const [isEditing, setIsEditing] = useState(false);
   const isMobile = useMobile();
   const [editTitle, setEditTitle] = useState(sessionTitle);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setEditTitle(sessionTitle);
+    }
+  }, [sessionTitle, isEditing]);
 
   if (repo.cloneStatus !== 'ready') {
     return (
@@ -164,12 +172,19 @@ export function SessionDetailHeader({
               </form>
             ) : (
               <>
-                <h1 
-                  className="text-xs text-green-500 sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
-                  onClick={handleTitleClick}
-                >
-                  {sessionTitle}
-                </h1>
+                {isTitleGenerating ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
+                    <span className="text-xs sm:text-base text-muted-foreground italic">Generating title...</span>
+                  </div>
+                ) : (
+                  <h1 
+                    className="text-xs text-green-500 sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
+                    onClick={handleTitleClick}
+                  >
+                    {sessionTitle}
+                  </h1>
+                )}
                 <p className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 truncate">
                   {repoName}
                 </p>

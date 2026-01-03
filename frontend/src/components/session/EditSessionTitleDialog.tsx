@@ -1,7 +1,7 @@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { X, Check } from "lucide-react";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useMobile } from "@/hooks/useMobile";
 
 interface EditSessionTitleDialogProps {
@@ -15,6 +15,12 @@ export function EditSessionTitleDialog({ isOpen, currentTitle, onClose, onSave }
   const [editTitle, setEditTitle] = useState(currentTitle);
   const inputRef = useRef<HTMLInputElement>(null);
   const isMobile = useMobile();
+
+  useEffect(() => {
+    if (isOpen) {
+      setEditTitle(currentTitle);
+    }
+  }, [isOpen, currentTitle]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
