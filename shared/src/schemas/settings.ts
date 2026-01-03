@@ -44,20 +44,22 @@ const isBrowser = typeof navigator !== 'undefined';
 const isMac = isBrowser && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const CMD_KEY = isMac ? 'Cmd' : 'Ctrl';
 
+export const DEFAULT_LEADER_KEY = `${CMD_KEY}+O`;
+
 export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
   submit: `${CMD_KEY}+Enter`,
   abort: 'Escape',
-  toggleMode: 'Tab',
-  undo: `${CMD_KEY}+Z`,
-  redo: `${CMD_KEY}+Shift+Z`,
-  compact: `${CMD_KEY}+K`,
-  fork: `${CMD_KEY}+Shift+F`,
-  settings: `${CMD_KEY}+,`,
-  sessions: `${CMD_KEY}+S`,
-  newSession: `${CMD_KEY}+N`,
-  closeSession: `${CMD_KEY}+W`,
-  toggleSidebar: `${CMD_KEY}+B`,
-  selectModel: `${CMD_KEY}+M`,
+  toggleMode: 'T',
+  undo: 'Z',
+  redo: 'Shift+Z',
+  compact: 'K',
+  fork: 'F',
+  settings: ',',
+  sessions: 'S',
+  newSession: 'N',
+  closeSession: 'W',
+  toggleSidebar: 'B',
+  selectModel: 'M',
 };
 
 export const GitCredentialSchema = z.object({
@@ -90,6 +92,8 @@ export const UserPreferencesSchema = z.object({
   showReasoning: z.boolean(),
   expandToolCalls: z.boolean(),
   expandDiffs: z.boolean(),
+  leaderKey: z.string().optional(),
+  directShortcuts: z.array(z.string()).optional(),
   keyboardShortcuts: z.record(z.string(), z.string()),
   customCommands: z.array(CustomCommandSchema),
   customAgents: z.array(CustomAgentSchema),
@@ -120,6 +124,8 @@ export const DEFAULT_USER_PREFERENCES = {
   showReasoning: false,
   expandToolCalls: false,
   expandDiffs: true,
+  leaderKey: DEFAULT_LEADER_KEY,
+  directShortcuts: ['submit', 'abort'],
   keyboardShortcuts: DEFAULT_KEYBOARD_SHORTCUTS,
   customCommands: [],
   customAgents: [],

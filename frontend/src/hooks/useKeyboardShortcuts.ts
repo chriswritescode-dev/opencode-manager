@@ -1,10 +1,10 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useRef, useState } from 'react'
 import { useSettings } from './useSettings'
+import { DEFAULT_LEADER_KEY } from '@/api/types/settings'
 
 const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0
 
 const normalizeShortcut = (shortcut: string): string => {
-  // Convert stored shortcuts to platform-specific format for comparison
   return shortcut.replace(/Cmd/g, isMac ? 'Cmd' : 'Ctrl')
 }
 
@@ -36,6 +36,9 @@ const parseEventShortcut = (e: KeyboardEvent): string => {
   return ''
 }
 
+const DEFAULT_DIRECT_SHORTCUTS = ['submit', 'abort']
+const LEADER_TIMEOUT = 1500
+
 interface ShortcutActions {
   openModelDialog?: () => void
   openSessions?: () => void
@@ -55,96 +58,135 @@ interface ShortcutActions {
 
 export function useKeyboardShortcuts(actions: ShortcutActions = {}) {
   const { preferences } = useSettings()
+  const [leaderActive, setLeaderActive] = useState(false)
+  const leaderTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const preferencesRef = useRef(preferences)
+  preferencesRef.current = preferences
 
-  
+  const actionsRef = useRef(actions)
+  actionsRef.current = actions
+
+  const clearLeaderTimeout = useCallback(() => {
+    if (leaderTimeoutRef.current) {
+      clearTimeout(leaderTimeoutRef.current)
+      leaderTimeoutRef.current = null
+    }
+  }, [])
+
+  const executeAction = useCallback((action: string, e: KeyboardEvent) => {
+    e.preventDefault()
+    const currentActions = actionsRef.current
+    
+    switch (action) {
+      case 'selectModel':
+        currentActions.openModelDialog?.()
+        break
+      case 'sessions':
+        currentActions.openSessions?.()
+        break
+      case 'newSession':
+        currentActions.newSession?.()
+        break
+      case 'closeSession':
+        currentActions.closeSession?.()
+        break
+      case 'toggleSidebar':
+        currentActions.toggleSidebar?.()
+        break
+      case 'submit':
+        currentActions.submitPrompt?.()
+        break
+      case 'abort':
+        currentActions.abortSession?.()
+        break
+      case 'toggleMode':
+        currentActions.toggleMode?.()
+        break
+      case 'undo':
+        currentActions.undo?.()
+        break
+      case 'redo':
+        currentActions.redo?.()
+        break
+      case 'compact':
+        currentActions.compact?.()
+        break
+      case 'fork':
+        currentActions.fork?.()
+        break
+      case 'settings':
+        currentActions.openSettings?.()
+        break
+    }
+  }, [])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     const shortcut = parseEventShortcut(e)
     if (!shortcut) return
 
-    const shortcuts = preferences?.keyboardShortcuts || {}
+    const prefs = preferencesRef.current
+    const shortcuts = prefs?.keyboardShortcuts || {}
+    const leaderKey = normalizeShortcut(prefs?.leaderKey || DEFAULT_LEADER_KEY)
+    const directShortcuts = prefs?.directShortcuts ?? DEFAULT_DIRECT_SHORTCUTS
     
-    // Check if any file editor is active on the page
     const activeFileEditor = document.querySelector('[data-file-editor="true"]')
     if (activeFileEditor && document.activeElement === activeFileEditor) {
-      return // Block all shortcuts when a file editor is active
+      return
     }
     
-    // Don't trigger shortcuts when user is typing in input fields or editing files
     const target = e.target as HTMLElement
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true' || target.getAttribute('data-file-editor') === 'true') {
-      // Allow some shortcuts to work even in input fields (but not in file editor)
-      const allowedInInput = ['submit', 'abort', 'toggleMode']
-      const isFileEditor = target.getAttribute('data-file-editor') === 'true'
-      const action = Object.entries(shortcuts).find(([, keys]) => normalizeShortcut(keys) === shortcut)?.[0]
-      if (!action || !allowedInInput.includes(action) || isFileEditor) {
+    const isInInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.contentEditable === 'true'
+    const isFileEditor = target.getAttribute('data-file-editor') === 'true'
+    
+    if (isFileEditor) return
+
+    if (leaderActive) {
+      clearLeaderTimeout()
+      setLeaderActive(false)
+      
+      const action = Object.entries(shortcuts).find(([actionName, keys]) => {
+        if (directShortcuts.includes(actionName)) return false
+        if (!keys) return false
+        return normalizeShortcut(keys) === shortcut
+      })?.[0]
+      
+      if (action) {
+        executeAction(action, e)
+      }
+      return
+    }
+
+    if (shortcut === leaderKey && !isInInput) {
+      e.preventDefault()
+      setLeaderActive(true)
+      clearLeaderTimeout()
+      leaderTimeoutRef.current = setTimeout(() => {
+        setLeaderActive(false)
+      }, LEADER_TIMEOUT)
+      return
+    }
+
+    const directAction = Object.entries(shortcuts).find(([actionName, keys]) => {
+      if (!directShortcuts.includes(actionName)) return false
+      if (!keys) return false
+      return normalizeShortcut(keys) === shortcut
+    })?.[0]
+    
+    if (directAction) {
+      if (isInInput && directAction !== 'submit' && directAction !== 'abort') {
         return
       }
+      executeAction(directAction, e)
     }
-
-    // Find the action that matches the current shortcut
-    const action = Object.entries(shortcuts).find(([, keys]) => normalizeShortcut(keys) === shortcut)?.[0]
-    
-    if (!action) return
-
-    switch (action) {
-      case 'selectModel':
-        e.preventDefault()
-        actions.openModelDialog?.()
-        break
-      case 'sessions':
-        e.preventDefault()
-        actions.openSessions?.()
-        break
-      case 'newSession':
-        e.preventDefault()
-        actions.newSession?.()
-        break
-      case 'closeSession':
-        e.preventDefault()
-        actions.closeSession?.()
-        break
-      case 'toggleSidebar':
-        e.preventDefault()
-        actions.toggleSidebar?.()
-        break
-      case 'submit':
-        e.preventDefault()
-        actions.submitPrompt?.()
-        break
-      case 'abort':
-        e.preventDefault()
-        actions.abortSession?.()
-        break
-      case 'toggleMode':
-        e.preventDefault()
-        actions.toggleMode?.()
-        break
-      case 'undo':
-        e.preventDefault()
-        actions.undo?.()
-        break
-      case 'redo':
-        e.preventDefault()
-        actions.redo?.()
-        break
-      case 'compact':
-        e.preventDefault()
-        actions.compact?.()
-        break
-      case 'fork':
-        e.preventDefault()
-        actions.fork?.()
-        break
-      case 'settings':
-        e.preventDefault()
-        actions.openSettings?.()
-        break
-    }
-  }, [preferences?.keyboardShortcuts, actions])
+  }, [leaderActive, clearLeaderTimeout, executeAction])
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [handleKeyDown])
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      clearLeaderTimeout()
+    }
+  }, [handleKeyDown, clearLeaderTimeout])
+
+  return { leaderActive }
 }

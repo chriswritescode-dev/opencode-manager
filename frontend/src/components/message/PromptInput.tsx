@@ -23,6 +23,14 @@ import type { components } from '@/api/opencode-types'
 import type { MessageWithParts, FileInfo, ImageAttachment } from '@/api/types'
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
+
+const revokeBlobUrls = (attachments: ImageAttachment[]) => {
+  attachments.forEach((attachment) => {
+    if (attachment.dataUrl.startsWith('blob:')) {
+      URL.revokeObjectURL(attachment.dataUrl)
+    }
+  })
+}
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 
@@ -64,31 +72,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   onPromptChange
 }, ref) {
   const [prompt, setPrompt] = useState('')
-  
-  useImperativeHandle(ref, () => ({
-    setPromptValue: (value: string) => {
-      setPrompt(value)
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-        textareaRef.current.focus()
-      }
-    },
-    clearPrompt: () => {
-      setPrompt('')
-      setAttachedFiles(new Map())
-      setImageAttachments([])
-      setSelectedAgent(null)
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.focus()
-      }
-    },
-    triggerFileUpload: () => {
-      fileInputRef.current?.click()
-    }
-  }), [])
-  
   const [isBashMode, setIsBashMode] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
@@ -104,6 +87,31 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  useImperativeHandle(ref, () => ({
+    setPromptValue: (value: string) => {
+      setPrompt(value)
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+        textareaRef.current.focus()
+      }
+    },
+    clearPrompt: () => {
+      setPrompt('')
+      setAttachedFiles(new Map())
+      revokeBlobUrls(imageAttachments)
+      setImageAttachments([])
+      setSelectedAgent(null)
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.focus()
+      }
+    },
+    triggerFileUpload: () => {
+      fileInputRef.current?.click()
+    }
+  }), [imageAttachments])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
@@ -170,6 +178,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       })
       setPrompt('')
       setAttachedFiles(new Map())
+      revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       setSelectedAgent(null)
       if (textareaRef.current) {
@@ -222,6 +231,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
     setPrompt('')
     setAttachedFiles(new Map())
+    revokeBlobUrls(imageAttachments)
     setImageAttachments([])
     setSelectedAgent(null)
     if (textareaRef.current) {
@@ -386,7 +396,13 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   }
 
   const removeImageAttachment = (id: string) => {
-    setImageAttachments((prev) => prev.filter((a) => a.id !== id))
+    setImageAttachments((prev) => {
+      const attachment = prev.find((a) => a.id === id)
+      if (attachment?.dataUrl.startsWith('blob:')) {
+        URL.revokeObjectURL(attachment.dataUrl)
+      }
+      return prev.filter((a) => a.id !== id)
+    })
   }
 
   const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -481,7 +497,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
-    if (file) {
+    if (file && ACCEPTED_FILE_TYPES.includes(file.type)) {
       addImageAttachment(file)
     }
     event.currentTarget.value = ''
@@ -573,6 +589,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       setMentionQuery('')
       setMentionRange(null)
       setPrompt('')
+      revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
@@ -778,7 +795,7 @@ return (
           <input
             ref={fileInputRef}
             type="file"
-            accept="*/*"
+            accept={ACCEPTED_FILE_TYPES.join(',')}
             className="hidden"
             onChange={handleFileInputChange}
           />

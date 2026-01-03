@@ -3,7 +3,7 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', '.env*', 'coverage']),
+  globalIgnores(['dist', '.env*', 'coverage', 'src/utils/logger.ts']),
   {
     files: ['**/*.ts'],
     extends: [

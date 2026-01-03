@@ -11,7 +11,7 @@ import { SessionList } from "@/components/session/SessionList";
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating } from "@/hooks/useOpenCode";
+import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating, useCreateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
@@ -27,6 +27,8 @@ import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { showToast } from "@/lib/toast";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
+import { createOpenCodeClient } from "@/api/opencode";
+import { useSessionStatus } from "@/stores/sessionStatusStore";
 
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
@@ -99,14 +101,97 @@ export function SessionDetail() {
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
+  const createSession = useCreateSession(opcodeUrl, repoDirectory);
   const isTitleGenerating = useTitleGenerating(sessionId);
   const { open: openSettings } = useSettingsDialog();
-  const { modelString } = useModelSelection(opcodeUrl, repoDirectory);
+  const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isPlaying, stop } = useTTS();
+  const setSessionStatus = useSessionStatus((state) => state.setStatus);
 
-  useKeyboardShortcuts({
+  const handleNewSession = useCallback(async () => {
+    try {
+      const newSession = await createSession.mutateAsync({ agent: undefined });
+      if (newSession?.id) {
+        navigate(`/repos/${repoId}/sessions/${newSession.id}`);
+      }
+    } catch {
+      showToast.error('Failed to create new session');
+    }
+  }, [createSession, navigate, repoId]);
+
+  const handleCompact = useCallback(async () => {
+    if (!opcodeUrl || !sessionId) return;
+    if (!model?.providerID || !model?.modelID) {
+      showToast.error('No model selected. Please select a provider and model first.');
+      return;
+    }
+
+    showToast.loading('Compacting session...', { id: `compact-${sessionId}` });
+    setSessionStatus(sessionId, { type: 'compact' });
+
+    try {
+      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      await client.summarizeSession(sessionId, model.providerID, model.modelID);
+    } catch (error) {
+      showToast.error(`Compact failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setSessionStatus(sessionId, { type: 'idle' });
+    }
+  }, [opcodeUrl, sessionId, model, repoDirectory, setSessionStatus]);
+
+  const handleUndo = useCallback(async () => {
+    if (!opcodeUrl || !sessionId) return;
+    try {
+      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      await client.sendCommand(sessionId, { command: 'undo', arguments: '' });
+    } catch (error) {
+      showToast.error(`Undo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [opcodeUrl, sessionId, repoDirectory]);
+
+  const handleRedo = useCallback(async () => {
+    if (!opcodeUrl || !sessionId) return;
+    try {
+      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      await client.sendCommand(sessionId, { command: 'redo', arguments: '' });
+    } catch (error) {
+      showToast.error(`Redo failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [opcodeUrl, sessionId, repoDirectory]);
+
+  const handleFork = useCallback(async () => {
+    if (!opcodeUrl || !sessionId) return;
+    try {
+      const client = createOpenCodeClient(opcodeUrl, repoDirectory);
+      const forkedSession = await client.forkSession(sessionId);
+      if (forkedSession?.id) {
+        navigate(`/repos/${repoId}/sessions/${forkedSession.id}`);
+        showToast.success('Session forked');
+      }
+    } catch (error) {
+      showToast.error(`Fork failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId]);
+
+  const handleCloseSession = useCallback(() => {
+    navigate(`/repos/${repoId}`);
+  }, [navigate, repoId]);
+
+  const { leaderActive } = useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
+    openSessions: () => setSessionsDialogOpen(true),
+    openSettings,
+    newSession: handleNewSession,
+    closeSession: handleCloseSession,
+    compact: handleCompact,
+    undo: handleUndo,
+    redo: handleRedo,
+    fork: handleFork,
+    toggleSidebar: () => setFileBrowserOpen(prev => !prev),
+    toggleMode: () => {
+      const newMode = preferences?.mode === "plan" ? "build" : "plan";
+      updateSettings({ mode: newMode });
+    },
     submitPrompt: () => {
       const submitButton = document.querySelector(
         "[data-submit-prompt]",
@@ -119,19 +204,6 @@ export function SessionDetail() {
       }
     },
   });
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Tab") {
-        e.preventDefault();
-        const newMode = preferences?.mode === "plan" ? "build" : "plan";
-        updateSettings({ mode: newMode });
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [preferences?.mode, updateSettings]);
 
   
 
@@ -281,7 +353,12 @@ export function SessionDetail() {
                   <span className="text-sm font-medium hidden sm:inline">Clear</span>
                 </button>
               )}
-              {isPlaying && (
+              {leaderActive && (
+                <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-primary/90 text-primary-foreground border border-primary shadow-lg backdrop-blur-md animate-pulse">
+                  <span className="text-sm font-medium">Waiting for shortcut key...</span>
+                </div>
+              )}
+              {isPlaying && !leaderActive && (
                 <button
                   onMouseDown={(e) => e.preventDefault()}
                   onTouchEnd={(e) => {

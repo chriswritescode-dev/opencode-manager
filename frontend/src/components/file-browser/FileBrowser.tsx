@@ -147,7 +147,7 @@ useEffect(() => {
   }
 }, [initialFileError])
 
-  const loadFiles = async (path: string) => {
+  const loadFiles = useCallback(async (path: string) => {
     setLoading(true)
     setError(null)
     
@@ -166,7 +166,7 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [onDirectoryLoad])
 
   const handleFileSelect = useCallback(async (file: FileInfo) => {
     if (file.isDirectory) {
@@ -274,7 +274,7 @@ useEffect(() => {
     } : null)
 
     await loadFiles(currentPath)
-  }, [currentPath, uploadSingleFile])
+  }, [currentPath, uploadSingleFile, loadFiles])
 
   const handleUpload = useCallback(async (fileList: FileList) => {
     const items = getUploadItemsFromFileList(fileList)
@@ -301,7 +301,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed')
     }
-  }, [currentPath])
+  }, [currentPath, loadFiles])
 
   const handleDelete = useCallback(async (path: string) => {
     try {
@@ -318,7 +318,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed')
     }
-  }, [currentPath])
+  }, [currentPath, loadFiles])
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
@@ -336,7 +336,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Rename failed')
     }
-  }, [currentPath])
+  }, [currentPath, loadFiles])
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -370,7 +370,7 @@ useEffect(() => {
 
   useEffect(() => {
     loadFiles(basePath)
-  }, [basePath])
+  }, [basePath, loadFiles])
 
   useEffect(() => {
     const handleFileSaved = (event: CustomEvent<{ path: string; content: string }>) => {
@@ -383,19 +383,18 @@ useEffect(() => {
     return () => window.removeEventListener('fileSaved', handleFileSaved as EventListener)
   }, [selectedFile, handleFileSelect])
 
-  // Handle escape key to close modal
   useEffect(() => {
+    if (!isPreviewModalOpen) return
+
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isPreviewModalOpen) {
+      if (e.key === 'Escape') {
         handleCloseModal()
       }
     }
 
-    if (isPreviewModalOpen) {
-      document.addEventListener('keydown', handleEscape)
-      return () => document.removeEventListener('keydown', handleEscape)
-    }
-  }, [isPreviewModalOpen])
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [isPreviewModalOpen, handleCloseModal])
 
   const filteredFiles = files?.children?.filter(file =>
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
