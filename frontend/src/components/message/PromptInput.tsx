@@ -24,6 +24,7 @@ import type { MessageWithParts, FileInfo, ImageAttachment } from '@/api/types'
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
 
+
 const revokeBlobUrls = (attachments: ImageAttachment[]) => {
   attachments.forEach((attachment) => {
     if (attachment.dataUrl.startsWith('blob:')) {
@@ -31,6 +32,7 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
     }
   })
 }
+
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 
@@ -795,7 +797,7 @@ return (
           <input
             ref={fileInputRef}
             type="file"
-            accept={ACCEPTED_FILE_TYPES.join(',')}
+            accept="*/*"
             className="hidden"
             onChange={handleFileInputChange}
           />
