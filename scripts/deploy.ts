@@ -218,9 +218,10 @@ async function updateSecretsWithTunnelUrl(ip: string): Promise<string | null> {
     `ssh ${sshOpts} ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
   );
   
-  const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-  if (urlMatch) {
-    const url = urlMatch[0];
+  // Get all URL matches and use the last one (most recent)
+  const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+  if (urlMatches && urlMatches.length > 0) {
+    const url = urlMatches[urlMatches.length - 1];
     const secrets = getLatestSecrets();
     const password = secrets?.password || config.authPassword || "(see previous secrets file)";
     const username = config.authUsername;
@@ -482,9 +483,10 @@ async function showStatus() {
       `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
     );
     
-    const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-    if (urlMatch) {
-      const currentUrl = urlMatch[0];
+    // Get all URL matches and use the last one (most recent)
+    const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+    if (urlMatches && urlMatches.length > 0) {
+      const currentUrl = urlMatches[urlMatches.length - 1];
       console.log(`\nTunnel URL: ${currentUrl}`);
       console.log(`Username: ${config.authUsername}`);
       
@@ -1121,8 +1123,8 @@ async function main() {
        // Show tunnel URL if available
        try {
         const tunnelLogs = execOutput(`ssh -o StrictHostKeyChecking=no ${config.adminUser}@${targetHost} "sudo docker logs cloudflared-tunnel 2>&1"`);
-        const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-        if (urlMatch) console.log(`\nTunnel URL: ${urlMatch[0]}`);
+        const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+        if (urlMatches && urlMatches.length > 0) console.log(`\nTunnel URL: ${urlMatches[urlMatches.length - 1]}`);
        } catch {}
     }
     return;
@@ -1207,10 +1209,11 @@ async function main() {
   const tunnelLogs = execOutput(
     `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
   );
-  const urlMatch = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
-  if (urlMatch) {
-    console.log(`\nTunnel URL: ${urlMatch[0]}`);
-    saveSecrets(urlMatch[0], config.authUsername, config.authPassword);
+  const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
+  if (urlMatches && urlMatches.length > 0) {
+    const tunnelUrl = urlMatches[urlMatches.length - 1];
+    console.log(`\nTunnel URL: ${tunnelUrl}`);
+    saveSecrets(tunnelUrl, config.authUsername, config.authPassword);
   }
   
   console.log(`\nCredentials:`);
