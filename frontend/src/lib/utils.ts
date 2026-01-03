@@ -29,11 +29,11 @@ export function sanitizeForTTS(text: string): string {
   // Remove inline code, keep content: `code` -> code
   sanitized = sanitized.replace(/`([^`]+)`/g, '$1')
 
+  // Remove markdown images first (before links): ![alt](url) -> alt
+  sanitized = sanitized.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+
   // Remove markdown links, keep display text: [text](url) -> text
   sanitized = sanitized.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-
-  // Remove markdown images: ![alt](url) -> alt
-  sanitized = sanitized.replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
 
   // Remove bold markers: **text** -> text or __text__ -> text
   sanitized = sanitized.replace(/\*\*([^*]+)\*\*/g, '$1')

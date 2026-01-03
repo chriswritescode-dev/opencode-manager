@@ -22,7 +22,8 @@
     "docker:restart": "docker-compose restart"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "puppeteer": "^24.34.0"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

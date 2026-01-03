@@ -240,64 +240,39 @@ Building a seamless web experience for a CLI tool required solving several compl
 
 ---
 
-## How to Build Your Own Cloud Vibe Station
+## Quick Start Deployment
 
 ### Prerequisites
-*   A Cloud VM (Azure B2s or AWS t3.medium recommended).
-*   A Domain Name (managed by Cloudflare).
+*   A Cloud VM (Azure B2s or AWS t3.medium recommended) or an existing Ubuntu server
+*   A Domain Name (managed by Cloudflare)
+*   Local machine with `bun` installed
 
-### The Deployment Recipe
+### Step 1: Deploy to VM
 
-**1. Prepare the VM**
-You can use our automated script to provision a new Azure VM or setup an existing one.
-
-If you already have a server (Ubuntu recommended):
+For an existing server:
 ```bash
 export TARGET_HOST="your-server-ip"
 bun run scripts/deploy.ts
 ```
 
-If you want to create a new VM on Azure automatically:
+For a new Azure VM (requires Azure CLI):
 ```bash
-# Requires Azure CLI installed and logged in
 bun run scripts/deploy.ts
 ```
-This script will:
-1.  Create an Azure Resource Group and VM (if `TARGET_HOST` is unset).
-2.  Install Docker, Git, and dependencies on the remote host.
-3.  Deploy the entire stack with Cloudflare Tunnels and Caddy authentication.
 
-**2. Authentication**
-Create a `docker-compose.yml` file that orchestrates the Manager and the Secure Tunnel.
+The script will:
+- Create an Azure Resource Group and VM (if deploying new)
+- Install Docker and dependencies
+- Build and start all containers with `docker compose up -d --build`
 
-```yaml
-services:
-  opencode-manager:
-    image: ghcr.io/dzianisv/opencode-manager:latest
-    restart: always
-    environment:
-      - PORT=5003
-      - OPENCODE_SERVER_PORT=5551
-    volumes:
-      - ./workspace:/workspace
-      - ./data:/app/data
+### Step 2: Configure Cloudflare Tunnel
 
-  tunnel:
-    image: cloudflare/cloudflared:latest
-    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
-    restart: always
-```
-
-**2. Configure the Tunnel**
 In your Cloudflare Dashboard (Zero Trust > Access > Tunnels):
-1.  Create a tunnel.
-2.  Route a public hostname (e.g., `vibe.your-domain.com`) to `http://opencode-manager:5003`.
-3.  Copy the token into your `.env` file on the server.
+1. Create a new tunnel
+2. Route your domain (e.g., `vibe.your-domain.com`) to `http://opencode-manager:5003`
+3. Copy the tunnel token and add to your server's `.env` file
 
-**3. Launch**
-```bash
-docker compose up -d
-```
+Done! Your instance is now live at `https://vibe.your-domain.com`
 
 ### The Experience
 Once deployed, you simply navigate to your URL. You're greeted by a chat interface. You can:

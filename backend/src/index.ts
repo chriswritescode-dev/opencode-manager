@@ -10,11 +10,13 @@ import { createRepoRoutes } from './routes/repos'
 import { createSettingsRoutes } from './routes/settings'
 import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
+import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTerminalRoutes, registerTerminalSocketIO } from './routes/terminal'
 import { terminalService } from './services/terminal'
+import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
@@ -221,6 +223,13 @@ try {
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
+
+  try {
+    await whisperServerManager.start()
+    logger.info(`Whisper STT server running on port ${whisperServerManager.getPort()}`)
+  } catch (error) {
+    logger.warn('Whisper server failed to start (STT will be unavailable):', error)
+  }
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }
@@ -232,6 +241,7 @@ app.route('/api/files', createFileRoutes(db))
 app.route('/api/providers', createProvidersRoutes())
 app.route('/api/oauth', createOAuthRoutes())
 app.route('/api/tts', createTTSRoutes(db))
+app.route('/api/stt', createSTTRoutes(db))
 app.route('/api/terminal', createTerminalRoutes())
 
 app.all('/api/opencode/*', async (c) => {
@@ -308,10 +318,12 @@ const shutdown = async (signal: string) => {
   try {
     terminalService.destroyAllSessions()
     logger.info('Terminal sessions destroyed')
+    await whisperServerManager.stop()
+    logger.info('Whisper server stopped')
     await opencodeServerManager.stop()
     logger.info('OpenCode server stopped')
   } catch (error) {
-    logger.error('Error stopping OpenCode server:', error)
+    logger.error('Error stopping services:', error)
   }
   process.exit(0)
 }

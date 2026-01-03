@@ -41,3 +41,9 @@
 - Use shared types from workspace package (@opencode-manager/shared)
 - OpenCode server runs on port 5551, backend API on port 5001
 - Prefer pnpm over npm for all package management
+
+
+## Architecture
+
+@docs/cloudVibeCoding.md
+

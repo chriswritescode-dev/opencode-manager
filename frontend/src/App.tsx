@@ -9,6 +9,8 @@ import { SettingsDialog } from './components/settings/SettingsDialog'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
+import { STTProvider } from './contexts/STTContext'
+import { TalkModeProvider } from './contexts/TalkModeContext'
 import { PermissionProvider } from '@/contexts/PermissionContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { usePermissionContext } from './contexts/PermissionContext'
@@ -76,10 +78,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TTSProvider>
-        <PermissionProvider>
-          <AppContent />
-          <PermissionDialogWrapper />
-        </PermissionProvider>
+        <STTProvider>
+          <TalkModeProvider>
+            <PermissionProvider>
+              <AppContent />
+              <PermissionDialogWrapper />
+            </PermissionProvider>
+          </TalkModeProvider>
+        </STTProvider>
       </TTSProvider>
     </QueryClientProvider>
   )

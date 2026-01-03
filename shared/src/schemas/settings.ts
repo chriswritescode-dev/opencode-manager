@@ -20,6 +20,21 @@ export const TTSConfigSchema = z.object({
   lastModelsFetch: z.number().optional(),
 });
 
+export const STTConfigSchema = z.object({
+  enabled: z.boolean(),
+  model: z.string().default('base'),
+  language: z.string().optional(),
+  autoSubmit: z.boolean().default(false),
+  availableModels: z.array(z.string()).optional(),
+});
+
+export const TalkModeConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  silenceThresholdMs: z.number().min(300).max(2000).default(800),
+  minSpeechMs: z.number().min(200).max(1000).default(400),
+  autoInterrupt: z.boolean().default(true),
+});
+
 export const CustomAgentSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -38,6 +53,21 @@ export type TTSConfig = {
   availableModels?: string[];
   lastVoicesFetch?: number;
   lastModelsFetch?: number;
+};
+
+export type STTConfig = {
+  enabled: boolean;
+  model: string;
+  language?: string;
+  autoSubmit: boolean;
+  availableModels?: string[];
+};
+
+export type TalkModeConfig = {
+  enabled: boolean;
+  silenceThresholdMs: number;
+  minSpeechMs: number;
+  autoInterrupt: boolean;
 };
 
 const isBrowser = typeof navigator !== 'undefined';
@@ -74,6 +104,8 @@ export const UserPreferencesSchema = z.object({
   customAgents: z.array(CustomAgentSchema),
   gitToken: z.string().optional(),
   tts: TTSConfigSchema.optional(),
+  stt: STTConfigSchema.optional(),
+  talkMode: TalkModeConfigSchema.optional(),
   lastKnownGoodConfig: z.string().optional(),
 });
 
@@ -91,6 +123,21 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   lastModelsFetch: 0,
 };
 
+export const DEFAULT_STT_CONFIG: STTConfig = {
+  enabled: false,
+  model: 'base',
+  language: undefined,
+  autoSubmit: false,
+  availableModels: ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'],
+};
+
+export const DEFAULT_TALK_MODE_CONFIG: TalkModeConfig = {
+  enabled: false,
+  silenceThresholdMs: 800,
+  minSpeechMs: 400,
+  autoInterrupt: true,
+};
+
 export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
   mode: "build" as const,
@@ -103,6 +150,8 @@ export const DEFAULT_USER_PREFERENCES = {
   customAgents: [],
   gitToken: undefined,
   tts: DEFAULT_TTS_CONFIG,
+  stt: DEFAULT_STT_CONFIG,
+  talkMode: DEFAULT_TALK_MODE_CONFIG,
 };
 
 export const SettingsResponseSchema = z.object({

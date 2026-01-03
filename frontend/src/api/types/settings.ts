@@ -1,13 +1,15 @@
 import {
   DEFAULT_TTS_CONFIG,
+  DEFAULT_STT_CONFIG,
   DEFAULT_KEYBOARD_SHORTCUTS,
   DEFAULT_USER_PREFERENCES,
   type TTSConfig,
+  type STTConfig,
   type OpenCodeConfigContent,
 } from '@opencode-manager/shared'
 
-export type { TTSConfig, OpenCodeConfigContent }
-export { DEFAULT_TTS_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES }
+export type { TTSConfig, STTConfig, OpenCodeConfigContent }
+export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES }
 
 export interface CustomCommand {
   name: string
@@ -35,6 +37,7 @@ export interface UserPreferences {
   customAgents: CustomAgent[]
   gitToken?: string
   tts?: TTSConfig
+  stt?: STTConfig
 }
 
 export interface SettingsResponse {

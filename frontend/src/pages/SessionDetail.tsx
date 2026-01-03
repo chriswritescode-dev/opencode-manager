@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
+import { TalkModeOverlay } from "@/components/message/TalkModeOverlay";
 import { X, VolumeX } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
@@ -365,6 +366,10 @@ export function SessionDetail() {
         cwd={repoDirectory}
         isOpen={terminalOpen}
         onClose={() => setTerminalOpen(false)}
+      />
+
+      <TalkModeOverlay
+        sessionID={sessionId}
       />
     </div>
   );

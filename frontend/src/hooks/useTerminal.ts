@@ -32,7 +32,7 @@ function getSocketUrl(): string {
     url.username = ''
     url.password = ''
     return url.origin
-  } catch (e) {
+  } catch {
     return window.location.origin
   }
 }

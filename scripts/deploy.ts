@@ -749,16 +749,28 @@ YOLOEOF'`;
   }
 }
 
+function getVMArch(ip: string): string {
+  const sshOpts = "-o StrictHostKeyChecking=no";
+  const arch = execOutput(`ssh ${sshOpts} ${config.adminUser}@${ip} "uname -m"`);
+  if (arch === "aarch64" || arch === "arm64") {
+    return "arm64";
+  }
+  return "amd64";
+}
+
 function patchDockerfile(ip: string) {
   const sshOpts = "-o StrictHostKeyChecking=no";
   const sshCmd = `ssh ${sshOpts} ${config.adminUser}@${ip}`;
+  
+  const vmArch = getVMArch(ip);
+  console.log(`Detected VM architecture: ${vmArch}`);
   
   // Read the Dockerfile
   const dockerfile = execOutput(`${sshCmd} "cat ~/opencode-manager/Dockerfile"`);
   
   // Check if already patched
-  if (dockerfile.includes('google-chrome-unstable')) {
-    console.log("Dockerfile already includes Chrome, skipping patch");
+  if (dockerfile.includes('PUPPETEER_EXECUTABLE_PATH')) {
+    console.log("Dockerfile already includes browser config, skipping patch");
     return;
   }
   
@@ -766,7 +778,7 @@ function patchDockerfile(ip: string) {
   let patchedDockerfile = dockerfile.replace(
     /python3-venv \\\n\s+&& rm -rf/,
     `python3-venv \\
-    # Browser dependencies
+    # Browser dependencies (works on both amd64 and arm64)
     chromium \\
     fonts-liberation \\
     libasound2 \\
@@ -780,7 +792,6 @@ function patchDockerfile(ip: string) {
     libgbm1 \\
     libglib2.0-0 \\
     libgtk-3-0 \\
-    libgtk-4-1 \\
     libnspr4 \\
     libnss3 \\
     libpango-1.0-0 \\
@@ -795,47 +806,65 @@ function patchDockerfile(ip: string) {
     xdg-utils \\
     wget \\
     gnupg \\
-    # Xvfb for running Chrome with extensions (non-headless)
+    # Xvfb for running browser with extensions (non-headless)
     xvfb \\
     x11-utils \\
     && rm -rf`
   );
   
-  // Add Google Chrome Dev installation after the first apt-get block
-  // Insert after "rm -rf /var/lib/apt/lists/*" in the base stage
-  const chromeInstallBlock = `
+  // For amd64, also install Google Chrome Dev (not available on arm64)
+  // For arm64, we only use Chromium which is available via apt
+  let browserInstallBlock: string;
+  
+  if (vmArch === "amd64") {
+    browserInstallBlock = `
 
-# Install Google Chrome Dev (unstable) for latest features
+# Install Google Chrome Dev (unstable) for latest features (amd64 only)
 RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg \\
     && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list \\
     && apt-get update \\
     && apt-get install -y google-chrome-unstable \\
     && rm -rf /var/lib/apt/lists/*
 
-# Set Chrome environment variables
+# Set Chrome environment variables (prefer Google Chrome on amd64)
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-unstable
 ENV CHROME_PATH=/usr/bin/google-chrome-unstable
 ENV CHROMIUM_PATH=/usr/bin/chromium
 ENV DISPLAY=:99
 `;
+  } else {
+    browserInstallBlock = `
+
+# Set Chromium environment variables (arm64 - Google Chrome not available)
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+ENV CHROME_PATH=/usr/bin/chromium
+ENV CHROMIUM_PATH=/usr/bin/chromium
+ENV DISPLAY=:99
+`;
+  }
 
   // Insert after the first RUN block (after rm -rf /var/lib/apt/lists/*)
   patchedDockerfile = patchedDockerfile.replace(
     /(RUN apt-get update && apt-get install -y[\s\S]*?&& rm -rf \/var\/lib\/apt\/lists\/\*)/,
-    `$1${chromeInstallBlock}`
+    `$1${browserInstallBlock}`
   );
   
   // Write the patched Dockerfile back
   const dockerfileBase64 = Buffer.from(patchedDockerfile).toString("base64");
   exec(`${sshCmd} "echo '${dockerfileBase64}' | base64 -d > ~/opencode-manager/Dockerfile"`, { quiet: true });
-  console.log("Dockerfile patched with Chromium + Google Chrome Dev");
+  console.log(`Dockerfile patched with browser support for ${vmArch}`);
 }
 
 async function updateOpencode(ip: string) {
   console.log("Updating opencode-manager to latest version...");
   const sshOpts = "-o StrictHostKeyChecking=no";
   const sshCmd = `ssh ${sshOpts} ${config.adminUser}@${ip}`;
+
+  // Detect VM architecture
+  const vmArch = getVMArch(ip);
+  console.log(`VM architecture: ${vmArch}`);
 
   // Check if we need to change the remote URL
   const managerRepo = process.env.OPENCODE_MANAGER_REPO || "VibeTechnologies/opencode-manager";
@@ -850,7 +879,7 @@ async function updateOpencode(ip: string) {
   exec(`${sshCmd} "cd ~/opencode-manager && git fetch origin && git reset --hard origin/main"`, { quiet: false });
 
   // Patch Dockerfile to add Chrome and browser dependencies
-  console.log("Patching Dockerfile to add Chrome...");
+  console.log("Patching Dockerfile to add browser support...");
   patchDockerfile(ip);
 
   // Update .env with fork settings if configured
@@ -871,6 +900,9 @@ async function updateOpencode(ip: string) {
     const envBase64 = Buffer.from(envContent).toString("base64");
     exec(`${sshCmd} "echo '${envBase64}' | base64 -d > ~/opencode-manager/.env"`, { quiet: true });
   }
+
+  // Set browser paths based on architecture
+  const browserPath = vmArch === "amd64" ? "/usr/bin/google-chrome-unstable" : "/usr/bin/chromium";
 
   // Update docker-compose.override.yml (without custom Dockerfile since we patched the original)
   console.log("Updating docker-compose.override.yml...");
@@ -902,8 +934,8 @@ async function updateOpencode(ip: string) {
     ports: []
     environment:
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-unstable
-      - CHROME_PATH=/usr/bin/google-chrome-unstable
+      - PUPPETEER_EXECUTABLE_PATH=${browserPath}
+      - CHROME_PATH=${browserPath}
       - CHROMIUM_PATH=/usr/bin/chromium
       - DISPLAY=:99
 

@@ -1,5 +1,7 @@
 FROM node:20 AS base
 
+ARG TARGETARCH
+
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -23,8 +25,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-# Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+# Install kubectl (supports both amd64 and arm64)
+RUN ARCH=$(case ${TARGETARCH} in arm64) echo "arm64" ;; *) echo "amd64" ;; esac) && \
+    curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/${ARCH}/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl
 
@@ -37,6 +40,15 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx
+
+RUN python3 -m venv /opt/whisper-venv && \
+    /opt/whisper-venv/bin/pip install --no-cache-dir \
+    faster-whisper \
+    fastapi \
+    uvicorn \
+    python-multipart
+
+ENV WHISPER_VENV=/opt/whisper-venv
 
 WORKDIR /app
 
@@ -73,7 +85,11 @@ COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
+COPY --from=base /opt/whisper-venv /opt/whisper-venv
+COPY scripts/whisper-server.py ./scripts/whisper-server.py
 COPY package.json pnpm-workspace.yaml ./
+
+ENV WHISPER_VENV=/opt/whisper-venv
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
     ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
