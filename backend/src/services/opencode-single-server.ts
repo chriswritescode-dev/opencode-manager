@@ -189,12 +189,7 @@ class OpenCodeServerManager {
     
     await new Promise(r => setTimeout(r, 2000))
     
-    try {
-      process.kill(this.serverPid, 0)
-      process.kill(this.serverPid, 'SIGKILL')
-    } catch {
-      
-    }
+    process.kill(this.serverPid, 'SIGKILL')
     
     this.serverPid = null
     this.isHealthy = false

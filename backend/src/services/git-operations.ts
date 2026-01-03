@@ -1,5 +1,6 @@
 import { executeCommand } from '../utils/process'
 import { logger } from '../utils/logger'
+import { getErrorMessage } from '../utils/error-utils'
 import { SettingsService } from './settings'
 import type { Database } from 'bun:sqlite'
 import path from 'path'
@@ -153,9 +154,9 @@ export async function getGitStatus(repoPath: string, database?: Database): Promi
       files,
       hasChanges: files.length > 0
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to get git status for ${repoPath}:`, error)
-    throw new Error(`Failed to get git status: ${error.message}`)
+    throw new Error(`Failed to get git status: ${getErrorMessage(error)}`)
   }
 }
 
@@ -187,9 +188,10 @@ export async function getFileDiff(repoPath: string, filePath: string, database?:
       try {
         const content = await executeCommand(['git', '-C', fullRepoPath, 'diff', '--no-index', '--', '/dev/null', filePath], { env })
         diff = content
-      } catch (error: any) {
-        if (error.message?.includes('exit code 1') || error.message?.includes('Command failed with code 1')) {
-          const output = error.message || ''
+      } catch (error: unknown) {
+        const errorMessage = getErrorMessage(error)
+        if (errorMessage?.includes('exit code 1') || errorMessage?.includes('Command failed with code 1')) {
+          const output = errorMessage || ''
           const diffMatch = output.match(/diff --git[\s\S]*/)
           diff = diffMatch ? diffMatch[0] : `New file: ${filePath}`
         } else {
@@ -204,8 +206,8 @@ export async function getFileDiff(repoPath: string, filePath: string, database?:
         } else {
           diff = `New file (no commits yet): ${filePath}`
         }
-      } catch (error: any) {
-        logger.warn(`Failed to get diff for ${filePath}:`, error.message)
+      } catch (error: unknown) {
+        logger.warn(`Failed to get diff for ${filePath}:`, getErrorMessage(error))
         diff = null
       }
     }
@@ -233,8 +235,8 @@ export async function getFileDiff(repoPath: string, filePath: string, database?:
       deletions,
       isBinary
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to get file diff for ${filePath}:`, error)
-    throw new Error(`Failed to get file diff: ${error.message}`)
+    throw new Error(`Failed to get file diff: ${getErrorMessage(error)}`)
   }
 }

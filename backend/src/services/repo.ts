@@ -693,26 +693,7 @@ export async function cleanupOrphanedDirectories(database: Database): Promise<vo
   }
 }
 
-async function checkWorktreeExists(baseRepoPath: string, worktreePath: string): Promise<boolean> {
-  try {
-    const worktreeList = await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'list', '--porcelain'])
-    return worktreeList.includes(worktreePath)
-  } catch {
-    return false
-  }
-}
 
-async function removeStaleWorktree(baseRepoPath: string, worktreePath: string): Promise<boolean> {
-  try {
-    logger.info(`Attempting to remove stale worktree: ${worktreePath}`)
-    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', worktreePath])
-    logger.info(`Successfully removed stale worktree: ${worktreePath}`)
-    return true
-  } catch (error: any) {
-    logger.warn(`Failed to remove stale worktree ${worktreePath}:`, error.message)
-    return false
-  }
-}
 
 async function pruneWorktreeReferences(baseRepoPath: string): Promise<void> {
   try {
@@ -749,36 +730,7 @@ async function cleanupStaleWorktree(baseRepoPath: string, worktreePath: string):
   }
 }
 
-async function isBranchCheckedOutInMainWorktree(baseRepoPath: string, branch: string): Promise<boolean> {
-  const currentBranch = await safeGetCurrentBranch(baseRepoPath)
-  return currentBranch === branch
-}
 
-async function getAvailableBranchForWorktree(baseRepoPath: string, targetBranch: string): Promise<string> {
-  const currentBranch = await safeGetCurrentBranch(baseRepoPath)
-  
-  if (!currentBranch) {
-    return targetBranch
-  }
-  
-  if (currentBranch === targetBranch) {
-    logger.info(`Branch '${targetBranch}' is currently checked out in main worktree`)
-    
-    const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD']).then(ref => ref.trim()).catch(() => 'main')
-    const cleanDefaultBranch = defaultBranch.replace('origin/', '')
-    
-    if (cleanDefaultBranch !== currentBranch) {
-      logger.info(`Switching to '${cleanDefaultBranch}' to free up '${targetBranch}' for worktree`)
-      await executeCommand(['git', '-C', baseRepoPath, 'checkout', cleanDefaultBranch])
-      return targetBranch
-    } else {
-      logger.warn(`Cannot free up branch '${targetBranch}' - it's the default branch`)
-      return `${targetBranch}-worktree-${Date.now()}`
-    }
-  }
-  
-  return targetBranch
-}
 
 async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string): Promise<void> {
   const currentBranch = await safeGetCurrentBranch(baseRepoPath)

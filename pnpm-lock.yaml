@@ -46,6 +46,9 @@ importers:
         specifier: ^4.1.12
         version: 4.3.2
     devDependencies:
+      '@eslint/js':
+        specifier: ^9.36.0
+        version: 9.39.2
       '@types/archiver':
         specifier: ^7.0.0
         version: 7.0.0
@@ -58,6 +61,12 @@ importers:
       '@vitest/ui':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      eslint:
+        specifier: ^9.39.1
+        version: 9.39.2(jiti@2.6.1)
+      typescript-eslint:
+        specifier: ^8.45.0
+        version: 8.51.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.4)(@vitest/ui@3.2.4)(jiti@2.6.1)(lightningcss@1.30.2)

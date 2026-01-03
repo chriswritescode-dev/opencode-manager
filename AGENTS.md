@@ -10,11 +10,14 @@
 - `cd backend && bun test <filename>` - Run single test file
 - `cd backend && vitest --ui` - Test UI with coverage
 - `cd backend && vitest --coverage` - Coverage report (80% threshold)
-- `cd frontend && npm run lint` - Frontend linting
+- `pnpm lint` - Lint both backend and frontend
+- `pnpm lint:backend` - Backend linting
+- `pnpm lint:frontend` - Frontend linting
 
 ## Code Style
 
 - No comments, self-documenting code only
+- No console logs (use Bun's logger or proper error handling)
 - Strict TypeScript everywhere, proper typing required
 - Named imports only: `import { Hono } from 'hono'`, `import { useState } from 'react'`
 
@@ -41,3 +44,4 @@
 - Use shared types from workspace package (@opencode-manager/shared)
 - OpenCode server runs on port 5551, backend API on port 5001
 - Prefer pnpm over npm for all package management
+- Run `pnpm lint` after completing tasks to ensure code quality

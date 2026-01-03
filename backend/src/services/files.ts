@@ -106,11 +106,11 @@ export async function getFile(userPath: string): Promise<FileInfo> {
     } else {
       // It's a file - get content
       let content = ''
-      let mimeType = getMimeType(validatedPath, new Uint8Array())
+      const mimeType = getMimeType(validatedPath)
       
       if (stats.size < FILE_LIMITS.MAX_SIZE_BYTES) {
         try {
-          const mimeType = getMimeType(validatedPath, new Uint8Array())
+          const mimeType = getMimeType(validatedPath)
           
           if (mimeType.startsWith('image/') || !mimeType.startsWith('text/')) {
             content = await readFileAsBase64(validatedPath)
@@ -144,8 +144,8 @@ export async function uploadFile(userPath: string, file: File, relativePath?: st
     throw new Error('File too large')
   }
   
-  const mimeType = file.type || getMimeType(file.name, new Uint8Array())
-  if (!ALLOWED_MIME_TYPES.includes(mimeType as any) && !mimeType.startsWith('text/')) {
+  const mimeType = file.type || getMimeType(file.name)
+  if (!ALLOWED_MIME_TYPES.includes(mimeType) && !mimeType.startsWith('text/')) {
     throw new Error('File type not allowed')
   }
   
@@ -246,7 +246,7 @@ function validatePath(userPath: string): string {
   return resolved
 }
 
-function getMimeType(filePath: string, _content: Uint8Array): string {
+function getMimeType(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase()
   
   const mimeTypes: Record<string, string> = {
@@ -323,7 +323,7 @@ export async function getFileRange(userPath: string, startLine: number, endLine:
   const totalLines = await countFileLines(validatedPath)
   const clampedEnd = Math.min(endLine, totalLines)
   const lines = await readFileLines(validatedPath, startLine, clampedEnd)
-  const mimeType = getMimeType(validatedPath, new Uint8Array())
+  const mimeType = getMimeType(validatedPath)
   
   return {
     name: path.basename(validatedPath),

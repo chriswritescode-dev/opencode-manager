@@ -1,6 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import { getErrorMessage } from '../utils/error-utils'
 import path from 'path'
 
 export interface RepoRow {
@@ -67,8 +68,9 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
       throw new Error(`Failed to retrieve newly created repo with id ${result.lastInsertRowid}`)
     }
     return newRepo
-  } catch (error: any) {
-    if (error.message?.includes('UNIQUE constraint failed') || error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+  } catch (error: unknown) {
+    const errorMessage = getErrorMessage(error)
+    if (errorMessage.includes('UNIQUE constraint failed') || (error && typeof error === 'object' && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE')) {
       const conflictRepo = repo.isLocal 
         ? getRepoByLocalPath(db, normalizedPath)
         : getRepoByUrlAndBranch(db, repo.repoUrl!, repo.branch)
@@ -81,7 +83,7 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
       throw new Error(`Repository with ${identifier} already exists but could not be retrieved. This may indicate database corruption.`)
     }
     
-    throw new Error(`Failed to create repository: ${error.message}`)
+    throw new Error(`Failed to create repository: ${errorMessage}`)
   }
 }
 

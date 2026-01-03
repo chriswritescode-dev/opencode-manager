@@ -1,9 +1,10 @@
 import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import * as fileService from '../services/files'
-import type { Database } from 'bun:sqlite'
 import { logger } from '../utils/logger'
+import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 
-export function createFileRoutes(_database: Database) {
+export function createFileRoutes() {
   const app = new Hono()
 
   app.get('/*', async (c) => {
@@ -50,9 +51,9 @@ export function createFileRoutes(_database: Database) {
       }
       
       return c.json(result)
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to get file:', error)
-      return c.json({ error: error.message || 'Failed to get file' }, error.statusCode || 500)
+      return c.json({ error: getErrorMessage(error) || 'Failed to get file' }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
 
@@ -69,9 +70,9 @@ export function createFileRoutes(_database: Database) {
       const relativePath = body.relativePath as string | undefined
       const result = await fileService.uploadFile(path, file, relativePath)
       return c.json(result)
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to upload file:', error)
-      return c.json({ error: error.message }, error.statusCode || 500)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
 
@@ -82,9 +83,9 @@ export function createFileRoutes(_database: Database) {
       
       const result = await fileService.createFileOrFolder(path, body)
       return c.json(result)
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to create file/folder:', error)
-      return c.json({ error: error.message }, error.statusCode || 500)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
 
@@ -94,9 +95,9 @@ export function createFileRoutes(_database: Database) {
       
       await fileService.deleteFileOrFolder(path)
       return c.json({ success: true })
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to delete file/folder:', error)
-      return c.json({ error: error.message }, error.statusCode || 500)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
 
@@ -112,9 +113,9 @@ export function createFileRoutes(_database: Database) {
       
       const result = await fileService.renameOrMoveFile(path, body)
       return c.json(result)
-    } catch (error: any) {
+    } catch (error: unknown) {
       logger.error('Failed to patch file:', error)
-      return c.json({ error: error.message }, error.statusCode || 500)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
 

@@ -9,7 +9,9 @@
     "build": "bun build src/index.ts --outdir=dist --target=bun",
     "test": "vitest",
     "test:ui": "vitest --ui",
-    "test:watch": "vitest --watch"
+    "test:watch": "vitest --watch",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.5",
@@ -21,10 +23,13 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@eslint/js": "^9.36.0",
     "@types/archiver": "^7.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "latest",
     "@vitest/ui": "^3.2.4",
+    "eslint": "^9.39.1",
+    "typescript-eslint": "^8.45.0",
     "vitest": "^3.2.4"
   },
   "peerDependencies": {

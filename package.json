@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
-  "scripts": {
+"scripts": {
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
     "dev:backend": "bun --watch backend/src/index.ts",
@@ -14,6 +14,10 @@
     "build:frontend": "pnpm --filter frontend build",
     "test": "pnpm run test:backend",
     "test:backend": "pnpm --filter backend test",
+    "lint": "pnpm run lint:frontend && pnpm run lint:backend",
+    "lint:frontend": "pnpm --filter frontend lint",
+    "lint:backend": "pnpm --filter backend lint",
+    "lint:fix": "pnpm run lint:frontend -- --fix && pnpm run lint:backend -- --fix",
     "generate:openapi": "bun scripts/generate-openapi.ts",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
