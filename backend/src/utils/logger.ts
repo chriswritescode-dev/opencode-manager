@@ -16,7 +16,7 @@ class Logger {
   }
 
   info(message: string, ...args: unknown[]): void {
-    console.log(this.format('info', message), ...args)
+    console.warn(this.format('info', message), ...args)
   }
 
   warn(message: string, ...args: unknown[]): void {
@@ -29,7 +29,7 @@ class Logger {
 
   debug(message: string, ...args: unknown[]): void {
     if (ENV.LOGGING.DEBUG) {
-      console.debug(this.format('debug', message), ...args)
+      console.warn(this.format('debug', message), ...args)
     }
   }
 }

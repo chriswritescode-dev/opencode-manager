@@ -22,7 +22,7 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 import type { components } from '@/api/opencode-types'
 import type { MessageWithParts, FileInfo, ImageAttachment } from '@/api/types'
 
-const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"]
+const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 
@@ -335,23 +335,54 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   }
 
   const addImageAttachment = (file: File) => {
-    if (!ACCEPTED_FILE_TYPES.includes(file.type)) return
-
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
-      const attachment: ImageAttachment = {
-        id: crypto.randomUUID(),
-        filename: file.name,
-        mime: file.type,
-        dataUrl,
+    const generateId = () => {
+      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID()
       }
-      setImageAttachments((prev) => [...prev, attachment])
+      return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
     }
-    reader.onerror = () => {
-      console.error('Failed to read file:', file.name)
+
+    try {
+      const reader = new FileReader()
+      
+      reader.onloadend = () => {
+        try {
+          if (reader.readyState !== 2) return
+          
+          const dataUrl = reader.result as string
+          
+          if (!dataUrl) {
+            const blobUrl = URL.createObjectURL(file)
+            const attachment: ImageAttachment = {
+              id: generateId(),
+              filename: file.name,
+              mime: file.type || 'image/png',
+              dataUrl: blobUrl,
+            }
+            setImageAttachments((prev) => [...prev, attachment])
+            return
+          }
+          
+          const attachment: ImageAttachment = {
+            id: generateId(),
+            filename: file.name,
+            mime: file.type || 'image/png',
+            dataUrl,
+          }
+          setImageAttachments((prev) => [...prev, attachment])
+        } catch (innerError) {
+          console.error('Error inside onloadend:', innerError)
+        }
+      }
+      
+      reader.onerror = () => {
+        console.error('FileReader error:', reader.error?.message)
+      }
+      
+      reader.readAsDataURL(file)
+    } catch (error) {
+      console.error('Error reading file:', error)
     }
-    reader.readAsDataURL(file)
   }
 
   const removeImageAttachment = (id: string) => {
@@ -362,14 +393,59 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     const clipboardData = event.clipboardData
     if (!clipboardData) return
 
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as { MSStream?: boolean }).MSStream
+    const isSecureContext = window.isSecureContext || (window.location.protocol === 'http:' && window.location.hostname === 'localhost')
+
+    if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
+      event.preventDefault()
+      try {
+        const clipboardItems = await navigator.clipboard.read()
+        
+        for (const item of clipboardItems) {
+          for (const type of item.types) {
+            if (ACCEPTED_FILE_TYPES.includes(type) || type.startsWith('image/')) {
+              try {
+                const blob = await item.getType(type)
+                const file = new File([blob], `pasted-${Date.now()}.${type.split('/')[1]}`, { type })
+                addImageAttachment(file)
+              } catch (err) {
+                console.error('Failed to read clipboard item type:', err)
+              }
+            }
+          }
+        }
+        return
+      } catch (error) {
+        console.error('Clipboard read failed on iOS:', error)
+      }
+    }
+
     const items = Array.from(clipboardData.items)
-    const imageItems = items.filter((item) => ACCEPTED_FILE_TYPES.includes(item.type))
+    
+    const imageItems = items.filter((item) => {
+      if (item.kind !== 'file') return false
+      
+      const hasKnownType = ACCEPTED_FILE_TYPES.includes(item.type)
+      const isLikelyImage = item.type.startsWith('image/')
+      const hasNoType = !item.type || item.type === ''
+      
+      return hasKnownType || isLikelyImage || hasNoType
+    })
 
     if (imageItems.length > 0) {
       event.preventDefault()
       for (const item of imageItems) {
         const file = item.getAsFile()
-        if (file) addImageAttachment(file)
+        if (file) {
+          const isValidImageFile = 
+            ACCEPTED_FILE_TYPES.includes(file.type) ||
+            file.type.startsWith('image/') ||
+            file.size > 0
+          
+          if (isValidImageFile) {
+            addImageAttachment(file)
+          }
+        }
       }
     }
   }
@@ -595,6 +671,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
 
   
 
+  
+
 return (
     <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-orange-500/50 ring-1 ring-orange-500/30' : ''}`}>
       {showStopButton && (
@@ -700,7 +778,7 @@ return (
           <input
             ref={fileInputRef}
             type="file"
-            accept={ACCEPTED_FILE_TYPES.join(',')}
+            accept="*/*"
             className="hidden"
             onChange={handleFileInputChange}
           />

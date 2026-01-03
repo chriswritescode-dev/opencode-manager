@@ -230,26 +230,22 @@ export const SessionList = ({
                 </>
               )}
 
-              {olderSessions.length > 0 && (
-                <>
-                  <div className="text-xs font-semibold text-muted-foreground px-1 py-2 mt-2">
-                    Older
-                  </div>
-                  {olderSessions.map((session) => (
-                    <SessionCard
-                      key={session.id}
-                      session={session}
-                      isSelected={selectedSessions.has(session.id)}
-                      isActive={activeSessionID === session.id}
-                      onSelect={onSelectSession}
-                      onToggleSelection={(selected) => {
-                        toggleSessionSelection(session.id, selected);
-                      }}
-                      onDelete={(e) => handleDelete(session.id, e)}
-                    />
-                  ))}
-                </>
+              {todaySessions.length > 0 && olderSessions.length > 0 && (
+                <div className="my-2 h-px bg-border/80" />
               )}
+              {olderSessions.map((session) => (
+                <SessionCard
+                  key={session.id}
+                  session={session}
+                  isSelected={selectedSessions.has(session.id)}
+                  isActive={activeSessionID === session.id}
+                  onSelect={onSelectSession}
+                  onToggleSelection={(selected) => {
+                    toggleSessionSelection(session.id, selected);
+                  }}
+                  onDelete={(e) => handleDelete(session.id, e)}
+                />
+              ))}
             </>
           )}
         </div>
