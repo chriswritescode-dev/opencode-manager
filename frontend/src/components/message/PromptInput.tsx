@@ -335,23 +335,34 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   }
 
   const addImageAttachment = (file: File) => {
-    if (!ACCEPTED_FILE_TYPES.includes(file.type)) return
+    const isValidType = ACCEPTED_FILE_TYPES.includes(file.type) || 
+                        file.type.startsWith('image/') || 
+                        file.size > 0
+    
+    if (!isValidType) {
+      console.error('Invalid file type:', file.type, 'File:', file)
+      return
+    }
 
-    const reader = new FileReader()
-    reader.onload = () => {
-      const dataUrl = reader.result as string
-      const attachment: ImageAttachment = {
-        id: crypto.randomUUID(),
-        filename: file.name,
-        mime: file.type,
-        dataUrl,
+    try {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const dataUrl = reader.result as string
+        const attachment: ImageAttachment = {
+          id: crypto.randomUUID(),
+          filename: file.name,
+          mime: file.type,
+          dataUrl,
+        }
+        setImageAttachments((prev) => [...prev, attachment])
       }
-      setImageAttachments((prev) => [...prev, attachment])
+      reader.onerror = (error) => {
+        console.error('Failed to read file:', file.name, error)
+      }
+      reader.readAsDataURL(file)
+    } catch (error) {
+      console.error('Error reading file:', file.name, error)
     }
-    reader.onerror = () => {
-      console.error('Failed to read file:', file.name)
-    }
-    reader.readAsDataURL(file)
   }
 
   const removeImageAttachment = (id: string) => {
@@ -362,14 +373,65 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     const clipboardData = event.clipboardData
     if (!clipboardData) return
 
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as { MSStream?: boolean }).MSStream
+    const isSecureContext = window.isSecureContext || (window.location.protocol === 'http:' && window.location.hostname === 'localhost')
+
+    if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
+      event.preventDefault()
+      console.log('iOS paste detected, attempting to read clipboard')
+      try {
+        const clipboardItems = await navigator.clipboard.read()
+        console.log('Clipboard items:', clipboardItems.length)
+        
+        for (const item of clipboardItems) {
+          console.log('Item types:', item.types)
+          for (const type of item.types) {
+            if (ACCEPTED_FILE_TYPES.includes(type) || type.startsWith('image/')) {
+              try {
+                console.log('Processing clipboard type:', type)
+                const blob = await item.getType(type)
+                console.log('Blob size:', blob.size)
+                const file = new File([blob], `pasted-${Date.now()}.${type.split('/')[1]}`, { type })
+                console.log('File created:', file.name, file.type, file.size)
+                addImageAttachment(file)
+              } catch (err) {
+                console.error('Failed to read clipboard item type:', err)
+              }
+            }
+          }
+        }
+        return
+      } catch (error) {
+        console.error('Clipboard read failed on iOS:', error)
+      }
+    }
+
     const items = Array.from(clipboardData.items)
-    const imageItems = items.filter((item) => ACCEPTED_FILE_TYPES.includes(item.type))
+    
+    const imageItems = items.filter((item) => {
+      if (item.kind !== 'file') return false
+      
+      const hasKnownType = ACCEPTED_FILE_TYPES.includes(item.type)
+      const isLikelyImage = item.type.startsWith('image/')
+      const hasNoType = !item.type || item.type === ''
+      
+      return hasKnownType || isLikelyImage || hasNoType
+    })
 
     if (imageItems.length > 0) {
       event.preventDefault()
       for (const item of imageItems) {
         const file = item.getAsFile()
-        if (file) addImageAttachment(file)
+        if (file) {
+          const isValidImageFile = 
+            ACCEPTED_FILE_TYPES.includes(file.type) ||
+            file.type.startsWith('image/') ||
+            file.size > 0
+          
+          if (isValidImageFile) {
+            addImageAttachment(file)
+          }
+        }
       }
     }
   }
@@ -406,6 +468,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
     if (file) {
+      console.log('File selected:', file.name, file.type, file.size)
       addImageAttachment(file)
     }
     event.currentTarget.value = ''
@@ -592,6 +655,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   useEffect(() => {
     onPromptChange?.(prompt.trim().length > 0)
   }, [prompt, onPromptChange])
+
+  useEffect(() => {
+    console.log('Image attachments changed:', imageAttachments.length, imageAttachments)
+  }, [imageAttachments])
 
   
 
