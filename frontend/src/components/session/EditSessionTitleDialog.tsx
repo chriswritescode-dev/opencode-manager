@@ -52,7 +52,7 @@ export function EditSessionTitleDialog({ isOpen, currentTitle, onClose, onSave }
       <DialogContent 
         hideCloseButton
         className={isMobile 
-          ? "w-screen max-w-none left-0 top-0 translate-x-0 translate-y-0 rounded-none border-0 border-b bg-background p-4 gap-0"
+          ? "w-screen max-w-none left-0 top-0 translate-x-0 translate-y-0 rounded-none border-0 border-b bg-background p-4 gap-0 pt-safe"
           : "p-6 gap-0"
         }
       >

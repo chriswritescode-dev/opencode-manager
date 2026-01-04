@@ -145,7 +145,7 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
   
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[95%] sm:max-w-[500px] p-0 gap-0 h-[90vh] sm:h-[80vh] flex flex-col">
+      <DialogContent className="max-w-[95%] sm:max-w-[500px] p-0 gap-0 h-[90vh] sm:h-[80vh] flex flex-col pt-safe">
         <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 shrink-0 border-b border-border">
           <div className="flex items-center gap-2">
             <Plug className="w-4 h-4 text-muted-foreground" />
