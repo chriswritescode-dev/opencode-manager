@@ -4,6 +4,7 @@ import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EditSessionTitleDialog } from "@/components/session/EditSessionTitleDialog";
+import { PageHeader } from "@/components/ui/page-header";
 import { Loader2, Settings, CornerUpLeft, Plug, FolderOpen, MoreVertical, Upload, X } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useMobile } from "@/hooks/useMobile";
@@ -68,14 +69,14 @@ export function SessionDetailHeader({
 
   if (repo.cloneStatus !== 'ready') {
     return (
-      <div className="sticky top-0 z-10 border-b border-border bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-2 sm:px-4 py-1.5 sm:py-2 pt-safe">
+      <PageHeader className="px-2 sm:px-4 py-1.5 sm:py-2">
         <div className="flex items-center justify-center">
           <Loader2 className="w-4 h-4 animate-spin text-muted-foreground mr-2" />
           <span className="text-sm text-muted-foreground">
             {repo.cloneStatus === 'cloning' ? 'Cloning repository...' : 'Repository not ready'}
           </span>
         </div>
-      </div>
+      </PageHeader>
     );
   }
 
@@ -111,7 +112,7 @@ export function SessionDetailHeader({
   
 
   return (
-    <div className="sticky top-0 z-10 border-b border-border bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-2 sm:px-4 py-1.5 sm:py-2 pt-safe">
+    <PageHeader className="px-2 sm:px-4 py-1.5 sm:py-2">
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
           {parentSessionId ? (
@@ -279,6 +280,6 @@ export function SessionDetailHeader({
           </DropdownMenu>
         </div>
       </div>
-    </div>
+    </PageHeader>
   );
 }

@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button'
 import { FileBrowser } from '@/components/file-browser/FileBrowser'
+import { PageHeader } from '@/components/ui/page-header'
 import { ArrowLeft } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
@@ -8,7 +9,7 @@ export function Workspace() {
 
   return (
     <div className="h-screen bg-gradient-to-br from-background via-background to-background flex flex-col">
-      <div className="sticky top-0 z-10 border-b border-border bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-4 py-2">
+      <PageHeader className="px-4 py-2">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Button
@@ -24,7 +25,7 @@ export function Workspace() {
             </h1>
           </div>
         </div>
-      </div>
+      </PageHeader>
 
       <div className="flex-1 overflow-hidden p-4">
         <FileBrowser />

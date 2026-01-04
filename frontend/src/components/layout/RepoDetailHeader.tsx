@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { BackButton } from "@/components/ui/back-button";
+import { PageHeader } from "@/components/ui/page-header";
 import { Plus, FolderOpen, GitBranch, Plug, MoreVertical } from "lucide-react";
 
 interface RepoDetailHeaderProps {
@@ -32,7 +33,7 @@ export function RepoDetailHeader({
   const isNotMainBranch = currentBranch && currentBranch !== "main" && currentBranch !== "master"
 
   return (
-    <div className="flex-shrink-0 z-10 bg-gradient-to-b from-background via-background to-background backdrop-blur-sm px-4 py-2">
+    <PageHeader className="flex-shrink-0 px-4 py-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
           <BackButton />
@@ -129,6 +130,6 @@ export function RepoDetailHeader({
           </Button>
         </div>
       </div>
-    </div>
+    </PageHeader>
   )
 }
