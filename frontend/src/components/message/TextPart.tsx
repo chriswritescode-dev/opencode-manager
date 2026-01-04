@@ -4,7 +4,8 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
 import mermaid from 'mermaid'
-import { Copy, Check, Maximize2, X, AlertCircle } from 'lucide-react'
+import { Maximize2, X, AlertCircle } from 'lucide-react'
+import { CopyButton } from '@/components/ui/copy-button'
 import type { components } from '@/api/opencode-types'
 import { useTheme } from '@/hooks/useTheme'
 import 'highlight.js/styles/github-dark.css'
@@ -23,7 +24,6 @@ function MermaidBlock({ code }: MermaidBlockProps) {
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [isExpanded, setIsExpanded] = useState(false)
-  const [copied, setCopied] = useState(false)
   const theme = useTheme()
   const uniqueId = useId().replace(/:/g, '-')
   const renderAttempt = React.useRef(0)
@@ -71,16 +71,6 @@ function MermaidBlock({ code }: MermaidBlockProps) {
     renderDiagram()
   }, [renderDiagram, theme])
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }
-
   if (error) {
     return (
       <div className="relative my-4">
@@ -94,13 +84,7 @@ function MermaidBlock({ code }: MermaidBlockProps) {
             <code>{code}</code>
           </pre>
         </div>
-        <button
-          onClick={handleCopy}
-          className="absolute top-2 right-2 p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground"
-          title="Copy code"
-        >
-          {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-        </button>
+        <CopyButton content={code} title="Copy code" className="absolute top-2 right-2" />
       </div>
     )
   }
@@ -128,13 +112,7 @@ function MermaidBlock({ code }: MermaidBlockProps) {
           >
             <Maximize2 className="w-4 h-4" />
           </button>
-          <button
-            onClick={handleCopy}
-            className="p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground"
-            title="Copy code"
-          >
-            {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-          </button>
+          <CopyButton content={code} title="Copy code" />
         </div>
       </div>
 
@@ -172,8 +150,6 @@ interface CodeBlockProps {
 }
 
 function CodeBlock({ children, className, ...props }: CodeBlockProps) {
-  const [copied, setCopied] = React.useState(false)
-  
   const extractTextContent = (node: React.ReactNode): string => {
     if (typeof node === 'string') return node
     if (typeof node === 'number') return node.toString()
@@ -188,29 +164,13 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
   }
   
   const codeContent = extractTextContent(children)
-  
-  const handleCopyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(codeContent)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (error) {
-      console.error('Failed to copy code:', error)
-    }
-  }
 
   return (
     <div className="relative">
       <pre className={`bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4 ${className || ''}`} {...props}>
         {children}
       </pre>
-      <button
-        onClick={handleCopyCode}
-        className="absolute top-2 right-2 p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground"
-        title="Copy code"
-      >
-        {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-      </button>
+      <CopyButton content={codeContent} title="Copy code" className="absolute top-2 right-2" />
     </div>
   )
 }

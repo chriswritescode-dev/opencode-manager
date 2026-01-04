@@ -145,7 +145,8 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       )
     case 'step-finish': {
       const isFree = part.cost === 0
-      const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {part.tokens.input + part.tokens.output} tokens</span>
+      const totalTokens = part.tokens.input + part.tokens.output + (part.tokens.cache?.read || 0)
+      const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} tokens</span>
       return (
         <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
           {costText}

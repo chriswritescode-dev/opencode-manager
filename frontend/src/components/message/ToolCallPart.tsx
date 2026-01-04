@@ -247,11 +247,12 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
             </span>
           )}
         </div>
-        <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap cursor-pointer hover:bg-accent/80 transition-colors"
-             onClick={() => navigator.clipboard.writeText(output)}
-             title="Click to copy output">
-          {output}
-        </pre>
+        <div className="relative">
+          <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap">
+            {output}
+          </pre>
+          <CopyButton content={output} title="Copy output" className="absolute top-2 right-2" />
+        </div>
       </div>
     )
   }
@@ -387,11 +388,14 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               )}
               <div className="text-sm">
                 <div className="text-muted-foreground mb-1">Output:</div>
-                <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all cursor-pointer hover:bg-accent/80 transition-colors"
-                     onClick={() => part.state.status === 'completed' && navigator.clipboard.writeText(part.state.output)}
-                     title="Click to copy output">
-                  {part.state.status === 'completed' ? part.state.output : ''}
-                </pre>
+                <div className="relative">
+                  <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
+                    {part.state.status === 'completed' ? part.state.output : ''}
+                  </pre>
+                  {part.state.status === 'completed' && part.state.output && (
+                    <CopyButton content={part.state.output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
+                  )}
+                </div>
               </div>
               {part.state.time && (
                 <div className="text-xs text-muted-foreground">

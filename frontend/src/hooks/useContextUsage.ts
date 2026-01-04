@@ -58,7 +58,7 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
     let latestAssistantMessage = assistantMessages[assistantMessages.length - 1]
     
     if (latestAssistantMessage?.info.role === 'assistant') {
-      const tokens = latestAssistantMessage.info.tokens.input + latestAssistantMessage.info.tokens.output + latestAssistantMessage.info.tokens.reasoning
+      const tokens = latestAssistantMessage.info.tokens.input + latestAssistantMessage.info.tokens.output + latestAssistantMessage.info.tokens.reasoning + (latestAssistantMessage.info.tokens.cache?.read || 0)
       if (tokens === 0 && assistantMessages.length > 1) {
         latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
       }
@@ -88,7 +88,7 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
     
     let totalTokens = 0
     if (latestAssistantMessage?.info.role === 'assistant') {
-      totalTokens = latestAssistantMessage.info.tokens.input + latestAssistantMessage.info.tokens.output + latestAssistantMessage.info.tokens.reasoning
+      totalTokens = latestAssistantMessage.info.tokens.input + latestAssistantMessage.info.tokens.output + latestAssistantMessage.info.tokens.reasoning + (latestAssistantMessage.info.tokens.cache?.read || 0)
     }
 
     const usagePercentage = contextLimit ? (totalTokens / contextLimit) * 100 : null

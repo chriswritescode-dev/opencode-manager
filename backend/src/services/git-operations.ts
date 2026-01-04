@@ -4,6 +4,7 @@ import { getErrorMessage } from '../utils/error-utils'
 import { SettingsService } from './settings'
 import type { Database } from 'bun:sqlite'
 import path from 'path'
+import fs from 'fs/promises'
 import { createGitEnv, createNoPromptGitEnv } from '../utils/git-auth'
 
 async function hasCommits(repoPath: string): Promise<boolean> {
@@ -140,6 +141,37 @@ function parsePorcelainV2(output: string): { branch: string; ahead: number; behi
   return { branch, ahead, behind, files }
 }
 
+async function expandUntrackedDirectory(repoPath: string, dirPath: string): Promise<GitFileStatus[]> {
+  const cleanDirPath = dirPath.endsWith('/') ? dirPath.slice(0, -1) : dirPath
+  const fullDirPath = path.join(repoPath, cleanDirPath)
+  const files: GitFileStatus[] = []
+  
+  async function walkDir(currentPath: string, relativePath: string): Promise<void> {
+    try {
+      const entries = await fs.readdir(currentPath, { withFileTypes: true })
+      for (const entry of entries) {
+        const entryRelPath = relativePath ? `${relativePath}/${entry.name}` : entry.name
+        const entryFullPath = path.join(currentPath, entry.name)
+        
+        if (entry.isDirectory()) {
+          await walkDir(entryFullPath, entryRelPath)
+        } else {
+          files.push({
+            path: `${cleanDirPath}/${entryRelPath}`,
+            status: 'untracked',
+            staged: false
+          })
+        }
+      }
+    } catch {
+      // Ignore errors reading directory
+    }
+  }
+  
+  await walkDir(fullDirPath, '')
+  return files
+}
+
 export async function getGitStatus(repoPath: string, database?: Database): Promise<GitStatusResponse> {
   try {
     const fullPath = path.resolve(repoPath)
@@ -147,12 +179,26 @@ export async function getGitStatus(repoPath: string, database?: Database): Promi
     const output = await executeCommand(['git', '-C', fullPath, 'status', '--porcelain=v2', '--branch'], { env })
     const { branch, ahead, behind, files } = parsePorcelainV2(output)
 
+    const expandedFiles: GitFileStatus[] = []
+    for (const file of files) {
+      if (file.status === 'untracked' && file.path.endsWith('/')) {
+        const dirFiles = await expandUntrackedDirectory(fullPath, file.path)
+        if (dirFiles.length > 0) {
+          expandedFiles.push(...dirFiles)
+        } else {
+          expandedFiles.push(file)
+        }
+      } else {
+        expandedFiles.push(file)
+      }
+    }
+
     return {
       branch,
       ahead,
       behind,
-      files,
-      hasChanges: files.length > 0
+      files: expandedFiles,
+      hasChanges: expandedFiles.length > 0
     }
   } catch (error: unknown) {
     logger.error(`Failed to get git status for ${repoPath}:`, error)

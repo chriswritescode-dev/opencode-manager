@@ -14,7 +14,7 @@ import {
   listDirectory 
 } from './file-operations'
 import { getReposPath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
-import { ALLOWED_MIME_TYPES } from '@opencode-manager/shared'
+import { ALLOWED_MIME_TYPES, type AllowedMimeType } from '@opencode-manager/shared'
 import type { ChunkedFileInfo, PatchOperation } from '@opencode-manager/shared'
 
 const SHARED_WORKSPACE_BASE = getReposPath()
@@ -144,7 +144,7 @@ export async function uploadFile(userPath: string, file: File, relativePath?: st
     throw new Error('File too large')
   }
   
-  const mimeType = file.type || getMimeType(file.name)
+  const mimeType = (file.type || getMimeType(file.name)) as AllowedMimeType
   if (!ALLOWED_MIME_TYPES.includes(mimeType) && !mimeType.startsWith('text/')) {
     throw new Error('File type not allowed')
   }
@@ -246,10 +246,10 @@ function validatePath(userPath: string): string {
   return resolved
 }
 
-function getMimeType(filePath: string): string {
+function getMimeType(filePath: string): AllowedMimeType {
   const ext = path.extname(filePath).toLowerCase()
   
-  const mimeTypes: Record<string, string> = {
+  const mimeTypes: Record<string, AllowedMimeType> = {
     '.txt': 'text/plain',
     '.html': 'text/html',
     '.css': 'text/css',
