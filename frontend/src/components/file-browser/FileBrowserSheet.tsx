@@ -2,6 +2,7 @@ import { useEffect, useState, memo, useCallback, useRef } from 'react'
 import { FileBrowser } from './FileBrowser'
 import { Button } from '@/components/ui/button'
 import { PathDisplay } from '@/components/ui/path-display'
+import { FullscreenSheet, FullscreenSheetHeader, FullscreenSheetContent } from '@/components/ui/fullscreen-sheet'
 import { X } from 'lucide-react'
 import { GPU_ACCELERATED_STYLE, MODAL_TRANSITION_MS } from '@/lib/utils'
 import { useSwipeBack } from '@/hooks/useMobile'
@@ -37,6 +38,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
       return () => clearTimeout(timer)
     }
   }, [isOpen])
+
   const handleDirectoryLoad = useCallback((info: { workspaceRoot?: string; currentPath: string }) => {
     if (!info.currentPath || info.currentPath === '.' || info.currentPath === '') {
       setDisplayPath('/')
@@ -94,11 +96,8 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
         transition: 'opacity 150ms ease-out',
       }}
     >
-      <div 
-        className="absolute inset-0 bg-background flex flex-col"
-        style={{ ...GPU_ACCELERATED_STYLE, ...swipeStyles }}
-      >
-        <div className="flex-shrink-0 border-b border-border bg-background backdrop-blur-sm px-4 py-1">
+      <FullscreenSheet style={{ ...GPU_ACCELERATED_STYLE, ...swipeStyles }}>
+        <FullscreenSheetHeader className="px-4 py-1">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               {(displayPath === '/' || !repoName) && (
@@ -119,17 +118,17 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
               </Button>
             )}
           </div>
-        </div>
+        </FullscreenSheetHeader>
 
-        <div className="flex-1 overflow-hidden min-h-0">
+        <FullscreenSheetContent>
           <FileBrowser 
             basePath={normalizedBasePath}
             embedded={true}
             initialSelectedFile={initialSelectedFile}
             onDirectoryLoad={handleDirectoryLoad}
           />
-        </div>
-      </div>
+        </FullscreenSheetContent>
+      </FullscreenSheet>
     </div>
   )
 })

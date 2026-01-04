@@ -1,5 +1,6 @@
 import { memo, useCallback, useState, useEffect, useRef } from "react";
 import { FilePreview } from "./FilePreview";
+import { FullscreenSheet } from "@/components/ui/fullscreen-sheet";
 import type { FileInfo } from "@/types/files";
 import { GPU_ACCELERATED_STYLE, MODAL_TRANSITION_MS } from "@/lib/utils";
 import { useSwipeBack } from "@/hooks/useMobile";
@@ -51,21 +52,17 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
   }
 
   return (
-    <div 
-      ref={containerRef}
-      className="fixed inset-0 z-50 bg-background"
-      style={{ isolation: 'isolate', ...GPU_ACCELERATED_STYLE, ...swipeStyles }}
-    >
-      <div
-        className={`h-full overflow-hidden bg-background ${showFilePreviewHeader ? "" : "pb-8"}`}
-      >
-        <FilePreview
-          file={localFile}
-          hideHeader={!showFilePreviewHeader}
-          isMobileModal={showFilePreviewHeader}
-          onCloseModal={handleClose}
-        />
-      </div>
+    <div ref={containerRef} style={{ isolation: 'isolate' }}>
+      <FullscreenSheet style={{ ...GPU_ACCELERATED_STYLE, ...swipeStyles }}>
+        <div className={`h-full overflow-hidden bg-background pt-safe ${showFilePreviewHeader ? "" : "pb-8"}`}>
+          <FilePreview
+            file={localFile}
+            hideHeader={!showFilePreviewHeader}
+            isMobileModal={showFilePreviewHeader}
+            onCloseModal={handleClose}
+          />
+        </div>
+      </FullscreenSheet>
     </div>
   );
 })

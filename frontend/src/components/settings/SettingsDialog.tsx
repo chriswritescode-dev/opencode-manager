@@ -98,7 +98,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </Tabs>
         </div>
 
-        <div className="sm:hidden flex flex-col h-full min-h-0">
+        <div className="sm:hidden flex flex-col h-full min-h-0 pt-safe">
           <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-4 py-4 flex items-center justify-between">
             <div className="flex items-center gap-2 flex-1">
               {mobileView !== 'menu' && (
