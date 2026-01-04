@@ -1,5 +1,5 @@
 import React from 'react'
-import { Copy } from 'lucide-react'
+import { CopyButton } from '@/components/ui/copy-button'
 import { useMobile } from '@/hooks/useMobile'
 import { cn } from '@/lib/utils'
 
@@ -59,7 +59,6 @@ function detectLanguage(fileName: string): string {
 
 export function CodePreview({ fileName, content }: CodePreviewProps) {
   const isMobile = useMobile()
-  const [copied, setCopied] = React.useState(false)
   const [showMore, setShowMore] = React.useState(false)
 
   const language = detectLanguage(fileName)
@@ -73,27 +72,11 @@ export function CodePreview({ fileName, content }: CodePreviewProps) {
     ? lines.slice(0, INITIAL_CODE_LINES).join('\n')
     : content
 
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(content)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (err) {
-      console.error('Failed to copy:', err)
-    }
-  }
-
   return (
     <div className="flex flex-col bg-background">
       <div className="px-3 py-2 bg-muted/30 border-b border-border/50 flex items-center justify-between text-xs">
         <span className="font-medium truncate flex-1">{extractFileFromPath(fileName)}</span>
-        <button
-          onClick={handleCopy}
-          className="p-1 hover:bg-accent rounded flex-shrink-0"
-          title={copied ? 'Copied!' : 'Copy'}
-        >
-          <Copy className={cn('w-3.5 h-3.5', copied && 'text-green-500')} />
-        </button>
+        <CopyButton content={content} title="Copy" iconSize="sm" variant="ghost" className="flex-shrink-0" />
       </div>
 
       <div className={cn('overflow-y-auto', isMobile ? 'max-h-64' : 'max-h-96')}>

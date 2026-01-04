@@ -1,6 +1,7 @@
 import { useFileDiff } from '@/api/git'
 import { Loader2, FileText, FilePlus, FileX, FileEdit, File, Plus, Minus, ArrowLeft, ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 import type { GitFileStatusType } from '@/types/git'
 
@@ -59,6 +60,8 @@ const statusConfig: Record<GitFileStatusType, { icon: typeof FileText; color: st
   untracked: { icon: File, color: 'text-muted-foreground', bgColor: 'bg-muted/50', label: 'Untracked' },
   copied: { icon: FileText, color: 'text-purple-500', bgColor: 'bg-purple-500/10', label: 'Copied' },
 }
+
+
 
 function DiffLineComponent({ line, showLineNumbers, onLineClick }: { line: DiffLine; showLineNumbers: boolean; onLineClick?: (lineNumber: number) => void }) {
   if (line.type === 'header') {
@@ -198,6 +201,7 @@ export function FileDiffView({ repoId, filePath, onBack, onOpenFile, isMobile = 
               <span className="text-red-500">-{diffData.deletions}</span>
             </>
           )}
+          {diffData.diff && <CopyButton content={diffData.diff} title="Copy diff" iconSize="sm" variant="ghost" />}
         </div>
       </div>
 
