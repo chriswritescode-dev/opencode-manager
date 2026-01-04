@@ -1,11 +1,8 @@
 import { useState, useMemo } from "react";
 import { useSessions, useDeleteSession } from "@/hooks/useOpenCode";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { ListToolbar } from "@/components/ui/list-toolbar";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
-import { Trash2, Search, MoreVertical } from "lucide-react";
 
 interface SessionListProps {
   opcodeUrl: string;
@@ -97,6 +94,7 @@ export const SessionList = ({
   const cancelDelete = () => {
     setDeleteDialogOpen(false);
     setSessionToDelete(null);
+    setSelectedSessions(new Set());
   };
 
   const toggleSessionSelection = (sessionId: string, selected: boolean) => {
@@ -131,74 +129,28 @@ export const SessionList = ({
     }
   };
 
+  const handleDeleteAll = () => {
+    if (!filteredSessions || filteredSessions.length === 0) return;
+    setSessionToDelete(filteredSessions.map((s) => s.id));
+    setDeleteDialogOpen(true);
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="px-4 pt-2 pb-3 flex-shrink-0 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          {filteredSessions && filteredSessions.length > 0 && (
-            <Button
-              onClick={toggleSelectAll}
-              variant={selectedSessions.size > 0 ? "default" : "outline"}
-              className="whitespace-nowrap hidden md:flex"
-            >
-              {filteredSessions.every((session) =>
-                selectedSessions.has(session.id),
-              )
-                ? "Deselect All"
-                : "Select All"}
-            </Button>
-          )}
-          <Button
-            onClick={handleBulkDelete}
-            variant="destructive"
-            disabled={selectedSessions.size === 0}
-            className="hidden md:flex whitespace-nowrap"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete ({selectedSessions.size})
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                className="md:hidden"
-                disabled={filteredSessions.length === 0}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {filteredSessions.length > 0 && (
-                <DropdownMenuItem onClick={toggleSelectAll}>
-                  {filteredSessions.every((session) =>
-                    selectedSessions.has(session.id),
-                  )
-                    ? "Deselect All"
-                    : "Select All"}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem 
-                onClick={handleBulkDelete}
-                disabled={selectedSessions.size === 0}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete ({selectedSessions.size})
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+        <ListToolbar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          selectedCount={selectedSessions.size}
+          totalCount={filteredSessions.length}
+          allSelected={
+            filteredSessions.length > 0 &&
+            filteredSessions.every((session) => selectedSessions.has(session.id))
+          }
+          onToggleSelectAll={toggleSelectAll}
+          onDelete={handleBulkDelete}
+          onDeleteAll={handleDeleteAll}
+        />
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pt-3 pb-4 min-h-0">

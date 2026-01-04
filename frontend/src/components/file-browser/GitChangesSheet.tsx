@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { createPortal } from 'react-dom'
 import { GitChangesPanel } from './GitChangesPanel'
 import { FileDiffView } from './FileDiffView'
 import { FilePreviewDialog } from './FilePreviewDialog'
+import { FullscreenSheet, FullscreenSheetHeader, FullscreenSheetContent } from '@/components/ui/fullscreen-sheet'
 import { Button } from '@/components/ui/button'
 import { X, GitBranch } from 'lucide-react'
 import { useMobile, useSwipeBack } from '@/hooks/useMobile'
 import { useQueryClient } from '@tanstack/react-query'
+import { GPU_ACCELERATED_STYLE, MODAL_TRANSITION_MS } from '@/lib/utils'
 
 interface GitChangesSheetProps {
   isOpen: boolean
@@ -63,40 +65,66 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
     queryClient.invalidateQueries({ queryKey: ['fileDiff'] })
   }
 
-  const handleOpenChange = (open: boolean) => {
-    if (!open) {
-      onClose()
+  const [shouldRender, setShouldRender] = useState(false)
+
+  useEffect(() => {
+    if (isOpen) {
+      setShouldRender(true)
+      document.body.style.overflow = 'hidden'
+    } else {
+      const timer = setTimeout(() => setShouldRender(false), MODAL_TRANSITION_MS)
+      document.body.style.overflow = 'unset'
+      return () => clearTimeout(timer)
     }
-  }
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [isOpen])
 
-  return (
-    <Dialog open={isOpen} onOpenChange={handleOpenChange}>
-      <DialogContent
-        ref={contentRef}
-        className="w-screen h-screen max-w-none max-h-none p-0 gap-0 bg-background border-0 flex flex-col"
-        hideCloseButton
-        fullscreen
-        style={swipeStyles}
-      >
-        <div className="flex items-center justify-between px-4 sm:py-3 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-2">
-            <GitBranch className="w-4 h-4 text-foreground" />
-            <h2 className="text-sm font-semibold text-foreground">
-              {selectedFile ? 'File Changes' : 'Git Changes'}
-            </h2>
-            <span className="text-xs text-muted-foreground">({currentBranch})</span>
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isOpen) {
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [isOpen, onClose])
+
+  if (!isOpen && !shouldRender) return null
+
+  return createPortal(
+    <div
+      ref={contentRef}
+      className="fixed inset-0 z-50"
+      style={{
+        opacity: isOpen ? 1 : 0,
+        pointerEvents: isOpen ? 'auto' : 'none',
+        transition: 'opacity 150ms ease-out',
+      }}
+    >
+      <FullscreenSheet style={{ ...GPU_ACCELERATED_STYLE, ...swipeStyles }}>
+        <FullscreenSheetHeader className="px-4 py-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <GitBranch className="w-4 h-4 text-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">
+                {selectedFile ? 'File Changes' : 'Git Changes'}
+              </h2>
+              <span className="text-xs text-muted-foreground">({currentBranch})</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={onClose}
+              className="text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200 h-8 w-8"
+            >
+              <X className="w-4 h-4" />
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground hover:bg-muted transition-all duration-200 h-8 w-8"
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
+        </FullscreenSheetHeader>
 
-        <div className="flex-1 overflow-hidden min-h-0">
+        <FullscreenSheetContent>
           {isMobile ? (
             selectedFile ? (
               <FileDiffView
@@ -138,7 +166,7 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
               </div>
             </div>
           )}
-        </div>
+        </FullscreenSheetContent>
 
         <FilePreviewDialog
           isOpen={!!previewFilePath}
@@ -148,7 +176,8 @@ export function GitChangesSheet({ isOpen, onClose, repoId, currentBranch, repoLo
           onFileSaved={handleFileSaved}
           initialLineNumber={previewLineNumber}
         />
-      </DialogContent>
-    </Dialog>
+      </FullscreenSheet>
+    </div>,
+    document.body
   )
 }

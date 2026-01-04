@@ -117,34 +117,30 @@ export function ProviderSettings() {
 
             return (
               <Card key={provider.id} className="bg-card border-border">
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <CardTitle className="text-base flex items-center gap-2">
+                <CardHeader className="p-4">
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <CardTitle className="text-base">
                         {provider.name || provider.id}
-                        {hasKey ? (
-                          <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                            <Check className="h-3 w-3 mr-1" />
-                            Connected
-                          </Badge>
-                        ) : (
-                          <Badge variant="secondary">
-                            <X className="h-3 w-3 mr-1" />
-                            Not Connected
-                          </Badge>
-                        )}
                       </CardTitle>
-                      <CardDescription className="mt-1">
-                        {provider.npm ? <span className="text-xs">Package: {provider.npm}</span> : null}
-                        {typeof provider.options?.baseURL === 'string' && (
-                          <span className="text-xs block">{provider.options.baseURL}</span>
-                        )}
-                        {modelCount > 0 && (
-                          <span className="text-xs block">{modelCount} model{modelCount !== 1 ? 's' : ''}</span>
-                        )}
-                      </CardDescription>
+                      {hasKey ? (
+                        <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
+                          <Check className="h-3 w-3 mr-1" />
+                          Connected
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="shrink-0">
+                          <X className="h-3 w-3 mr-1" />
+                          Not Connected
+                        </Badge>
+                      )}
                     </div>
-                    <div className="flex gap-2">
+                    <CardDescription>
+                      {modelCount > 0 && (
+                        <span className="text-xs">{modelCount} model{modelCount !== 1 ? 's' : ''}</span>
+                      )}
+                    </CardDescription>
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         size="sm"
                         variant={hasKey ? 'outline' : 'default'}

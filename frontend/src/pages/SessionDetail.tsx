@@ -4,13 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
-import { X, VolumeX } from "lucide-react";
+import { X, VolumeX, FolderOpen, Plug, Settings, Upload, CornerUpLeft } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
-import { SessionDetailHeader } from "@/components/session/SessionDetailHeader";
+import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating, useCreateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
@@ -294,29 +298,110 @@ export function SessionDetail() {
   }
 
   return (
-    <div 
+    <div
       ref={pageRef}
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
       style={swipeStyles}
     >
-      <SessionDetailHeader
-        repo={repo}
-        sessionId={sessionId}
-        sessionTitle={session?.title || "Untitled Session"}
-        repoId={repoId}
-        isConnected={isConnected}
-        isReconnecting={isReconnecting}
-        opcodeUrl={opcodeUrl}
-        repoDirectory={repoDirectory}
-        parentSessionId={session?.parentID}
-        isTitleGenerating={isTitleGenerating}
-        onFileBrowserOpen={() => setFileBrowserOpen(true)}
-        onSettingsOpen={openSettings}
-        onMcpDialogOpen={() => setMcpDialogOpen(true)}
-        onSessionTitleUpdate={handleSessionTitleUpdate}
-        onParentSessionClick={handleParentSessionClick}
-        onAttachFile={handleAttachFile}
-      />
+      <Header>
+        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
+          {session?.parentID ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleParentSessionClick}
+                className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
+                title="Back to parent session"
+              >
+                <CornerUpLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline text-xs">Parent</span>
+              </Button>
+              <div className="hidden sm:block">
+                <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
+              </div>
+            </>
+          ) : (
+            <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
+          )}
+          <Header.EditableTitle
+            value={session?.title || "Untitled Session"}
+            onChange={handleSessionTitleUpdate}
+            subtitle={repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}
+            generating={isTitleGenerating}
+          />
+        </div>
+        <Header.Actions className="gap-2 sm:gap-4">
+          <ContextUsageIndicator
+            opcodeUrl={opcodeUrl}
+            sessionID={sessionId}
+            directory={repoDirectory}
+            isConnected={isConnected}
+            isReconnecting={isReconnecting}
+          />
+          <BranchSwitcher
+            repoId={repoId}
+            currentBranch={repo.currentBranch || "main"}
+            isWorktree={repo.isWorktree}
+            repoUrl={repo.repoUrl}
+            repoLocalPath={repo.localPath}
+            className="hidden sm:flex max-w-[80px] sm:w-[140px] sm:max-w-[140px]"
+          />
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setFileBrowserOpen(true)}
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            title="Files"
+          >
+            <FolderOpen className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setMcpDialogOpen(true)}
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            title="MCP Servers"
+          >
+            <Plug className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={openSettings}
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </Button>
+          <Header.MobileDropdown>
+            <div className="px-2 py-1.5">
+              <BranchSwitcher
+                repoId={repoId}
+                currentBranch={repo.currentBranch || "main"}
+                isWorktree={repo.isWorktree}
+                repoUrl={repo.repoUrl}
+                repoLocalPath={repo.localPath}
+                iconOnly={false}
+                className="w-full"
+              />
+            </div>
+            <div className="h-px bg-border my-1" />
+            <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
+              <FolderOpen className="w-4 h-4 mr-2" /> Files
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleAttachFile}>
+              <Upload className="w-4 h-4 mr-2" /> Upload
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
+              <Plug className="w-4 h-4 mr-2" /> MCP
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={openSettings}>
+              <Settings className="w-4 h-4 mr-2" /> Settings
+            </DropdownMenuItem>
+          </Header.MobileDropdown>
+        </Header.Actions>
+      </Header>
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28 overscroll-contain">

@@ -2,10 +2,8 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listRepos, deleteRepo } from "@/api/repos";
 import { DeleteDialog } from "@/components/ui/delete-dialog";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { Loader2, GitBranch, Search, Trash2, MoreVertical } from "lucide-react";
+import { ListToolbar } from "@/components/ui/list-toolbar";
+import { Loader2, GitBranch, Search } from "lucide-react";
 import { RepoCard } from "./RepoCard";
 
 export function RepoList() {
@@ -127,73 +125,34 @@ export function RepoList() {
     }
   };
 
+  const handleDeleteAll = () => {
+    if (filteredRepos.length === 0) return;
+    setSelectedRepos(new Set(filteredRepos.map((r) => r.id)));
+    setDeleteDialogOpen(true);
+  };
+
 
   return (
     <>
-      <div className="px-0 py-2 md:p-4">
-        <div className="flex items-center gap-3 mb-4 md:mb-6 px-2 md:px-0">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-            <Input
-              placeholder="Search"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          {filteredRepos.length > 0 && (
-            <Button
-              onClick={handleSelectAll}
-              variant={selectedRepos.size > 0 ? "default" : "outline"}
-              className="whitespace-nowrap hidden md:flex"
-            >
-              {filteredRepos.every((repo) => selectedRepos.has(repo.id))
-                ? "Deselect All"
-                : "Select All"}
-            </Button>
-          )}
-          <Button
-            onClick={handleBatchDelete}
-            variant="destructive"
-            disabled={selectedRepos.size === 0}
-            className="hidden md:flex whitespace-nowrap"
-          >
-            <Trash2 className="w-4 h-4 mr-2" />
-            Delete ({selectedRepos.size})
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon"
-                className="md:hidden"
-                disabled={filteredRepos.length === 0}
-              >
-                <MoreVertical className="w-4 h-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              {filteredRepos.length > 0 && (
-                <DropdownMenuItem onClick={handleSelectAll}>
-                  {filteredRepos.every((repo) => selectedRepos.has(repo.id))
-                    ? "Deselect All"
-                    : "Select All"}
-                </DropdownMenuItem>
-              )}
-              <DropdownMenuItem 
-                onClick={handleBatchDelete}
-                disabled={selectedRepos.size === 0}
-                className="text-destructive focus:text-destructive"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                Delete ({selectedRepos.size})
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+      <div className="px-0 md:p-4 h-full flex flex-col">
+        <div className="mb-4 md:mb-6 px-2 md:px-0">
+          <ListToolbar
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            selectedCount={selectedRepos.size}
+            totalCount={filteredRepos.length}
+            allSelected={
+              filteredRepos.length > 0 &&
+              filteredRepos.every((repo) => selectedRepos.has(repo.id))
+            }
+            onToggleSelectAll={handleSelectAll}
+            onDelete={handleBatchDelete}
+            onDeleteAll={handleDeleteAll}
+          />
         </div>
 
-        <div className="mx-2 md:mx-0">
-          <div className="h-[calc(100dvh-140px)] md:h-[calc(100vh-160px)] overflow-y-auto py-2 md:py-0">
+        <div className="mx-2 md:mx-0 flex-1 min-h-0">
+          <div className="h-full overflow-y-auto py-2 md:py-0">
             {filteredRepos.length === 0 ? (
               <div className="text-center p-12">
                 <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
@@ -237,6 +196,7 @@ export function RepoList() {
         onCancel={() => {
           setDeleteDialogOpen(false);
           setRepoToDelete(null);
+          setSelectedRepos(new Set());
         }}
         title={
           selectedRepos.size > 0

@@ -4,12 +4,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
-import { RepoDetailHeader } from "@/components/layout/RepoDetailHeader";
+import { Header } from "@/components/ui/header";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSwipeBack } from "@/hooks/useMobile";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { Plug, FolderOpen, Plus, GitBranch } from "lucide-react";
 
 import { Loader2 } from "lucide-react";
 
@@ -107,24 +112,86 @@ export function RepoDetail() {
   const branchToDisplay = repo.currentBranch || repo.branch;
   const displayName = branchToDisplay ? `${repoName} (${branchToDisplay})` : repoName;
   const currentBranch = repo.currentBranch || repo.branch || "main";
+  const isWorktree = repo.isWorktree || false;
 
   return (
-    <div 
+    <div
       ref={pageRef}
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
       style={swipeStyles}
     >
-<RepoDetailHeader
-        repoName={repoName}
-        repoId={repoId}
-        currentBranch={currentBranch}
-        isWorktree={repo.isWorktree || false}
-        repoUrl={repo.repoUrl}
-        onMcpClick={() => setMcpDialogOpen(true)}
-        onFilesClick={() => setFileBrowserOpen(true)}
-        onNewSession={handleCreateSession}
-        disabledNewSession={!opcodeUrl || createSessionMutation.isPending}
-      />
+    <Header>
+      <Header.BackButton to="/" />
+      <div className="flex items-center gap-2 min-w-0">
+        <Header.Title>{repoName}</Header.Title>
+        {isWorktree ? (
+          <Badge className="text-xs px-1.5 sm:px-2.5 py-0.5 bg-purple-600/20 text-purple-400 border-purple-600/40" title="Worktree">
+            <GitBranch className="h-3 w-3 sm:mr-1" />
+            <span className="hidden sm:inline">WT: {currentBranch}</span>
+          </Badge>
+        ) : !isWorktree && currentBranch ? (
+          <BranchSwitcher
+            repoId={repoId}
+            currentBranch={currentBranch}
+            isWorktree={false}
+            repoUrl={repo.repoUrl}
+            className="hidden sm:flex w-[140px] max-w-[140px]"
+          />
+        ) : null}
+      </div>
+      <Header.Actions>
+        <Button
+          variant="outline"
+          onClick={() => setMcpDialogOpen(true)}
+          size="sm"
+          className="hidden sm:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+        >
+          <Plug className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">MCP</span>
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setFileBrowserOpen(true)}
+          size="sm"
+          className="hidden sm:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+        >
+          <FolderOpen className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">Files</span>
+        </Button>
+        <Header.MobileDropdown>
+          {!isWorktree && currentBranch && (
+            <>
+              <div className="px-2 py-1.5">
+                <BranchSwitcher
+                  repoId={repoId}
+                  currentBranch={currentBranch}
+                  isWorktree={false}
+                  repoUrl={repo.repoUrl}
+                  iconOnly={false}
+                  className="w-full"
+                />
+              </div>
+              <div className="h-px bg-border my-1" />
+            </>
+          )}
+          <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
+            <Plug className="w-4 h-4 mr-2" /> MCP
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
+            <FolderOpen className="w-4 h-4 mr-2" /> Files
+          </DropdownMenuItem>
+        </Header.MobileDropdown>
+        <Button
+          onClick={() => handleCreateSession()}
+          disabled={!opcodeUrl || createSessionMutation.isPending}
+          size="sm"
+          className="bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+        >
+          <Plus className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">New Session</span>
+        </Button>
+      </Header.Actions>
+    </Header>
 
       <div className="flex-1 flex flex-col min-h-0">
         {opcodeUrl && repoDirectory && (

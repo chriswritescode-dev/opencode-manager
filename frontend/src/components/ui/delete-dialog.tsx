@@ -9,7 +9,7 @@ interface DeleteDialogProps {
   onConfirm: () => void
   onCancel: () => void
   title: string
-  description: string
+  description: React.ReactNode
   itemName?: string
   isDeleting?: boolean
 }

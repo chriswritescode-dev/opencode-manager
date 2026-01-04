@@ -13,7 +13,7 @@ export function DeleteSessionDialog({ open, onOpenChange, onConfirm, onCancel, i
   const isMultiple = sessionCount > 1
   const title = isMultiple ? "Delete Sessions" : "Delete Session"
   const description = isMultiple 
-    ? `Are you sure you want to delete ${sessionCount} sessions? This action cannot be undone.`
+    ? <>Are you sure you want to delete <span className="text-destructive font-bold text-lg">{sessionCount}</span> sessions? This action cannot be undone.</>
     : "Are you sure you want to delete this session? This action cannot be undone."
 
   return (
