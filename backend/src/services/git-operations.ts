@@ -232,14 +232,14 @@ export async function getFileDiff(repoPath: string, filePath: string, database?:
     
     if (fileStatus.status === 'untracked') {
       try {
-        const content = await executeCommand(['git', '-C', fullRepoPath, 'diff', '--no-index', '--', '/dev/null', filePath], { env })
+        const content = await executeCommand(['git', '-C', fullRepoPath, 'diff', '--no-index', '--', '/dev/null', filePath], { env, silent: true })
         diff = content
       } catch (error: unknown) {
         const errorMessage = getErrorMessage(error)
         if (errorMessage?.includes('exit code 1') || errorMessage?.includes('Command failed with code 1')) {
           const output = errorMessage || ''
-          const diffMatch = output.match(/diff --git[\s\S]*/)
-          diff = diffMatch ? diffMatch[0] : `New file: ${filePath}`
+          const diffMatch = output.match(/diff --git[\s\S]*(?=\n\n No newline|$)/)
+          diff = diffMatch ? diffMatch[0] : output.substring(output.indexOf('diff --git'))
         } else {
           diff = `New file: ${filePath}`
         }

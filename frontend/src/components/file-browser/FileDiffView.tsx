@@ -201,7 +201,7 @@ export function FileDiffView({ repoId, filePath, onBack, onOpenFile, isMobile = 
               <span className="text-red-500">-{diffData.deletions}</span>
             </>
           )}
-          {diffData.diff && <CopyButton content={diffData.diff} title="Copy diff" iconSize="sm" variant="ghost" />}
+          {diffData.diff && <CopyButton content={diffData.diff || ''} title="Copy diff" iconSize="sm" variant="ghost" className="flex-shrink-0" />}
         </div>
       </div>
 
