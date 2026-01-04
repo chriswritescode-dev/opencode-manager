@@ -177,7 +177,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     minSpeechFrames: Math.ceil(minSpeechMs / 96),
     preSpeechPadFrames: 3,
     baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/',
-    onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/',
+    onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/',
     onSpeechStart: () => {
       if (autoInterrupt && state === 'speaking' && isPlaying) {
         stopTTS()

@@ -167,7 +167,7 @@ importers:
         specifier: ^11.12.2
         version: 11.12.2
       onnxruntime-web:
-        specifier: ^1.22.0
+        specifier: ^1.17.3
         version: 1.23.2
       react:
         specifier: ^19.1.1
