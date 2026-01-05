@@ -185,7 +185,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     redemptionFrames: Math.ceil(silenceThresholdMs / 96),
     minSpeechFrames: Math.ceil(minSpeechMs / 96),
     preSpeechPadFrames: 3,
-    baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/',
+    baseAssetPath: '/vad/',
     onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/',
     onSpeechStart: () => {
       if (autoInterrupt && stateRef.current === 'speaking' && isPlaying) {
