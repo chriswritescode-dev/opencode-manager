@@ -263,6 +263,37 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     }
   }, [])
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const testApi = {
+        injectAudio: (audio: Float32Array) => {
+          if (stateRef.current === 'listening' && isActiveRef.current) {
+            console.log('[TalkMode Test] Injecting audio, length:', audio.length)
+            processAudio(audio)
+            return true
+          }
+          console.log('[TalkMode Test] Cannot inject - state:', stateRef.current, 'active:', isActiveRef.current)
+          return false
+        },
+        getState: () => ({
+          state: stateRef.current,
+          isActive: isActiveRef.current,
+          sessionID,
+          userTranscript,
+          agentResponse
+        }),
+        forceListening: () => {
+          if (isActiveRef.current) {
+            updateState('listening')
+            return true
+          }
+          return false
+        }
+      }
+      ;(window as Window & typeof globalThis & { __TALK_MODE_TEST__?: typeof testApi }).__TALK_MODE_TEST__ = testApi
+    }
+  }, [processAudio, sessionID, userTranscript, agentResponse, updateState])
+
   const value = {
     state,
     error,
