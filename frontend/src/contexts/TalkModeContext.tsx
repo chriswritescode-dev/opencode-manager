@@ -259,8 +259,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   }, [isEnabled, vad, updateState])
 
   const stop = useCallback(() => {
-    console.log('[TalkMode] stop() called')
-    console.trace('[TalkMode] stop() call stack')
+    const stack = new Error().stack
+    console.log('[TalkMode] stop() called, stack:', stack)
     isActiveRef.current = false
 
     if (pollIntervalRef.current) {

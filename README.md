@@ -387,3 +387,33 @@ OpenCode WebUI supports OAuth authentication for select providers, offering a mo
 
 
 
+# Testing
+
+1. scripts/run-local-docker.sh
+Pulls and runs the CI-built Docker image from GHCR locally:
+./scripts/run-local-docker.sh
+2. scripts/run-e2e-tests.ts
+Runs all E2E tests against a running instance:
+bun run scripts/run-e2e-tests.ts --url http://localhost:5003
+3. Updated AGENTS.md
+Documents the E2E testing workflow with CI-built images.
+The workflow
+GitHub Actions (CI)          Local Machine
+─────────────────────        ──────────────────────
+Push to main                 
+    ↓
+docker-build.yml runs
+    ↓
+Build Docker image
+    ↓
+Push to GHCR ───────────────→ ./scripts/run-local-docker.sh
+                                  ↓
+                              Pull image from GHCR
+                                  ↓
+                              Run container (port 5003)
+                                  ↓
+                              bun run scripts/run-e2e-tests.ts
+                                  ↓
+                              ✅ Voice E2E tests
+                              ✅ Talk Mode API tests  
+                              ✅ Talk Mode Browser tests

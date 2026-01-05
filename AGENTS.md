@@ -228,4 +228,4 @@ The browser test uses `window.__TALK_MODE_TEST__` API to inject audio directly i
 ## Architecture
 
 @docs/cloudVibeCoding.md
-
+@./README.md
