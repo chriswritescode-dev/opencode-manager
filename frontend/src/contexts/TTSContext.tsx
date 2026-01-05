@@ -47,10 +47,15 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
   const ttsConfig = preferences?.tts
   const isBuiltin = ttsConfig?.provider === 'builtin'
+  const isChatterbox = ttsConfig?.provider === 'chatterbox'
   const isEnabled = (() => {
     if (!ttsConfig?.enabled) return false
     if (isBuiltin) {
       return isWebSpeechSupported()
+    }
+    if (isChatterbox) {
+      // Chatterbox doesn't require API key
+      return true
     }
     // External requires apiKey
     return !!ttsConfig?.apiKey
@@ -326,6 +331,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     }
 
     const configIsBuiltin = config.provider === 'builtin'
+    const configIsChatterbox = config.provider === 'chatterbox'
 
     if (configIsBuiltin) {
       if (!isWebSpeechSupported()) {
@@ -334,7 +340,10 @@ export function TTSProvider({ children }: TTSProviderProps) {
         return false
       }
       return speakBuiltinWithConfig(text, config)
+    } else if (configIsChatterbox) {
+      // Chatterbox doesn't require API key - handled by backend
     } else {
+      // External provider requires API key
       if (!config.apiKey) {
         setError('API key not configured')
         setState('error')
@@ -346,29 +355,30 @@ export function TTSProvider({ children }: TTSProviderProps) {
         setState('error')
         return false
       }
-
-      const sanitizedText = sanitizeForTTS(text)
-      
-      if (!sanitizedText?.trim()) {
-        setError('No readable content after sanitization')
-        setState('error')
-        return false
-      }
-
-      stop()
-      stoppedRef.current = false
-      setError(null)
-
-      setOriginalText(text)
-      setCurrentText(sanitizedText)
-
-      abortControllerRef.current = new AbortController()
-      chunksRef.current = splitIntoChunks(sanitizedText)
-      
-      playChunk(0)
-      
-      return true
     }
+
+    // Both chatterbox and external providers use the backend API
+    const sanitizedText = sanitizeForTTS(text)
+    
+    if (!sanitizedText?.trim()) {
+      setError('No readable content after sanitization')
+      setState('error')
+      return false
+    }
+
+    stop()
+    stoppedRef.current = false
+    setError(null)
+
+    setOriginalText(text)
+    setCurrentText(sanitizedText)
+
+    abortControllerRef.current = new AbortController()
+    chunksRef.current = splitIntoChunks(sanitizedText)
+    
+    playChunk(0)
+    
+    return true
   }, [speakBuiltinWithConfig, stop, playChunk])
 
   // Main speak function - uses stored preferences
