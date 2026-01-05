@@ -42,6 +42,25 @@ Tests performed:
 4. STT transcription with generated audio
 5. TTS voices and synthesis endpoints
 
+## Talk Mode E2E Tests
+
+Test the full Talk Mode flow (STT -> OpenCode -> TTS):
+
+```bash
+# Local development (no auth required)
+bun run scripts/test-talkmode-e2e.ts
+
+# Remote deployment (with auth)
+bun run scripts/test-talkmode-e2e.ts --url https://your-url.com --user admin --pass secret
+```
+
+Tests performed:
+1. Talk Mode settings verification
+2. STT transcription with 16kHz WAV audio
+3. OpenCode session creation
+4. Full flow: Audio -> STT -> Send to OpenCode -> Poll for response
+5. TTS response synthesis
+
 ## Code Style
 
 - No comments, self-documenting code only

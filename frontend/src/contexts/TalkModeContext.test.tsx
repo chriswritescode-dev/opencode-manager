@@ -298,3 +298,132 @@ describe('TalkModeState types', () => {
     })
   })
 })
+
+describe('VAD speech processing (stale closure regression test)', () => {
+  let capturedOnSpeechEnd: ((audio: Float32Array) => void) | null = null
+  
+  beforeEach(() => {
+    capturedOnSpeechEnd = null
+    vi.clearAllMocks()
+    
+    vi.mocked(useSettings).mockReturnValue({
+      preferences: {
+        talkMode: {
+          enabled: true,
+          silenceThresholdMs: 800,
+          minSpeechMs: 400,
+          autoInterrupt: true
+        },
+        stt: {
+          enabled: true,
+          model: 'base',
+          language: 'en'
+        }
+      }
+    } as ReturnType<typeof useSettings>)
+    
+    vi.mocked(useMicVAD).mockImplementation((options) => {
+      capturedOnSpeechEnd = options.onSpeechEnd as (audio: Float32Array) => void
+      return {
+        start: vi.fn(),
+        pause: vi.fn(),
+        userSpeaking: false
+      } as ReturnType<typeof useMicVAD>
+    })
+  })
+
+  it('should process audio when onSpeechEnd fires in listening state', async () => {
+    const { sttApi } = await import('@/api/stt')
+    const { blobToBase64 } = await import('@/lib/audioUtils')
+    
+    vi.mocked(blobToBase64).mockResolvedValue('bW9jayBiYXNlNjQ=')
+    
+    const mockTranscribe = vi.mocked(sttApi.transcribeBase64)
+    mockTranscribe.mockResolvedValue({
+      text: 'test transcription',
+      language: 'en',
+      language_probability: 0.95,
+      duration: 1.5
+    })
+
+    const { result } = renderHook(() => useTalkMode(), {
+      wrapper: createWrapper()
+    })
+
+    await act(async () => {
+      await result.current.start('session-123', 'http://localhost:5551', '/workspace')
+    })
+
+    expect(result.current.state).toBe('listening')
+    expect(capturedOnSpeechEnd).not.toBeNull()
+
+    const mockAudio = new Float32Array([0.1, 0.2, 0.3])
+    
+    await act(async () => {
+      capturedOnSpeechEnd!(mockAudio)
+      await new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    expect(mockTranscribe).toHaveBeenCalledWith(
+      'bW9jayBiYXNlNjQ=',
+      'wav',
+      expect.objectContaining({
+        model: 'base',
+        language: 'en'
+      })
+    )
+  })
+
+  it('should NOT process audio when state is off (stale closure check)', async () => {
+    const { sttApi } = await import('@/api/stt')
+    const mockTranscribe = vi.mocked(sttApi.transcribeBase64)
+
+    const { result } = renderHook(() => useTalkMode(), {
+      wrapper: createWrapper()
+    })
+
+    expect(result.current.state).toBe('off')
+    expect(capturedOnSpeechEnd).not.toBeNull()
+
+    const mockAudio = new Float32Array([0.1, 0.2, 0.3])
+    
+    await act(async () => {
+      capturedOnSpeechEnd!(mockAudio)
+      await new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    expect(mockTranscribe).not.toHaveBeenCalled()
+  })
+
+  it('should update userTranscript after successful transcription', async () => {
+    const { sttApi } = await import('@/api/stt')
+    vi.mocked(sttApi.transcribeBase64).mockResolvedValue({
+      text: 'hello world from talk mode',
+      language: 'en',
+      language_probability: 0.98,
+      duration: 2.0
+    })
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({})
+    })
+
+    const { result } = renderHook(() => useTalkMode(), {
+      wrapper: createWrapper()
+    })
+
+    await act(async () => {
+      await result.current.start('session-456', 'http://localhost:5551', '/workspace')
+    })
+
+    const mockAudio = new Float32Array([0.1, 0.2, 0.3])
+    
+    await act(async () => {
+      capturedOnSpeechEnd!(mockAudio)
+      await new Promise(resolve => setTimeout(resolve, 100))
+    })
+
+    expect(result.current.userTranscript).toBe('hello world from talk mode')
+  })
+})
