@@ -407,6 +407,7 @@ async function runFullE2ETest(config: TestConfig) {
     let response: string | null = null
     const startTime = Date.now()
     const maxWait = 45000
+    let pollCount = 0
 
     while (Date.now() - startTime < maxWait) {
       const state = await page.evaluate(() => {
@@ -419,6 +420,11 @@ async function runFullE2ETest(config: TestConfig) {
         }).__TALK_MODE_TEST__
         return testApi?.getState()
       })
+
+      pollCount++
+      if (pollCount <= 10 || pollCount % 10 === 0) {
+        log(`Poll #${pollCount}: state=${state?.state}, transcript=${state?.userTranscript?.slice(0, 30) || 'null'}`, 1)
+      }
 
       if (state?.userTranscript && !transcription) {
         transcription = state.userTranscript
