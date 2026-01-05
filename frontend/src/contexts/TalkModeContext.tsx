@@ -37,9 +37,11 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const opcodeUrlRef = useRef<string | null>(null)
   const directoryRef = useRef<string | undefined>(undefined)
   const isActiveRef = useRef(false)
+  const stateRef = useRef<TalkModeState>('off')
   const pendingAudioRef = useRef<Float32Array | null>(null)
   const lastProcessedMessageIdRef = useRef<string | null>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const startPollingRef = useRef<(() => void) | null>(null)
 
   const talkModeConfig = preferences?.talkMode
   const sttConfig = preferences?.stt
@@ -49,10 +51,15 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const minSpeechMs = talkModeConfig?.minSpeechMs ?? 400
   const autoInterrupt = talkModeConfig?.autoInterrupt ?? true
 
-  const processAudio = useCallback(async (audio: Float32Array) => {
-    if (!isActiveRef.current || state === 'off') return
+  const updateState = useCallback((newState: TalkModeState) => {
+    stateRef.current = newState
+    setState(newState)
+  }, [])
 
-    setState('thinking')
+  const processAudio = useCallback(async (audio: Float32Array) => {
+    if (!isActiveRef.current || stateRef.current === 'off') return
+
+    updateState('thinking')
     setError(null)
 
     try {
@@ -68,7 +75,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
 
       const transcript = result.text?.trim()
       if (!transcript) {
-        setState('listening')
+        updateState('listening')
         return
       }
 
@@ -79,7 +86,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       const currentSessionID = sessionID
 
       if (!opcodeUrl || !currentSessionID) {
-        setState('listening')
+        updateState('listening')
         return
       }
 
@@ -98,16 +105,16 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         throw new Error('Failed to send message')
       }
 
-      startPollingForResponse()
+      startPollingRef.current?.()
 
     } catch (err) {
       if (!isActiveRef.current) return
       const message = err instanceof Error ? err.message : 'Failed to process audio'
       setError(message)
-      setState('listening')
+      updateState('listening')
       setTimeout(() => setError(null), 3000)
     }
-  }, [state, sessionID, sttConfig?.model, sttConfig?.language])
+  }, [sessionID, sttConfig?.model, sttConfig?.language, updateState])
 
   const startPollingForResponse = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -152,22 +159,24 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           const textContent = getMessageTextContent(lastMessage)
           if (textContent && isActiveRef.current) {
             setAgentResponse(textContent)
-            setState('speaking')
+            updateState('speaking')
             await speak(textContent)
 
             if (isActiveRef.current) {
               setAgentResponse(null)
-              setState('listening')
+              updateState('listening')
             }
           } else {
-            setState('listening')
+            updateState('listening')
           }
         }
       } catch {
         // Ignore polling errors
       }
     }, 500)
-  }, [sessionID, queryClient, speak])
+  }, [sessionID, queryClient, speak, updateState])
+
+  startPollingRef.current = startPollingForResponse
 
   const vad = useMicVAD({
     startOnLoad: false,
@@ -179,14 +188,14 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     baseAssetPath: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.30/dist/',
     onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/',
     onSpeechStart: () => {
-      if (autoInterrupt && state === 'speaking' && isPlaying) {
+      if (autoInterrupt && stateRef.current === 'speaking' && isPlaying) {
         stopTTS()
-        setState('listening')
+        updateState('listening')
         setAgentResponse(null)
       }
     },
     onSpeechEnd: (audio) => {
-      if (isActiveRef.current && state === 'listening') {
+      if (isActiveRef.current && stateRef.current === 'listening') {
         pendingAudioRef.current = audio
         processAudio(audio)
       }
@@ -208,21 +217,21 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     isActiveRef.current = true
     lastProcessedMessageIdRef.current = null
 
-    setState('initializing')
+    updateState('initializing')
     setError(null)
     setUserTranscript(null)
     setAgentResponse(null)
 
     try {
       vad.start()
-      setState('listening')
+      updateState('listening')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start Talk Mode'
       setError(message)
-      setState('error')
+      updateState('error')
       isActiveRef.current = false
     }
-  }, [isEnabled, vad])
+  }, [isEnabled, vad, updateState])
 
   const stop = useCallback(() => {
     isActiveRef.current = false
@@ -235,7 +244,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     vad.pause()
     stopTTS()
 
-    setState('off')
+    updateState('off')
     setSessionID(null)
     setError(null)
     setUserTranscript(null)
@@ -243,7 +252,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     opcodeUrlRef.current = null
     directoryRef.current = undefined
     lastProcessedMessageIdRef.current = null
-  }, [vad, stopTTS])
+  }, [vad, stopTTS, updateState])
 
   useEffect(() => {
     return () => {
