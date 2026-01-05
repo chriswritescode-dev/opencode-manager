@@ -60,9 +60,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   }, [])
 
   const processAudio = useCallback(async (audio: Float32Array) => {
-    console.log('[TalkMode] processAudio called, length:', audio.length, 'state:', stateRef.current, 'active:', isActiveRef.current)
     if (!isActiveRef.current || stateRef.current === 'off') {
-      console.log('[TalkMode] processAudio skipped - inactive or off')
       return
     }
 
@@ -70,42 +68,34 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     setError(null)
 
     try {
-      console.log('[TalkMode] Converting audio to WAV...')
       const wavBlob = float32ToWav(audio, 16000)
       const base64Audio = await blobToBase64(wavBlob)
-      console.log('[TalkMode] Sending to STT, base64 length:', base64Audio.length)
 
       const result = await sttApi.transcribeBase64(base64Audio, 'wav', {
         model: sttConfig?.model,
         language: sttConfig?.language
       })
-      console.log('[TalkMode] STT result:', result)
 
       if (!isActiveRef.current) return
 
       const transcript = result.text?.trim()
-      console.log('[TalkMode] Transcript:', transcript)
       if (!transcript) {
         updateState('listening')
         return
       }
 
-      console.log('[TalkMode] Setting userTranscript:', transcript)
       setUserTranscript(transcript)
       userTranscriptRef.current = transcript
 
       const opcodeUrl = opcodeUrlRef.current
       const directory = directoryRef.current
       const currentSessionID = sessionIDRef.current
-      console.log('[TalkMode] opcodeUrl:', opcodeUrl, 'sessionID:', currentSessionID)
 
       if (!opcodeUrl || !currentSessionID) {
-        console.log('[TalkMode] No opcodeUrl or sessionID, returning to listening')
         updateState('listening')
         return
       }
 
-      console.log('[TalkMode] Sending message to OpenCode...')
       const response = await fetch(`${opcodeUrl}/session/${currentSessionID}/message`, {
         method: 'POST',
         headers: {
@@ -116,17 +106,14 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           parts: [{ type: 'text', text: transcript }]
         })
       })
-      console.log('[TalkMode] OpenCode response status:', response.status)
 
       if (!response.ok) {
         throw new Error('Failed to send message')
       }
 
-      console.log('[TalkMode] Starting polling for response...')
       startPollingRef.current?.()
 
     } catch (err) {
-      console.error('[TalkMode] processAudio error:', err)
       if (!isActiveRef.current) return
       const message = err instanceof Error ? err.message : 'Failed to process audio'
       setError(message)
@@ -156,14 +143,12 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
 
       try {
-        // Fetch messages directly instead of relying on cache (SSE might not be working)
         const messagesResponse = await fetch(`${opcodeUrl}/session/${currentSessionID}/message`, {
           headers: directory ? { 'x-opencode-dir': directory } : {}
         })
         if (!messagesResponse.ok) return
         
         const messages = await messagesResponse.json()
-        console.log('[TalkMode] Polling messages, count:', messages?.length)
         
         if (!messages || messages.length === 0) return
 
@@ -172,7 +157,6 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         if (lastMessage.info.role !== 'assistant') return
 
         const isComplete = 'completed' in lastMessage.info.time && lastMessage.info.time.completed
-        console.log('[TalkMode] Last message:', lastMessage.info.id, 'complete:', isComplete)
 
         if (isComplete && lastMessage.info.id !== lastProcessedMessageIdRef.current) {
           lastProcessedMessageIdRef.current = lastMessage.info.id
@@ -183,7 +167,6 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           }
 
           const textContent = getMessageTextContent(lastMessage)
-          console.log('[TalkMode] Agent response:', textContent?.slice(0, 100))
           if (textContent && isActiveRef.current) {
             setAgentResponse(textContent)
             agentResponseRef.current = textContent
@@ -199,8 +182,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
             updateState('listening')
           }
         }
-      } catch (err) {
-        console.error('[TalkMode] Polling error:', err)
+      } catch {
+        // Ignore polling errors
       }
     }, 500)
   }, [queryClient, speak, updateState])
@@ -267,8 +250,6 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   }, [isEnabled, vad, updateState])
 
   const stop = useCallback(() => {
-    const stack = new Error().stack
-    console.log('[TalkMode] stop() called, stack:', stack)
     isActiveRef.current = false
 
     if (pollIntervalRef.current) {
