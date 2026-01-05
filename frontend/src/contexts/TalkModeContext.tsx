@@ -84,17 +84,20 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       if (!isActiveRef.current) return
 
       const transcript = result.text?.trim()
+      console.log('[TalkMode] Transcript:', transcript)
       if (!transcript) {
         updateState('listening')
         return
       }
 
+      console.log('[TalkMode] Setting userTranscript:', transcript)
       setUserTranscript(transcript)
       userTranscriptRef.current = transcript
 
       const opcodeUrl = opcodeUrlRef.current
       const directory = directoryRef.current
       const currentSessionID = sessionIDRef.current
+      console.log('[TalkMode] opcodeUrl:', opcodeUrl, 'sessionID:', currentSessionID)
 
       if (!opcodeUrl || !currentSessionID) {
         console.log('[TalkMode] No opcodeUrl or sessionID, returning to listening')
@@ -102,6 +105,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         return
       }
 
+      console.log('[TalkMode] Sending message to OpenCode...')
       const response = await fetch(`${opcodeUrl}/session/${currentSessionID}/message`, {
         method: 'POST',
         headers: {
@@ -112,11 +116,13 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           parts: [{ type: 'text', text: transcript }]
         })
       })
+      console.log('[TalkMode] OpenCode response status:', response.status)
 
       if (!response.ok) {
         throw new Error('Failed to send message')
       }
 
+      console.log('[TalkMode] Starting polling for response...')
       startPollingRef.current?.()
 
     } catch (err) {
@@ -253,6 +259,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   }, [isEnabled, vad, updateState])
 
   const stop = useCallback(() => {
+    console.log('[TalkMode] stop() called')
+    console.trace('[TalkMode] stop() call stack')
     isActiveRef.current = false
 
     if (pollIntervalRef.current) {
