@@ -104,7 +104,11 @@ export function useStreamingVAD(options: UseStreamingVADOptions = {}): UseStream
         }, silenceTimeoutMs)
       }
     } catch (err) {
-      console.error('[StreamingVAD] Transcription error:', err)
+      // Only log non-invalid-data errors (invalid data is expected with fake/silent audio)
+      const errMsg = err instanceof Error ? err.message : String(err)
+      if (!errMsg.includes('Invalid data') && !errMsg.includes('500')) {
+        console.error('[StreamingVAD] Transcription error:', err)
+      }
     } finally {
       setIsProcessing(false)
     }
