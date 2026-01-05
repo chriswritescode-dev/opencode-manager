@@ -56,12 +56,17 @@ async function runTest(name: string, script: string, args: string[]): Promise<Te
   })
 }
 
-async function waitForHealth(url: string, timeoutMs = 60000): Promise<boolean> {
+async function waitForHealth(url: string, user?: string, pass?: string, timeoutMs = 60000): Promise<boolean> {
   const start = Date.now()
+  const headers: Record<string, string> = {}
+  
+  if (user && pass) {
+    headers['Authorization'] = `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`
+  }
   
   while (Date.now() - start < timeoutMs) {
     try {
-      const response = await fetch(`${url}/api/health`)
+      const response = await fetch(`${url}/api/health`, { headers })
       const data = await response.json()
       if (data.status === 'healthy') {
         return true
@@ -128,7 +133,7 @@ Example:
   console.log('═'.repeat(60))
 
   console.log('\n⏳ Waiting for server to be healthy...')
-  const healthy = await waitForHealth(url)
+  const healthy = await waitForHealth(url, user, pass)
   
   if (!healthy) {
     console.log('❌ Server not healthy after 60s timeout')
