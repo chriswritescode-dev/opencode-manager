@@ -156,9 +156,15 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
 
       try {
-        const messagesKey = ['opencode', 'messages', opcodeUrl, currentSessionID, directory]
-        const messages = queryClient.getQueryData<MessageWithParts[]>(messagesKey)
-
+        // Fetch messages directly instead of relying on cache (SSE might not be working)
+        const messagesResponse = await fetch(`${opcodeUrl}/session/${currentSessionID}/message`, {
+          headers: directory ? { 'x-opencode-dir': directory } : {}
+        })
+        if (!messagesResponse.ok) return
+        
+        const messages = await messagesResponse.json()
+        console.log('[TalkMode] Polling messages, count:', messages?.length)
+        
         if (!messages || messages.length === 0) return
 
         const lastMessage = messages[messages.length - 1]
@@ -166,6 +172,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         if (lastMessage.info.role !== 'assistant') return
 
         const isComplete = 'completed' in lastMessage.info.time && lastMessage.info.time.completed
+        console.log('[TalkMode] Last message:', lastMessage.info.id, 'complete:', isComplete)
 
         if (isComplete && lastMessage.info.id !== lastProcessedMessageIdRef.current) {
           lastProcessedMessageIdRef.current = lastMessage.info.id
@@ -176,6 +183,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           }
 
           const textContent = getMessageTextContent(lastMessage)
+          console.log('[TalkMode] Agent response:', textContent?.slice(0, 100))
           if (textContent && isActiveRef.current) {
             setAgentResponse(textContent)
             agentResponseRef.current = textContent
@@ -191,8 +199,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
             updateState('listening')
           }
         }
-      } catch {
-        // Ignore polling errors
+      } catch (err) {
+        console.error('[TalkMode] Polling error:', err)
       }
     }, 500)
   }, [queryClient, speak, updateState])
