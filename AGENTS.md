@@ -73,6 +73,114 @@ Tests performed:
 - Prefer pnpm over npm for all package management
 
 
+## Deployment
+
+### Deploy to Cloud (Azure VM with Basic Auth)
+
+Use the deployment script for proper setup with Caddy reverse proxy and basic authentication:
+
+```bash
+# Fresh deployment (creates Azure VM, sets up Docker, Caddy, Cloudflare tunnel)
+bun run scripts/deploy.ts
+
+# Check deployment status and get current tunnel URL
+bun run scripts/deploy.ts --status
+
+# Update to latest code (pulls from GitHub, rebuilds containers)
+bun run scripts/deploy.ts --update
+
+# Update environment variables (API keys, etc.)
+bun run scripts/deploy.ts --update-env
+
+# Sync local OpenCode auth to remote (GitHub Copilot, Anthropic OAuth)
+bun run scripts/deploy.ts --sync-auth
+
+# Enable YOLO mode (auto-approve all permissions)
+bun run scripts/deploy.ts --yolo
+
+# Destroy all Azure resources
+bun run scripts/deploy.ts --destroy
+```
+
+Environment variables for deployment (set in `.env` or environment):
+- `AUTH_USERNAME` - Basic auth username (default: admin)
+- `AUTH_PASSWORD` - Basic auth password (prompted if not set)
+- `GITHUB_TOKEN` - For cloning private repos
+- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` - AI provider keys
+- `TARGET_HOST` - Deploy to existing server instead of creating Azure VM
+
+### Deploy to Existing Server
+
+```bash
+# Deploy to your own server (skips Azure VM creation)
+TARGET_HOST=your-server.com bun run scripts/deploy.ts
+```
+
+### Architecture (Deployed)
+
+```
+Cloudflare Tunnel (trycloudflare.com)
+    ↓
+Caddy (port 80, basic auth)
+    ↓
+opencode-manager app (port 5003)
+    ├── OpenCode server (port 5551, internal)
+    └── Whisper STT (port 5552, internal)
+```
+
+### Important: Never bypass docker compose
+
+**DO NOT** run containers directly with `docker run`. Always use `docker compose`:
+
+```bash
+# CORRECT: Uses docker-compose.yml + docker-compose.override.yml
+# Sets up Caddy auth, cloudflared tunnel, proper networking
+ssh user@server "cd ~/opencode-manager && sudo docker compose up -d"
+
+# WRONG: Bypasses Caddy auth, exposes app directly without protection
+ssh user@server "sudo docker run -d -p 5003:5003 ghcr.io/dzianisv/opencode-manager"
+```
+
+The `docker-compose.override.yml` configures:
+- **caddy-auth**: Reverse proxy with basic authentication
+- **cloudflared-tunnel**: Cloudflare tunnel for HTTPS access
+- **app**: The main application (not exposed directly)
+
+### Credentials
+
+Deployment credentials are saved to `.secrets/YYYY-MM-DD.json`:
+```json
+{
+  "url": "https://xxx.trycloudflare.com",
+  "username": "admin",
+  "password": "generated-password"
+}
+```
+
+### Troubleshooting
+
+```bash
+# SSH to VM
+ssh azureuser@<VM_IP>
+
+# Check all containers are running (should see 3: opencode-manager, caddy-auth, cloudflared-tunnel)
+sudo docker ps
+
+# View logs
+sudo docker logs opencode-manager
+sudo docker logs caddy-auth
+sudo docker logs cloudflared-tunnel
+
+# Get current tunnel URL
+sudo docker logs cloudflared-tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' | tail -1
+
+# Restart all services
+cd ~/opencode-manager && sudo docker compose restart
+
+# Rebuild and restart (after code changes)
+cd ~/opencode-manager && sudo docker compose up -d --build
+```
+
 ## Architecture
 
 @docs/cloudVibeCoding.md
