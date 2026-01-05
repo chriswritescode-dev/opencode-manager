@@ -442,14 +442,31 @@ async function runFullE2ETest(config: TestConfig) {
 
       if (state?.state === 'speaking' && response) {
         info('Agent is speaking response via TTS')
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        break
+      }
+
+      if (transcription && response) {
+        break
       }
 
       await new Promise(resolve => setTimeout(resolve, 500))
     }
 
     info('Stopping Talk Mode...')
-    if (talkModeButton.selector) {
-      await page.click(talkModeButton.selector)
+    const stopResult = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button'))
+      for (const btn of buttons) {
+        const title = btn.getAttribute('title')?.toLowerCase() || ''
+        if (title.includes('talk mode') || title.includes('talk-mode') || title.includes('stop talk')) {
+          (btn as HTMLButtonElement).click()
+          return { stopped: true, buttonTitle: btn.getAttribute('title') }
+        }
+      }
+      return { stopped: false }
+    })
+    if (stopResult.stopped) {
+      log(`Clicked stop button: ${stopResult.buttonTitle}`, 1)
     }
 
     console.log('\n' + '═'.repeat(60))
