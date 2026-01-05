@@ -41,7 +41,8 @@ export function TalkModeOverlay({ sessionID }: TalkModeOverlayProps) {
         stop()
       }
     }
-  }, [sessionID, activeSessionID, stop])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionID, activeSessionID]) // Intentionally exclude 'stop' - it's stable from context
 
   if (!isActive) return null
 
