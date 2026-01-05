@@ -42,6 +42,9 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const lastProcessedMessageIdRef = useRef<string | null>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const startPollingRef = useRef<(() => void) | null>(null)
+  const userTranscriptRef = useRef<string | null>(null)
+  const agentResponseRef = useRef<string | null>(null)
+  const sessionIDRef = useRef<string | null>(null)
 
   const talkModeConfig = preferences?.talkMode
   const sttConfig = preferences?.stt
@@ -57,19 +60,26 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   }, [])
 
   const processAudio = useCallback(async (audio: Float32Array) => {
-    if (!isActiveRef.current || stateRef.current === 'off') return
+    console.log('[TalkMode] processAudio called, length:', audio.length, 'state:', stateRef.current, 'active:', isActiveRef.current)
+    if (!isActiveRef.current || stateRef.current === 'off') {
+      console.log('[TalkMode] processAudio skipped - inactive or off')
+      return
+    }
 
     updateState('thinking')
     setError(null)
 
     try {
+      console.log('[TalkMode] Converting audio to WAV...')
       const wavBlob = float32ToWav(audio, 16000)
       const base64Audio = await blobToBase64(wavBlob)
+      console.log('[TalkMode] Sending to STT, base64 length:', base64Audio.length)
 
       const result = await sttApi.transcribeBase64(base64Audio, 'wav', {
         model: sttConfig?.model,
         language: sttConfig?.language
       })
+      console.log('[TalkMode] STT result:', result)
 
       if (!isActiveRef.current) return
 
@@ -80,12 +90,14 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
 
       setUserTranscript(transcript)
+      userTranscriptRef.current = transcript
 
       const opcodeUrl = opcodeUrlRef.current
       const directory = directoryRef.current
-      const currentSessionID = sessionID
+      const currentSessionID = sessionIDRef.current
 
       if (!opcodeUrl || !currentSessionID) {
+        console.log('[TalkMode] No opcodeUrl or sessionID, returning to listening')
         updateState('listening')
         return
       }
@@ -108,13 +120,14 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       startPollingRef.current?.()
 
     } catch (err) {
+      console.error('[TalkMode] processAudio error:', err)
       if (!isActiveRef.current) return
       const message = err instanceof Error ? err.message : 'Failed to process audio'
       setError(message)
       updateState('listening')
       setTimeout(() => setError(null), 3000)
     }
-  }, [sessionID, sttConfig?.model, sttConfig?.language, updateState])
+  }, [sttConfig?.model, sttConfig?.language, updateState])
 
   const startPollingForResponse = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -123,7 +136,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
 
     const opcodeUrl = opcodeUrlRef.current
     const directory = directoryRef.current
-    const currentSessionID = sessionID
+    const currentSessionID = sessionIDRef.current
 
     if (!opcodeUrl || !currentSessionID) return
 
@@ -159,11 +172,13 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           const textContent = getMessageTextContent(lastMessage)
           if (textContent && isActiveRef.current) {
             setAgentResponse(textContent)
+            agentResponseRef.current = textContent
             updateState('speaking')
             await speak(textContent)
 
             if (isActiveRef.current) {
               setAgentResponse(null)
+              agentResponseRef.current = null
               updateState('listening')
             }
           } else {
@@ -174,7 +189,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         // Ignore polling errors
       }
     }, 500)
-  }, [sessionID, queryClient, speak, updateState])
+  }, [queryClient, speak, updateState])
 
   startPollingRef.current = startPollingForResponse
 
@@ -192,6 +207,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         stopTTS()
         updateState('listening')
         setAgentResponse(null)
+        agentResponseRef.current = null
       }
     },
     onSpeechEnd: (audio) => {
@@ -212,6 +228,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     }
 
     setSessionID(newSessionID)
+    sessionIDRef.current = newSessionID
     opcodeUrlRef.current = opcodeUrl
     directoryRef.current = directory
     isActiveRef.current = true
@@ -220,7 +237,9 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     updateState('initializing')
     setError(null)
     setUserTranscript(null)
+    userTranscriptRef.current = null
     setAgentResponse(null)
+    agentResponseRef.current = null
 
     try {
       vad.start()
@@ -246,9 +265,12 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
 
     updateState('off')
     setSessionID(null)
+    sessionIDRef.current = null
     setError(null)
     setUserTranscript(null)
+    userTranscriptRef.current = null
     setAgentResponse(null)
+    agentResponseRef.current = null
     opcodeUrlRef.current = null
     directoryRef.current = undefined
     lastProcessedMessageIdRef.current = null
@@ -278,9 +300,9 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         getState: () => ({
           state: stateRef.current,
           isActive: isActiveRef.current,
-          sessionID,
-          userTranscript,
-          agentResponse
+          sessionID: sessionIDRef.current,
+          userTranscript: userTranscriptRef.current,
+          agentResponse: agentResponseRef.current
         }),
         forceListening: () => {
           if (isActiveRef.current) {
@@ -292,7 +314,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
       ;(window as Window & typeof globalThis & { __TALK_MODE_TEST__?: typeof testApi }).__TALK_MODE_TEST__ = testApi
     }
-  }, [processAudio, sessionID, userTranscript, agentResponse, updateState])
+  }, [processAudio, updateState])
 
   const value = {
     state,

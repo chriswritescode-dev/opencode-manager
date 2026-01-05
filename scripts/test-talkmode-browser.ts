@@ -135,6 +135,26 @@ async function runFullE2ETest(config: TestConfig) {
       log(`[Page Error] ${err.message}`, 1)
     })
 
+    page.on('requestfailed', request => {
+      const url = request.url()
+      if (url.includes('stt') || url.includes('transcribe')) {
+        log(`[Request Failed] ${url}: ${request.failure()?.errorText}`, 1)
+      }
+    })
+
+    page.on('response', async response => {
+      const url = response.url()
+      if (url.includes('stt') || url.includes('transcribe')) {
+        log(`[Response] ${url}: ${response.status()}`, 1)
+        try {
+          const body = await response.text()
+          log(`[Response Body] ${body.slice(0, 500)}`, 1)
+        } catch {
+          // Ignore if we can't read the body
+        }
+      }
+    })
+
     info('Loading page...')
     await page.goto(config.baseUrl, { waitUntil: 'networkidle2', timeout: 60000 })
     success('Page loaded')
