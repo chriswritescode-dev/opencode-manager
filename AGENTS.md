@@ -200,6 +200,31 @@ cd ~/opencode-manager && sudo docker compose restart
 cd ~/opencode-manager && sudo docker compose up -d --build
 ```
 
+## CI/CD
+
+The project uses GitHub Actions for CI/CD. Workflows are in `.github/workflows/`:
+
+- **docker-build.yml** - Builds and pushes Docker image to GHCR on push to main
+
+### E2E Testing with CI-built Image
+
+The recommended flow is: CI builds Docker image → pull locally → run E2E tests.
+
+```bash
+# 1. Pull and run the CI-built Docker image locally
+./scripts/run-local-docker.sh
+
+# 2. In another terminal, run all E2E tests
+bun run scripts/run-e2e-tests.ts
+
+# Or run individual tests
+bun run scripts/test-voice-e2e.ts --url http://localhost:5003
+bun run scripts/test-talkmode-e2e.ts --url http://localhost:5003
+bun run scripts/test-talkmode-browser.ts --url http://localhost:5003
+```
+
+The browser test uses `window.__TALK_MODE_TEST__` API to inject audio directly into TalkModeContext, bypassing VAD (which can't detect speech from non-microphone sources reliably). This is how companies like OpenAI/Anthropic test voice features.
+
 ## Architecture
 
 @docs/cloudVibeCoding.md
