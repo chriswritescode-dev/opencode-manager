@@ -208,6 +208,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
     },
     onSpeechEnd: (audio) => {
+      console.log('[VAD] onSpeechEnd, audio length:', audio.length, 'active:', isActiveRef.current, 'state:', stateRef.current)
       if (isActiveRef.current && stateRef.current === 'listening') {
         pendingAudioRef.current = audio
         processAudio(audio)
@@ -215,12 +216,35 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     },
     onVADMisfire: () => {
       // Ignored - too short
+    },
+    onFrameProcessed: (probs) => {
+      // Log speech probability for debugging
+      if (probs.isSpeech > 0.5) {
+        console.log('[VAD] Speech detected, probability:', probs.isSpeech)
+      }
     }
   })
+
+  useEffect(() => {
+    if (vad.errored) {
+      console.error('[VAD] Error:', vad.errored)
+      setError(`VAD Error: ${vad.errored}`)
+    }
+  }, [vad.errored])
 
   const start = useCallback(async (newSessionID: string, opcodeUrl: string, directory?: string) => {
     if (!isEnabled) {
       setError('Talk Mode is not enabled. Enable it in Settings.')
+      return
+    }
+
+    if (vad.errored) {
+      setError(`Cannot start Talk Mode: VAD failed to initialize - ${vad.errored}`)
+      return
+    }
+
+    if (vad.loading) {
+      setError('Please wait, VAD is still loading...')
       return
     }
 
@@ -241,6 +265,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     try {
       vad.start()
       updateState('listening')
+      console.log('[TalkMode] Started, VAD listening:', vad.listening)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start Talk Mode'
       setError(message)
