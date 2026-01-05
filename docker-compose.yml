@@ -1,8 +1,9 @@
 services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/dzianisv/opencode-manager:latest
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     container_name: opencode-manager
     ports:
       - "5003:5003"
