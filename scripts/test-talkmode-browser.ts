@@ -112,6 +112,8 @@ async function runFullE2ETest(config: TestConfig) {
 
     const page = await browser.newPage()
     
+    await page.setViewport({ width: 1280, height: 800 })
+    
     if (config.username && config.password) {
       await page.setExtraHTTPHeaders({
         'Authorization': `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
@@ -123,7 +125,8 @@ async function runFullE2ETest(config: TestConfig) {
       const text = msg.text()
       consoleMessages.push(`[${msg.type()}] ${text}`)
       if (text.includes('TalkMode') || text.includes('VAD') || text.includes('STT') || 
-          text.includes('speech') || text.includes('Test]') || text.includes('transcri')) {
+          text.includes('speech') || text.includes('Test]') || text.includes('transcri') ||
+          text.includes('Error') || text.includes('error') || text.includes('failed')) {
         log(`[Browser] ${text}`, 1)
       }
     })
@@ -142,6 +145,100 @@ async function runFullE2ETest(config: TestConfig) {
     success('App rendered')
 
     await new Promise(resolve => setTimeout(resolve, 2000))
+
+    info('Navigating to first available repo...')
+    const repos = await page.evaluate(async () => {
+      try {
+        const response = await fetch('/api/repos')
+        return await response.json()
+      } catch (e) {
+        return { error: String(e) }
+      }
+    })
+
+    if (repos.error || !repos.length) {
+      fail(`No repos available: ${repos.error || 'empty list'}`)
+      return false
+    }
+
+    const repoId = repos[0].id
+    success(`Found repo: ${repos[0].repoUrl} (id: ${repoId})`)
+
+    await page.goto(`${config.baseUrl}/repo/${repoId}`, { waitUntil: 'networkidle2', timeout: 60000 })
+    success('Navigated to repo page')
+
+    await new Promise(resolve => setTimeout(resolve, 3000))
+
+    info('Looking for existing sessions or creating a new one...')
+    const sessionsResult = await page.evaluate(async (directory: string) => {
+      try {
+        const response = await fetch(`/api/opencode/sessions?directory=${encodeURIComponent(directory)}`)
+        if (!response.ok) {
+          return { error: `HTTP ${response.status}` }
+        }
+        return await response.json()
+      } catch (e) {
+        return { error: String(e) }
+      }
+    }, repos[0].fullPath)
+
+    let sessionId: string | null = null
+
+    if (sessionsResult.error) {
+      info(`Could not fetch sessions: ${sessionsResult.error}, creating new session...`)
+    } else if (Array.isArray(sessionsResult) && sessionsResult.length > 0) {
+      sessionId = sessionsResult[0].id
+      success(`Found existing session: ${sessionId}`)
+    }
+
+    if (!sessionId) {
+      info('Creating new session...')
+      const createResult = await page.evaluate(async (directory: string) => {
+        try {
+          const response = await fetch('/api/opencode/session', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-opencode-dir': directory
+            },
+            body: JSON.stringify({})
+          })
+          if (!response.ok) {
+            return { error: `HTTP ${response.status}` }
+          }
+          return await response.json()
+        } catch (e) {
+          return { error: String(e) }
+        }
+      }, repos[0].fullPath)
+
+      if (createResult.error) {
+        fail(`Failed to create session: ${createResult.error}`)
+        return false
+      }
+      sessionId = createResult.id
+      success(`Created new session: ${sessionId}`)
+    }
+
+    info(`Navigating to session page: /repos/${repoId}/sessions/${sessionId}`)
+    await page.goto(`${config.baseUrl}/repos/${repoId}/sessions/${sessionId}`, { 
+      waitUntil: 'networkidle2', 
+      timeout: 60000 
+    })
+    success('Navigated to session page')
+
+    await new Promise(resolve => setTimeout(resolve, 3000))
+
+    const pageState = await page.evaluate(() => {
+      return {
+        url: window.location.href,
+        bodyHtml: document.body.innerHTML.slice(0, 1000),
+        hasRoot: !!document.getElementById('root'),
+        rootContent: document.getElementById('root')?.innerHTML.slice(0, 500),
+        buttonCount: document.querySelectorAll('button').length
+      }
+    })
+    log(`Page state: URL=${pageState.url}, buttons=${pageState.buttonCount}`, 1)
 
     info('Checking STT API is working...')
     const sttStatus = await page.evaluate(async () => {
@@ -164,15 +261,12 @@ async function runFullE2ETest(config: TestConfig) {
       const buttons = Array.from(document.querySelectorAll('button'))
       
       for (const btn of buttons) {
-        const ariaLabel = btn.getAttribute('aria-label')?.toLowerCase() || ''
         const title = btn.getAttribute('title')?.toLowerCase() || ''
         
-        if (ariaLabel.includes('talk') || ariaLabel.includes('live') ||
-            title.includes('talk') || title.includes('live')) {
+        if (title.includes('talk mode') || title.includes('talk-mode')) {
           return { 
             found: true, 
-            selector: ariaLabel ? `button[aria-label="${btn.getAttribute('aria-label')}"]` : null,
-            ariaLabel: btn.getAttribute('aria-label'),
+            selector: `button[title="${btn.getAttribute('title')}"]`,
             title: btn.getAttribute('title')
           }
         }
@@ -183,15 +277,21 @@ async function runFullE2ETest(config: TestConfig) {
 
     if (!talkModeButton.found) {
       fail('Could not find Talk Mode button')
-      const buttons = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('button')).slice(0, 10).map(b => ({
+      const pageInfo = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button')).slice(0, 20).map(b => ({
           ariaLabel: b.getAttribute('aria-label'),
           title: b.getAttribute('title'),
-          text: b.textContent?.slice(0, 30)
+          text: b.textContent?.slice(0, 50),
+          classes: b.className.slice(0, 50)
         }))
+        const html = document.body.innerHTML.slice(0, 500)
+        return { buttons, html, url: window.location.href }
       })
+      log(`Current URL: ${pageInfo.url}`, 1)
       log('Available buttons:', 1)
-      buttons.forEach(b => log(JSON.stringify(b), 2))
+      pageInfo.buttons.forEach(b => log(JSON.stringify(b), 2))
+      log('Page preview:', 1)
+      log(pageInfo.html.slice(0, 200), 2)
       return false
     }
 
