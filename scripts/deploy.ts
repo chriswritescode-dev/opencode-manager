@@ -327,8 +327,8 @@ async function deployToVM(ip: string) {
   const sshOpts = "-o StrictHostKeyChecking=no";
   const sshCmd = `ssh ${sshOpts} ${config.adminUser}@${ip}`;
 
-  // Clone opencode-manager (use VibeTechnologies fork which has the context overflow fix)
-  const managerRepo = process.env.OPENCODE_MANAGER_REPO || "VibeTechnologies/opencode-manager";
+  // Clone opencode-manager
+  const managerRepo = process.env.OPENCODE_MANAGER_REPO || "dzianisv/opencode-manager";
   console.log(`Cloning opencode-manager from ${managerRepo}...`);
   exec(`${sshCmd} "git clone https://github.com/${managerRepo}.git opencode-manager 2>/dev/null || (cd opencode-manager && git pull)"`, { quiet: true });
 
@@ -899,7 +899,7 @@ async function updateOpencode(ip: string) {
   console.log(`VM architecture: ${vmArch}`);
 
   // Check if we need to change the remote URL
-  const managerRepo = process.env.OPENCODE_MANAGER_REPO || "VibeTechnologies/opencode-manager";
+  const managerRepo = process.env.OPENCODE_MANAGER_REPO || "dzianisv/opencode-manager";
   const currentRemote = execOutput(`${sshCmd} "cd ~/opencode-manager && git remote get-url origin 2>/dev/null || echo ''"`);
   if (currentRemote && !currentRemote.includes(managerRepo)) {
     console.log(`Changing remote to ${managerRepo}...`);
@@ -978,9 +978,9 @@ volumes:
   const composeBase64 = Buffer.from(composeOverride).toString("base64");
   exec(`${sshCmd} "echo '${composeBase64}' | base64 -d > ~/opencode-manager/docker-compose.override.yml"`, { quiet: true });
 
-  // Rebuild and restart containers
-  console.log("Rebuilding and restarting containers (this may take a few minutes for first build)...");
-  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build"`, { quiet: false });
+  // Rebuild and restart only the app container (preserve cloudflared tunnel URL)
+  console.log("Rebuilding and restarting app container (this may take a few minutes for first build)...");
+  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build app"`, { quiet: false });
 
   // Wait for container to be ready
   console.log("Waiting for container to start...");
@@ -989,9 +989,8 @@ volumes:
   // Enable YOLO mode
   await enableYoloMode(ip);
 
-  // Wait for tunnel and save secrets
-  console.log("\nWaiting for tunnel URL...");
-  await sleep(10000);
+  // Get existing tunnel URL (cloudflared container was not restarted)
+  console.log("\nGetting tunnel URL...");
   await updateSecretsWithTunnelUrl(ip);
 
   console.log("\nUpdate complete! opencode-manager is now running the latest version with YOLO mode.");
