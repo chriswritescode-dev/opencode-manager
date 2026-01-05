@@ -436,10 +436,6 @@ async function runFullE2ETest(config: TestConfig) {
         success(`Agent response: "${response.slice(0, 100)}"`)
       }
 
-      if (state?.state === 'listening' && transcription) {
-        break
-      }
-
       if (state?.state === 'speaking' && response) {
         info('Agent is speaking response via TTS')
         await new Promise(resolve => setTimeout(resolve, 2000))
@@ -447,6 +443,32 @@ async function runFullE2ETest(config: TestConfig) {
       }
 
       if (transcription && response) {
+        break
+      }
+
+      if (state?.state === 'listening' && transcription && !response) {
+        info('State returned to listening, checking API directly for response...')
+        
+        const apiResponse = await page.evaluate(async (sessionId: string) => {
+          try {
+            const response = await fetch(`/api/opencode/session/${sessionId}/message`)
+            if (!response.ok) return null
+            const messages = await response.json()
+            const assistantMsg = messages.find((m: { info: { role: string } }) => m.info.role === 'assistant')
+            if (assistantMsg) {
+              const textPart = assistantMsg.parts.find((p: { type: string }) => p.type === 'text')
+              return textPart?.text || null
+            }
+            return null
+          } catch {
+            return null
+          }
+        }, state.sessionID)
+        
+        if (apiResponse) {
+          response = apiResponse
+          success(`Agent response (from API): "${response.slice(0, 100)}"`)
+        }
         break
       }
 
