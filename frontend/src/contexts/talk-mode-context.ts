@@ -12,6 +12,7 @@ export interface TalkModeContextValue {
   state: TalkModeState
   error: string | null
   userTranscript: string | null
+  liveTranscript: string
   agentResponse: string | null
   userSpeaking: boolean
   sessionID: string | null

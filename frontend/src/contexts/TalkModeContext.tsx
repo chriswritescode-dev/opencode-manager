@@ -1,11 +1,8 @@
 import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
-import { useMicVAD } from '@ricky0123/vad-react'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
-import { sttApi } from '@/api/stt'
+import { useStreamingVAD } from '@/hooks/useStreamingVAD'
 import { TalkModeContext, type TalkModeState } from './talk-mode-context'
-import { float32ToWav, blobToBase64 } from '@/lib/audioUtils'
-import { useQueryClient } from '@tanstack/react-query'
 import type { MessageWithParts } from '@/api/types'
 
 export { TalkModeContext } from './talk-mode-context'
@@ -25,12 +22,12 @@ function getMessageTextContent(msg: MessageWithParts): string {
 
 export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const { preferences } = useSettings()
-  const { speak, stop: stopTTS, isPlaying } = useTTS()
-  const queryClient = useQueryClient()
+  const { speak, stop: stopTTS } = useTTS()
 
   const [state, setState] = useState<TalkModeState>('off')
   const [error, setError] = useState<string | null>(null)
   const [userTranscript, setUserTranscript] = useState<string | null>(null)
+  const [liveTranscript, setLiveTranscript] = useState<string>('')
   const [agentResponse, setAgentResponse] = useState<string | null>(null)
   const [sessionID, setSessionID] = useState<string | null>(null)
 
@@ -38,10 +35,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const directoryRef = useRef<string | undefined>(undefined)
   const isActiveRef = useRef(false)
   const stateRef = useRef<TalkModeState>('off')
-  const pendingAudioRef = useRef<Float32Array | null>(null)
   const lastProcessedMessageIdRef = useRef<string | null>(null)
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const startPollingRef = useRef<(() => void) | null>(null)
   const userTranscriptRef = useRef<string | null>(null)
   const agentResponseRef = useRef<string | null>(null)
   const sessionIDRef = useRef<string | null>(null)
@@ -50,52 +45,31 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const sttConfig = preferences?.stt
   const isEnabled = !!(talkModeConfig?.enabled && sttConfig?.enabled)
 
-  const silenceThresholdMs = talkModeConfig?.silenceThresholdMs ?? 800
-  const minSpeechMs = talkModeConfig?.minSpeechMs ?? 400
-  const autoInterrupt = talkModeConfig?.autoInterrupt ?? true
+  const silenceTimeoutMs = talkModeConfig?.silenceThresholdMs ?? 1500
 
   const updateState = useCallback((newState: TalkModeState) => {
     stateRef.current = newState
     setState(newState)
   }, [])
 
-  const processAudio = useCallback(async (audio: Float32Array) => {
-    if (!isActiveRef.current || stateRef.current === 'off') {
+  const sendToOpenCode = useCallback(async (transcript: string) => {
+    if (!isActiveRef.current) return
+
+    const opcodeUrl = opcodeUrlRef.current
+    const directory = directoryRef.current
+    const currentSessionID = sessionIDRef.current
+
+    if (!opcodeUrl || !currentSessionID || !transcript) {
+      updateState('listening')
       return
     }
 
     updateState('thinking')
-    setError(null)
+    setUserTranscript(transcript)
+    userTranscriptRef.current = transcript
+    setLiveTranscript('')
 
     try {
-      const wavBlob = float32ToWav(audio, 16000)
-      const base64Audio = await blobToBase64(wavBlob)
-
-      const result = await sttApi.transcribeBase64(base64Audio, 'wav', {
-        model: sttConfig?.model,
-        language: sttConfig?.language
-      })
-
-      if (!isActiveRef.current) return
-
-      const transcript = result.text?.trim()
-      if (!transcript) {
-        updateState('listening')
-        return
-      }
-
-      setUserTranscript(transcript)
-      userTranscriptRef.current = transcript
-
-      const opcodeUrl = opcodeUrlRef.current
-      const directory = directoryRef.current
-      const currentSessionID = sessionIDRef.current
-
-      if (!opcodeUrl || !currentSessionID) {
-        updateState('listening')
-        return
-      }
-
       const response = await fetch(`${opcodeUrl}/session/${currentSessionID}/message`, {
         method: 'POST',
         headers: {
@@ -111,16 +85,16 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         throw new Error('Failed to send message')
       }
 
-      startPollingRef.current?.()
+      startPollingForResponse()
 
     } catch (err) {
       if (!isActiveRef.current) return
-      const message = err instanceof Error ? err.message : 'Failed to process audio'
+      const message = err instanceof Error ? err.message : 'Failed to send message'
       setError(message)
       updateState('listening')
       setTimeout(() => setError(null), 3000)
     }
-  }, [sttConfig?.model, sttConfig?.language, updateState])
+  }, [updateState])
 
   const startPollingForResponse = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -186,65 +160,40 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         // Ignore polling errors
       }
     }, 500)
-  }, [queryClient, speak, updateState])
+  }, [speak, updateState])
 
-  startPollingRef.current = startPollingForResponse
+  const handleTranscriptUpdate = useCallback((transcript: string, isFinal: boolean) => {
+    if (!isActiveRef.current) return
+    
+    setLiveTranscript(transcript)
+    
+    if (isFinal) {
+      // Will be handled by onSpeechEnd
+    }
+  }, [])
 
-  const vad = useMicVAD({
-    startOnLoad: false,
-    positiveSpeechThreshold: 0.3,
-    negativeSpeechThreshold: 0.25,
-    redemptionFrames: Math.ceil(silenceThresholdMs / 96),
-    minSpeechFrames: Math.ceil(minSpeechMs / 96),
-    preSpeechPadFrames: 3,
-    baseAssetPath: '/vad/',
-    onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/',
-    onSpeechStart: () => {
-      if (autoInterrupt && stateRef.current === 'speaking' && isPlaying) {
-        stopTTS()
-        updateState('listening')
-        setAgentResponse(null)
-        agentResponseRef.current = null
-      }
-    },
-    onSpeechEnd: (audio) => {
-      console.log('[VAD] onSpeechEnd, audio length:', audio.length, 'active:', isActiveRef.current, 'state:', stateRef.current)
-      if (isActiveRef.current && stateRef.current === 'listening') {
-        pendingAudioRef.current = audio
-        processAudio(audio)
-      }
-    },
-    onVADMisfire: () => {
-      // Ignored - too short
-    },
-    onFrameProcessed: (probs) => {
-      // Log speech probability for debugging
-      if (probs.isSpeech > 0.5) {
-        console.log('[VAD] Speech detected, probability:', probs.isSpeech)
-      }
+  const handleSpeechEnd = useCallback((fullTranscript: string) => {
+    if (!isActiveRef.current || stateRef.current !== 'listening') return
+    
+    if (fullTranscript && fullTranscript.trim()) {
+      sendToOpenCode(fullTranscript.trim())
+    }
+  }, [sendToOpenCode])
+
+  const streamingVAD = useStreamingVAD({
+    chunkIntervalMs: 2500,
+    silenceTimeoutMs,
+    onTranscriptUpdate: handleTranscriptUpdate,
+    onSpeechEnd: handleSpeechEnd,
+    sttConfig: {
+      model: sttConfig?.model,
+      language: sttConfig?.language
     }
   })
-
-  useEffect(() => {
-    if (vad.errored) {
-      console.error('[VAD] Error:', vad.errored)
-      setError(`VAD Error: ${vad.errored}`)
-    }
-  }, [vad.errored])
 
   const start = useCallback(async (newSessionID: string, opcodeUrl: string, directory?: string) => {
     if (!isEnabled) {
       setError('Talk Mode is not enabled. Enable it in Settings.')
-      return
-    }
-
-    if (vad.errored) {
-      setError(`Cannot start Talk Mode: VAD failed to initialize - ${vad.errored}`)
-      return
-    }
-
-    if (vad.loading) {
-      setError('Please wait, VAD is still loading...')
       return
     }
 
@@ -259,20 +208,20 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     setError(null)
     setUserTranscript(null)
     userTranscriptRef.current = null
+    setLiveTranscript('')
     setAgentResponse(null)
     agentResponseRef.current = null
 
     try {
-      vad.start()
+      await streamingVAD.start()
       updateState('listening')
-      console.log('[TalkMode] Started, VAD listening:', vad.listening)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to start Talk Mode'
       setError(message)
       updateState('error')
       isActiveRef.current = false
     }
-  }, [isEnabled, vad, updateState])
+  }, [isEnabled, streamingVAD, updateState])
 
   const stop = useCallback(() => {
     isActiveRef.current = false
@@ -282,7 +231,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       pollIntervalRef.current = null
     }
 
-    vad.pause()
+    streamingVAD.stop()
     stopTTS()
 
     updateState('off')
@@ -291,12 +240,13 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
     setError(null)
     setUserTranscript(null)
     userTranscriptRef.current = null
+    setLiveTranscript('')
     setAgentResponse(null)
     agentResponseRef.current = null
     opcodeUrlRef.current = null
     directoryRef.current = undefined
     lastProcessedMessageIdRef.current = null
-  }, [vad, stopTTS, updateState])
+  }, [streamingVAD, stopTTS, updateState])
 
   useEffect(() => {
     return () => {
@@ -308,15 +258,19 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   }, [])
 
   useEffect(() => {
+    if (streamingVAD.error) {
+      setError(streamingVAD.error)
+    }
+  }, [streamingVAD.error])
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const testApi = {
-        injectAudio: (audio: Float32Array) => {
+        injectTranscript: (transcript: string) => {
           if (stateRef.current === 'listening' && isActiveRef.current) {
-            console.log('[TalkMode Test] Injecting audio, length:', audio.length)
-            processAudio(audio)
+            handleSpeechEnd(transcript)
             return true
           }
-          console.log('[TalkMode Test] Cannot inject - state:', stateRef.current, 'active:', isActiveRef.current)
           return false
         },
         getState: () => ({
@@ -324,7 +278,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
           isActive: isActiveRef.current,
           sessionID: sessionIDRef.current,
           userTranscript: userTranscriptRef.current,
-          agentResponse: agentResponseRef.current
+          agentResponse: agentResponseRef.current,
+          liveTranscript: streamingVAD.currentTranscript
         }),
         forceListening: () => {
           if (isActiveRef.current) {
@@ -336,14 +291,15 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
       ;(window as Window & typeof globalThis & { __TALK_MODE_TEST__?: typeof testApi }).__TALK_MODE_TEST__ = testApi
     }
-  }, [processAudio, updateState])
+  }, [handleSpeechEnd, updateState, streamingVAD.currentTranscript])
 
   const value = {
     state,
     error,
     userTranscript,
+    liveTranscript,
     agentResponse,
-    userSpeaking: vad.userSpeaking,
+    userSpeaking: streamingVAD.isListening && streamingVAD.isProcessing,
     sessionID,
     start,
     stop,

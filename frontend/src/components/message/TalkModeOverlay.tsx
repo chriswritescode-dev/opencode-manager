@@ -13,6 +13,7 @@ export function TalkModeOverlay({ sessionID }: TalkModeOverlayProps) {
     state,
     error,
     userTranscript,
+    liveTranscript,
     agentResponse,
     userSpeaking,
     sessionID: activeSessionID,
@@ -102,6 +103,13 @@ export function TalkModeOverlay({ sessionID }: TalkModeOverlayProps) {
         </div>
 
         <div className="w-full space-y-3">
+          {liveTranscript && state === 'listening' && (
+            <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 backdrop-blur-md animate-pulse">
+              <div className="text-xs text-green-400 mb-1 font-medium">Listening...</div>
+              <div className="text-sm text-foreground">{liveTranscript}</div>
+            </div>
+          )}
+
           {userTranscript && (
             <div className="p-4 rounded-xl bg-blue-500/10 border border-blue-500/30 backdrop-blur-md">
               <div className="text-xs text-blue-400 mb-1 font-medium">You said:</div>
