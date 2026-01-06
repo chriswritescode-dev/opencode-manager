@@ -164,6 +164,19 @@ async function testClientMode(): Promise<void> {
         if (!data.healthy) throw new Error('OpenCode not healthy')
       })
 
+      await runTest('OpenCode directory auto-registered as repo', async () => {
+        const resp = await fetch(`http://localhost:${BACKEND_PORT}/api/repos`)
+        if (!resp.ok) throw new Error(`Repos endpoint returned ${resp.status}`)
+        const repos = await resp.json() as Array<{ fullPath: string; isLocal: boolean }>
+        if (!Array.isArray(repos)) throw new Error('Repos is not an array')
+        
+        const projectDir = path.resolve(import.meta.dir, '..')
+        const hasProjectRepo = repos.some(r => r.fullPath === projectDir)
+        if (!hasProjectRepo) {
+          throw new Error(`Expected repo with fullPath '${projectDir}', got: ${repos.map(r => r.fullPath).join(', ')}`)
+        }
+      })
+
     } finally {
       backendProc.kill('SIGTERM')
     }
