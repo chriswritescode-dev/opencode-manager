@@ -20,7 +20,7 @@ import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
-import { cleanupOrphanedDirectories } from './services/repo'
+import { cleanupOrphanedDirectories, registerExternalDirectory } from './services/repo'
 import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
 import { chatterboxServerManager } from './services/chatterbox'
@@ -224,6 +224,14 @@ try {
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
+
+  if (opencodeServerManager.isClientMode()) {
+    const connectedDir = opencodeServerManager.getConnectedDirectory()
+    if (connectedDir) {
+      logger.info(`Client mode: registering connected directory as workspace: ${connectedDir}`)
+      await registerExternalDirectory(db, connectedDir)
+    }
+  }
 
   try {
     await whisperServerManager.start()

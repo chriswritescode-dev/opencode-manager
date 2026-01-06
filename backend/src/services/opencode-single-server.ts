@@ -34,6 +34,7 @@ class OpenCodeServerManager {
   private db: Database | null = null
   private version: string | null = null
   private lastStartupError: string | null = null
+  private connectedDirectory: string | null = null
 
   private constructor() {}
 
@@ -60,7 +61,11 @@ class OpenCodeServerManager {
       if (healthy) {
         this.isHealthy = true
         await this.fetchVersion()
+        await this.fetchConnectedDirectory()
         logger.info(`Connected to OpenCode server v${this.version || 'unknown'}`)
+        if (this.connectedDirectory) {
+          logger.info(`OpenCode server directory: ${this.connectedDirectory}`)
+        }
         return
       }
       throw new Error(`Failed to connect to OpenCode server on port ${OPENCODE_SERVER_PORT}`)
@@ -234,6 +239,14 @@ class OpenCodeServerManager {
     return compareVersions(this.version, MIN_OPENCODE_VERSION) >= 0
   }
 
+  getConnectedDirectory(): string | null {
+    return this.connectedDirectory
+  }
+
+  isClientMode(): boolean {
+    return CLIENT_MODE
+  }
+
   getLastStartupError(): string | null {
     return this.lastStartupError
   }
@@ -274,6 +287,26 @@ class OpenCodeServerManager {
       }
     } catch (error) {
       logger.warn('Failed to get OpenCode version:', error)
+    }
+    return null
+  }
+
+  async fetchConnectedDirectory(): Promise<string | null> {
+    if (!CLIENT_MODE) return null
+    
+    try {
+      const response = await fetch(`http://127.0.0.1:${OPENCODE_SERVER_PORT}/session`, {
+        signal: AbortSignal.timeout(5000)
+      })
+      if (response.ok) {
+        const sessions = await response.json() as Array<{ directory?: string }>
+        if (sessions.length > 0 && sessions[0]?.directory) {
+          this.connectedDirectory = sessions[0].directory
+          return this.connectedDirectory
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to get OpenCode server directory:', error)
     }
     return null
   }

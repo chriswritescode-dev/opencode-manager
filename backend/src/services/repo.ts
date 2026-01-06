@@ -186,6 +186,58 @@ export async function initLocalRepo(
   }
 }
 
+export async function registerExternalDirectory(
+  database: Database,
+  absolutePath: string
+): Promise<Repo | null> {
+  const normalizedPath = absolutePath.trim().replace(/\/+$/, '')
+  
+  const existingRepos = db.listRepos(database)
+  for (const repo of existingRepos) {
+    if (repo.fullPath === normalizedPath) {
+      logger.info(`External directory already registered: ${normalizedPath}`)
+      return repo
+    }
+  }
+  
+  try {
+    const isGitRepo = await executeCommand(['git', '-C', normalizedPath, 'rev-parse', '--git-dir'], { silent: true })
+      .then(() => true)
+      .catch(() => false)
+    
+    if (!isGitRepo) {
+      logger.warn(`External directory is not a git repository: ${normalizedPath}`)
+      return null
+    }
+    
+    const currentBranch = await safeGetCurrentBranch(normalizedPath)
+    
+    let remoteUrl: string | undefined
+    try {
+      remoteUrl = (await executeCommand(['git', '-C', normalizedPath, 'remote', 'get-url', 'origin'], { silent: true })).trim()
+    } catch {
+      // No remote - that's ok
+    }
+    
+    const createRepoInput: CreateRepoInput = {
+      repoUrl: remoteUrl,
+      localPath: normalizedPath,
+      branch: currentBranch || undefined,
+      defaultBranch: currentBranch || 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+      isLocal: true,
+    }
+    
+    const repo = db.createRepo(database, createRepoInput)
+    logger.info(`Registered external directory as repo: ${normalizedPath} (id: ${repo.id})`)
+    return repo
+  } catch (error: any) {
+    logger.error(`Failed to register external directory: ${normalizedPath}`, error)
+    return null
+  }
+}
+
 export async function cloneRepo(
   database: Database,
   repoUrl: string,

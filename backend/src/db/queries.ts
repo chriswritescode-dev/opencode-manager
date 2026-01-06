@@ -18,11 +18,12 @@ export interface RepoRow {
 }
 
 function rowToRepo(row: RepoRow): Repo {
+  const isAbsolutePath = row.local_path.startsWith('/')
   return {
     id: row.id,
     repoUrl: row.repo_url,
     localPath: row.local_path,
-    fullPath: path.join(getReposPath(), row.local_path),
+    fullPath: isAbsolutePath ? row.local_path : path.join(getReposPath(), row.local_path),
     branch: row.branch,
     defaultBranch: row.default_branch,
     cloneStatus: row.clone_status as Repo['cloneStatus'],

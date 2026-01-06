@@ -9,7 +9,7 @@ import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
-import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
 import path from 'path'
 
 export function createRepoRoutes(database: Database) {
@@ -258,8 +258,7 @@ export function createRepoRoutes(database: Database) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const repoPath = path.resolve(getReposPath(), repo.localPath)
-       const status = await gitOperations.getGitStatus(repoPath, database)
+      const status = await gitOperations.getGitStatus(repo.fullPath, database)
 
       
       return c.json(status)
@@ -284,8 +283,7 @@ export function createRepoRoutes(database: Database) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const repoPath = path.resolve(getReposPath(), repo.localPath)
-       const diff = await gitOperations.getFileDiff(repoPath, filePath, database)
+      const diff = await gitOperations.getFileDiff(repo.fullPath, filePath, database)
 
       
       return c.json(diff)
@@ -304,11 +302,10 @@ export function createRepoRoutes(database: Database) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const repoPath = path.resolve(getReposPath(), repo.localPath)
       const repoName = path.basename(repo.localPath)
       
-      logger.info(`Starting archive creation for repo ${id}: ${repoPath}`)
-      const archivePath = await archiveService.createRepoArchive(repoPath)
+      logger.info(`Starting archive creation for repo ${id}: ${repo.fullPath}`)
+      const archivePath = await archiveService.createRepoArchive(repo.fullPath)
       const archiveSize = await archiveService.getArchiveSize(archivePath)
       const archiveStream = archiveService.getArchiveStream(archivePath)
       
