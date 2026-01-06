@@ -1,4 +1,6 @@
 import { spawn, ChildProcess } from 'child_process'
+import fs from 'fs'
+import os from 'os'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import path from 'path'
@@ -52,6 +54,30 @@ class ChatterboxServerManager {
     return { ...this.status }
   }
 
+  private findPythonBin(): string {
+    if (process.env.CHATTERBOX_VENV) {
+      const venvPython = path.join(process.env.CHATTERBOX_VENV, 'bin', 'python')
+      if (fs.existsSync(venvPython)) {
+        return venvPython
+      }
+    }
+
+    const defaultVenvPath = path.join(os.homedir(), '.opencode-manager', 'chatterbox-venv', 'bin', 'python')
+    if (fs.existsSync(defaultVenvPath)) {
+      logger.info(`Found Chatterbox venv at ${defaultVenvPath}`)
+      return defaultVenvPath
+    }
+
+    if (process.env.WHISPER_VENV) {
+      const whisperPython = path.join(process.env.WHISPER_VENV, 'bin', 'python')
+      if (fs.existsSync(whisperPython)) {
+        return whisperPython
+      }
+    }
+
+    return 'python3'
+  }
+
   async start(): Promise<void> {
     if (this.startPromise) {
       return this.startPromise
@@ -87,9 +113,7 @@ class ChatterboxServerManager {
       PYTHONUNBUFFERED: '1'
     }
 
-    const venvPath = process.env.CHATTERBOX_VENV || process.env.WHISPER_VENV
-    const pythonBin = venvPath ? path.join(venvPath, 'bin', 'python') : 'python3'
-
+    const pythonBin = this.findPythonBin()
     logger.info(`Using Python: ${pythonBin}`)
 
     this.process = spawn(pythonBin, [scriptPath], {
