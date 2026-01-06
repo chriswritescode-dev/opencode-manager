@@ -1,5 +1,4 @@
-import axios from 'axios'
-import { API_BASE_URL } from '@/config'
+import { apiClient, API_BASE_URL } from '@/lib/api'
 
 export interface TTSModelsResponse {
   models: string[]
@@ -25,28 +24,28 @@ export interface TTSStatusResponse {
 
 export const ttsApi = {
   getModels: async (userId = 'default', forceRefresh = false): Promise<TTSModelsResponse> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/tts/models`, {
+    const { data } = await apiClient.get(`${API_BASE_URL}/api/tts/models`, {
       params: { userId, ...(forceRefresh && { refresh: 'true' }) },
     })
     return data
   },
 
   getVoices: async (userId = 'default', forceRefresh = false): Promise<TTSVoicesResponse> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/tts/voices`, {
+    const { data } = await apiClient.get(`${API_BASE_URL}/api/tts/voices`, {
       params: { userId, ...(forceRefresh && { refresh: 'true' }) },
     })
     return data
   },
 
   getStatus: async (userId = 'default'): Promise<TTSStatusResponse> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/tts/status`, {
+    const { data } = await apiClient.get(`${API_BASE_URL}/api/tts/status`, {
       params: { userId },
     })
     return data
   },
 
   synthesize: async (text: string, userId = 'default', signal?: AbortSignal): Promise<Blob> => {
-    const { data } = await axios.post(
+    const { data } = await apiClient.post(
       `${API_BASE_URL}/api/tts/synthesize`,
       { text },
       {

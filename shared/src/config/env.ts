@@ -43,6 +43,7 @@ export const ENV = {
     HOST: getEnvString('HOST', DEFAULTS.SERVER.HOST),
     CORS_ORIGIN: getEnvString('CORS_ORIGIN', DEFAULTS.SERVER.CORS_ORIGIN),
     NODE_ENV: getEnvString('NODE_ENV', 'development'),
+    DISABLE_AUTH: getEnvString('DISABLE_AUTH', 'false'),
   },
 
   OPENCODE: {
