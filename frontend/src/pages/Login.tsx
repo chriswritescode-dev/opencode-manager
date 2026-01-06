@@ -67,7 +67,10 @@ export function Login() {
             {needsSetup && (
               <Alert className="bg-blue-900/20 border-blue-900/50">
                 <AlertDescription className="text-blue-200 text-sm">
-                  This appears to be a fresh installation. Check your server console for the generated API token.
+                  This appears to be a fresh installation. Your token was saved to:<br />
+                  <code className="text-xs bg-black/30 px-1 py-0.5 rounded mt-1 inline-block">
+                    ~/.config/opencode-manager.json
+                  </code>
                 </AlertDescription>
               </Alert>
             )}

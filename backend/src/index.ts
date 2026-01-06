@@ -254,13 +254,24 @@ try {
 
   const bootstrapToken = bootstrapFirstToken(db)
   if (bootstrapToken) {
+    const configFilePath = path.join(os.homedir(), '.config', 'opencode-manager.json')
+    const configDir = path.dirname(configFilePath)
+    await ensureDirectoryExists(configDir)
+    
+    const configData = {
+      token: bootstrapToken,
+      createdAt: new Date().toISOString(),
+      apiUrl: `http://${HOST}:${PORT}`,
+    }
+    await writeFileContent(configFilePath, JSON.stringify(configData, null, 2))
+    
     logger.info('')
     logger.info('='.repeat(60))
     logger.info('FIRST TIME SETUP - API TOKEN GENERATED')
     logger.info('='.repeat(60))
-    logger.info(`Token: ${bootstrapToken}`)
+    logger.info(`Token saved to: ${configFilePath}`)
     logger.info('')
-    logger.info('Save this token securely - it will not be shown again!')
+    logger.info('You can also find the token in the file above.')
     logger.info('Use it in the Authorization header: Bearer <token>')
     logger.info('='.repeat(60))
     logger.info('')
