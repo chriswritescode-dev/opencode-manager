@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process'
+import { spawn, ChildProcess, execSync } from 'child_process'
 import fs from 'fs'
 import os from 'os'
 import { logger } from '../utils/logger'
@@ -8,6 +8,7 @@ import path from 'path'
 const CHATTERBOX_PORT = parseInt(process.env.CHATTERBOX_PORT || '5553')
 const CHATTERBOX_HOST = process.env.CHATTERBOX_HOST || '127.0.0.1'
 const CHATTERBOX_DEVICE = process.env.CHATTERBOX_DEVICE || 'auto'
+const DEFAULT_VENV_DIR = path.join(os.homedir(), '.opencode-manager', 'chatterbox-venv')
 
 interface ChatterboxServerStatus {
   running: boolean
@@ -54,7 +55,7 @@ class ChatterboxServerManager {
     return { ...this.status }
   }
 
-  private findPythonBin(): string {
+  private findPythonBin(): string | null {
     if (process.env.CHATTERBOX_VENV) {
       const venvPython = path.join(process.env.CHATTERBOX_VENV, 'bin', 'python')
       if (fs.existsSync(venvPython)) {
@@ -62,10 +63,9 @@ class ChatterboxServerManager {
       }
     }
 
-    const defaultVenvPath = path.join(os.homedir(), '.opencode-manager', 'chatterbox-venv', 'bin', 'python')
-    if (fs.existsSync(defaultVenvPath)) {
-      logger.info(`Found Chatterbox venv at ${defaultVenvPath}`)
-      return defaultVenvPath
+    const defaultVenvPython = path.join(DEFAULT_VENV_DIR, 'bin', 'python')
+    if (fs.existsSync(defaultVenvPython)) {
+      return defaultVenvPython
     }
 
     if (process.env.WHISPER_VENV) {
@@ -75,7 +75,65 @@ class ChatterboxServerManager {
       }
     }
 
-    return 'python3'
+    return null
+  }
+
+  private findCompatiblePython(): string | null {
+    const candidates = ['python3.11', 'python3.12', 'python3.10']
+    for (const py of candidates) {
+      try {
+        execSync(`which ${py}`, { stdio: 'pipe' })
+        return py
+      } catch {
+        continue
+      }
+    }
+    return null
+  }
+
+  private async setupVenv(): Promise<string | null> {
+    const pythonBin = this.findCompatiblePython()
+    if (!pythonBin) {
+      logger.warn('No compatible Python (3.10-3.12) found for Chatterbox TTS')
+      logger.warn('Install Python 3.11 with: brew install python@3.11')
+      return null
+    }
+
+    logger.info(`Setting up Chatterbox venv with ${pythonBin}...`)
+    
+    try {
+      fs.mkdirSync(path.dirname(DEFAULT_VENV_DIR), { recursive: true })
+      
+      logger.info('Creating virtual environment...')
+      execSync(`${pythonBin} -m venv "${DEFAULT_VENV_DIR}"`, { stdio: 'pipe' })
+      
+      const pip = path.join(DEFAULT_VENV_DIR, 'bin', 'pip')
+      const venvPython = path.join(DEFAULT_VENV_DIR, 'bin', 'python')
+      
+      logger.info('Installing PyTorch (this may take a few minutes)...')
+      const torchCmd = os.platform() === 'darwin' && os.arch() === 'arm64'
+        ? `"${pip}" install torch==2.6.0 torchaudio==2.6.0`
+        : `"${pip}" install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cpu`
+      execSync(torchCmd, { stdio: 'pipe', timeout: 600000 })
+      
+      logger.info('Installing chatterbox-tts dependencies...')
+      execSync(`"${pip}" install 'numpy>=1.24.0,<1.26.0' 'safetensors==0.5.3' 'transformers==4.46.3'`, { stdio: 'pipe', timeout: 300000 })
+      
+      logger.info('Installing chatterbox-tts...')
+      execSync(`"${pip}" install chatterbox-tts==0.1.6`, { stdio: 'pipe', timeout: 300000 })
+      
+      logger.info('Installing server dependencies...')
+      execSync(`"${pip}" install fastapi uvicorn python-multipart`, { stdio: 'pipe', timeout: 120000 })
+      
+      logger.info('Chatterbox venv setup complete!')
+      return venvPython
+    } catch (error) {
+      logger.error('Failed to setup Chatterbox venv:', error)
+      try {
+        fs.rmSync(DEFAULT_VENV_DIR, { recursive: true, force: true })
+      } catch {}
+      return null
+    }
   }
 
   async start(): Promise<void> {
@@ -100,9 +158,20 @@ class ChatterboxServerManager {
     const scriptPath = path.join(process.cwd(), 'scripts', 'chatterbox-server.py')
     const voiceSamplesDir = path.join(getWorkspacePath(), 'cache', 'chatterbox-voices')
 
+    let pythonBin = this.findPythonBin()
+    
+    if (!pythonBin) {
+      logger.info('Chatterbox venv not found, setting up automatically...')
+      pythonBin = await this.setupVenv()
+      if (!pythonBin) {
+        throw new Error('Failed to setup Chatterbox environment')
+      }
+    }
+
     logger.info(`Starting Chatterbox server on ${CHATTERBOX_HOST}:${CHATTERBOX_PORT}`)
     logger.info(`Script path: ${scriptPath}`)
     logger.info(`Voice samples directory: ${voiceSamplesDir}`)
+    logger.info(`Using Python: ${pythonBin}`)
 
     const env = {
       ...process.env,
@@ -112,9 +181,6 @@ class ChatterboxServerManager {
       CHATTERBOX_DEVICE: CHATTERBOX_DEVICE,
       PYTHONUNBUFFERED: '1'
     }
-
-    const pythonBin = this.findPythonBin()
-    logger.info(`Using Python: ${pythonBin}`)
 
     this.process = spawn(pythonBin, [scriptPath], {
       env,
