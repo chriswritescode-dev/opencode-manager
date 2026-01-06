@@ -77,7 +77,9 @@ install_from_fork() {
 
 install_official() {
   echo "Installing official OpenCode..."
-  curl -fsSL https://opencode.ai/install | bash
+  # Unset GITHUB_ACTIONS to prevent the install script from trying to write to $GITHUB_PATH
+  # which doesn't exist inside Docker containers even when running in CI
+  GITHUB_ACTIONS= curl -fsSL https://opencode.ai/install | bash
 }
 
 echo "Checking OpenCode installation..."
