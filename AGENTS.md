@@ -5,12 +5,57 @@
 - `pnpm dev` - Start both backend (5001) and frontend (5173)
 - `pnpm dev:backend` - Backend only: `bun --watch backend/src/index.ts`
 - `pnpm dev:frontend` - Frontend only: `cd frontend && vite`
+- `pnpm start` - Native start with Cloudflare tunnel (spawns opencode serve)
+- `pnpm start:client` - Connect to existing opencode instance with tunnel
+- `pnpm start:no-tunnel` - Native start without tunnel
+- `pnpm cleanup` - Kill orphaned processes on managed ports
 - `pnpm build` - Build both backend and frontend
 - `pnpm test` - Run backend tests: `cd backend && bun test`
 - `cd backend && bun test <filename>` - Run single test file
 - `cd backend && vitest --ui` - Test UI with coverage
 - `cd backend && vitest --coverage` - Coverage report (80% threshold)
 - `cd frontend && npm run lint` - Frontend linting
+
+## Native Local Development (No Docker)
+
+Run opencode-manager natively on macOS without Docker:
+
+```bash
+# Normal mode - spawns opencode serve with Cloudflare tunnel
+pnpm start
+
+# Client mode - connect to existing opencode instance with tunnel
+# (shows list of running opencode servers to choose from)
+pnpm start:client
+
+# Without Cloudflare tunnel (local only)
+pnpm start:no-tunnel
+
+# Client mode without tunnel
+bun scripts/start-native.ts --client
+
+# Custom port
+bun scripts/start-native.ts --port 3000
+```
+
+### Requirements
+
+- Bun installed
+- Node.js (for frontend)
+- `cloudflared` for tunnel mode: `brew install cloudflared`
+- OpenCode installed: `curl -fsSL https://opencode.ai/install | bash`
+
+### How Client Mode Works
+
+When using `--client`, the script:
+1. Scans for running opencode processes using `lsof`
+2. Checks health via `/doc` endpoint on each discovered port
+3. Fetches version info from `/global/health`
+4. Lists all healthy instances with directory, version, and PID
+5. Lets you select which instance to connect to
+6. Starts the backend in "client mode" (doesn't spawn opencode serve)
+
+This is useful when you already have `opencode` running in a terminal and want the web UI to connect to it.
 
 ## Voice E2E Tests
 

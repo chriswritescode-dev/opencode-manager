@@ -11,6 +11,7 @@ const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
 const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
+const CLIENT_MODE = process.env.OPENCODE_CLIENT_MODE === 'true'
 
 function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.split('.').map(Number)
@@ -51,6 +52,18 @@ class OpenCodeServerManager {
     if (this.isHealthy) {
       logger.info('OpenCode server already running and healthy')
       return
+    }
+
+    if (CLIENT_MODE) {
+      logger.info(`Client mode: connecting to existing OpenCode server on port ${OPENCODE_SERVER_PORT}`)
+      const healthy = await this.waitForHealth(10000)
+      if (healthy) {
+        this.isHealthy = true
+        await this.fetchVersion()
+        logger.info(`Connected to OpenCode server v${this.version || 'unknown'}`)
+        return
+      }
+      throw new Error(`Failed to connect to OpenCode server on port ${OPENCODE_SERVER_PORT}`)
     }
 
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
@@ -169,6 +182,12 @@ class OpenCodeServerManager {
   }
 
   async stop(): Promise<void> {
+    if (CLIENT_MODE) {
+      logger.info('Client mode: not stopping external OpenCode server')
+      this.isHealthy = false
+      return
+    }
+
     if (!this.serverPid) return
     
     logger.info('Stopping OpenCode server')

@@ -316,16 +316,23 @@ async function runRealAudioTest(config: TestConfig): Promise<boolean> {
       success(`OpenCode responded: "${response.slice(0, 100)}"`)
       if (response.includes('4') || response.toLowerCase().includes('four')) {
         success('Response contains correct answer!')
+      } else {
+        fail('Response does not contain expected answer (4)')
       }
     } else {
-      info('No response captured (may need more time)')
+      fail('No response from OpenCode')
     }
 
-    const passed = !!transcribedCorrectly
+    const responseCorrect = response && (response.includes('4') || response.toLowerCase().includes('four'))
+    const passed = !!transcribedCorrectly && !!responseCorrect
     
     if (passed) {
       console.log('\n✅ FULL E2E TEST PASSED')
-      console.log('   Real audio → MediaRecorder → STT → Transcription verified!')
+      console.log('   Real audio → MediaRecorder → STT → Transcription → OpenCode → Response verified!')
+    } else {
+      console.log('\n❌ TEST FAILED')
+      if (!transcribedCorrectly) console.log('   - Transcription failed or incorrect')
+      if (!responseCorrect) console.log('   - OpenCode response missing or incorrect')
     }
 
     return passed

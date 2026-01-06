@@ -27,5 +27,10 @@ export default defineConfig({
     exclude: ["test/integration/**"],
     testTimeout: 10000,
     hookTimeout: 10000,
+    server: {
+      deps: {
+        external: ["bun"],
+      },
+    },
   },
 });

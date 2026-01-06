@@ -146,44 +146,46 @@ We regularly sync our fork with upstream sst/opencode to incorporate new feature
 
 ## Installation
 
-### Option 1: Docker (Recommended for Production)
+### Option 1: Docker (Recommended)
 
 ```bash
-# Clone the repository
+# Simple one-liner
+docker run -d -p 5003:5003 -v opencode-workspace:/workspace ghcr.io/dzianisv/opencode-manager
+
+# Or with API keys
+docker run -d -p 5003:5003 \
+  -e ANTHROPIC_API_KEY=sk-... \
+  -v opencode-workspace:/workspace \
+  ghcr.io/dzianisv/opencode-manager
+```
+
+Access the application at http://localhost:5003
+
+**With Docker Compose** (for persistent volumes and env vars):
+
+```bash
 git clone https://github.com/VibeTechnologies/opencode-manager.git
 cd opencode-manager
 
-# Start with Docker Compose (single container)
-docker-compose up -d
+# Configure API keys (optional)
+echo "ANTHROPIC_API_KEY=sk-..." > .env
 
-# Access the application at http://localhost:5001
+# Start
+docker compose up -d
 ```
 
 The Docker setup automatically:
-- Installs OpenCode if not present
-- Builds and serves frontend from backend
+- Installs OpenCode CLI on first run
+- Starts Whisper (STT) and Chatterbox (TTS) servers
 - Sets up persistent volumes for workspace and database
-- Includes health checks and auto-restart
 
 **Docker Commands:**
 ```bash
-# Start container
-docker-compose up -d
-
-# Stop and remove container
-docker-compose down
-
-# Rebuild image
-docker-compose build
-
-# View logs
-docker-compose logs -f
-
-# Restart container
-docker-compose restart
-
-# Access container shell
-docker exec -it opencode-manager sh
+docker compose up -d        # Start
+docker compose down         # Stop
+docker compose logs -f      # View logs
+docker compose restart      # Restart
+docker exec -it opencode-manager sh  # Shell access
 ```
 
 ### Dev Server Ports
@@ -348,7 +350,102 @@ ssh azureuser@<VM_IP> "sudo docker logs opencode-manager -f"
 - Standard_D2s_v5 (2 vCPU, 8GB RAM): ~$70/month
 - Use `--destroy` when not in use to avoid charges
 
-### Option 3: Local Development
+### Option 3: Native Local Development (macOS)
+
+Run OpenCode Manager natively on macOS without Docker. This is ideal for development or when you want the web UI to connect to an existing OpenCode instance running in your terminal.
+
+**Prerequisites:**
+- [Bun](https://bun.sh/) installed
+- [Node.js](https://nodejs.org/) installed (for frontend)
+- [OpenCode](https://opencode.ai) installed: `curl -fsSL https://opencode.ai/install | bash`
+- (Optional) [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) for tunnel mode: `brew install cloudflared`
+
+**Quick Start:**
+
+```bash
+# Clone the repository
+git clone https://github.com/VibeTechnologies/opencode-manager.git
+cd opencode-manager
+
+# Install dependencies
+pnpm install
+
+# Copy environment configuration
+cp .env.local.example .env
+
+# Start with Cloudflare tunnel (spawns opencode serve + creates public URL)
+pnpm start
+
+# Or connect to an existing opencode instance with tunnel
+pnpm start:client
+
+# Or start without tunnel (local only)
+pnpm start:no-tunnel
+```
+
+**Available Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `pnpm start` | Start with Cloudflare tunnel - spawns `opencode serve` + public URL |
+| `pnpm start:client` | Connect to existing opencode instance with tunnel |
+| `pnpm start:no-tunnel` | Start without tunnel (local only) |
+| `bun scripts/start-native.ts --help` | Show all available options |
+
+**Client Mode:**
+
+When using `--client` mode, the script will:
+1. Scan for running opencode processes using `lsof`
+2. Check health via `/doc` endpoint on each discovered port
+3. Fetch version info from `/global/health`
+4. List all healthy instances with directory, version, and PID
+5. Let you select which instance to connect to
+
+```bash
+$ pnpm start:client
+
+╔═══════════════════════════════════════╗
+║   OpenCode Manager - Native Start     ║
+╚═══════════════════════════════════════╝
+
+🔍 Searching for running opencode servers...
+
+📋 Found multiple opencode servers:
+
+  [1] Port 5551
+      Directory: /Users/you/project-a
+      Version: 1.1.2
+      PID: 12345
+
+  [2] Port 61782
+      Directory: /Users/you/project-b
+      Version: 1.0.223
+      PID: 67890
+
+Select server [1]: 
+```
+
+This is useful when you already have `opencode` running in a terminal and want the web UI to connect to it without spawning a separate server.
+
+**Without Tunnel (Local Only):**
+
+```bash
+# Start without tunnel
+pnpm start:no-tunnel
+
+# Or connect to existing instance without tunnel
+bun scripts/start-native.ts --client
+```
+
+**Custom Port:**
+
+```bash
+# Use a different backend port
+bun scripts/start-native.ts --port 3000
+bun scripts/start-native.ts --client --port 3000
+```
+
+### Option 4: Local Development (Hot Reload)
 
 ```bash
 # Clone the repository

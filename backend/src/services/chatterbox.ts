@@ -138,6 +138,10 @@ class ChatterboxServerManager {
 
   private async waitForReady(maxAttempts = 60, delayMs = 2000): Promise<void> {
     for (let i = 0; i < maxAttempts; i++) {
+      if (!this.process) {
+        throw new Error('Chatterbox server process exited unexpectedly')
+      }
+
       try {
         const response = await fetch(`${this.getBaseUrl()}/health`, {
           signal: AbortSignal.timeout(5000)
