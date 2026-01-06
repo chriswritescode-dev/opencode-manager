@@ -18,6 +18,7 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: 5173,
+      allowedHosts: true,
       proxy: {
         "/api/terminal/socket.io": {
           target: `http://localhost:${backendPort}`,
