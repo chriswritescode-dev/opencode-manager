@@ -1,5 +1,4 @@
-import axios from 'axios'
-import { API_BASE_URL } from '@/config'
+import { apiClient, API_BASE_URL } from '@/lib/api'
 
 export interface STTTranscribeResponse {
   text: string
@@ -39,7 +38,7 @@ export const sttApi = {
   ): Promise<STTTranscribeResponse> => {
     const base64 = await blobToBase64(audioBlob)
     
-    const { data } = await axios.post(
+    const { data } = await apiClient.post(
       `${API_BASE_URL}/api/stt/transcribe`,
       {
         audio: base64,
@@ -62,7 +61,7 @@ export const sttApi = {
     options?: { model?: string; language?: string; signal?: AbortSignal },
     userId = 'default'
   ): Promise<STTTranscribeResponse> => {
-    const { data } = await axios.post(
+    const { data } = await apiClient.post(
       `${API_BASE_URL}/api/stt/transcribe`,
       {
         audio: base64Audio,
@@ -80,14 +79,14 @@ export const sttApi = {
   },
 
   getModels: async (): Promise<STTModelsResponse> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/stt/models`, {
+    const { data } = await apiClient.get(`${API_BASE_URL}/api/stt/models`, {
       timeout: 10000
     })
     return data
   },
 
   getStatus: async (userId = 'default'): Promise<STTStatusResponse> => {
-    const { data } = await axios.get(`${API_BASE_URL}/api/stt/status`, {
+    const { data } = await apiClient.get(`${API_BASE_URL}/api/stt/status`, {
       params: { userId },
       timeout: 10000
     })

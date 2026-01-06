@@ -15,6 +15,8 @@ import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTerminalRoutes, registerTerminalSocketIO } from './routes/terminal'
+import { createAuthRoutes } from './routes/auth'
+import { createAuthMiddleware } from './middleware/auth'
 import { terminalService } from './services/terminal'
 import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
@@ -24,6 +26,7 @@ import { cleanupOrphanedDirectories, registerExternalDirectory } from './service
 import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
 import { chatterboxServerManager } from './services/chatterbox'
+import { bootstrapFirstToken } from './services/token'
 import { 
   getWorkspacePath, 
   getReposPath, 
@@ -48,6 +51,8 @@ app.use('/*', cors({
 }))
 
 const db = initializeDatabase(DB_PATH)
+
+app.use('/api/*', createAuthMiddleware(db))
 
 export const DEFAULT_AGENTS_MD = `# OpenCode Manager - Global Agent Instructions
 
@@ -246,10 +251,25 @@ try {
   } catch (error) {
     logger.warn('Chatterbox server failed to start (TTS will be unavailable):', error)
   }
+
+  const bootstrapToken = bootstrapFirstToken(db)
+  if (bootstrapToken) {
+    logger.info('')
+    logger.info('='.repeat(60))
+    logger.info('FIRST TIME SETUP - API TOKEN GENERATED')
+    logger.info('='.repeat(60))
+    logger.info(`Token: ${bootstrapToken}`)
+    logger.info('')
+    logger.info('Save this token securely - it will not be shown again!')
+    logger.info('Use it in the Authorization header: Bearer <token>')
+    logger.info('='.repeat(60))
+    logger.info('')
+  }
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }
 
+app.route('/api/auth', createAuthRoutes(db))
 app.route('/api/repos', createRepoRoutes(db))
 app.route('/api/settings', createSettingsRoutes(db))
 app.route('/api/health', createHealthRoutes(db))
