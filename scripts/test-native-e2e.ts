@@ -222,6 +222,111 @@ async function testCleanupScript(): Promise<void> {
   }
 }
 
+async function testTunnelMode(): Promise<void> {
+  console.log('\n📋 Test: Tunnel Mode (Cloudflare tunnel)\n')
+
+  await cleanupPorts()
+
+  let hasTunnel = true
+  try {
+    execSync('which cloudflared', { stdio: 'pipe' })
+  } catch {
+    console.log('  ⚠ cloudflared not installed, skipping tunnel tests')
+    hasTunnel = false
+    return
+  }
+
+  const opencodeProc = spawn('opencode', ['serve', '--port', OPENCODE_PORT.toString(), '--hostname', '127.0.0.1'], {
+    cwd: path.resolve(import.meta.dir, '..'),
+    stdio: 'ignore',
+    detached: true,
+  })
+
+  await waitForHealth(`http://127.0.0.1:${OPENCODE_PORT}/doc`, 20, 500)
+
+  const proc = spawn('bun', ['scripts/start-native.ts', '--client', '--tunnel', '--port', BACKEND_PORT.toString()], {
+    cwd: path.resolve(import.meta.dir, '..'),
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      OPENCODE_SERVER_PORT: OPENCODE_PORT.toString(),
+      OPENCODE_CLIENT_MODE: 'true',
+      NODE_ENV: 'test',
+    },
+  })
+
+  proc.stdin?.write('1\n')
+  proc.stdin?.end()
+
+  let output = ''
+  let tunnelUrl = ''
+  proc.stdout?.on('data', (data) => { 
+    output += data.toString()
+    const match = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
+    if (match && !tunnelUrl) tunnelUrl = match[0]
+  })
+  proc.stderr?.on('data', (data) => { output += data.toString() })
+
+  try {
+    await runTest('Tunnel URL is captured', async () => {
+      for (let i = 0; i < 30 && !tunnelUrl; i++) {
+        await sleep(1000)
+      }
+      if (!tunnelUrl) throw new Error('Tunnel URL not found in output')
+    })
+
+    await runTest('Local backend is accessible', async () => {
+      const healthy = await waitForHealth(`http://localhost:${BACKEND_PORT}/api/health`, 30, 1000)
+      if (!healthy) throw new Error('Backend health check failed')
+    })
+
+    await runTest('Tunnel URL is reachable', async () => {
+      if (!tunnelUrl) throw new Error('No tunnel URL')
+      
+      let reached = false
+      for (let i = 0; i < 10; i++) {
+        try {
+          const resp = await fetch(tunnelUrl, { signal: AbortSignal.timeout(5000) })
+          if (resp.ok || resp.status === 200) {
+            reached = true
+            break
+          }
+        } catch {}
+        await sleep(2000)
+      }
+      if (!reached) throw new Error(`Tunnel URL ${tunnelUrl} not reachable`)
+    })
+
+    await runTest('API accessible via tunnel', async () => {
+      if (!tunnelUrl) throw new Error('No tunnel URL')
+      
+      let success = false
+      for (let i = 0; i < 5; i++) {
+        try {
+          const resp = await fetch(`${tunnelUrl}/api/health`, { signal: AbortSignal.timeout(5000) })
+          if (resp.ok) {
+            const data = await resp.json() as { status: string }
+            if (data.status === 'healthy') {
+              success = true
+              break
+            }
+          }
+        } catch {}
+        await sleep(2000)
+      }
+      if (!success) throw new Error('API health check via tunnel failed')
+    })
+
+  } finally {
+    proc.kill('SIGTERM')
+    try {
+      opencodeProc.kill('SIGTERM')
+    } catch {}
+    await sleep(1000)
+    await cleanupPorts()
+  }
+}
+
 async function main() {
   console.log('\n╔═══════════════════════════════════════════════════════╗')
   console.log('║   OpenCode Manager - Native Start E2E Tests           ║')
@@ -233,6 +338,7 @@ async function main() {
     await testCleanupScript()
     await testNormalMode()
     await testClientMode()
+    await testTunnelMode()
   } catch (error) {
     console.error('\n❌ Test suite failed:', error)
   }

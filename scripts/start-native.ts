@@ -215,15 +215,37 @@ async function startBackend(port: number, opencodePort?: number): Promise<Return
   return backendProcess
 }
 
-async function startFrontend(): Promise<ReturnType<typeof spawn>> {
+async function startFrontend(): Promise<{ process: ReturnType<typeof spawn>, port: number }> {
   console.log('🎨 Starting frontend...\n')
 
   const frontendProcess = spawn('pnpm', ['--filter', 'frontend', 'dev'], {
     cwd: path.resolve(import.meta.dir, '..'),
-    stdio: 'inherit',
+    stdio: ['ignore', 'pipe', 'pipe'],
   })
 
-  return frontendProcess
+  let frontendPort = 5173
+  
+  const portPromise = new Promise<number>((resolve) => {
+    const timeout = setTimeout(() => resolve(5173), 15000)
+    
+    const handleOutput = (data: Buffer) => {
+      const output = data.toString()
+      process.stdout.write(output)
+      
+      const portMatch = output.match(/Local:\s+http:\/\/localhost:(\d+)/)
+      if (portMatch) {
+        frontendPort = parseInt(portMatch[1])
+        clearTimeout(timeout)
+        resolve(frontendPort)
+      }
+    }
+    
+    frontendProcess.stdout?.on('data', handleOutput)
+    frontendProcess.stderr?.on('data', (data: Buffer) => process.stderr.write(data.toString()))
+  })
+
+  const port = await portPromise
+  return { process: frontendProcess, port }
 }
 
 async function main() {
@@ -260,13 +282,15 @@ async function main() {
 
   await new Promise(resolve => setTimeout(resolve, 2000))
 
-  const frontendProcess = await startFrontend()
-  processes.push(frontendProcess)
+  const frontend = await startFrontend()
+  processes.push(frontend.process)
 
   let tunnelProcess: ReturnType<typeof spawn> | null = null
+  let tunnelUrl: string | null = null
   if (args.tunnel) {
-    const tunnel = await startCloudflaredTunnel(args.port)
+    const tunnel = await startCloudflaredTunnel(frontend.port)
     tunnelProcess = tunnel.process
+    tunnelUrl = tunnel.url
     processes.push(tunnel.process)
 
     if (tunnel.url) {
@@ -278,7 +302,7 @@ async function main() {
 
   console.log('\n📍 Local URLs:')
   console.log(`   Backend:  http://localhost:${args.port}`)
-  console.log(`   Frontend: http://localhost:5173`)
+  console.log(`   Frontend: http://localhost:${frontend.port}`)
   if (opencodePort) {
     console.log(`   OpenCode: http://localhost:${opencodePort}`)
   }
