@@ -28,12 +28,9 @@ export async function analyzeScreenshot(
   imagePath: string,
   config: OCRConfig = DEFAULT_CONFIG
 ): Promise<OCRResult> {
-  const worker = await createWorker()
+  const worker = await createWorker(config.language || 'eng')
   
   try {
-    await worker.loadLanguage(config.language || 'eng')
-    await worker.initialize(config.language || 'eng')
-    
     const { data } = await worker.recognize(imagePath)
     
     const fullText = data.text

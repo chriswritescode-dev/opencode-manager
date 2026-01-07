@@ -171,33 +171,59 @@ async function runTests(config: TestConfig, envName: string): Promise<TestReport
     
     info('Phase 2: Core Functionality Tests')
     {
-      const testName = 'Navigate to first repo'
+      const testName = 'Navigate to session page'
       const testStart = Date.now()
       try {
+        info('Attempting to navigate to a session where Talk Mode is available')
+        
+        let sessionUrl = `${config.url}/repos/2/sessions`
+        await page.goto(sessionUrl, { waitUntil: 'networkidle0', timeout: config.timeouts.pageLoad })
         await sleep(2000)
         
-        const repoLink = await page.evaluateHandle(() => {
+        const sessionLinkHref = await page.evaluate(() => {
           const links = Array.from(document.querySelectorAll('a'))
-          return links.find(link => link.href.includes('/repos/') && link.href.match(/\/repos\/\d+$/))
+          const link = links.find(link => link.href.includes('/sessions/') && link.href.match(/\/sessions\/[^/]+$/))
+          return link ? link.href : null
         })
         
-        if (repoLink) {
-          await (repoLink as any).click()
+        if (sessionLinkHref) {
+          await page.goto(sessionLinkHref, { waitUntil: 'networkidle0', timeout: config.timeouts.pageLoad })
           await sleep(3000)
-          const screenshot = await takeScreenshot(page, '02-repo-page')
+          const screenshot = await takeScreenshot(page, '02-session-page')
           allScreenshots.push(screenshot)
           
-          success('Navigated to repo page')
+          success('Navigated to session page')
           functionalityTests.push(createTestResult(testName, true, {
             duration: Date.now() - testStart,
-            screenshot
+            screenshot,
+            notes: ['Session page loaded where Talk Mode button should be available']
           }))
         } else {
-          throw new Error('No repo links found')
+          info('No existing session found, creating new session')
+          sessionUrl = `${config.url}/repos/2`
+          await page.goto(sessionUrl, { waitUntil: 'networkidle0', timeout: config.timeouts.pageLoad })
+          await sleep(2000)
+          
+          const newSessionButton = await findButtonByText(page, ['New Session', 'New Chat', 'Start'])
+          if (newSessionButton) {
+            await (newSessionButton as any).click()
+            await sleep(3000)
+            const screenshot = await takeScreenshot(page, '02-new-session-page')
+            allScreenshots.push(screenshot)
+            
+            success('Created and navigated to new session')
+            functionalityTests.push(createTestResult(testName, true, {
+              duration: Date.now() - testStart,
+              screenshot,
+              notes: ['New session created']
+            }))
+          } else {
+            throw new Error('Could not find existing session or create new one')
+          }
         }
       } catch (error) {
         fail(`Failed: ${testName}`)
-        const screenshot = await takeScreenshot(page, '02-repo-page-fail')
+        const screenshot = await takeScreenshot(page, '02-session-page-fail')
         allScreenshots.push(screenshot)
         functionalityTests.push(createTestResult(testName, false, {
           duration: Date.now() - testStart,
@@ -213,7 +239,7 @@ async function runTests(config: TestConfig, envName: string): Promise<TestReport
       try {
         await sleep(2000)
         
-        const talkModeButton = await findButtonByText(page, ['Talk Mode', 'Start Talk'])
+        const talkModeButton = await findButtonByText(page, ['Talk Mode', 'Start Talk', 'Voice'])
         
         if (talkModeButton && await talkModeButton.asElement()) {
           const screenshot = await takeScreenshot(page, '03-talkmode-button-found')
@@ -246,7 +272,7 @@ async function runTests(config: TestConfig, envName: string): Promise<TestReport
       const testName = 'Start Talk Mode'
       const testStart = Date.now()
       try {
-        const talkModeButton = await findButtonByText(page, ['Talk Mode', 'Start Talk'])
+        const talkModeButton = await findButtonByText(page, ['Talk Mode', 'Start Talk', 'Voice'])
         
         if (talkModeButton && await talkModeButton.asElement()) {
           await (talkModeButton as any).click()

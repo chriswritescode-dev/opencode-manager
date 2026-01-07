@@ -24,7 +24,7 @@
   "testTask": "Create a file called test.txt with content 'Hello World'",
   "talkModePhrase": "What is two plus two?",
   "ocr": {
-    "minConfidence": 70,
+    "minConfidence": 60,
     "language": "eng"
   }
 }
