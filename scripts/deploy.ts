@@ -342,6 +342,9 @@ async function deployToVM(ip: string) {
   console.log("Configuring single-container deployment with token auth...");
   const composeOverride = `services:
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file:
       - .env
     ports:
@@ -901,6 +904,9 @@ async function updateOpencode(ip: string) {
   console.log("Updating docker-compose.override.yml...");
   const composeOverride = `services:
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     env_file:
       - .env
     ports:
