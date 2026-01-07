@@ -27,7 +27,8 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
-    "puppeteer": "^24.34.0"
+    "puppeteer": "^24.34.0",
+    "tesseract.js": "^7.0.0"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

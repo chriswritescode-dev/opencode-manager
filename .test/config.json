@@ -1,0 +1,30 @@
+{
+  "environments": {
+    "local": {
+      "url": "https://indie-tire-count-arnold.trycloudflare.com",
+      "username": "admin",
+      "password": "secret",
+      "expectAgentResponse": false,
+      "description": "Local development with tunnel"
+    },
+    "azure": {
+      "url": "https://height-scholarships-nuts-charger.trycloudflare.com",
+      "username": "admin",
+      "password": "4ba37511de810320530bb11d27086f004d9ef701",
+      "expectAgentResponse": true,
+      "description": "Azure VM deployment"
+    }
+  },
+  "timeouts": {
+    "pageLoad": 30000,
+    "agentResponse": 60000,
+    "talkModeTransition": 10000,
+    "captionRender": 5000
+  },
+  "testTask": "Create a file called test.txt with content 'Hello World'",
+  "talkModePhrase": "What is two plus two?",
+  "ocr": {
+    "minConfidence": 70,
+    "language": "eng"
+  }
+}

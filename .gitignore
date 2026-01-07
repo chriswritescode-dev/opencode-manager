@@ -19,3 +19,8 @@ temp/
 
 .venv-chatterbox
 .secrets/
+
+# Test artifacts
+.test/screenshots/*.png
+.test/ocr-results/*.json
+.test/reports/*.md

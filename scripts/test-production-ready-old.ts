@@ -1,0 +1,508 @@
+#!/usr/bin/env bun
+
+import puppeteer, { Browser, Page } from 'puppeteer'
+import fs from 'fs/promises'
+import path from 'path'
+import { analyzeTalkModeCaptions, saveOCRResult } from './lib/ocr-analyzer'
+import { generateMarkdownReport, createTestResult, TestReport, TestSection, TestResult } from './lib/report-generator'
+
+interface TestConfig {
+  url: string
+  username: string
+  password: string
+  expectAgentResponse: boolean
+  description: string
+  testTask: string
+  talkModePhrase: string
+  timeouts: {
+    pageLoad: number
+    agentResponse: number
+    talkModeTransition: number
+    captionRender: number
+  }
+  ocr: {
+    minConfidence: number
+    language: string
+  }
+}
+
+const PROJECT_ROOT = path.resolve(import.meta.dir, '..')
+const TEST_DIR = path.join(PROJECT_ROOT, '.test')
+const SCREENSHOTS_DIR = path.join(TEST_DIR, 'screenshots')
+const OCR_DIR = path.join(TEST_DIR, 'ocr-results')
+const REPORTS_DIR = path.join(TEST_DIR, 'reports')
+
+function log(message: string, indent = 0) {
+  const prefix = '  '.repeat(indent)
+  console.log(`${prefix}${message}`)
+}
+
+function success(message: string) {
+  log(`✅ ${message}`)
+}
+
+function fail(message: string) {
+  log(`❌ ${message}`)
+}
+
+function info(message: string) {
+  log(`ℹ️  ${message}`)
+}
+
+async function loadConfig(env: string): Promise<TestConfig> {
+  const configPath = path.join(TEST_DIR, 'config.json')
+  const configData = await fs.readFile(configPath, 'utf-8')
+  const config = JSON.parse(configData)
+  
+  const envConfig = config.environments[env]
+  if (!envConfig) {
+    throw new Error(`Environment '${env}' not found in config`)
+  }
+  
+  return {
+    ...envConfig,
+    testTask: config.testTask,
+    talkModePhrase: config.talkModePhrase,
+    timeouts: config.timeouts,
+    ocr: config.ocr,
+  }
+}
+
+async function takeScreenshot(page: Page, name: string): Promise<string> {
+  const timestamp = Date.now()
+  const filename = `${timestamp}-${name}.png`
+  const filepath = path.join(SCREENSHOTS_DIR, filename)
+  await page.screenshot({ path: filepath, fullPage: true })
+  info(`Screenshot saved: ${filename}`)
+  return filepath
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function runTests(config: TestConfig, envName: string): Promise<TestReport> {
+  const startTime = Date.now()
+  const sections: TestSection[] = []
+  const allScreenshots: string[] = []
+  const allOCRResults: string[] = []
+  
+  let browser: Browser | null = null
+  let page: Page | null = null
+  
+  try {
+    info(`Starting tests for environment: ${envName}`)
+    info(`URL: ${config.url}`)
+    
+    info('Launching browser...')
+    browser = await puppeteer.launch({
+      headless: false,
+      args: [
+        '--use-fake-ui-for-media-stream',
+        '--use-fake-device-for-media-stream',
+        '--autoplay-policy=no-user-gesture-required',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+      ]
+    })
+    
+    page = await browser.newPage()
+    await page.setViewport({ width: 1280, height: 800 })
+    
+    if (config.username && config.password) {
+      await page.setExtraHTTPHeaders({
+        'Authorization': `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
+      })
+    }
+    
+    page.on('console', msg => {
+      const text = msg.text()
+      if (text.includes('Error') || text.includes('error') || text.includes('[Test]')) {
+        log(`[Browser] ${text}`, 1)
+      }
+    })
+    
+    const authTests: TestResult[] = []
+    const functionalityTests: TestResult[] = []
+    const talkModeTests: TestResult[] = []
+    
+    info('Phase 1: Authentication Tests')
+    {
+      const testName = 'Navigate with authentication'
+      const testStart = Date.now()
+      try {
+        await page.goto(config.url, { waitUntil: 'networkidle0', timeout: config.timeouts.pageLoad })
+        const screenshot = await takeScreenshot(page, '01-auth-success')
+        allScreenshots.push(screenshot)
+        
+        const title = await page.title()
+        const hasApp = await page.$('div#root') !== null
+        
+        if (hasApp && title.includes('OpenCode')) {
+          success('Page loaded with authentication')
+          authTests.push(createTestResult(testName, true, {
+            duration: Date.now() - testStart,
+            screenshot,
+            notes: [`Page title: ${title}`, 'App root element found']
+          }))
+        } else {
+          throw new Error('App did not load correctly')
+        }
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        authTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    sections.push({ name: 'Authentication', tests: authTests })
+    
+    info('Phase 2: Core Functionality Tests')
+    {
+      const testName = 'Navigate to repo page'
+      const testStart = Date.now()
+      try {
+        await page.waitForSelector('a[href*="/repos/"]', { timeout: 10000 })
+        const repoLinks = await page.$$('a[href*="/repos/"]')
+        if (repoLinks.length > 0) {
+          await repoLinks[0].click()
+          await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 })
+          const screenshot = await takeScreenshot(page, '02-repo-page')
+          allScreenshots.push(screenshot)
+          
+          success('Navigated to repo page')
+          functionalityTests.push(createTestResult(testName, true, {
+            duration: Date.now() - testStart,
+            screenshot
+          }))
+        } else {
+          throw new Error('No repo links found')
+        }
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        functionalityTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    {
+      const testName = 'Create new session'
+      const testStart = Date.now()
+      try {
+        const newChatButton = await page.waitForSelector('button:has-text("New Chat"), button[aria-label*="New"], button:has-text("Start")', { timeout: 10000 })
+        if (newChatButton) {
+          await newChatButton.click()
+          await sleep(2000)
+          const screenshot = await takeScreenshot(page, '03-new-session')
+          allScreenshots.push(screenshot)
+          
+          success('Created new session')
+          functionalityTests.push(createTestResult(testName, true, {
+            duration: Date.now() - testStart,
+            screenshot
+          }))
+        } else {
+          throw new Error('New chat button not found')
+        }
+      } catch (error) {
+        info('New chat button not found, trying direct session creation...')
+        try {
+          await page.evaluate(() => {
+            const url = new URL(window.location.href)
+            const repoId = url.pathname.split('/')[2]
+            window.location.href = `/repos/${repoId}/sessions/new`
+          })
+          await page.waitForNavigation({ waitUntil: 'networkidle0', timeout: 10000 })
+          const screenshot = await takeScreenshot(page, '03-new-session')
+          allScreenshots.push(screenshot)
+          
+          success('Created new session (direct navigation)')
+          functionalityTests.push(createTestResult(testName, true, {
+            duration: Date.now() - testStart,
+            screenshot,
+            notes: ['Used direct navigation']
+          }))
+        } catch (error2) {
+          fail(`Failed: ${testName}`)
+          functionalityTests.push(createTestResult(testName, false, {
+            duration: Date.now() - testStart,
+            error: error2 instanceof Error ? error2.message : String(error2)
+          }))
+        }
+      }
+    }
+    
+    {
+      const testName = 'Submit simple task'
+      const testStart = Date.now()
+      try {
+        const textarea = await page.waitForSelector('textarea[placeholder*="message"], textarea', { timeout: 10000 })
+        if (textarea) {
+          await textarea.type(config.testTask)
+          await sleep(500)
+          
+          const submitButton = await page.$('button[type="submit"], button:has-text("Send")')
+          if (submitButton) {
+            await submitButton.click()
+          } else {
+            await textarea.press('Enter')
+          }
+          
+          await sleep(3000)
+          const screenshot = await takeScreenshot(page, '04-task-submitted')
+          allScreenshots.push(screenshot)
+          
+          if (config.expectAgentResponse) {
+            await page.waitForSelector('.message, [class*="message"]', { timeout: config.timeouts.agentResponse })
+            success('Task submitted and agent responded')
+            functionalityTests.push(createTestResult(testName, true, {
+              duration: Date.now() - testStart,
+              screenshot,
+              notes: ['Agent response received']
+            }))
+          } else {
+            success('Task submitted (agent response not expected)')
+            functionalityTests.push(createTestResult(testName, true, {
+              duration: Date.now() - testStart,
+              screenshot,
+              notes: ['Agent response not expected for local environment']
+            }))
+          }
+        } else {
+          throw new Error('Textarea not found')
+        }
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        functionalityTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    sections.push({ name: 'Core Functionality', tests: functionalityTests })
+    
+    info('Phase 3: Talk Mode Tests')
+    {
+      const testName = 'Start Talk Mode'
+      const testStart = Date.now()
+      try {
+        const talkModeButton = await page.waitForSelector('button:has-text("Talk Mode"), button:has-text("Start Talk")', { timeout: 10000 })
+        if (talkModeButton) {
+          await talkModeButton.click()
+          await sleep(2000)
+          
+          const overlay = await page.$('[class*="overlay"], [class*="talk-mode"]')
+          if (overlay) {
+            const screenshot = await takeScreenshot(page, '05-talkmode-overlay')
+            allScreenshots.push(screenshot)
+            
+            success('Talk Mode overlay appeared')
+            talkModeTests.push(createTestResult(testName, true, {
+              duration: Date.now() - testStart,
+              screenshot
+            }))
+          } else {
+            throw new Error('Talk Mode overlay not found')
+          }
+        } else {
+          throw new Error('Talk Mode button not found')
+        }
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        talkModeTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    {
+      const testName = 'Inject test transcript'
+      const testStart = Date.now()
+      try {
+        await page.waitForFunction(() => typeof (window as any).__TALK_MODE_TEST__ !== 'undefined', { timeout: 5000 })
+        
+        await page.evaluate((phrase) => {
+          (window as any).__TALK_MODE_TEST__.injectTranscript(phrase)
+        }, config.talkModePhrase)
+        
+        await sleep(config.timeouts.captionRender)
+        
+        success('Transcript injected')
+        talkModeTests.push(createTestResult(testName, true, {
+          duration: Date.now() - testStart
+        }))
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        talkModeTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    {
+      const testName = 'Verify caption UI with OCR'
+      const testStart = Date.now()
+      try {
+        await sleep(config.timeouts.captionRender)
+        const screenshot = await takeScreenshot(page, '06-talkmode-captions')
+        allScreenshots.push(screenshot)
+        
+        info('Running OCR analysis on captions...')
+        const ocrAnalysis = await analyzeTalkModeCaptions(screenshot, config.ocr)
+        
+        const ocrPath = path.join(OCR_DIR, '06-talkmode-captions.json')
+        await saveOCRResult(ocrAnalysis.result, ocrPath)
+        allOCRResults.push(ocrPath)
+        
+        const notes = [...ocrAnalysis.reasons]
+        if (ocrAnalysis.passed) {
+          success('Caption UI verified via OCR')
+          notes.unshift('User caption found in screenshot')
+        } else {
+          info('Caption UI partially verified (see notes)')
+        }
+        
+        talkModeTests.push(createTestResult(testName, ocrAnalysis.passed, {
+          duration: Date.now() - testStart,
+          screenshot,
+          ocrResult: ocrAnalysis.result,
+          notes
+        }))
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        talkModeTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    {
+      const testName = 'Close Talk Mode'
+      const testStart = Date.now()
+      try {
+        await page.keyboard.press('Escape')
+        await sleep(1000)
+        
+        const overlayGone = await page.$('[class*="overlay"], [class*="talk-mode"]') === null
+        const screenshot = await takeScreenshot(page, '07-talkmode-closed')
+        allScreenshots.push(screenshot)
+        
+        if (overlayGone) {
+          success('Talk Mode closed')
+          talkModeTests.push(createTestResult(testName, true, {
+            duration: Date.now() - testStart,
+            screenshot
+          }))
+        } else {
+          throw new Error('Talk Mode overlay still visible')
+        }
+      } catch (error) {
+        fail(`Failed: ${testName}`)
+        talkModeTests.push(createTestResult(testName, false, {
+          duration: Date.now() - testStart,
+          error: error instanceof Error ? error.message : String(error)
+        }))
+      }
+    }
+    
+    sections.push({ name: 'Talk Mode', tests: talkModeTests })
+    
+  } finally {
+    if (browser) {
+      await browser.close()
+    }
+  }
+  
+  const duration = Date.now() - startTime
+  
+  let totalTests = 0
+  let passed = 0
+  let failed = 0
+  let warnings = 0
+  
+  for (const section of sections) {
+    for (const test of section.tests) {
+      totalTests++
+      if (test.passed) {
+        passed++
+      } else {
+        failed++
+      }
+      if (test.notes && test.notes.length > 0 && !test.passed) {
+        warnings++
+      }
+    }
+  }
+  
+  return {
+    environment: envName,
+    url: config.url,
+    timestamp: new Date().toISOString(),
+    duration,
+    sections,
+    screenshots: allScreenshots,
+    ocrResults: allOCRResults,
+    summary: {
+      totalTests,
+      passed,
+      failed,
+      warnings,
+    },
+  }
+}
+
+async function main() {
+  const args = process.argv.slice(2)
+  const envArg = args.find(arg => arg.startsWith('--env='))
+  const env = envArg ? envArg.split('=')[1] : 'local'
+  
+  console.log('\n🧪 OpenCode Manager Production Readiness Test')
+  console.log('='.repeat(60))
+  console.log(`Environment: ${env}`)
+  console.log('='.repeat(60))
+  console.log('')
+  
+  try {
+    const config = await loadConfig(env)
+    const report = await runTests(config, env)
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+    const reportPath = path.join(REPORTS_DIR, `test-report-${env}-${timestamp}.md`)
+    
+    info('Generating report...')
+    await generateMarkdownReport(report, reportPath)
+    
+    console.log('')
+    console.log('='.repeat(60))
+    console.log('Test Summary')
+    console.log('='.repeat(60))
+    console.log(`Total Tests: ${report.summary.totalTests}`)
+    console.log(`Passed: ✅ ${report.summary.passed}`)
+    console.log(`Failed: ❌ ${report.summary.failed}`)
+    console.log(`Warnings: ⚠️ ${report.summary.warnings}`)
+    console.log(`Success Rate: ${((report.summary.passed / report.summary.totalTests) * 100).toFixed(1)}%`)
+    console.log('='.repeat(60))
+    console.log('')
+    console.log(`📄 Report saved: ${reportPath}`)
+    console.log('')
+    
+    const { spawn } = await import('child_process')
+    spawn('open', [reportPath], { stdio: 'inherit' })
+    
+    process.exit(report.summary.failed > 0 ? 1 : 0)
+    
+  } catch (error) {
+    console.error('Fatal error:', error)
+    process.exit(1)
+  }
+}
+
+main()
