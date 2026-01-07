@@ -339,12 +339,11 @@ async function deployToVM(ip: string) {
   exec(`${sshCmd} "git clone https://github.com/${managerRepo}.git opencode-manager 2>/dev/null || (cd opencode-manager && git pull)"`, { quiet: true });
 
   // Create docker-compose.override.yml for single-container setup with built-in tunnel
+  // Uses pre-built GHCR image instead of building on VM (per AGENTS.md guidelines)
   console.log("Configuring single-container deployment with token auth...");
   const composeOverride = `services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/dzianisv/opencode-manager:latest
     env_file:
       - .env
     ports:
@@ -396,9 +395,9 @@ async function deployToVM(ip: string) {
   // Sync OpenCode auth from local machine
   await uploadOpencodeAuth(ip);
 
-  // Build and start
-  console.log("Starting Docker containers (this may take a few minutes)...");
-  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build"`, { quiet: false });
+  // Pull latest image and start
+  console.log("Pulling latest Docker image and starting containers...");
+  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose pull && sudo docker compose up -d"`, { quiet: false });
 
   // Wait for container to be ready and enable YOLO mode
   console.log("Waiting for container to start...");
@@ -901,12 +900,11 @@ async function updateOpencode(ip: string) {
   const browserPath = vmArch === "amd64" ? "/usr/bin/google-chrome-unstable" : "/usr/bin/chromium";
 
   // Update docker-compose.override.yml for single-container setup with built-in tunnel
+  // Uses pre-built GHCR image instead of building on VM (per AGENTS.md guidelines)
   console.log("Updating docker-compose.override.yml...");
   const composeOverride = `services:
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/dzianisv/opencode-manager:latest
     env_file:
       - .env
     ports:
@@ -926,9 +924,9 @@ async function updateOpencode(ip: string) {
   console.log("Cleaning up old containers if present...");
   exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose down 2>/dev/null || true"`, { quiet: true });
 
-  // Rebuild and restart
-  console.log("Rebuilding and restarting app container (this may take a few minutes for first build)...");
-  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build"`, { quiet: false });
+  // Pull latest image and restart
+  console.log("Pulling latest Docker image and restarting container...");
+  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose pull && sudo docker compose up -d"`, { quiet: false });
 
   // Wait for container to be ready
   console.log("Waiting for container to start...");
