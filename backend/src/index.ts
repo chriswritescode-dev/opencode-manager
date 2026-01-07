@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { basicAuth } from 'hono/basic-auth'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { Server as SocketIOServer } from 'socket.io'
 import os from 'os'
@@ -46,6 +47,15 @@ app.use('/*', cors({
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'x-forwarded-proto', 'x-forwarded-host'],
 }))
+
+const { AUTH_USERNAME, AUTH_PASSWORD } = ENV.SERVER
+if (AUTH_USERNAME && AUTH_PASSWORD) {
+  logger.info(`Basic authentication enabled for user: ${AUTH_USERNAME}`)
+  app.use('/*', basicAuth({
+    username: AUTH_USERNAME,
+    password: AUTH_PASSWORD,
+  }))
+}
 
 const db = initializeDatabase(DB_PATH)
 

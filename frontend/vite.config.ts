@@ -6,6 +6,12 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, ".."), "");
   const backendPort = env.PORT || 5001;
+  const authUsername = env.AUTH_USERNAME;
+  const authPassword = env.AUTH_PASSWORD;
+  
+  const proxyHeaders = authUsername && authPassword 
+    ? { headers: { Authorization: `Basic ${Buffer.from(`${authUsername}:${authPassword}`).toString('base64')}` } }
+    : {};
 
   return {
     envDir: path.resolve(__dirname, ".."),
@@ -21,13 +27,15 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true,
       proxy: {
         "/api/terminal/socket.io": {
-          target: `http://localhost:${backendPort}`,
+          target: `http://127.0.0.1:${backendPort}`,
           ws: true,
           changeOrigin: true,
+          ...proxyHeaders,
         },
         "/api": {
-          target: `http://localhost:${backendPort}`,
+          target: `http://127.0.0.1:${backendPort}`,
           changeOrigin: true,
+          ...proxyHeaders,
         },
       },
     },
