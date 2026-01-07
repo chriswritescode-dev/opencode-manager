@@ -1,4 +1,5 @@
-import { apiClient, API_BASE_URL } from "@/lib/api";
+import axios from "axios";
+import { API_BASE_URL } from "@/config";
 import { settingsApi } from "./settings";
 
 export type ProviderSource = "configured" | "local" | "builtin";
@@ -151,7 +152,7 @@ function getProviderPriority(source: ProviderSource): number {
 
 async function getProvidersFromOpenCodeServer(): Promise<Provider[]> {
   try {
-    const response = await apiClient.get(`${API_BASE_URL}/api/opencode/provider`);
+    const response = await axios.get(`${API_BASE_URL}/api/opencode/provider`);
     
     if (response?.data?.all && Array.isArray(response.data.all)) {
       return response.data.all.map((openCodeProvider: OpenCodeProvider) => {
@@ -318,24 +319,24 @@ export function formatProviderName(
 
 export const providerCredentialsApi = {
   list: async (): Promise<string[]> => {
-    const { data } = await apiClient.get(`${API_BASE_URL}/api/providers/credentials`);
+    const { data } = await axios.get(`${API_BASE_URL}/api/providers/credentials`);
     return data.providers;
   },
 
   getStatus: async (providerId: string): Promise<boolean> => {
-    const { data } = await apiClient.get(
+    const { data } = await axios.get(
       `${API_BASE_URL}/api/providers/${providerId}/credentials/status`
     );
     return data.hasCredentials;
   },
 
   set: async (providerId: string, apiKey: string): Promise<void> => {
-    await apiClient.post(`${API_BASE_URL}/api/providers/${providerId}/credentials`, {
+    await axios.post(`${API_BASE_URL}/api/providers/${providerId}/credentials`, {
       apiKey,
     });
   },
 
   delete: async (providerId: string): Promise<void> => {
-    await apiClient.delete(`${API_BASE_URL}/api/providers/${providerId}/credentials`);
+    await axios.delete(`${API_BASE_URL}/api/providers/${providerId}/credentials`);
   },
 };

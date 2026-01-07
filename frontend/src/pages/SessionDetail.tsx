@@ -18,7 +18,6 @@ import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
-import { authFetch } from "@/lib/auth";
 import { useModelSelection } from "@/hooks/useModelSelection";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
@@ -69,7 +68,7 @@ export function SessionDetail() {
   const { data: settings } = useQuery({
     queryKey: ["opencode-config"],
     queryFn: async () => {
-      const response = await authFetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
+      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
       if (!response.ok) throw new Error("Failed to fetch config");
       return response.json();
     },

@@ -1,6 +1,5 @@
 import axios, { type AxiosInstance } from 'axios'
 import type { paths } from './opencode-types'
-import { getStoredToken } from '@/lib/auth'
 
 type SessionListResponse = paths['/session']['get']['responses']['200']['content']['application/json']
 type SessionResponse = paths['/session/{id}']['get']['responses']['200']['content']['application/json']
@@ -30,12 +29,6 @@ export class OpenCodeClient {
       if (this.directory) {
         config.params = { ...config.params, directory: this.directory }
       }
-      
-      const token = getStoredToken()
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`
-      }
-      
       return config
     })
   }

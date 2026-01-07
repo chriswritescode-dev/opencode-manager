@@ -123,28 +123,4 @@ fi
 
 echo "Starting OpenCode Manager Backend..."
 
-if [ "${ENABLE_TUNNEL}" = "true" ] && command -v cloudflared >/dev/null 2>&1; then
-  echo "Starting Cloudflare tunnel..."
-  cloudflared tunnel --no-autoupdate --url http://127.0.0.1:5003 > /tmp/cloudflared.log 2>&1 &
-  CLOUDFLARED_PID=$!
-  
-  for i in $(seq 1 30); do
-    TUNNEL_URL=$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log 2>/dev/null | head -1)
-    if [ -n "$TUNNEL_URL" ]; then
-      echo ""
-      echo "=============================================="
-      echo "Tunnel URL: $TUNNEL_URL"
-      echo "=============================================="
-      echo ""
-      break
-    fi
-    sleep 1
-  done
-  
-  if [ -z "$TUNNEL_URL" ]; then
-    echo "Warning: Could not detect tunnel URL after 30s"
-    echo "Check /tmp/cloudflared.log for details"
-  fi
-fi
-
 exec "$@"

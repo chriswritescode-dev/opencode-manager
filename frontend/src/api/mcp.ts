@@ -1,5 +1,4 @@
 import { API_BASE_URL } from '@/config'
-import { authFetch } from '@/lib/auth'
 
 const API_BASE = API_BASE_URL
 
@@ -38,7 +37,7 @@ export interface McpAuthStartResponse {
 
 export const mcpApi = {
   async getStatus(): Promise<McpStatusMap> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp`)
+    const response = await fetch(`${API_BASE}/api/opencode/mcp`)
     if (!response.ok) {
       throw new Error(`Failed to get MCP status: ${response.statusText}`)
     }
@@ -46,7 +45,7 @@ export const mcpApi = {
   },
 
   async addServer(name: string, config: McpServerConfig): Promise<McpStatusMap> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name, config }),
@@ -59,7 +58,7 @@ export const mcpApi = {
   },
 
   async connect(name: string): Promise<boolean> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/connect`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/connect`, {
       method: 'POST',
     })
     if (!response.ok) {
@@ -70,7 +69,7 @@ export const mcpApi = {
   },
 
   async disconnect(name: string): Promise<boolean> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/disconnect`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/disconnect`, {
       method: 'POST',
     })
     if (!response.ok) {
@@ -81,7 +80,7 @@ export const mcpApi = {
   },
 
   async startAuth(name: string): Promise<McpAuthStartResponse> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth`, {
       method: 'POST',
     })
     if (!response.ok) {
@@ -92,7 +91,7 @@ export const mcpApi = {
   },
 
   async completeAuth(name: string, code: string): Promise<McpStatus> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth/callback`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth/callback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code }),
@@ -105,7 +104,7 @@ export const mcpApi = {
   },
 
   async authenticate(name: string): Promise<McpStatus> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth/authenticate`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth/authenticate`, {
       method: 'POST',
     })
     if (!response.ok) {
@@ -116,7 +115,7 @@ export const mcpApi = {
   },
 
   async removeAuth(name: string): Promise<{ success: true }> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth`, {
+    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth`, {
       method: 'DELETE',
     })
     if (!response.ok) {
@@ -127,7 +126,7 @@ export const mcpApi = {
   },
 
   async getStatusFor(directory: string): Promise<McpStatusMap> {
-    const response = await authFetch(`${API_BASE}/api/opencode/mcp?directory=${encodeURIComponent(directory)}`)
+    const response = await fetch(`${API_BASE}/api/opencode/mcp?directory=${encodeURIComponent(directory)}`)
     if (!response.ok) {
       throw new Error(`Failed to get MCP status for directory: ${response.statusText}`)
     }
@@ -135,7 +134,7 @@ export const mcpApi = {
   },
 
   async connectDirectory(name: string, directory: string): Promise<boolean> {
-    const response = await authFetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/connectdirectory`, {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/connectdirectory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory }),
@@ -148,7 +147,7 @@ export const mcpApi = {
   },
 
   async disconnectDirectory(name: string, directory: string): Promise<boolean> {
-    const response = await authFetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/disconnectdirectory`, {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/disconnectdirectory`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory }),
@@ -161,7 +160,7 @@ export const mcpApi = {
   },
 
   async authenticateDirectory(name: string, directory: string): Promise<McpStatus> {
-    const response = await authFetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/authdirectedir`, {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/authdirectedir`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory }),
@@ -174,7 +173,7 @@ export const mcpApi = {
   },
 
   async removeAuthDirectory(name: string, directory: string): Promise<{ success: true }> {
-    const response = await authFetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/authdir`, {
+    const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/authdir`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ directory }),

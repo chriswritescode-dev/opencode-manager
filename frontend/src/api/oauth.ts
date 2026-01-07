@@ -1,5 +1,5 @@
 import axios from "axios"
-import { apiClient, API_BASE_URL } from "@/lib/api"
+import { API_BASE_URL } from "@/config"
 
 export interface OAuthAuthorizeResponse {
   url: string
@@ -32,7 +32,7 @@ function handleApiError(error: unknown, context: string): never {
 export const oauthApi = {
   authorize: async (providerId: string, method: number): Promise<OAuthAuthorizeResponse> => {
     try {
-      const { data } = await apiClient.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+      const { data } = await axios.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
         method,
       })
       return data
@@ -43,7 +43,7 @@ export const oauthApi = {
 
   callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> => {
     try {
-      const { data } = await apiClient.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, request)
+      const { data } = await axios.post(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, request)
       return data
     } catch (error) {
       handleApiError(error, "OAuth callback failed")
@@ -52,7 +52,7 @@ export const oauthApi = {
 
   getAuthMethods: async (): Promise<ProviderAuthMethods> => {
     try {
-      const { data } = await apiClient.get(`${API_BASE_URL}/api/oauth/auth-methods`)
+      const { data } = await axios.get(`${API_BASE_URL}/api/oauth/auth-methods`)
       return data.providers || data
     } catch (error) {
       handleApiError(error, "Failed to get provider auth methods")

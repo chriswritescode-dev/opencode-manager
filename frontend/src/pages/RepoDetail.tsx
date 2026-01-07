@@ -10,7 +10,6 @@ import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
 import { useSwipeBack } from "@/hooks/useMobile";
-import { authFetch } from "@/lib/auth";
 
 import { Loader2 } from "lucide-react";
 
@@ -45,7 +44,7 @@ export function RepoDetail() {
   const { data: settings } = useQuery({
     queryKey: ["opencode-config"],
     queryFn: async () => {
-      const response = await authFetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
+      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
       if (!response.ok) throw new Error("Failed to fetch config");
       return response.json();
     },

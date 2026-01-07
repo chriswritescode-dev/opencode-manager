@@ -48,18 +48,6 @@ export function initializeDatabase(dbPath: string = './data/opencode.db'): Datab
     
     CREATE INDEX IF NOT EXISTS idx_opencode_user_id ON opencode_configs(user_id);
     CREATE INDEX IF NOT EXISTS idx_opencode_default ON opencode_configs(user_id, is_default);
-    
-    CREATE TABLE IF NOT EXISTS api_tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      token_hash TEXT NOT NULL UNIQUE,
-      comment TEXT,
-      created_at INTEGER NOT NULL,
-      last_used_at INTEGER,
-      is_active BOOLEAN DEFAULT TRUE
-    );
-    
-    CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash);
-    CREATE INDEX IF NOT EXISTS idx_api_tokens_active ON api_tokens(is_active);
   `)
   
   runMigrations(db)

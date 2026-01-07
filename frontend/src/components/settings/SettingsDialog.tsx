@@ -3,10 +3,9 @@ import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
-import { TokenSettings } from '@/components/settings/TokenSettings'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, X, Key, Shield } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, X, Key } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSwipeBack } from '@/hooks/useMobile'
 
@@ -15,7 +14,7 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-type SettingsView = 'menu' | 'general' | 'shortcuts' | 'opencode' | 'providers' | 'security'
+type SettingsView = 'menu' | 'general' | 'shortcuts' | 'opencode' | 'providers'
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
@@ -43,7 +42,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', description: 'Customize keyboard shortcuts' },
     { id: 'opencode', icon: Code, label: 'OpenCode Config', description: 'Manage OpenCode configurations, commands, and agents' },
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
-    { id: 'security', icon: Shield, label: 'Security', description: 'Manage API tokens and authentication' },
   ]
 
   const handleClose = () => {
@@ -67,7 +65,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
           <Tabs defaultValue="general" className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
-              <TabsList className="grid w-full grid-cols-5 bg-card border border-border p-1">
+              <TabsList className="grid w-full grid-cols-4 bg-card border border-border p-1">
                 <TabsTrigger value="general" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   General
                 </TabsTrigger>
@@ -80,9 +78,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <TabsTrigger value="providers" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   Providers
                 </TabsTrigger>
-                <TabsTrigger value="security" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Security
-                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -92,7 +87,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 <TabsContent value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
                 <TabsContent value="opencode" className="mt-0"><OpenCodeConfigManager /></TabsContent>
                 <TabsContent value="providers" className="mt-0"><ProviderSettings /></TabsContent>
-                <TabsContent value="security" className="mt-0"><TokenSettings /></TabsContent>
               </div>
             </div>
           </Tabs>
@@ -152,7 +146,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             {mobileView === 'shortcuts' && <KeyboardShortcuts />}
             {mobileView === 'opencode' && <OpenCodeConfigManager />}
             {mobileView === 'providers' && <ProviderSettings />}
-            {mobileView === 'security' && <TokenSettings />}
           </div>
         </div>
       </DialogContent>

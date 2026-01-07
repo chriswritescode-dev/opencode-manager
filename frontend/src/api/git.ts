@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { API_BASE_URL } from '@/config'
 import type { GitStatusResponse, FileDiffResponse } from '@/types/git'
-import { authFetch } from '@/lib/auth'
 
 export async function fetchGitStatus(repoId: number): Promise<GitStatusResponse> {
-  const response = await authFetch(`${API_BASE_URL}/api/repos/${repoId}/git/status`)
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/status`)
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Failed to fetch git status' }))
@@ -15,7 +14,7 @@ export async function fetchGitStatus(repoId: number): Promise<GitStatusResponse>
 }
 
 export async function fetchFileDiff(repoId: number, path: string): Promise<FileDiffResponse> {
-  const response = await authFetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff?path=${encodeURIComponent(path)}`)
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff?path=${encodeURIComponent(path)}`)
   
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'Failed to fetch file diff' }))

@@ -4,7 +4,6 @@ import { FilePreview } from './FilePreview'
 import { Loader2, FileText } from 'lucide-react'
 import { API_BASE_URL } from '@/config'
 import type { FileInfo } from '@/types/files'
-import { authFetch } from '@/lib/auth'
 
 interface FilePreviewDialogProps {
   isOpen: boolean
@@ -33,7 +32,7 @@ export function FilePreviewDialog({ isOpen, onClose, filePath, repoBasePath, onF
 
       try {
         const fullPath = repoBasePath ? `${repoBasePath}/${filePath}` : filePath
-        const response = await authFetch(`${API_BASE_URL}/api/files/${fullPath}`)
+        const response = await fetch(`${API_BASE_URL}/api/files/${fullPath}`)
         
         if (!response.ok) {
           throw new Error(`Failed to load file: ${response.statusText}`)

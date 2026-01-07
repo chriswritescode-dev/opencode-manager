@@ -4,7 +4,6 @@ import { API_BASE_URL } from '@/config'
 import { TTSContext, type TTSState, type TTSConfig } from './tts-context'
 import { sanitizeForTTS } from '@/lib/utils'
 import { getWebSpeechSynthesizer, isWebSpeechSupported } from '@/lib/webSpeechSynthesizer'
-import { authFetch } from '@/lib/auth'
 
 export { TTSContext, type TTSContextValue, type TTSState, type TTSConfig } from './tts-context'
 
@@ -118,7 +117,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
     if (stoppedRef.current) return null
 
     try {
-      const response = await authFetch(`${API_BASE_URL}/api/tts/synthesize`, {
+      const response = await fetch(`${API_BASE_URL}/api/tts/synthesize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
