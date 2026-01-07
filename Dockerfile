@@ -23,6 +23,12 @@ RUN apt-get update && apt-get install -y \
     python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+# Install cloudflared for tunnel support
+RUN ARCH=$(case $(dpkg --print-architecture) in arm64) echo "arm64" ;; *) echo "amd64" ;; esac) && \
+    curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${ARCH}.deb" -o /tmp/cloudflared.deb && \
+    dpkg -i /tmp/cloudflared.deb && \
+    rm /tmp/cloudflared.deb
+
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
 # Install kubectl (supports both amd64 and arm64)

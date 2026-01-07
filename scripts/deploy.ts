@@ -214,25 +214,31 @@ function sleep(ms: number): Promise<void> {
 
 async function updateSecretsWithTunnelUrl(ip: string): Promise<string | null> {
   const sshOpts = "-o StrictHostKeyChecking=no";
-  const tunnelLogs = execOutput(
-    `ssh ${sshOpts} ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
+  
+  // Try app container first (new single-container setup), fallback to cloudflared-tunnel
+  let tunnelLogs = execOutput(
+    `ssh ${sshOpts} ${config.adminUser}@${ip} "sudo docker logs opencode-manager 2>&1 | grep trycloudflare || true"`
   );
+  
+  if (!tunnelLogs) {
+    tunnelLogs = execOutput(
+      `ssh ${sshOpts} ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1 || true"`
+    );
+  }
   
   // Get all URL matches and use the last one (most recent)
   const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
   if (urlMatches && urlMatches.length > 0) {
     const url = urlMatches[urlMatches.length - 1];
-    const secrets = getLatestSecrets();
-    const password = secrets?.password || config.authPassword || "(see previous secrets file)";
-    const username = config.authUsername;
     
-    saveSecrets(url, username, password);
+    // For token auth, we save the token location info instead of basic auth password
+    saveSecrets(url, "token", "See ~/.config/opencode-manager.json on the server or container");
     console.log(`Tunnel URL: ${url}`);
-    console.log(`Credentials: ${username} / ${password}`);
+    console.log(`Auth: Bearer token (check container logs or ~/.config/opencode-manager.json)`);
     return url;
   }
   
-  console.log("Could not detect tunnel URL from cloudflared logs");
+  console.log("Could not detect tunnel URL from container logs");
   return null;
 }
 
@@ -332,68 +338,21 @@ async function deployToVM(ip: string) {
   console.log(`Cloning opencode-manager from ${managerRepo}...`);
   exec(`${sshCmd} "git clone https://github.com/${managerRepo}.git opencode-manager 2>/dev/null || (cd opencode-manager && git pull)"`, { quiet: true });
 
-  // Pull caddy image first to generate password hash
-  console.log("Generating password hash...");
-  exec(`${sshCmd} "sudo docker pull caddy:2-alpine"`, { quiet: true });
-  const hashCmd = `${sshCmd} "sudo docker run --rm caddy:2-alpine caddy hash-password --plaintext '${config.authPassword}'"`;
-  const passwordHash = execOutput(hashCmd);
-
-  // Create Caddyfile with basic auth (hash embedded directly to avoid $ escaping issues)
-  console.log("Configuring Caddy with Basic Auth...");
-  const caddyfile = `:80 {
-    basicauth /* {
-        ${config.authUsername} ${passwordHash}
-    }
-    reverse_proxy app:5003
-}`;
-  
-  // Write Caddyfile using base64 to avoid escaping issues
-  const caddyBase64 = Buffer.from(caddyfile).toString("base64");
-  exec(`${sshCmd} "echo '${caddyBase64}' | base64 -d > ~/opencode-manager/Caddyfile"`, { quiet: true });
-
-  // Upload custom Dockerfile for extended image with Chrome, etc.
-  console.log("Uploading custom Dockerfile...");
-  const dockerfilePath = join(__dirname, "Dockerfile.custom");
-  if (existsSync(dockerfilePath)) {
-    const dockerfileContent = readFileSync(dockerfilePath, "utf-8");
-    const dockerfileBase64 = Buffer.from(dockerfileContent).toString("base64");
-    exec(`${sshCmd} "echo '${dockerfileBase64}' | base64 -d > ~/opencode-manager/Dockerfile.custom"`, { quiet: true });
-  }
-
-  // Create docker-compose.override.yml with Caddy and custom build
+  // Create docker-compose.override.yml for single-container setup with built-in tunnel
+  console.log("Configuring single-container deployment with token auth...");
   const composeOverride = `services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: caddy-auth
-    ports:
-      - "80:80"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-    restart: unless-stopped
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-tunnel
-    command: tunnel --no-autoupdate --url http://caddy:80
-    restart: unless-stopped
-    depends_on:
-      - caddy
-
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile.custom
     env_file:
       - .env
-    ports: []
-
-volumes:
-  caddy_data:
-  caddy_config:
+    ports:
+      - "5003:5003"
+    environment:
+      - ENABLE_TUNNEL=true
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-unstable
+      - CHROME_PATH=/usr/bin/google-chrome-unstable
+      - CHROMIUM_PATH=/usr/bin/chromium
+      - DISPLAY=:99
 `;
 
   const composeBase64 = Buffer.from(composeOverride).toString("base64");
@@ -479,29 +438,46 @@ async function showStatus() {
     console.log("\nContainer status:");
     exec(`ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker ps --format 'table {{.Names}}\t{{.Status}}'"`, { quiet: false });
 
-    const tunnelLogs = execOutput(
-      `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
+    // Get tunnel URL from app container logs (new single-container setup)
+    let tunnelLogs = execOutput(
+      `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker logs opencode-manager 2>&1 | grep trycloudflare || true"`
     );
+    
+    // Fallback to old cloudflared-tunnel container if exists
+    if (!tunnelLogs) {
+      tunnelLogs = execOutput(
+        `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1 || true"`
+      );
+    }
     
     // Get all URL matches and use the last one (most recent)
     const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
     if (urlMatches && urlMatches.length > 0) {
       const currentUrl = urlMatches[urlMatches.length - 1];
       console.log(`\nTunnel URL: ${currentUrl}`);
-      console.log(`Username: ${config.authUsername}`);
       
-      const secrets = getLatestSecrets();
-      if (secrets && secrets.password) {
-        console.log(`Password: ${secrets.password}`);
-        
-        // Update secrets file if URL changed
-        if (secrets.url !== currentUrl) {
-          console.log(`\n(URL changed from ${secrets.url})`);
-          saveSecrets(currentUrl, config.authUsername, secrets.password);
+      // Get token from container
+      const tokenJson = execOutput(
+        `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker exec opencode-manager cat /home/node/.config/opencode-manager.json 2>/dev/null || echo ''"`
+      );
+      
+      if (tokenJson) {
+        try {
+          const tokenData = JSON.parse(tokenJson);
+          console.log(`API Token: ${tokenData.token}`);
+          
+          const secrets = getLatestSecrets();
+          if (!secrets || secrets.url !== currentUrl) {
+            saveSecrets(currentUrl, "token", tokenData.token);
+          }
+        } catch {
+          console.log("Token: (check container logs for bootstrap token)");
         }
       } else {
-        console.log(`(Password was set during deployment - check .secrets/ folder)`);
+        console.log("Token: (not yet generated - container may still be starting)");
       }
+    } else {
+      console.log("\nTunnel URL: (not detected - check if ENABLE_TUNNEL=true)");
     }
 
     console.log("\nOpenCode Manager logs (last 5 lines):");
@@ -512,28 +488,13 @@ async function showStatus() {
 }
 
 async function redeployAuth(ip: string) {
-  console.log("Updating authentication...");
-  const sshOpts = "-o StrictHostKeyChecking=no";
-  const sshCmd = `ssh ${sshOpts} ${config.adminUser}@${ip}`;
-
-  // Generate new password hash
-  const hashCmd = `${sshCmd} "sudo docker run --rm caddy:2-alpine caddy hash-password --plaintext '${config.authPassword}'"`;
-  const passwordHash = execOutput(hashCmd);
-  
-  // Update Caddyfile with new hash
-  const caddyfile = `:80 {
-    basicauth /* {
-        ${config.authUsername} ${passwordHash}
-    }
-    reverse_proxy app:5003
-}`;
-  
-  const caddyBase64 = Buffer.from(caddyfile).toString("base64");
-  exec(`${sshCmd} "echo '${caddyBase64}' | base64 -d > ~/opencode-manager/Caddyfile"`, { quiet: true });
-  
-  // Restart caddy
-  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose restart caddy"`, { quiet: true });
-  console.log("Authentication updated!");
+  console.log("Token-based authentication is now used.");
+  console.log("To manage API tokens, use the Settings UI or API endpoints:");
+  console.log("  - GET /api/auth/tokens - List tokens");
+  console.log("  - POST /api/auth/tokens - Create new token");
+  console.log("  - DELETE /api/auth/tokens/:id - Delete token");
+  console.log("\nThe initial bootstrap token is saved to ~/.config/opencode-manager.json inside the container.");
+  console.log("Run: ssh azureuser@" + ip + " 'sudo docker exec opencode-manager cat /home/node/.config/opencode-manager.json'");
 }
 
 async function updateEnv(ip: string) {
@@ -936,51 +897,32 @@ async function updateOpencode(ip: string) {
   // Set browser paths based on architecture
   const browserPath = vmArch === "amd64" ? "/usr/bin/google-chrome-unstable" : "/usr/bin/chromium";
 
-  // Update docker-compose.override.yml (without custom Dockerfile since we patched the original)
+  // Update docker-compose.override.yml for single-container setup with built-in tunnel
   console.log("Updating docker-compose.override.yml...");
   const composeOverride = `services:
-  caddy:
-    image: caddy:2-alpine
-    container_name: caddy-auth
-    ports:
-      - "80:80"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - app
-    restart: unless-stopped
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: cloudflared-tunnel
-    command: tunnel --no-autoupdate --url http://caddy:80
-    restart: unless-stopped
-    depends_on:
-      - caddy
-
   app:
     env_file:
       - .env
-    ports: []
+    ports:
+      - "5003:5003"
     environment:
+      - ENABLE_TUNNEL=true
       - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
       - PUPPETEER_EXECUTABLE_PATH=${browserPath}
       - CHROME_PATH=${browserPath}
       - CHROMIUM_PATH=/usr/bin/chromium
       - DISPLAY=:99
-
-volumes:
-  caddy_data:
-  caddy_config:
 `;
   const composeBase64 = Buffer.from(composeOverride).toString("base64");
   exec(`${sshCmd} "echo '${composeBase64}' | base64 -d > ~/opencode-manager/docker-compose.override.yml"`, { quiet: true });
 
-  // Rebuild and restart only the app container (preserve cloudflared tunnel URL)
+  // Stop old containers (caddy, cloudflared) if they exist from previous setup
+  console.log("Cleaning up old containers if present...");
+  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose down 2>/dev/null || true"`, { quiet: true });
+
+  // Rebuild and restart
   console.log("Rebuilding and restarting app container (this may take a few minutes for first build)...");
-  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build app"`, { quiet: false });
+  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build"`, { quiet: false });
 
   // Wait for container to be ready
   console.log("Waiting for container to start...");
@@ -1120,11 +1062,7 @@ async function main() {
        await deployToVM(targetHost);
        console.log("\nDeployment to existing host complete!");
        // Show tunnel URL if available
-       try {
-        const tunnelLogs = execOutput(`ssh -o StrictHostKeyChecking=no ${config.adminUser}@${targetHost} "sudo docker logs cloudflared-tunnel 2>&1"`);
-        const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
-        if (urlMatches && urlMatches.length > 0) console.log(`\nTunnel URL: ${urlMatches[urlMatches.length - 1]}`);
-       } catch {}
+       await updateSecretsWithTunnelUrl(targetHost);
     }
     return;
   }
@@ -1159,32 +1097,12 @@ async function main() {
   }
 
   if (existingIP && args.includes("--update-auth")) {
-    // This one needs password for updating Basic Auth
-    if (!config.authPassword) {
-      config.authPassword = await promptPassword();
-      if (!config.authPassword) {
-        console.error("Password is required for --update-auth");
-        process.exit(1);
-      }
-    }
+    // Token auth is now used, just show info
     await redeployAuth(existingIP);
     return;
   }
 
-  // Get or prompt for password (only for fresh deployment)
-  if (!config.authPassword) {
-    const useGenerated = !process.stdin.isTTY;
-    if (useGenerated) {
-      config.authPassword = generatePassword();
-      console.log(`Generated password: ${config.authPassword}`);
-    } else {
-      config.authPassword = await promptPassword();
-      if (!config.authPassword) {
-        config.authPassword = generatePassword();
-        console.log(`Generated password: ${config.authPassword}`);
-      }
-    }
-  }
+  // No password needed for token-based auth
 
   console.log("\n=== OpenCode Manager Deployment ===\n");
   console.log(`Username: ${config.authUsername}`);
@@ -1197,27 +1115,32 @@ async function main() {
   await waitForDocker(ip);
   await deployToVM(ip);
 
-  // Wait for tunnel
-  console.log("\nWaiting for tunnel...");
-  await sleep(15000);
+  // Wait for tunnel and token generation
+  console.log("\nWaiting for tunnel and token generation...");
+  await sleep(20000);
 
   console.log("\n=== Deployment Summary ===");
   console.log(`VM IP: ${ip}`);
   console.log(`SSH: ssh ${config.adminUser}@${ip}`);
   
-  const tunnelLogs = execOutput(
-    `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker logs cloudflared-tunnel 2>&1"`
-  );
-  const urlMatches = tunnelLogs.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g);
-  if (urlMatches && urlMatches.length > 0) {
-    const tunnelUrl = urlMatches[urlMatches.length - 1];
-    console.log(`\nTunnel URL: ${tunnelUrl}`);
-    saveSecrets(tunnelUrl, config.authUsername, config.authPassword);
-  }
+  // Get tunnel URL and token from container
+  await updateSecretsWithTunnelUrl(ip);
   
-  console.log(`\nCredentials:`);
-  console.log(`  Username: ${config.authUsername}`);
-  console.log(`  Password: ${config.authPassword}`);
+  // Try to get the bootstrap token
+  const tokenJson = execOutput(
+    `ssh -o StrictHostKeyChecking=no ${config.adminUser}@${ip} "sudo docker exec opencode-manager cat /home/node/.config/opencode-manager.json 2>/dev/null || echo ''"`
+  );
+  
+  if (tokenJson) {
+    try {
+      const tokenData = JSON.parse(tokenJson);
+      console.log(`\nAPI Token: ${tokenData.token}`);
+      console.log(`\nUse this token in the Authorization header:`);
+      console.log(`  Authorization: Bearer ${tokenData.token}`);
+    } catch {
+      console.log("\nToken: (check container logs for bootstrap token)");
+    }
+  }
   
   console.log(`\nCommands:`);
   console.log(`  Status:  bun run scripts/deploy.ts --status`);
