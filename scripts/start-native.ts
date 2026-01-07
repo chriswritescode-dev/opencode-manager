@@ -288,7 +288,7 @@ async function main() {
   let tunnelProcess: ReturnType<typeof spawn> | null = null
   let tunnelUrl: string | null = null
   if (args.tunnel) {
-    const tunnel = await startCloudflaredTunnel(frontend.port)
+    const tunnel = await startCloudflaredTunnel(args.port)
     tunnelProcess = tunnel.process
     tunnelUrl = tunnel.url
     processes.push(tunnel.process)

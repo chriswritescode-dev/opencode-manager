@@ -291,23 +291,7 @@ if (isProduction) {
     return c.html(html)
   })
 } else {
-  app.get('/', (c) => {
-    return c.json({
-      name: 'OpenCode WebUI',
-      version: '2.0.0',
-      status: 'running',
-      endpoints: {
-        health: '/api/health',
-        repos: '/api/repos',
-        settings: '/api/settings',
-        sessions: '/api/sessions',
-        files: '/api/files',
-        providers: '/api/providers',
-        terminal: '/api/terminal',
-        opencode_proxy: '/api/opencode/*'
-      }
-    })
-  })
+  const VITE_DEV_SERVER = 'http://localhost:5173'
 
   app.get('/api/network-info', async (c) => {
     const os = await import('os')
@@ -331,6 +315,60 @@ if (isProduction) {
         ...ips.map(ip => `${protocol}://${ip}:${PORT}`)
       ]
     })
+  })
+
+  app.all('/*', async (c) => {
+    if (c.req.path.startsWith('/api/')) {
+      return c.notFound()
+    }
+    
+    try {
+      const url = new URL(c.req.url)
+      const targetUrl = `${VITE_DEV_SERVER}${url.pathname}${url.search}`
+      
+      const headers = new Headers()
+      c.req.raw.headers.forEach((value, key) => {
+        if (key.toLowerCase() !== 'host') {
+          headers.set(key, value)
+        }
+      })
+      
+      const response = await fetch(targetUrl, {
+        method: c.req.method,
+        headers,
+        body: c.req.method !== 'GET' && c.req.method !== 'HEAD' ? c.req.raw.body : undefined,
+      })
+      
+      const responseHeaders = new Headers()
+      response.headers.forEach((value, key) => {
+        if (key.toLowerCase() !== 'content-encoding') {
+          responseHeaders.set(key, value)
+        }
+      })
+      
+      return new Response(response.body, {
+        status: response.status,
+        headers: responseHeaders,
+      })
+    } catch (error) {
+      logger.error('Failed to proxy to Vite dev server:', error)
+      return c.json({
+        name: 'OpenCode WebUI',
+        version: '2.0.0',
+        status: 'running',
+        note: 'Vite dev server not available. Start frontend with: pnpm dev:frontend',
+        endpoints: {
+          health: '/api/health',
+          repos: '/api/repos',
+          settings: '/api/settings',
+          sessions: '/api/sessions',
+          files: '/api/files',
+          providers: '/api/providers',
+          terminal: '/api/terminal',
+          opencode_proxy: '/api/opencode/*'
+        }
+      })
+    }
   })
 }
 
