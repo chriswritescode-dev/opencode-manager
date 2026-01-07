@@ -111,6 +111,14 @@ We regularly sync our fork with upstream sst/opencode to incorporate new feature
 - **Floating Controls** - Persistent stop button for audio control
 - **Custom Endpoints** - Connect to local or self-hosted TTS services
 
+### QA Testing System
+- **Autonomous AI Testing** - OpenCode AI agent can autonomously test the entire application
+- **Quick Test Commands** - Run health, API, auth, tunnel, Docker, and E2E tests with one command
+- **CI/CD Ready** - Integration-ready for GitHub Actions and other CI/CD pipelines
+- **Comprehensive Coverage** - Tests server startup, API endpoints, authentication, tunnels, Docker deployment, and more
+
+Use `@qa-tester` in OpenCode or run `scripts/qa-test.sh` for quick tests.
+
 ## Screenshots
 
 <table>
@@ -461,6 +469,87 @@ cp .env.example .env
 # Start development servers (backend + frontend)
 npm run dev
 ```
+
+## Testing
+
+The project includes a comprehensive QA testing system with autonomous AI testing capabilities.
+
+### Quick Testing
+
+Run tests using the provided command script:
+
+```bash
+# Health check (quick verification)
+scripts/qa-test.sh health
+
+# API endpoint tests
+scripts/qa-test.sh api
+
+# Authentication tests
+scripts/qa-test.sh auth
+
+# Cloudflare tunnel tests
+scripts/qa-test.sh tunnel
+
+# Docker deployment tests
+scripts/qa-test.sh docker
+
+# E2E test suite
+scripts/qa-test.sh e2e
+
+# Run all tests
+scripts/qa-test.sh full
+
+# Test remote deployment
+scripts/qa-test.sh health https://your-deployment.com
+```
+
+### Autonomous AI Testing
+
+Use OpenCode slash commands for quick testing:
+
+```
+/qa-test       # Run comprehensive QA tests
+/qa-health     # Quick health check
+```
+
+Or mention the QA agent directly:
+
+```
+"@qa-tester run a full test suite and report any issues"
+"Test the application and generate a comprehensive report"
+```
+
+The AI agent will autonomously:
+1. Execute all test protocols
+2. Evaluate results against expected outputs
+3. Generate a professional test report with metrics
+4. Identify issues and provide recommendations
+
+### Available Tests
+
+- ✅ Development server startup and health
+- ✅ Backend API endpoints (health, repos, settings, OpenCode proxy)
+- ✅ Authentication (with/without credentials, valid/invalid)
+- ✅ Cloudflare tunnel (startup, URL generation, public access)
+- ✅ Docker deployment (build, run, health checks, volumes)
+- ✅ E2E test suite (voice, talk mode, browser automation)
+- ✅ Database integrity
+- ✅ Git operations
+- ✅ Performance metrics
+- ✅ Security validation
+
+### CI/CD Integration
+
+The QA system can be integrated into GitHub Actions:
+
+```yaml
+- name: Run QA Tests
+  run: |
+    scripts/qa-test.sh full
+```
+
+See the QA agent at `.opencode/agent/qa-tester.md` for detailed test protocols.
 
 ## OAuth Provider Setup
 
