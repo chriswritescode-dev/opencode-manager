@@ -173,77 +173,7 @@ async function runTests(config: TestConfig, envName: string): Promise<TestReport
     
     sections.push({ name: 'Authentication', tests: authTests })
     
-    info('Phase 2: Enable Talk Mode in Settings')
-    {
-      const testName = 'Enable Talk Mode'
-      const testStart = Date.now()
-      try {
-        info('Navigating to settings to enable Talk Mode')
-        await page.goto(`${config.url}/settings`, { waitUntil: 'networkidle0', timeout: config.timeouts.pageLoad })
-        await sleep(2000)
-        
-        const findAndToggle = async (labelText: string) => {
-          return await page.evaluate((label: string) => {
-            const labels = Array.from(document.querySelectorAll('label'))
-            const targetLabel = labels.find(l => l.textContent?.toLowerCase().includes(label.toLowerCase()))
-            if (!targetLabel) return { found: false, toggled: false }
-            
-            const switchId = targetLabel.getAttribute('for')
-            if (!switchId) return { found: false, toggled: false }
-            
-            const switchButton = document.getElementById(switchId) as HTMLButtonElement | null
-            if (!switchButton) return { found: false, toggled: false }
-            
-            const isChecked = switchButton.getAttribute('data-state') === 'checked'
-            if (!isChecked) {
-              switchButton.click()
-              return { found: true, toggled: true }
-            }
-            return { found: true, toggled: false, alreadyEnabled: true }
-          }, labelText)
-        }
-        
-        info('Enabling STT...')
-        const sttResult = await findAndToggle('enable stt')
-        await sleep(500)
-        
-        info('Enabling TTS...')
-        const ttsResult = await findAndToggle('enable tts')
-        await sleep(500)
-        
-        info('Enabling Talk Mode...')
-        const talkModeResult = await findAndToggle('enable talk mode')
-        await sleep(500)
-        
-        if (sttResult.found && ttsResult.found && talkModeResult.found) {
-          const screenshot = await takeScreenshot(page, '01b-talkmode-enabled')
-          allScreenshots.push(screenshot)
-          success('Talk Mode enabled in settings')
-          functionalityTests.push(createTestResult(testName, true, {
-            duration: Date.now() - testStart,
-            screenshot,
-            notes: [
-              `STT: ${sttResult.alreadyEnabled ? 'already enabled' : 'enabled'}`,
-              `TTS: ${ttsResult.alreadyEnabled ? 'already enabled' : 'enabled'}`,
-              `Talk Mode: ${talkModeResult.alreadyEnabled ? 'already enabled' : 'enabled'}`
-            ]
-          }))
-        } else {
-          throw new Error(`Missing switches - STT: ${sttResult.found}, TTS: ${ttsResult.found}, Talk Mode: ${talkModeResult.found}`)
-        }
-      } catch (error) {
-        fail(`Failed: ${testName}`)
-        const screenshot = await takeScreenshot(page, '01b-talkmode-enable-fail')
-        allScreenshots.push(screenshot)
-        functionalityTests.push(createTestResult(testName, false, {
-          duration: Date.now() - testStart,
-          error: error instanceof Error ? error.message : String(error),
-          screenshot
-        }))
-      }
-    }
-    
-    info('Phase 3: Navigate to Session')
+    info('Phase 2: Navigate to Session')
     {
       const testName = 'Navigate to session page'
       const testStart = Date.now()
@@ -341,7 +271,7 @@ async function runTests(config: TestConfig, envName: string): Promise<TestReport
     
     sections.push({ name: 'Core Functionality', tests: functionalityTests })
     
-    info('Phase 4: Talk Mode Tests')
+    info('Phase 3: Talk Mode Tests')
     {
       const testName = 'Start Talk Mode'
       const testStart = Date.now()
