@@ -11,3 +11,30 @@ export function setStoredToken(token: string): void {
 export function removeStoredToken(): void {
   localStorage.removeItem(TOKEN_STORAGE_KEY)
 }
+
+export function getAuthHeaders(): Record<string, string> {
+  const token = getStoredToken()
+  if (token) {
+    return { 'Authorization': `Bearer ${token}` }
+  }
+  return {}
+}
+
+export async function authFetch(url: string, options: RequestInit = {}): Promise<Response> {
+  const headers = {
+    ...getAuthHeaders(),
+    ...options.headers,
+  }
+  
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  })
+  
+  if (response.status === 401) {
+    removeStoredToken()
+    window.location.reload()
+  }
+  
+  return response
+}

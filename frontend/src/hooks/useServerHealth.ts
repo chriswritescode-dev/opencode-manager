@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { settingsApi } from '@/api/settings'
 import { useMutation } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
+import { authFetch } from '@/lib/auth'
 
 interface HealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy'
@@ -17,7 +18,7 @@ interface HealthResponse {
 }
 
 async function fetchHealth(): Promise<HealthResponse> {
-  const response = await fetch('/api/health')
+  const response = await authFetch('/api/health')
   if (!response.ok) {
     throw new Error('Health check failed')
   }

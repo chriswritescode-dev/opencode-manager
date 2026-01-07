@@ -1,5 +1,6 @@
 import type { Repo } from './types'
 import { API_BASE_URL } from '@/config'
+import { authFetch } from '@/lib/auth'
 
 export async function createRepo(
   repoUrl?: string,
@@ -8,11 +9,10 @@ export async function createRepo(
   openCodeConfigName?: string,
   useWorktree?: boolean
 ): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl, localPath, branch, openCodeConfigName, useWorktree }),
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -24,9 +24,7 @@ export async function createRepo(
 }
 
 export async function listRepos(): Promise<Repo[]> {
-  const response = await fetch(`${API_BASE_URL}/api/repos`, {
-    credentials: 'include', // Ensure credentials (cookies) are sent
-  })
+  const response = await authFetch(`${API_BASE_URL}/api/repos`)
 
   if (!response.ok) {
     throw new Error('Failed to list repos')
@@ -36,9 +34,7 @@ export async function listRepos(): Promise<Repo[]> {
 }
 
 export async function getRepo(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}`, {
-    credentials: 'include', // Ensure credentials (cookies) are sent
-  })
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}`)
 
   if (!response.ok) {
     throw new Error('Failed to get repo')
@@ -48,9 +44,8 @@ export async function getRepo(id: number): Promise<Repo> {
 }
 
 export async function deleteRepo(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}`, {
     method: 'DELETE',
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -59,11 +54,10 @@ export async function deleteRepo(id: number): Promise<void> {
 }
 
 export async function startServer(id: number, openCodeConfigName?: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/start`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/server/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ openCodeConfigName }),
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -74,9 +68,8 @@ export async function startServer(id: number, openCodeConfigName?: string): Prom
 }
 
 export async function stopServer(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/stop`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/server/stop`, {
     method: 'POST',
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -87,9 +80,8 @@ export async function stopServer(id: number): Promise<Repo> {
 }
 
 export async function pullRepo(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/pull`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/pull`, {
     method: 'POST',
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -100,9 +92,7 @@ export async function pullRepo(id: number): Promise<Repo> {
 }
 
 export async function getServerLogs(id: number): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/logs`, {
-    credentials: 'include', // Ensure credentials (cookies) are sent
-  })
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/server/logs`)
 
   if (!response.ok) {
     throw new Error('Failed to get server logs')
@@ -112,11 +102,10 @@ export async function getServerLogs(id: number): Promise<string> {
 }
 
 export async function switchRepoConfig(id: number, configName: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/config/switch`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/config/switch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ configName }),
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -137,11 +126,10 @@ export class GitAuthError extends Error {
 }
 
 export async function switchBranch(id: number, branch: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/switch`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/branch/switch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ branch }),
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -156,9 +144,7 @@ export async function switchBranch(id: number, branch: string): Promise<Repo> {
 }
 
 export async function listBranches(id: number): Promise<{ local: string[], all: string[], current: string | null }> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branches`, {
-    credentials: 'include', // Ensure credentials (cookies) are sent
-  })
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/branches`)
 
   if (!response.ok) {
     throw new Error('Failed to list branches')
@@ -168,11 +154,10 @@ export async function listBranches(id: number): Promise<{ local: string[], all: 
 }
 
 export async function createBranch(id: number, branch: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/create`, {
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/branch/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ branch }),
-    credentials: 'include', // Ensure credentials (cookies) are sent
   })
 
   if (!response.ok) {
@@ -187,9 +172,7 @@ export async function createBranch(id: number, branch: string): Promise<Repo> {
 }
 
 export async function downloadRepo(id: number, repoName: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/download`, {
-    credentials: 'include', // Ensure credentials (cookies) are sent
-  })
+  const response = await authFetch(`${API_BASE_URL}/api/repos/${id}/download`)
 
   if (!response.ok) {
     const error = await response.json()

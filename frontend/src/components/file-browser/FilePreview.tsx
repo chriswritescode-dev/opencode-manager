@@ -4,6 +4,7 @@ import { Download, X, Edit3, Save, X as XIcon, WrapText } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { API_BASE_URL } from '@/config'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
+import { authFetch } from '@/lib/auth'
 
 
 const API_BASE = API_BASE_URL
@@ -104,7 +105,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      const response = await fetch(`${API_BASE}/api/files/${file.path}`, {
+      const response = await authFetch(`${API_BASE}/api/files/${file.path}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'file', content: editContent }),
