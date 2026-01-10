@@ -108,6 +108,11 @@ export const settingsApi = {
     return data
   },
 
+  upgradeOpenCode: async (): Promise<{ success: boolean; message: string; oldVersion?: string; newVersion?: string; upgraded: boolean }> => {
+    const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-upgrade`)
+    return data
+  },
+
   getAgentsMd: async (): Promise<{ content: string }> => {
     const { data } = await axios.get(`${API_BASE_URL}/api/settings/agents-md`)
     return data

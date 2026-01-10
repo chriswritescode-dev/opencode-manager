@@ -1,17 +1,31 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { execSync } from 'child_process'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
 import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
-import { 
-  UserPreferencesSchema, 
+import {
+  UserPreferencesSchema,
   OpenCodeConfigSchema,
 } from '../types/settings'
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../index'
+
+function compareVersions(v1: string, v2: string): number {
+  const parts1 = v1.split('.').map(s => Number(s))
+  const parts2 = v2.split('.').map(s => Number(s))
+
+  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+    const p1 = parts1[i] || 0
+    const p2 = parts2[i] || 0
+    if (p1 > p2) return 1
+    if (p1 < p2) return -1
+  }
+  return 0
+}
 
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
@@ -318,6 +332,57 @@ export function createSettingsRoutes(db: Database) {
     } catch (error) {
       logger.error('Failed to rollback OpenCode config:', error)
       return c.json({ error: 'Failed to rollback OpenCode config' }, 500)
+    }
+  })
+
+  app.post('/opencode-upgrade', async (c) => {
+    try {
+      logger.info('OpenCode upgrade requested')
+
+      const oldVersion = opencodeServerManager.getVersion()
+      logger.info(`Current OpenCode version: ${oldVersion}`)
+
+      logger.info('Running opencode upgrade...')
+      const upgradeOutput = execSync('opencode upgrade 2>&1', { encoding: 'utf8' })
+      logger.info(`Upgrade output: ${upgradeOutput}`)
+
+      await new Promise(r => setTimeout(r, 2000))
+
+      const newVersion = opencodeServerManager.getVersion() || await opencodeServerManager.fetchVersion()
+
+      logger.info(`New OpenCode version: ${newVersion}`)
+
+      const upgraded = oldVersion && newVersion && compareVersions(newVersion, oldVersion) > 0
+
+      if (upgraded) {
+        logger.info(`OpenCode upgraded from v${oldVersion} to v${newVersion}`)
+        opencodeServerManager.clearStartupError()
+        await opencodeServerManager.restart()
+        logger.info('OpenCode server restarted after upgrade')
+
+        return c.json({
+          success: true,
+          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and server restarted`,
+          oldVersion,
+          newVersion,
+          upgraded: true
+        })
+      } else {
+        logger.info('OpenCode is already up to date or version unchanged')
+        return c.json({
+          success: true,
+          message: 'OpenCode is already up to date',
+          oldVersion,
+          newVersion: oldVersion,
+          upgraded: false
+        })
+      }
+    } catch (error) {
+      logger.error('Failed to upgrade OpenCode:', error)
+      return c.json({
+        error: 'Failed to upgrade OpenCode',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
     }
   })
 

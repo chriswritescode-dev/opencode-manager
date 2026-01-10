@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw, FileText } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw, FileText, ArrowUpCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -85,6 +85,24 @@ export function OpenCodeConfigManager() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+    },
+  })
+
+  const upgradeOpenCodeMutation = useMutation({
+    mutationFn: async () => {
+      return await settingsApi.upgradeOpenCode()
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      if (data.upgraded) {
+        showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
+      } else {
+        showToast.success('OpenCode is already up to date', { id: 'upgrade-opencode' })
+      }
+    },
+    onError: () => {
+      showToast.error('Failed to upgrade OpenCode', { id: 'upgrade-opencode' })
     },
   })
 
@@ -310,6 +328,31 @@ export function OpenCodeConfigManager() {
                 )}
               </div>
               <div className="flex flex-wrap gap-2 justify-center sm:justify-end">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    showToast.loading('Upgrading OpenCode...', { id: 'upgrade-opencode' })
+                    try {
+                      await upgradeOpenCodeMutation.mutateAsync()
+                    } catch (error) {
+                      const errorMessage = error && typeof error === 'object' && 'response' in error
+                        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
+                           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
+                           || 'Failed to upgrade OpenCode')
+                        : 'Failed to upgrade OpenCode'
+                      showToast.error(errorMessage, { id: 'upgrade-opencode' })
+                    }
+                  }}
+                  disabled={upgradeOpenCodeMutation.isPending}
+                >
+                  {upgradeOpenCodeMutation.isPending ? (
+                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                  ) : (
+                    <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  )}
+                  <span className="text-xs sm:text-sm">Update</span>
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
