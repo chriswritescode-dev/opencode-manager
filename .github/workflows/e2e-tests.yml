@@ -128,3 +128,104 @@ jobs:
       - name: Build frontend
         run: npm run build
         working-directory: frontend
+
+  voice-e2e:
+    name: Voice E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install audio dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pulseaudio pulseaudio-utils espeak ffmpeg
+
+      - name: Setup virtual audio
+        run: |
+          chmod +x scripts/setup-virtual-audio.sh
+          ./scripts/setup-virtual-audio.sh
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: opencode-manager:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          target: runner
+
+      - name: Start container
+        run: |
+          docker run -d --name opencode-manager \
+            -p 5003:5003 \
+            -e ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }} \
+            -e OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }} \
+            opencode-manager:test
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Install Playwright
+        run: bunx playwright install chromium --with-deps
+
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for OpenCode Manager to be ready..."
+          for i in {1..60}; do
+            if curl -sf http://localhost:5003/api/health | grep -q '"status":"healthy"'; then
+              echo "Service is healthy!"
+              exit 0
+            fi
+            echo "Attempt $i/60 - waiting..."
+            docker logs opencode-manager --tail 20 2>&1 || true
+            sleep 5
+          done
+          echo "Service failed to become healthy"
+          docker logs opencode-manager
+          exit 1
+
+      - name: Wait for STT to be ready
+        run: |
+          echo "Waiting for STT server to be ready..."
+          for i in {1..30}; do
+            if curl -sf http://localhost:5003/api/stt/status | grep -q '"ready":true'; then
+              echo "STT is ready!"
+              exit 0
+            fi
+            echo "Attempt $i/30 - STT not ready..."
+            sleep 2
+          done
+          echo "Warning: STT may not be ready, continuing anyway"
+
+      - name: Run Voice E2E Tests
+        run: bun run scripts/test-voice-e2e-full.ts --url http://localhost:5003 --no-virtual-mic
+        env:
+          CI: true
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: voice-e2e-screenshots
+          path: /tmp/voice-e2e-*.png
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs opencode-manager
