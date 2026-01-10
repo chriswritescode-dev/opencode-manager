@@ -190,17 +190,46 @@ async function ensureDefaultConfigExists(): Promise<void> {
 }
 
 async function syncDefaultConfigToDisk(): Promise<void> {
-  const settingsService = new SettingsService(db)
-  const defaultConfig = settingsService.getDefaultOpenCodeConfig()
-  
-  if (defaultConfig) {
-    const configPath = getOpenCodeConfigFilePath()
-    const configContent = JSON.stringify(defaultConfig.content, null, 2)
-    await writeFileContent(configPath, configContent)
-    logger.info(`Synced default config '${defaultConfig.name}' to: ${configPath}`)
-  } else {
-    logger.info('No default OpenCode config found in database')
+  if (process.env.OPENCODE_CLIENT_MODE === 'true') {
+    logger.info('Client mode: skipping config sync to preserve existing server config')
+    return
   }
+
+  const settingsService = new SettingsService(db)
+  const managerConfig = settingsService.getDefaultOpenCodeConfig()
+  
+  if (!managerConfig) {
+    logger.info('No default OpenCode config found in database')
+    return
+  }
+
+  const homeConfigPath = path.join(os.homedir(), '.config/opencode/opencode.json')
+  let userConfig: Record<string, unknown> = {}
+  
+  if (await fileExists(homeConfigPath)) {
+    try {
+      const content = await readFileContent(homeConfigPath)
+      userConfig = JSON.parse(content)
+      logger.info('Found user local OpenCode config, will merge with Manager config')
+    } catch (error) {
+      logger.warn('Failed to read user config, using Manager config only:', error)
+    }
+  }
+
+  const mergedConfig = {
+    ...managerConfig.content,
+    model: userConfig.model || managerConfig.content.model,
+    small_model: userConfig.small_model || managerConfig.content.small_model,
+    provider: {
+      ...(managerConfig.content.provider || {}),
+      ...(userConfig.provider as Record<string, unknown> || {}),
+    },
+  }
+
+  const configPath = getOpenCodeConfigFilePath()
+  const configContent = JSON.stringify(mergedConfig, null, 2)
+  await writeFileContent(configPath, configContent)
+  logger.info(`Synced merged config to: ${configPath} (user model: ${userConfig.model || 'none'}, manager additions applied)`)
 }
 
 async function ensureDefaultAgentsMdExists(): Promise<void> {
