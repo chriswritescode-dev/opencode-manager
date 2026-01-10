@@ -1,5 +1,39 @@
 # OpenCode WebUI - Agent Guidelines
 
+## ⚠️ CRITICAL: Verification Before Committing
+
+**NEVER commit code claiming a feature or fix works without actually testing it end-to-end.**
+
+Before committing any change that affects startup or core functionality:
+
+1. **Kill all processes and clean up:**
+   ```bash
+   pnpm cleanup
+   # Or manually: lsof -ti:5001,5173,5551,5552,5553 | xargs kill
+   ```
+
+2. **Start fresh and verify:**
+   ```bash
+   # For client mode (connecting to existing opencode)
+   opencode serve --port 5551 --hostname 127.0.0.1 &
+   sleep 3
+   pnpm start:client
+   
+   # Or for standalone mode
+   pnpm start
+   ```
+
+3. **Wait for full startup** (~60-90s for model loading) and verify:
+   ```bash
+   curl -s http://localhost:5001/api/health | jq '.status'  # Should be "healthy"
+   curl -s http://localhost:5001/api/stt/status | jq '.server.running'  # Should be true
+   curl -s http://localhost:5001/api/repos | jq '.[].fullPath'  # Should list repos
+   ```
+
+4. **Test the actual feature** you changed (e.g., voice transcription, file creation, etc.)
+
+**DO NOT** trust that previous test runs are still valid after making changes.
+
 ## ⚠️ CRITICAL: Never Kill OpenCode Processes
 
 **NEVER run `pkill -f opencode` or similar commands that kill opencode processes.**

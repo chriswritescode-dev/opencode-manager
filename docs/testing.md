@@ -18,8 +18,8 @@ This test verifies that when using `pnpm start:client` to connect to an existing
 # Kill any existing processes
 bun scripts/cleanup.ts --all
 
-# Backup and remove existing database
-mv workspace/opencode-manager.db workspace/opencode-manager.db.bak 2>/dev/null || true
+# Backup and remove existing database (path configured in .env as DATABASE_PATH)
+mv data/opencode.db data/opencode.db.bak 2>/dev/null || true
 ```
 
 #### Step 2: Start OpenCode Server
@@ -61,7 +61,7 @@ curl -s http://localhost:5001/api/repos | jq .
 ```bash
 bun scripts/cleanup.ts --all
 # Restore original database
-mv workspace/opencode-manager.db.bak workspace/opencode-manager.db 2>/dev/null || true
+mv data/opencode.db.bak data/opencode.db 2>/dev/null || true
 ```
 
 ### Success Criteria
