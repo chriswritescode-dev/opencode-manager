@@ -1,5 +1,16 @@
 # OpenCode WebUI - Agent Guidelines
 
+## ⚠️ CRITICAL: Never Kill OpenCode Processes
+
+**NEVER run `pkill -f opencode` or similar commands that kill opencode processes.**
+
+The user runs `opencode -c` in their terminal sessions. Killing these processes will terminate the user's active coding sessions and potentially lose their work.
+
+Safe alternatives:
+- Kill specific PIDs you spawned: `kill <specific-pid>`
+- Use `pnpm cleanup` to kill only managed ports (5001, 5173, 5551, 5552, 5553)
+- Kill by port: `lsof -ti:5551 | xargs kill` (only kills process on that port)
+
 ## Commands
 
 - `pnpm dev` - Start both backend (5001) and frontend (5173)
