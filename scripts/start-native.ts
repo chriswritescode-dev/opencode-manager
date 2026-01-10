@@ -101,11 +101,36 @@ async function findOpenCodeInstances(): Promise<OpenCodeInstance[]> {
 
 async function checkServerHealth(port: number): Promise<boolean> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/doc`, { signal: AbortSignal.timeout(2000) })
+    const response = await fetch(`http://127.0.0.1:${port}/doc`, {
+      signal: AbortSignal.timeout(2000)
+    })
     return response.ok
   } catch {
     return false
   }
+}
+
+async function waitForBackendHealth(port: number, maxSeconds: number): Promise<boolean> {
+  for (let i = 0; i < maxSeconds; i++) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+        signal: AbortSignal.timeout(2000)
+      })
+      if (response.ok) {
+        const data = await response.json() as { status?: string }
+        if (data.status === 'healthy') {
+          return true
+        }
+      }
+    } catch {
+      // Not ready yet
+    }
+    if (i > 0 && i % 10 === 0) {
+      console.log(`   Still waiting... (${i}s)`)
+    }
+    await new Promise(r => setTimeout(r, 1000))
+  }
+  return false
 }
 
 async function promptUserSelection(instances: OpenCodeInstance[]): Promise<OpenCodeInstance | null> {
@@ -152,7 +177,7 @@ async function promptUserSelection(instances: OpenCodeInstance[]): Promise<OpenC
 async function startCloudflaredTunnel(localPort: number): Promise<{ process: ReturnType<typeof spawn>, url: string | null }> {
   console.log('\n🌐 Starting Cloudflare tunnel...')
 
-  const tunnelProcess = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--url', `http://127.0.0.1:${localPort}`], {
+  const tunnelProcess = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${localPort}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
 
@@ -280,10 +305,16 @@ async function main() {
   const backendProcess = await startBackend(args.port, opencodePort)
   processes.push(backendProcess)
 
-  await new Promise(resolve => setTimeout(resolve, 2000))
-
   const frontend = await startFrontend()
   processes.push(frontend.process)
+
+  console.log('\n⏳ Waiting for backend to be ready (this may take ~60s for model loading)...')
+  const backendReady = await waitForBackendHealth(args.port, 120)
+  if (!backendReady) {
+    console.error('❌ Backend failed to start within timeout')
+    process.exit(1)
+  }
+  console.log('✓ Backend is ready!')
 
   let tunnelProcess: ReturnType<typeof spawn> | null = null
   let tunnelUrl: string | null = null
