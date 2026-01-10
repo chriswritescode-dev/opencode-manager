@@ -117,6 +117,47 @@ Tests performed:
 4. Full flow: Audio -> STT -> Send to OpenCode -> Poll for response
 5. TTS response synthesis
 
+## Browser E2E Test (Real Audio Pipeline)
+
+Test the complete voice pipeline using Chrome's fake audio capture:
+
+```bash
+# Start the app with Cloudflare tunnel
+pnpm start
+
+# Wait for startup (~90s for model loading), then note the tunnel URL
+# Example: https://wallet-geographical-task-governance.trycloudflare.com
+
+# Run browser E2E test over tunnel (headless)
+bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com
+
+# Run with visible browser for debugging
+bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com --no-headless
+
+# Local testing (no tunnel)
+bun run scripts/test-talkmode-browser.ts --url http://localhost:5001
+```
+
+This test:
+1. Generates test audio using macOS `say` command
+2. Launches Chrome with `--use-file-for-fake-audio-capture` flag
+3. Opens the app, navigates to a session, starts Talk Mode
+4. Chrome captures audio from the fake device instead of microphone
+5. Audio flows through real STT pipeline (MediaRecorder → /api/stt/transcribe → Whisper)
+6. Verifies transcription matches expected text
+
+Requirements:
+- macOS with `say` command
+- `ffmpeg` installed (`brew install ffmpeg`)
+- Chromium/Chrome installed (Puppeteer downloads automatically)
+
+### Cloudflare Tunnel Notes
+
+The tunnel uses HTTP/2 protocol to avoid QUIC conflicts with Tailscale VPN:
+- QUIC protocol causes Cloudflare Error 1033 when Tailscale is running
+- Backend must be healthy before starting tunnel (models take ~90s to load)
+- The `pnpm start` command handles this automatically
+
 ## Code Style
 
 - No comments, self-documenting code only
@@ -279,7 +320,33 @@ bun run scripts/test-talkmode-e2e.ts --url http://localhost:5003
 bun run scripts/test-talkmode-browser.ts --url http://localhost:5003
 ```
 
-The browser test uses `window.__TALK_MODE_TEST__` API to inject audio directly into TalkModeContext, bypassing VAD (which can't detect speech from non-microphone sources reliably). This is how companies like OpenAI/Anthropic test voice features.
+The browser test uses Chrome's `--use-file-for-fake-audio-capture` flag to inject real audio into the browser's audio capture pipeline. This tests the complete STT flow through MediaRecorder → Whisper without mocking.
+
+### Complete Voice Testing Workflow
+
+The recommended workflow for testing voice/Talk Mode:
+
+```bash
+# 1. Start the app with tunnel (waits for model loading automatically)
+pnpm start
+# Wait for "✓ Backend is ready!" and tunnel URL (~90s)
+
+# 2. Verify health endpoints
+curl https://YOUR-TUNNEL-URL.trycloudflare.com/api/health
+curl https://YOUR-TUNNEL-URL.trycloudflare.com/api/stt/status
+
+# 3. Run browser E2E test over tunnel
+bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com
+
+# 4. For debugging, run with visible browser
+bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com --no-headless
+```
+
+Key points:
+- `pnpm start` now waits for backend health before starting tunnel
+- Whisper model takes ~30s to load, Chatterbox ~50s
+- Tunnel uses HTTP/2 protocol (QUIC causes issues with Tailscale VPN)
+- Browser test injects real audio via Chrome's fake audio device
 
 ## Architecture
 
