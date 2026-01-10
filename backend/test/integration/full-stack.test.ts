@@ -1,6 +1,14 @@
+/**
+ * Full stack integration test that starts the entire app
+ * 
+ * NOTE: This test is skipped by default. Run with RUN_INTEGRATION_TESTS=1 or use pnpm run test:integration
+ */
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
+
+const SKIP_INTEGRATION = !process.env.RUN_INTEGRATION_TESTS
 
 const BACKEND_PORT = 5001
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`
@@ -8,7 +16,7 @@ const STARTUP_TIMEOUT = 60000
 
 let serverProcess: ChildProcess | null = null
 
-describe('Full Stack Integration Test', () => {
+describe.skipIf(SKIP_INTEGRATION)('Full Stack Integration Test', () => {
   beforeAll(async () => {
     console.log('Starting opencode-manager with npm start...')
     

@@ -13,9 +13,13 @@
  * Or for local testing:
  *   docker run -d -p 5003:5003 ghcr.io/vibetechnologies/opencode-manager:latest
  *   pnpm run test:integration
+ * 
+ * NOTE: This test is skipped by default. Run with RUN_INTEGRATION_TESTS=1 or use pnpm run test:integration
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'vitest'
+
+const SKIP_INTEGRATION = !process.env.RUN_INTEGRATION_TESTS && !process.env.OPENCODE_MANAGER_URL
 import axios, { AxiosInstance } from 'axios'
 
 const OPENCODE_MANAGER_URL = process.env.OPENCODE_MANAGER_URL || 'http://localhost:5003'
@@ -55,7 +59,7 @@ interface Message {
   parts: MessagePart[]
 }
 
-describe('WebFetch Large Output Integration Test', () => {
+describe.skipIf(SKIP_INTEGRATION)('WebFetch Large Output Integration Test', () => {
   let client: AxiosInstance
   let sessionID: string
   let directory: string
