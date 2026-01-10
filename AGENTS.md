@@ -348,6 +348,12 @@ Key points:
 - Tunnel uses HTTP/2 protocol (QUIC causes issues with Tailscale VPN)
 - Browser test injects real audio via Chrome's fake audio device
 
+## Testing Documentation
+
+See [docs/testing.md](docs/testing.md) for detailed test procedures:
+- Client Mode Auto-Registration Test
+- Voice Mode End-to-End Test (full voice-to-code pipeline)
+
 ## Architecture
 
 @docs/cloudVibeCoding.md
