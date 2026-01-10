@@ -300,11 +300,11 @@ async function runVoiceE2ETest(config: TestConfig): Promise<boolean> {
       return response.json()
     })
 
-    if (sttStatus.error || !sttStatus.ready) {
+    if (sttStatus.error || !sttStatus.server?.running) {
       fail(`STT not ready: ${JSON.stringify(sttStatus)}`)
       return false
     }
-    success(`STT ready: ${sttStatus.model}`)
+    success(`STT ready: ${sttStatus.server?.model || sttStatus.config?.model}`)
 
     info('Looking for Talk Mode button...')
     const talkModeButton = await page.locator('button[title*="Talk Mode"], button[title*="talk mode"]').first()

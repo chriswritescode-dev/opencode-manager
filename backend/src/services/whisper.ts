@@ -43,6 +43,28 @@ class WhisperServerManager {
     return { ...this.status }
   }
 
+  async syncStatus(): Promise<WhisperServerStatus> {
+    try {
+      const response = await fetch(`${this.getBaseUrl()}/health`, {
+        signal: AbortSignal.timeout(2000)
+      })
+      
+      if (response.ok) {
+        const data = await response.json() as { current_model?: string }
+        this.status.running = true
+        this.status.model = data.current_model || null
+        this.status.error = null
+      } else {
+        this.status.running = false
+        this.status.error = 'Health check failed'
+      }
+    } catch (error) {
+      this.status.running = false
+      this.status.error = error instanceof Error ? error.message : 'Health check failed'
+    }
+    return { ...this.status }
+  }
+
   async start(): Promise<void> {
     if (this.startPromise) {
       return this.startPromise
@@ -216,6 +238,7 @@ class WhisperServerManager {
     language_probability: number
     duration: number
   }> {
+    await this.syncStatus()
     if (!this.status.running) {
       throw new Error('Whisper server is not running')
     }

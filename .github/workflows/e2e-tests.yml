@@ -205,7 +205,7 @@ jobs:
         run: |
           echo "Waiting for STT server to be ready..."
           for i in {1..30}; do
-            if curl -sf http://localhost:5003/api/stt/status | grep -q '"ready":true'; then
+            if curl -sf http://localhost:5003/api/stt/status | grep -q '"running":true'; then
               echo "STT is ready!"
               exit 0
             fi

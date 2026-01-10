@@ -32,7 +32,7 @@ export function createSTTRoutes(db: Database) {
         return c.json({ error: 'STT is not enabled' }, 400)
       }
 
-      const status = whisperServerManager.getStatus()
+      const status = await whisperServerManager.syncStatus()
       if (!status.running) {
         return c.json({ error: 'Whisper server is not running' }, 503)
       }
@@ -89,7 +89,7 @@ export function createSTTRoutes(db: Database) {
     const settingsService = new SettingsService(db)
     const settings = settingsService.getSettings(userId)
     const sttConfig = settings.preferences.stt
-    const serverStatus = whisperServerManager.getStatus()
+    const serverStatus = await whisperServerManager.syncStatus()
 
     return c.json({
       enabled: sttConfig?.enabled || false,

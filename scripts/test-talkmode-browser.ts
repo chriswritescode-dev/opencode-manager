@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 
-import puppeteer, { Browser } from 'puppeteer'
+import puppeteer, { Browser, Page } from 'puppeteer'
+import { spawn } from 'child_process'
+import { existsSync, unlinkSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 interface TestConfig {
   baseUrl: string
@@ -26,36 +30,108 @@ function log(message: string, indent = 0) {
 }
 
 function success(message: string) {
-  log(`✅ ${message}`)
+  log(`PASS ${message}`)
 }
 
 function fail(message: string) {
-  log(`❌ ${message}`)
+  log(`FAIL ${message}`)
 }
 
 function info(message: string) {
-  log(`ℹ️  ${message}`)
+  log(`INFO  ${message}`)
 }
 
-async function runFullE2ETest(config: TestConfig) {
-  console.log('\n🎧 Talk Mode Full Browser E2E Test (Streaming VAD)')
-  console.log('━'.repeat(60))
+function execCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
+  return new Promise((resolve) => {
+    const proc = spawn(command, args)
+    let stdout = ''
+    let stderr = ''
+    
+    proc.stdout.on('data', (data) => { stdout += data.toString() })
+    proc.stderr.on('data', (data) => { stderr += data.toString() })
+    proc.on('close', (code) => {
+      resolve({ stdout, stderr, code: code || 0 })
+    })
+  })
+}
+
+async function generateTestAudio(text: string): Promise<string | null> {
+  const wavPath = join(tmpdir(), `talk-mode-test-${Date.now()}.wav`)
+  const aiffPath = wavPath.replace('.wav', '.aiff')
+  
+  info(`Generating test audio: "${text}"`)
+  
+  const sayResult = await execCommand('say', ['-o', aiffPath, text])
+  if (sayResult.code !== 0) {
+    fail(`say command failed: ${sayResult.stderr}`)
+    return null
+  }
+
+  const ffmpegResult = await execCommand('ffmpeg', [
+    '-y', '-i', aiffPath, '-ar', '16000', '-ac', '1', wavPath
+  ])
+  
+  try { unlinkSync(aiffPath) } catch {}
+  
+  if (ffmpegResult.code !== 0) {
+    fail(`ffmpeg conversion failed: ${ffmpegResult.stderr}`)
+    return null
+  }
+  
+  if (!existsSync(wavPath)) {
+    fail('Failed to create test audio file')
+    return null
+  }
+  
+  success(`Generated test audio: ${wavPath}`)
+  return wavPath
+}
+
+async function waitForTalkModeState(page: Page, targetState: string, timeoutMs = 30000): Promise<boolean> {
+  const startTime = Date.now()
+  
+  while (Date.now() - startTime < timeoutMs) {
+    const state = await page.evaluate(() => {
+      const testApi = (window as Window & typeof globalThis & { 
+        __TALK_MODE_TEST__?: { getState: () => { state: string } } 
+      }).__TALK_MODE_TEST__
+      return testApi?.getState()?.state
+    })
+    
+    if (state === targetState) {
+      return true
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
+  
+  return false
+}
+
+async function runRealAudioTest(config: TestConfig) {
+  console.log('\nTalk Mode Real Audio E2E Test')
+  console.log('='.repeat(60))
   console.log(`URL: ${config.baseUrl}`)
   console.log(`Test Phrase: "${config.testPhrase}"`)
   console.log(`Headless: ${config.headless}`)
-  console.log('━'.repeat(60))
+  console.log('='.repeat(60))
 
-  info('Using transcript injection (new streaming VAD architecture)...')
+  const audioPath = await generateTestAudio(config.testPhrase)
+  if (!audioPath) {
+    fail('Cannot run test without audio file')
+    return false
+  }
 
   let browser: Browser | null = null
   
   try {
-    info('Launching browser...')
+    info('Launching browser with fake audio device...')
     browser = await puppeteer.launch({
       headless: config.headless,
       args: [
         '--use-fake-ui-for-media-stream',
         '--use-fake-device-for-media-stream',
+        `--use-file-for-fake-audio-capture=${audioPath}`,
         '--autoplay-policy=no-user-gesture-required',
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -63,7 +139,6 @@ async function runFullE2ETest(config: TestConfig) {
     })
 
     const page = await browser.newPage()
-    
     await page.setViewport({ width: 1280, height: 800 })
     
     if (config.username && config.password) {
@@ -72,37 +147,35 @@ async function runFullE2ETest(config: TestConfig) {
       })
     }
 
-    const consoleMessages: string[] = []
+    const sttRequests: { url: string; status: number; body?: string }[] = []
+    let transcriptionResult: string | null = null
+
     page.on('console', msg => {
       const text = msg.text()
-      consoleMessages.push(`[${msg.type()}] ${text}`)
-      if (text.includes('TalkMode') || text.includes('VAD') || text.includes('STT') || 
-          text.includes('speech') || text.includes('Test]') || text.includes('transcri') ||
-          text.includes('Error') || text.includes('error') || text.includes('failed')) {
+      if (text.includes('TalkMode') || text.includes('STT') || text.includes('transcri') ||
+          text.includes('Error') || text.includes('error') || text.includes('speech')) {
         log(`[Browser] ${text}`, 1)
-      }
-    })
-
-    page.on('pageerror', err => {
-      log(`[Page Error] ${err.message}`, 1)
-    })
-
-    page.on('requestfailed', request => {
-      const url = request.url()
-      if (url.includes('stt') || url.includes('transcribe')) {
-        log(`[Request Failed] ${url}: ${request.failure()?.errorText}`, 1)
       }
     })
 
     page.on('response', async response => {
       const url = response.url()
-      if (url.includes('stt') || url.includes('transcribe')) {
-        log(`[Response] ${url}: ${response.status()}`, 1)
+      if (url.includes('/api/stt/transcribe')) {
+        const status = response.status()
         try {
           const body = await response.text()
-          log(`[Response Body] ${body.slice(0, 500)}`, 1)
+          sttRequests.push({ url, status, body })
+          log(`[STT Response] ${status}: ${body.slice(0, 200)}`, 1)
+          
+          if (status === 200) {
+            const data = JSON.parse(body)
+            if (data.text) {
+              transcriptionResult = data.text
+              success(`Real STT transcription: "${data.text}"`)
+            }
+          }
         } catch {
-          // Ignore if we can't read the body
+          sttRequests.push({ url, status })
         }
       }
     })
@@ -111,12 +184,8 @@ async function runFullE2ETest(config: TestConfig) {
     await page.goto(config.baseUrl, { waitUntil: 'networkidle2', timeout: 60000 })
     success('Page loaded')
 
-    await page.waitForFunction(() => {
-      return document.querySelector('button') !== null
-    }, { timeout: 15000 })
+    await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 15000 })
     success('App rendered')
-
-    await new Promise(resolve => setTimeout(resolve, 2000))
 
     info('Navigating to first available repo...')
     const repos = await page.evaluate(async () => {
@@ -136,147 +205,88 @@ async function runFullE2ETest(config: TestConfig) {
     const repoId = repos[0].id
     success(`Found repo: ${repos[0].repoUrl} (id: ${repoId})`)
 
-    await page.goto(`${config.baseUrl}/repo/${repoId}`, { waitUntil: 'networkidle2', timeout: 60000 })
-    success('Navigated to repo page')
-
-    await new Promise(resolve => setTimeout(resolve, 3000))
-
-    info('Looking for existing sessions or creating a new one...')
-    const sessionsResult = await page.evaluate(async (directory: string) => {
-      try {
-        const response = await fetch(`/api/opencode/sessions?directory=${encodeURIComponent(directory)}`)
-        if (!response.ok) {
-          return { error: `HTTP ${response.status}` }
-        }
-        return await response.json()
-      } catch (e) {
-        return { error: String(e) }
-      }
-    }, repos[0].fullPath)
-
+    info('Getting or creating session...')
     let sessionId: string | null = null
 
-    if (sessionsResult.error) {
-      info(`Could not fetch sessions: ${sessionsResult.error}, creating new session...`)
-    } else if (Array.isArray(sessionsResult) && sessionsResult.length > 0) {
-      sessionId = sessionsResult[0].id
-      success(`Found existing session: ${sessionId}`)
-    }
+    const sessions = await page.evaluate(async (directory: string) => {
+      try {
+        const response = await fetch(`/api/opencode/sessions?directory=${encodeURIComponent(directory)}`)
+        if (!response.ok) return []
+        return await response.json()
+      } catch { return [] }
+    }, repos[0].fullPath)
 
-    if (!sessionId) {
-      info('Creating new session...')
+    if (Array.isArray(sessions) && sessions.length > 0) {
+      sessionId = sessions[0].id
+      success(`Using existing session: ${sessionId}`)
+    } else {
       const createResult = await page.evaluate(async (directory: string) => {
-        try {
-          const response = await fetch('/api/opencode/session', {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'x-opencode-dir': directory
-            },
-            body: JSON.stringify({})
-          })
-          if (!response.ok) {
-            return { error: `HTTP ${response.status}` }
-          }
-          return await response.json()
-        } catch (e) {
-          return { error: String(e) }
-        }
+        const response = await fetch('/api/opencode/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-opencode-dir': directory },
+          body: JSON.stringify({})
+        })
+        return response.ok ? await response.json() : null
       }, repos[0].fullPath)
 
-      if (createResult.error) {
-        fail(`Failed to create session: ${createResult.error}`)
+      if (!createResult) {
+        fail('Failed to create session')
         return false
       }
       sessionId = createResult.id
       success(`Created new session: ${sessionId}`)
     }
 
-    info(`Navigating to session page: /repos/${repoId}/sessions/${sessionId}`)
     await page.goto(`${config.baseUrl}/repos/${repoId}/sessions/${sessionId}`, { 
       waitUntil: 'networkidle2', 
       timeout: 60000 
     })
     success('Navigated to session page')
 
-    await new Promise(resolve => setTimeout(resolve, 3000))
+    await new Promise(resolve => setTimeout(resolve, 2000))
 
-    const pageState = await page.evaluate(() => {
-      return {
-        url: window.location.href,
-        bodyHtml: document.body.innerHTML.slice(0, 1000),
-        hasRoot: !!document.getElementById('root'),
-        rootContent: document.getElementById('root')?.innerHTML.slice(0, 500),
-        buttonCount: document.querySelectorAll('button').length
-      }
-    })
-    log(`Page state: URL=${pageState.url}, buttons=${pageState.buttonCount}`, 1)
-
-    info('Checking STT API is working...')
+    info('Verifying STT is working via API...')
     const sttStatus = await page.evaluate(async () => {
-      try {
-        const response = await fetch('/api/stt/status')
-        return await response.json()
-      } catch (e) {
-        return { error: String(e) }
-      }
+      const response = await fetch('/api/stt/status')
+      return response.json()
     })
     
-    if (sttStatus.error) {
-      fail(`STT API error: ${sttStatus.error}`)
+    if (!sttStatus.server?.running) {
+      fail(`STT server not running: ${JSON.stringify(sttStatus)}`)
       return false
     }
-    success(`STT server ready: ${sttStatus.model || 'whisper'}`)
+    success('STT server is running')
 
     info('Looking for Talk Mode button...')
     const talkModeButton = await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('button'))
-      
       for (const btn of buttons) {
         const title = btn.getAttribute('title')?.toLowerCase() || ''
-        
         if (title.includes('talk mode') || title.includes('talk-mode')) {
-          return { 
-            found: true, 
-            selector: `button[title="${btn.getAttribute('title')}"]`,
-            title: btn.getAttribute('title')
-          }
+          return { found: true, selector: `button[title="${btn.getAttribute('title')}"]` }
         }
       }
-      
-      return { found: false, buttonCount: buttons.length }
+      return { found: false }
     })
 
     if (!talkModeButton.found) {
-      fail('Could not find Talk Mode button')
-      const pageInfo = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button')).slice(0, 20).map(b => ({
-          ariaLabel: b.getAttribute('aria-label'),
+      fail('Talk Mode button not found')
+      const buttons = await page.evaluate(() => 
+        Array.from(document.querySelectorAll('button')).slice(0, 10).map(b => ({
           title: b.getAttribute('title'),
-          text: b.textContent?.slice(0, 50),
-          classes: b.className.slice(0, 50)
+          text: b.textContent?.slice(0, 30)
         }))
-        const html = document.body.innerHTML.slice(0, 500)
-        return { buttons, html, url: window.location.href }
-      })
-      log(`Current URL: ${pageInfo.url}`, 1)
+      )
       log('Available buttons:', 1)
-      pageInfo.buttons.forEach(b => log(JSON.stringify(b), 2))
-      log('Page preview:', 1)
-      log(pageInfo.html.slice(0, 200), 2)
+      buttons.forEach(b => log(JSON.stringify(b), 2))
       return false
     }
+    success('Found Talk Mode button')
 
-    success(`Found Talk Mode button: ${talkModeButton.ariaLabel || talkModeButton.title}`)
+    info('Starting Talk Mode (will use fake audio capture)...')
+    await page.click(talkModeButton.selector!)
+    await new Promise(resolve => setTimeout(resolve, 1000))
 
-    info('Clicking Talk Mode button to start...')
-    if (talkModeButton.selector) {
-      await page.click(talkModeButton.selector)
-    }
-
-    await new Promise(resolve => setTimeout(resolve, 2000))
-
-    info('Waiting for Talk Mode test API to be available...')
     const testApiReady = await page.evaluate(() => {
       return new Promise<boolean>((resolve) => {
         let attempts = 0
@@ -284,7 +294,6 @@ async function runFullE2ETest(config: TestConfig) {
           const testApi = (window as Window & typeof globalThis & { 
             __TALK_MODE_TEST__?: { getState: () => unknown } 
           }).__TALK_MODE_TEST__
-          
           if (testApi && typeof testApi.getState === 'function') {
             resolve(true)
           } else if (attempts++ < 20) {
@@ -301,176 +310,77 @@ async function runFullE2ETest(config: TestConfig) {
       fail('Talk Mode test API not available')
       return false
     }
-    success('Talk Mode test API ready')
+    success('Talk Mode activated')
 
-    info('Checking Talk Mode state...')
-    const initialState = await page.evaluate(() => {
-      const testApi = (window as Window & typeof globalThis & { 
-        __TALK_MODE_TEST__?: { getState: () => { state: string; isActive: boolean; sessionID: string | null } } 
-      }).__TALK_MODE_TEST__
-      return testApi?.getState()
-    })
-
-    log(`Initial state: ${JSON.stringify(initialState)}`, 1)
-
-    if (initialState?.state !== 'listening') {
-      info('Waiting for listening state...')
-      await new Promise(resolve => setTimeout(resolve, 2000))
-      
-      const retryState = await page.evaluate(() => {
-        const testApi = (window as Window & typeof globalThis & { 
-          __TALK_MODE_TEST__?: { getState: () => { state: string; isActive: boolean } } 
-        }).__TALK_MODE_TEST__
-        return testApi?.getState()
-      })
-      
-      if (retryState?.state !== 'listening') {
-        fail(`Talk Mode not in listening state: ${retryState?.state}`)
-        return false
-      }
-    }
-    
-    success('Talk Mode is listening')
-
-    info('Injecting transcript via test API (simulating speech-to-text result)...')
-    const injected = await page.evaluate((transcript: string) => {
-      const testApi = (window as Window & typeof globalThis & { 
-        __TALK_MODE_TEST__?: { injectTranscript: (text: string) => boolean } 
-      }).__TALK_MODE_TEST__
-      
-      if (!testApi) return { success: false, error: 'Test API not found' }
-      
-      console.log('[Test] Injecting transcript:', transcript)
-      
-      const result = testApi.injectTranscript(transcript)
-      return { success: result }
-    }, config.testPhrase)
-
-    if (!injected.success) {
-      fail(`Failed to inject transcript: ${JSON.stringify(injected)}`)
-      return false
-    }
-    success('Transcript injected successfully')
-
-    info('Waiting for response from OpenCode...')
-    
-    let response: string | null = null
-    const startTime = Date.now()
-    const maxWait = 45000
-    let pollCount = 0
-
-    while (Date.now() - startTime < maxWait) {
+    info('Waiting for Talk Mode to enter listening state...')
+    const isListening = await waitForTalkModeState(page, 'listening', 10000)
+    if (!isListening) {
       const state = await page.evaluate(() => {
         const testApi = (window as Window & typeof globalThis & { 
-          __TALK_MODE_TEST__?: { getState: () => { 
-            state: string
-            userTranscript: string | null
-            agentResponse: string | null
-            sessionID: string | null
-          }} 
+          __TALK_MODE_TEST__?: { getState: () => { state: string } } 
         }).__TALK_MODE_TEST__
         return testApi?.getState()
       })
+      fail(`Talk Mode not in listening state: ${JSON.stringify(state)}`)
+      return false
+    }
+    success('Talk Mode is listening for audio')
 
-      pollCount++
-      if (pollCount <= 10 || pollCount % 10 === 0) {
-        log(`Poll #${pollCount}: state=${state?.state}, userTranscript=${state?.userTranscript?.slice(0, 30) || 'null'}`, 1)
-      }
-
-      if (state?.agentResponse && !response) {
-        response = state.agentResponse
-        success(`Agent response: "${response.slice(0, 100)}"`)
-      }
-
-      if (state?.state === 'speaking' && response) {
-        info('Agent is speaking response via TTS')
-        await new Promise(resolve => setTimeout(resolve, 2000))
-        break
-      }
-
-      if (response) {
-        break
-      }
-
-      if (state?.state === 'listening' && state?.userTranscript && !response) {
-        info('State returned to listening, checking API directly for response...')
-        
-        const apiResponse = await page.evaluate(async (sessionId: string) => {
-          try {
-            const response = await fetch(`/api/opencode/session/${sessionId}/message`)
-            if (!response.ok) return null
-            const messages = await response.json()
-            const assistantMsg = messages.find((m: { info: { role: string } }) => m.info.role === 'assistant')
-            if (assistantMsg) {
-              const textPart = assistantMsg.parts.find((p: { type: string }) => p.type === 'text')
-              return textPart?.text || null
-            }
-            return null
-          } catch {
-            return null
-          }
-        }, state.sessionID)
-        
-        if (apiResponse) {
-          response = apiResponse
-          success(`Agent response (from API): "${response.slice(0, 100)}"`)
-        }
-        break
-      }
-
+    info('Audio is being captured from fake device...')
+    info('Waiting for STT transcription from real audio pipeline...')
+    
+    const startTime = Date.now()
+    const maxWait = 30000
+    
+    while (Date.now() - startTime < maxWait && !transcriptionResult) {
       await new Promise(resolve => setTimeout(resolve, 500))
-    }
-
-    info('Stopping Talk Mode...')
-    const stopResult = await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button'))
-      for (const btn of buttons) {
-        const title = btn.getAttribute('title')?.toLowerCase() || ''
-        if (title.includes('talk mode') || title.includes('talk-mode') || title.includes('stop talk')) {
-          (btn as HTMLButtonElement).click()
-          return { stopped: true, buttonTitle: btn.getAttribute('title') }
+      
+      if (sttRequests.length > 0) {
+        const lastReq = sttRequests[sttRequests.length - 1]
+        if (lastReq.status !== 200) {
+          log(`STT request failed: ${lastReq.status} - ${lastReq.body}`, 1)
         }
       }
-      return { stopped: false }
-    })
-    if (stopResult.stopped) {
-      log(`Clicked stop button: ${stopResult.buttonTitle}`, 1)
     }
 
-    console.log('\n' + '═'.repeat(60))
+    console.log('\n' + '='.repeat(60))
     console.log('Test Results')
-    console.log('═'.repeat(60))
+    console.log('='.repeat(60))
 
-    const results = {
-      transcriptInjected: injected.success,
-      transcription: config.testPhrase,
-      gotResponse: !!response,
-      response: response?.slice(0, 100)
-    }
-
-    if (results.transcriptInjected) {
-      success('Transcript was injected and processed')
+    if (transcriptionResult) {
+      success(`Real audio was transcribed by STT: "${transcriptionResult}"`)
       
-      if (results.gotResponse) {
-        success('OpenCode responded to the query')
-        success('Full Talk Mode E2E flow verified!')
-
-        if (response?.includes('4') || response?.toLowerCase().includes('four')) {
-          success('Response contains correct answer (4)')
-        }
-        
+      const expectedWords = config.testPhrase.toLowerCase().split(/\s+/)
+      const transcribedWords = transcriptionResult.toLowerCase().split(/\s+/)
+      const matches = expectedWords.filter(w => transcribedWords.some(tw => tw.includes(w) || w.includes(tw)))
+      const accuracy = Math.round((matches.length / expectedWords.length) * 100)
+      
+      if (accuracy >= 50) {
+        success(`Transcription accuracy: ${accuracy}% (${matches.length}/${expectedWords.length} words matched)`)
+        success('Real audio STT pipeline is working!')
         return true
       } else {
-        info('Transcript processed but no response captured (may still be processing)')
-        return true
+        fail(`Low transcription accuracy: ${accuracy}%`)
+        log(`Expected: "${config.testPhrase}"`, 1)
+        log(`Got: "${transcriptionResult}"`, 1)
+        return false
       }
     } else {
-      fail('Failed to inject transcript')
-      log('Console messages with speech/STT:', 1)
-      consoleMessages
-        .filter(m => m.includes('speech') || m.includes('STT') || m.includes('transcri') || m.includes('Test]'))
-        .slice(-10)
-        .forEach(m => log(m, 2))
+      fail('No transcription received from real audio pipeline')
+      log(`Total STT requests made: ${sttRequests.length}`, 1)
+      
+      if (sttRequests.length === 0) {
+        fail('No STT requests were made - audio capture may not be working')
+        log('This could mean:', 1)
+        log('- MediaRecorder is not capturing audio from fake device', 2)
+        log('- VAD (Voice Activity Detection) is not detecting speech', 2)
+        log('- The audio file may be too short or have no speech content', 2)
+      } else {
+        fail('STT requests were made but no successful transcription')
+        sttRequests.forEach((req, i) => {
+          log(`Request ${i + 1}: ${req.status} - ${req.body?.slice(0, 100) || 'no body'}`, 2)
+        })
+      }
       return false
     }
 
@@ -480,6 +390,10 @@ async function runFullE2ETest(config: TestConfig) {
   } finally {
     if (browser) {
       await browser.close()
+    }
+    
+    if (audioPath) {
+      try { unlinkSync(audioPath) } catch {}
     }
   }
 }
@@ -501,21 +415,25 @@ async function main() {
       config.headless = false
     } else if (args[i] === '--help' || args[i] === '-h') {
       console.log(`
-Talk Mode Full Browser E2E Test (Streaming VAD)
+Talk Mode Real Audio E2E Test
 
-Tests the complete Talk Mode flow by injecting transcript via test API:
-1. Starts Talk Mode in browser
-2. Injects a test transcript directly (simulating what STT would produce)
-3. Waits for OpenCode to respond
-4. Verifies the agent response
+Tests the complete Talk Mode flow with REAL audio capture:
+1. Generates test audio using macOS 'say' command
+2. Launches Chrome with --use-file-for-fake-audio-capture
+3. Starts Talk Mode which captures audio via getUserMedia()
+4. Audio flows through MediaRecorder -> STT API -> Whisper
+5. Verifies the transcription matches the test phrase
 
-This tests the new streaming VAD architecture which uses:
-- MediaRecorder for chunked audio capture
-- Whisper STT API for transcription  
-- Silence detection via no-new-words timeout
+This test verifies the ACTUAL audio pipeline works, not just the
+transcript injection path. It will FAIL if:
+- STT server is not running
+- Audio capture doesn't work
+- Whisper transcription fails
 
-The injectTranscript API bypasses the audio capture layer but tests
-the full Talk Mode -> OpenCode -> Response flow.
+Requirements:
+- macOS with 'say' command
+- ffmpeg installed
+- Whisper server running
 
 Usage: bun run scripts/test-talkmode-browser.ts [options]
 
@@ -523,7 +441,7 @@ Options:
   --url <url>       Base URL (default: http://localhost:5001)
   --user <username> Username for basic auth
   --pass <password> Password for basic auth
-  --text <phrase>   Test phrase to inject (default: "What is two plus two?")
+  --text <phrase>   Test phrase to speak (default: "What is two plus two?")
   --no-headless     Run browser in visible mode for debugging
   --help, -h        Show this help
 `)
@@ -531,7 +449,7 @@ Options:
     }
   }
 
-  const passed = await runFullE2ETest(config)
+  const passed = await runRealAudioTest(config)
   process.exit(passed ? 0 : 1)
 }
 
