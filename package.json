@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
+    "playwright": "^1.57.0",
     "puppeteer": "^24.34.0",
     "tesseract.js": "^7.0.0"
   },
