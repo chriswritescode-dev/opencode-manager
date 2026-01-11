@@ -131,22 +131,22 @@ voice-e2e:
       run: |
         pnpm dev &
         sleep 10
-        bun run scripts/test-talkmode-browser.ts
+        bun run scripts/test-browser.ts
 ```
 
 ## Test Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/test-voice-e2e.ts` | API-level voice tests (STT/TTS endpoints) |
-| `scripts/test-talkmode-browser.ts` | Full browser E2E with fake audio capture |
-| `scripts/test-talkmode-e2e.ts` | Talk Mode flow without browser |
+| `scripts/test-voice.ts` | API-level voice tests (STT/TTS endpoints, talk mode flow) |
+| `scripts/test-browser.ts` | Full browser E2E with fake audio capture |
+| `scripts/test-startup.ts` | Tests native startup modes (client mode, tunnel) |
 
 ## Debugging Tips
 
 ### Test Locally with Visible Browser
 ```bash
-bun run scripts/test-talkmode-browser.ts --no-headless
+bun run scripts/test-browser.ts --no-headless
 ```
 
 ### Check Whisper Server

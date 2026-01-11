@@ -56,7 +56,7 @@ echo ""
 echo "To run E2E tests:"
 echo "  bun run scripts/test-voice-e2e.ts --url http://localhost:${PORT}"
 echo "  bun run scripts/test-talkmode-e2e.ts --url http://localhost:${PORT}"
-echo "  bun run scripts/test-talkmode-browser.ts --url http://localhost:${PORT}"
+echo "  bun run scripts/test-browser.ts --url http://localhost:${PORT}"
 echo ""
 echo "Press Ctrl+C to stop..."
 

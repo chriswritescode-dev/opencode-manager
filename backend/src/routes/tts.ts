@@ -8,6 +8,7 @@ import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { chatterboxServerManager } from '../services/chatterbox'
+import { coquiServerManager } from '../services/coqui'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
 const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'discovery')
@@ -377,6 +378,75 @@ async function handleChatterboxSynthesis(
   }
 }
 
+async function handleCoquiSynthesis(
+  c: Context, 
+  text: string, 
+  ttsConfig: TTSConfig,
+  abortController: AbortController
+): Promise<Response> {
+  const status = coquiServerManager.getStatus()
+  
+  if (!status.running) {
+    logger.info('Coqui TTS server not running, attempting to start...')
+    try {
+      await coquiServerManager.start()
+    } catch (error) {
+      logger.error('Failed to start Coqui TTS server:', error)
+      return c.json({ 
+        error: 'Coqui TTS server not available', 
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 503)
+    }
+  }
+  
+  const voice = ttsConfig.voice || 'default'
+  const speed = ttsConfig.speed ?? 1.0
+  
+  const cacheKey = generateCacheKey(text, voice, 'coqui-jenny', speed)
+  
+  await ensureCacheDir()
+  
+  const cachedAudio = await getCachedAudio(cacheKey)
+  if (cachedAudio) {
+    logger.info(`Coqui cache hit: ${cacheKey.substring(0, 8)}...`)
+    return new Response(cachedAudio, {
+      headers: {
+        'Content-Type': 'audio/wav',
+        'X-Cache': 'HIT',
+      },
+    })
+  }
+  
+  if (abortController.signal.aborted) {
+    return new Response(null, { status: 499 })
+  }
+  
+  logger.info(`Coqui cache miss, synthesizing: ${cacheKey.substring(0, 8)}...`)
+  
+  try {
+    const audioBuffer = await coquiServerManager.synthesize(text, {
+      voice,
+      speed
+    })
+    
+    await cacheAudio(cacheKey, audioBuffer)
+    logger.info(`Coqui audio cached: ${cacheKey.substring(0, 8)}...`)
+    
+    return new Response(audioBuffer, {
+      headers: {
+        'Content-Type': 'audio/wav',
+        'X-Cache': 'MISS',
+      },
+    })
+  } catch (error) {
+    logger.error('Coqui synthesis failed:', error)
+    return c.json({ 
+      error: 'Coqui synthesis failed', 
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, 500)
+  }
+}
+
 export function createTTSRoutes(db: Database) {
   const app = new Hono()
 
@@ -405,6 +475,10 @@ export function createTTSRoutes(db: Database) {
       
       if (provider === 'chatterbox') {
         return await handleChatterboxSynthesis(c, text, ttsConfig, abortController)
+      }
+      
+      if (provider === 'coqui') {
+        return await handleCoquiSynthesis(c, text, ttsConfig, abortController)
       }
       
       if (provider === 'builtin') {
@@ -608,10 +682,11 @@ export function createTTSRoutes(db: Database) {
     const ttsConfig = settings.preferences.tts
     const cacheStats = await getCacheStats()
     const chatterboxStatus = chatterboxServerManager.getStatus()
+    const coquiStatus = coquiServerManager.getStatus()
     
     return c.json({
       enabled: ttsConfig?.enabled || false,
-      configured: !!(ttsConfig?.apiKey) || ttsConfig?.provider === 'chatterbox' || ttsConfig?.provider === 'builtin',
+      configured: !!(ttsConfig?.apiKey) || ttsConfig?.provider === 'chatterbox' || ttsConfig?.provider === 'coqui' || ttsConfig?.provider === 'builtin',
       provider: ttsConfig?.provider || 'external',
       cache: {
         ...cacheStats,
@@ -623,6 +698,13 @@ export function createTTSRoutes(db: Database) {
         device: chatterboxStatus.device,
         cudaAvailable: chatterboxStatus.cudaAvailable,
         error: chatterboxStatus.error
+      },
+      coqui: {
+        running: coquiStatus.running,
+        device: coquiStatus.device,
+        model: coquiStatus.model,
+        cudaAvailable: coquiStatus.cudaAvailable,
+        error: coquiStatus.error
       }
     })
   })
@@ -703,6 +785,63 @@ export function createTTSRoutes(db: Database) {
       logger.error('Failed to delete voice:', error)
       return c.json({ 
         error: 'Failed to delete voice',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.get('/coqui/status', async (c) => {
+    const status = coquiServerManager.getStatus()
+    return c.json(status)
+  })
+
+  app.post('/coqui/start', async (c) => {
+    try {
+      await coquiServerManager.start()
+      return c.json({ success: true, status: coquiServerManager.getStatus() })
+    } catch (error) {
+      logger.error('Failed to start Coqui TTS server:', error)
+      return c.json({ 
+        error: 'Failed to start Coqui TTS server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.post('/coqui/stop', async (c) => {
+    try {
+      await coquiServerManager.stop()
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to stop Coqui TTS server:', error)
+      return c.json({ 
+        error: 'Failed to stop Coqui TTS server',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.get('/coqui/voices', async (c) => {
+    try {
+      const voices = await coquiServerManager.getVoices()
+      return c.json(voices)
+    } catch (error) {
+      logger.error('Failed to get Coqui voices:', error)
+      return c.json({ 
+        error: 'Failed to get voices',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.get('/coqui/models', async (c) => {
+    try {
+      const models = await coquiServerManager.getModels()
+      return c.json(models)
+    } catch (error) {
+      logger.error('Failed to get Coqui models:', error)
+      return c.json({ 
+        error: 'Failed to get models',
         details: error instanceof Error ? error.message : 'Unknown error'
       }, 500)
     }

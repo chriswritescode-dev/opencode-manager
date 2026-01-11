@@ -31,7 +31,7 @@ function isKokoroStyleVoice(voice: string): boolean {
 
 const ttsFormSchema = z.object({
   enabled: z.boolean(),
-  provider: z.enum(['external', 'builtin', 'chatterbox']),
+  provider: z.enum(['external', 'builtin', 'chatterbox', 'coqui']),
   endpoint: z.string(),
   apiKey: z.string(),
   voice: z.string(),
@@ -86,6 +86,22 @@ interface ChatterboxVoice {
   name: string
   description: string
   is_custom?: boolean
+}
+
+interface CoquiStatus {
+  running: boolean
+  port: number
+  host: string
+  device: string | null
+  model: string
+  cudaAvailable: boolean
+  error: string | null
+}
+
+interface CoquiVoice {
+  id: string
+  name: string
+  description: string
 }
 
 export function TTSSettings() {
@@ -160,6 +176,45 @@ export function TTSSettings() {
     },
   })
   
+  const { data: coquiStatus, refetch: refetchCoquiStatus } = useQuery<CoquiStatus>({
+    queryKey: ['coqui', 'status'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/tts/coqui/status')
+      return response.data
+    },
+    refetchInterval: 10000,
+  })
+  
+  const { data: coquiVoices, refetch: refetchCoquiVoices } = useQuery<{ voices: string[], voiceDetails: CoquiVoice[] }>({
+    queryKey: ['coqui', 'voices'],
+    queryFn: async () => {
+      const response = await apiClient.get('/api/tts/coqui/voices')
+      return response.data
+    },
+    enabled: coquiStatus?.running === true,
+  })
+  
+  const startCoquiMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post('/api/tts/coqui/start')
+      return response.data
+    },
+    onSuccess: () => {
+      refetchCoquiStatus()
+      refetchCoquiVoices()
+    },
+  })
+  
+  const stopCoquiMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post('/api/tts/coqui/stop')
+      return response.data
+    },
+    onSuccess: () => {
+      refetchCoquiStatus()
+    },
+  })
+  
   const availableModels = modelsData?.models || preferences?.tts?.availableModels || []
   const availableVoices = voicesData?.voices || preferences?.tts?.availableVoices || []
   const modelsCached = modelsData?.cached || false
@@ -184,6 +239,8 @@ export function TTSSettings() {
       return hasWebSpeechSupport && browserVoices.length > 0 && !!watchVoice && !isCheckingBuiltin
     } else if (watchProvider === 'chatterbox') {
       return chatterboxStatus?.running === true
+    } else if (watchProvider === 'coqui') {
+      return coquiStatus?.running === true
     } else {
       return !!watchApiKey && !!watchVoice && !isLoadingVoices
     }
@@ -351,7 +408,7 @@ export function TTSSettings() {
 
           {watchEnabled && (
             <>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -376,6 +433,28 @@ export function TTSSettings() {
                 <button
                   type="button"
                   onClick={() => {
+                    form.setValue('provider', 'coqui', { shouldDirty: true })
+                    form.setValue('apiKey', '', { shouldDirty: true })
+                    form.setValue('endpoint', '', { shouldDirty: true })
+                    form.setValue('voice', 'default', { shouldDirty: true })
+                  }}
+                  className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
+                    watchProvider === 'coqui'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-border hover:border-blue-300'
+                  }`}
+                >
+                  <Cpu className={`h-6 w-6 ${watchProvider === 'coqui' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                  <span className={`font-medium ${watchProvider === 'coqui' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                    Coqui Jenny
+                  </span>
+                  <span className="text-xs text-muted-foreground text-center">
+                    Fast local TTS
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
                     form.setValue('provider', 'chatterbox', { shouldDirty: true })
                     form.setValue('apiKey', '', { shouldDirty: true })
                     form.setValue('endpoint', '', { shouldDirty: true })
@@ -392,7 +471,7 @@ export function TTSSettings() {
                     Chatterbox
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
-                    Local AI voice
+                    Expressive AI
                   </span>
                 </button>
                 <button
@@ -411,13 +490,110 @@ export function TTSSettings() {
                     External API
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
-                    OpenAI, Kokoro, etc.
+                    OpenAI, etc.
                   </span>
                 </button>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                Choose how you want to generate speech. Built-in and Chatterbox work locally without external API.
+                Choose how you want to generate speech. Built-in, Coqui, and Chatterbox work locally without external API.
               </div>
+
+              {/* Coqui Provider Settings */}
+              {watchProvider === 'coqui' && (
+                <>
+                  <div className="rounded-lg border border-border p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="font-medium">Coqui TTS Server (Jenny)</h3>
+                        <p className="text-sm text-muted-foreground">
+                          {coquiStatus?.running ? (
+                            <span className="text-green-600 dark:text-green-400">
+                              Running on {coquiStatus.device || 'CPU'}
+                              {coquiStatus.cudaAvailable && ' (CUDA available)'}
+                            </span>
+                          ) : (
+                            <span className="text-yellow-600 dark:text-yellow-400">
+                              {coquiStatus?.error || 'Not running'}
+                            </span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        {coquiStatus?.running ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => stopCoquiMutation.mutate()}
+                            disabled={stopCoquiMutation.isPending}
+                          >
+                            {stopCoquiMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <StopCircle className="h-4 w-4 mr-2" />
+                            )}
+                            Stop
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => startCoquiMutation.mutate()}
+                            disabled={startCoquiMutation.isPending}
+                          >
+                            {startCoquiMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <Play className="h-4 w-4 mr-2" />
+                            )}
+                            Start
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {startCoquiMutation.isPending && (
+                      <div className="text-sm text-muted-foreground">
+                        Starting server... This may take a minute on first run to download the Jenny model.
+                      </div>
+                    )}
+                  </div>
+
+                  <FormField
+                    control={form.control}
+                    name="voice"
+                    render={({ field }) => {
+                      const voiceOptions = (coquiVoices?.voiceDetails || []).map((v) => ({
+                        value: v.id,
+                        label: v.name
+                      }))
+                      
+                      return (
+                        <FormItem>
+                          <FormLabel>Voice</FormLabel>
+                          <FormControl>
+                            <Combobox
+                              value={field.value}
+                              onChange={field.onChange}
+                              options={voiceOptions.length > 0 ? voiceOptions : [{ value: 'default', label: 'Jenny (Default)' }]}
+                              placeholder="Select a voice..."
+                              disabled={!coquiStatus?.running}
+                              allowCustomValue={false}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {coquiStatus?.running 
+                              ? `Model: ${coquiStatus.model}`
+                              : 'Start the Coqui TTS server to use Jenny voice'}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )
+                    }}
+                  />
+                </>
+              )}
 
               {/* Chatterbox Provider Settings */}
               {watchProvider === 'chatterbox' && (

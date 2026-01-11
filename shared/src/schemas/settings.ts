@@ -46,7 +46,7 @@ export const CustomCommandSchema = z.object({
 
 export const TTSConfigSchema = z.object({
   enabled: z.boolean(),
-  provider: z.enum(['external', 'builtin', 'chatterbox']).default('external'),
+  provider: z.enum(['external', 'builtin', 'chatterbox', 'coqui']).default('external'),
   endpoint: z.string().refine(isAllowedTTSEndpoint, {
     message: 'TTS endpoint must be a valid HTTPS URL from an allowed provider',
   }),
@@ -85,7 +85,7 @@ export const CustomAgentSchema = z.object({
 
 export type TTSConfig = {
   enabled: boolean;
-  provider: 'external' | 'builtin' | 'chatterbox';
+  provider: 'external' | 'builtin' | 'chatterbox' | 'coqui';
   endpoint: string;
   apiKey: string;
   voice: string;

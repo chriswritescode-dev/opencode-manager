@@ -4,7 +4,7 @@ export type TTSState = 'idle' | 'loading' | 'playing' | 'error'
 
 export interface TTSConfig {
   enabled: boolean
-  provider: 'external' | 'builtin' | 'chatterbox'
+  provider: 'external' | 'builtin' | 'chatterbox' | 'coqui'
   endpoint: string
   apiKey: string
   voice: string

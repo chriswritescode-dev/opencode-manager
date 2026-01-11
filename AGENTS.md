@@ -104,20 +104,23 @@ This is useful when you already have `opencode` running in a terminal and want t
 
 ## Voice E2E Tests
 
-Test STT (Speech-to-Text) and TTS (Text-to-Speech) functionality:
+Test STT (Speech-to-Text), TTS (Text-to-Speech), and Talk Mode functionality:
 
 ```bash
 # Local development (no auth required)
-bun run scripts/test-voice-e2e.ts
+bun run scripts/test-voice.ts
 
 # Remote deployment (with auth)
-bun run scripts/test-voice-e2e.ts --url https://your-url.com --user admin --pass secret
+bun run scripts/test-voice.ts --url https://your-url.com --user admin --pass secret
 
 # Using environment variables
-OPENCODE_URL=https://your-url.com OPENCODE_USER=admin OPENCODE_PASS=secret bun run scripts/test-voice-e2e.ts
+OPENCODE_URL=https://your-url.com OPENCODE_USER=admin OPENCODE_PASS=secret bun run scripts/test-voice.ts
 
 # Custom test phrase
-bun run scripts/test-voice-e2e.ts --text "Your custom phrase to transcribe"
+bun run scripts/test-voice.ts --text "Your custom phrase to transcribe"
+
+# Skip slow talk mode flow test
+bun run scripts/test-voice.ts --skip-talkmode
 ```
 
 Requirements for STT test:
@@ -131,25 +134,8 @@ Tests performed:
 3. STT server status and available models
 4. STT transcription with generated audio
 5. TTS voices and synthesis endpoints
-
-## Talk Mode E2E Tests
-
-Test the full Talk Mode flow (STT -> OpenCode -> TTS):
-
-```bash
-# Local development (no auth required)
-bun run scripts/test-talkmode-e2e.ts
-
-# Remote deployment (with auth)
-bun run scripts/test-talkmode-e2e.ts --url https://your-url.com --user admin --pass secret
-```
-
-Tests performed:
-1. Talk Mode settings verification
-2. STT transcription with 16kHz WAV audio
-3. OpenCode session creation
-4. Full flow: Audio -> STT -> Send to OpenCode -> Poll for response
-5. TTS response synthesis
+6. OpenCode session creation
+7. Full talk mode flow: Audio -> STT -> Send to OpenCode -> Poll for response
 
 ## Browser E2E Test (Real Audio Pipeline)
 
@@ -163,25 +149,29 @@ pnpm start
 # Example: https://wallet-geographical-task-governance.trycloudflare.com
 
 # Run browser E2E test over tunnel (headless)
-bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com
+bun run scripts/test-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com
 
 # Run with visible browser for debugging
-bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com --no-headless
+bun run scripts/test-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com --no-headless
 
 # Local testing (no tunnel)
-bun run scripts/test-talkmode-browser.ts --url http://localhost:5001
+bun run scripts/test-browser.ts --url http://localhost:5001
+
+# Use Web Audio API injection (alternative to fake audio device)
+bun run scripts/test-browser.ts --web-audio
 ```
 
 This test:
-1. Generates test audio using macOS `say` command
-2. Launches Chrome with `--use-file-for-fake-audio-capture` flag
+1. Generates test audio using macOS `say` command (or espeak/pico2wave on Linux)
+2. Launches Chrome with `--use-file-for-fake-audio-capture` flag OR Web Audio API injection
 3. Opens the app, navigates to a session, starts Talk Mode
 4. Chrome captures audio from the fake device instead of microphone
 5. Audio flows through real STT pipeline (MediaRecorder → /api/stt/transcribe → Whisper)
 6. Verifies transcription matches expected text
+7. Waits for OpenCode to respond and verifies the answer
 
 Requirements:
-- macOS with `say` command
+- macOS with `say` command OR Linux with espeak/pico2wave
 - `ffmpeg` installed (`brew install ffmpeg`)
 - Chromium/Chrome installed (Puppeteer downloads automatically)
 
@@ -349,9 +339,8 @@ The recommended flow is: CI builds Docker image → pull locally → run E2E tes
 bun run scripts/run-e2e-tests.ts
 
 # Or run individual tests
-bun run scripts/test-voice-e2e.ts --url http://localhost:5003
-bun run scripts/test-talkmode-e2e.ts --url http://localhost:5003
-bun run scripts/test-talkmode-browser.ts --url http://localhost:5003
+bun run scripts/test-voice.ts --url http://localhost:5003
+bun run scripts/test-browser.ts --url http://localhost:5003
 ```
 
 The browser test uses Chrome's `--use-file-for-fake-audio-capture` flag to inject real audio into the browser's audio capture pipeline. This tests the complete STT flow through MediaRecorder → Whisper without mocking.
@@ -370,10 +359,10 @@ curl https://YOUR-TUNNEL-URL.trycloudflare.com/api/health
 curl https://YOUR-TUNNEL-URL.trycloudflare.com/api/stt/status
 
 # 3. Run browser E2E test over tunnel
-bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com
+bun run scripts/test-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com
 
 # 4. For debugging, run with visible browser
-bun run scripts/test-talkmode-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com --no-headless
+bun run scripts/test-browser.ts --url https://YOUR-TUNNEL-URL.trycloudflare.com --no-headless
 ```
 
 Key points:
