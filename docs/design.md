@@ -448,16 +448,16 @@ WORKSPACE_PATH=/workspace
 
 ```bash
 # Uses Chrome's fake audio capture
-bun run scripts/test-talkmode-real-audio.ts \
+bun run scripts/test-browser.ts \
   --url https://your-deployment.com \
   --user admin \
   --pass secret
 ```
 
 **Test Flow**:
-1. Generate audio using macOS `say` command
-2. Convert to WAV with ffmpeg (48kHz, mono, s16)
-3. Launch Puppeteer with `--use-file-for-fake-audio-capture`
+1. Generate audio using macOS `say` command (or espeak/pico2wave on Linux)
+2. Convert to WAV with ffmpeg (16kHz, mono, s16)
+3. Launch Puppeteer with `--use-file-for-fake-audio-capture` OR use Web Audio API injection (`--web-audio`)
 4. Audio injected to MediaRecorder as if from microphone
 5. Verify STT transcription matches input
 6. Verify OpenCode response is correct

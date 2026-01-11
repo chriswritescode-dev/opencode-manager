@@ -124,14 +124,11 @@ docker logs opencode-manager
 
 ### E2E Testing
 ```bash
-# Voice E2E test
-bun run scripts/test-voice-e2e.ts
-
-# Talk Mode E2E test
-bun run scripts/test-talkmode-e2e.ts
+# Voice API test (STT, TTS, talk mode flow)
+bun run scripts/test-voice.ts
 
 # Browser automation test
-bun run scripts/test-talkmode-browser.ts
+bun run scripts/test-browser.ts
 
 # Run all E2E tests
 bun run scripts/run-e2e-tests.ts
@@ -256,14 +253,12 @@ pnpm cleanup
 **Purpose**: Verify voice and talk mode features work end-to-end.
 
 **Steps**:
-1. Run voice test: `bun run scripts/test-voice-e2e.ts`
-2. Run talk mode test: `bun run scripts/test-talkmode-e2e.ts`
-3. Run browser test: `bun run scripts/test-talkmode-browser.ts`
+1. Run voice API test: `bun run scripts/test-voice.ts`
+2. Run browser test: `bun run scripts/test-browser.ts`
 
 **Expected Results**:
-- Voice E2E: STT transcribes audio correctly
-- Talk Mode E2E: Full flow works (audio → STT → OpenCode → response)
-- Browser test: UI interactions work correctly
+- Voice API: STT transcribes audio correctly, full talk mode flow works
+- Browser test: UI interactions work correctly with fake audio capture
 
 **Evaluation**:
 - ✅ PASS if all tests exit with code 0

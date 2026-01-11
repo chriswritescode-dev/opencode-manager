@@ -58,8 +58,17 @@ RUN python3 -m venv /opt/chatterbox-venv && \
     uvicorn \
     python-multipart
 
+# Coqui TTS (Jenny voice) - faster and lighter than Chatterbox
+RUN python3 -m venv /opt/coqui-venv && \
+    /opt/coqui-venv/bin/pip install --no-cache-dir \
+    TTS \
+    fastapi \
+    uvicorn \
+    python-multipart
+
 ENV WHISPER_VENV=/opt/whisper-venv
 ENV CHATTERBOX_VENV=/opt/chatterbox-venv
+ENV COQUI_VENV=/opt/coqui-venv
 
 WORKDIR /app
 
@@ -98,12 +107,15 @@ COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=base /opt/whisper-venv /opt/whisper-venv
 COPY --from=base /opt/chatterbox-venv /opt/chatterbox-venv
+COPY --from=base /opt/coqui-venv /opt/coqui-venv
 COPY scripts/whisper-server.py ./scripts/whisper-server.py
 COPY scripts/chatterbox-server.py ./scripts/chatterbox-server.py
+COPY scripts/coqui-server.py ./scripts/coqui-server.py
 COPY package.json pnpm-workspace.yaml ./
 
 ENV WHISPER_VENV=/opt/whisper-venv
 ENV CHATTERBOX_VENV=/opt/chatterbox-venv
+ENV COQUI_VENV=/opt/coqui-venv
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
     ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared

@@ -279,12 +279,13 @@ try {
     logger.warn('Whisper server failed to start (STT will be unavailable):', error)
   }
 
-  try {
-    await chatterboxServerManager.start()
-    logger.info(`Chatterbox TTS server running on port ${chatterboxServerManager.getPort()}`)
-  } catch (error) {
-    logger.warn('Chatterbox server failed to start (TTS will be unavailable):', error)
-  }
+  // Chatterbox auto-start disabled - use on-demand via API
+  // try {
+  //   await chatterboxServerManager.start()
+  //   logger.info(`Chatterbox TTS server running on port ${chatterboxServerManager.getPort()}`)
+  // } catch (error) {
+  //   logger.warn('Chatterbox server failed to start (TTS will be unavailable):', error)
+  // }
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }

@@ -48,13 +48,14 @@ export function TTSProvider({ children }: TTSProviderProps) {
   const ttsConfig = preferences?.tts
   const isBuiltin = ttsConfig?.provider === 'builtin'
   const isChatterbox = ttsConfig?.provider === 'chatterbox'
+  const isCoqui = ttsConfig?.provider === 'coqui'
   const isEnabled = (() => {
     if (!ttsConfig?.enabled) return false
     if (isBuiltin) {
       return isWebSpeechSupported()
     }
-    if (isChatterbox) {
-      // Chatterbox doesn't require API key
+    if (isChatterbox || isCoqui) {
+      // Local TTS providers don't require API key
       return true
     }
     // External requires apiKey
@@ -332,6 +333,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     const configIsBuiltin = config.provider === 'builtin'
     const configIsChatterbox = config.provider === 'chatterbox'
+    const configIsCoqui = config.provider === 'coqui'
 
     if (configIsBuiltin) {
       if (!isWebSpeechSupported()) {
@@ -340,8 +342,8 @@ export function TTSProvider({ children }: TTSProviderProps) {
         return false
       }
       return speakBuiltinWithConfig(text, config)
-    } else if (configIsChatterbox) {
-      // Chatterbox doesn't require API key - handled by backend
+    } else if (configIsChatterbox || configIsCoqui) {
+      // Local TTS providers don't require API key - handled by backend
     } else {
       // External provider requires API key
       if (!config.apiKey) {
