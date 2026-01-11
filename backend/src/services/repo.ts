@@ -76,6 +76,35 @@ async function hasCommits(repoPath: string): Promise<boolean> {
   }
 }
 
+async function isValidGitRepo(repoPath: string): Promise<boolean> {
+  try {
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--git-dir'], { silent: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function checkRepoNameAvailable(name: string): Promise<boolean> {
+  const reposPath = getReposPath()
+  const targetPath = path.join(reposPath, name)
+  try {
+    await executeCommand(['test', '-e', targetPath], { silent: true })
+    return false
+  } catch {
+    return true
+  }
+}
+
+async function copyRepoToWorkspace(sourcePath: string, targetName: string): Promise<void> {
+  const reposPath = getReposPath()
+  const targetPath = path.join(reposPath, targetName)
+  
+  logger.info(`Copying repo from ${sourcePath} to ${targetPath}`)
+  await executeCommand(['git', 'clone', '--local', sourcePath, targetName], { cwd: reposPath })
+  logger.info(`Successfully copied repo to ${targetPath}`)
+}
+
 
 
 async function safeGetCurrentBranch(repoPath: string): Promise<string | null> {
@@ -96,6 +125,40 @@ async function safeGetCurrentBranch(repoPath: string): Promise<string | null> {
   }
 }
 
+async function checkoutBranchSafely(repoPath: string, branch: string): Promise<void> {
+  const sanitizedBranch = branch
+    .replace(/^refs\/heads\//, '')
+    .replace(/^refs\/remotes\//, '')
+    .replace(/^origin\//, '')
+
+  let localBranchExists = false
+  try {
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/heads/${sanitizedBranch}`], { silent: true })
+    localBranchExists = true
+  } catch {
+    localBranchExists = false
+  }
+
+  let remoteBranchExists = false
+  try {
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${sanitizedBranch}`], { silent: true })
+    remoteBranchExists = true
+  } catch {
+    remoteBranchExists = false
+  }
+
+  if (localBranchExists) {
+    logger.info(`Checking out existing local branch: ${sanitizedBranch}`)
+    await executeCommand(['git', '-C', repoPath, 'checkout', sanitizedBranch])
+  } else if (remoteBranchExists) {
+    logger.info(`Checking out remote branch: ${sanitizedBranch}`)
+    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch, `origin/${sanitizedBranch}`])
+  } else {
+    logger.info(`Creating new branch: ${sanitizedBranch}`)
+    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
+  }
+}
+
 function getGitEnv(database: Database): Record<string, string> {
   try {
     const settingsService = new SettingsService(database)
@@ -113,17 +176,62 @@ export async function initLocalRepo(
   localPath: string,
   branch?: string
 ): Promise<Repo> {
-  const normalizedPath = localPath.trim().replace(/\/+$/, '')
-  const fullPath = path.resolve(getReposPath(), normalizedPath)
+  const normalizedInputPath = localPath.trim().replace(/\/+$/, '')
   
-  const existing = db.getRepoByLocalPath(database, normalizedPath)
+  let targetPath: string
+  let repoLocalPath: string
+  let sourceWasGitRepo = false
+  
+  if (path.isAbsolute(normalizedInputPath)) {
+    logger.info(`Absolute path detected: ${normalizedInputPath}`)
+    
+    try {
+      const exists = await executeCommand(['test', '-d', normalizedInputPath], { silent: true })
+        .then(() => true)
+        .catch(() => false)
+      
+      if (!exists) {
+        throw new Error(`No such file or directory: '${normalizedInputPath}'`)
+      }
+      
+      const isGit = await isValidGitRepo(normalizedInputPath)
+      
+      if (isGit) {
+        sourceWasGitRepo = true
+        const baseName = path.basename(normalizedInputPath)
+        
+        const isAvailable = await checkRepoNameAvailable(baseName)
+        if (!isAvailable) {
+          throw new Error(`A repository named '${baseName}' already exists in the workspace. Please remove it first or use a different source directory.`)
+        }
+        
+        repoLocalPath = baseName
+        
+        logger.info(`Copying existing git repo from ${normalizedInputPath} to workspace as ${baseName}`)
+        await copyRepoToWorkspace(normalizedInputPath, baseName)
+        targetPath = path.join(getReposPath(), baseName)
+      } else {
+        throw new Error(`Directory exists but is not a valid Git repository. Please provide either a Git repository path or a simple directory name to create a new empty repository.`)
+      }
+    } catch (error: any) {
+      if (error.message.includes('No such file or directory')) {
+        throw error
+      }
+      throw new Error(`Failed to process absolute path '${normalizedInputPath}': ${error.message}`)
+    }
+  } else {
+    repoLocalPath = normalizedInputPath
+    targetPath = path.join(getReposPath(), repoLocalPath)
+  }
+  
+  const existing = db.getRepoByLocalPath(database, repoLocalPath)
   if (existing) {
-    logger.info(`Local repo already exists in database: ${normalizedPath}`)
+    logger.info(`Local repo already exists in database: ${repoLocalPath}`)
     return existing
   }
   
   const createRepoInput: CreateRepoInput = {
-    localPath: normalizedPath,
+    localPath: repoLocalPath,
     branch: branch || undefined,
     defaultBranch: branch || 'main',
     cloneStatus: 'cloning',
@@ -136,26 +244,36 @@ export async function initLocalRepo(
   
   try {
     repo = db.createRepo(database, createRepoInput)
-    logger.info(`Created database record for local repo: ${normalizedPath} (id: ${repo.id})`)
+    logger.info(`Created database record for local repo: ${repoLocalPath} (id: ${repo.id})`)
   } catch (error: any) {
-    logger.error(`Failed to create database record for local repo: ${normalizedPath}`, error)
-    throw new Error(`Failed to register local repository '${normalizedPath}': ${error.message}`)
+    logger.error(`Failed to create database record for local repo: ${repoLocalPath}`, error)
+    throw new Error(`Failed to register local repository '${repoLocalPath}': ${error.message}`)
   }
   
   try {
-    await ensureDirectoryExists(fullPath)
-    directoryCreated = true
-    logger.info(`Created directory for local repo: ${fullPath}`)
-    
-    logger.info(`Initializing git repository: ${fullPath}`)
-
-    await executeCommand(['git', 'init'], { cwd: fullPath })
-    
-    if (branch && branch !== 'main') {
-      await executeCommand(['git', '-C', fullPath, 'checkout', '-b', branch])
+    if (!sourceWasGitRepo) {
+      await ensureDirectoryExists(targetPath)
+      directoryCreated = true
+      logger.info(`Created directory for local repo: ${targetPath}`)
+      
+      logger.info(`Initializing git repository: ${targetPath}`)
+      await executeCommand(['git', 'init'], { cwd: targetPath })
+      
+      if (branch && branch !== 'main') {
+        await executeCommand(['git', '-C', targetPath, 'checkout', '-b', branch])
+      }
+    } else {
+      if (branch) {
+        logger.info(`Switching to branch ${branch} for copied repo`)
+        const currentBranch = await safeGetCurrentBranch(targetPath)
+        
+        if (currentBranch !== branch) {
+          await checkoutBranchSafely(targetPath, branch)
+        }
+      }
     }
     
-    const isGitRepo = await executeCommand(['git', '-C', fullPath, 'rev-parse', '--git-dir'])
+    const isGitRepo = await executeCommand(['git', '-C', targetPath, 'rev-parse', '--git-dir'])
       .then(() => true)
       .catch(() => false)
     
@@ -164,10 +282,10 @@ export async function initLocalRepo(
     }
     
     db.updateRepoStatus(database, repo.id, 'ready')
-    logger.info(`Local git repo ready: ${normalizedPath}`)
+    logger.info(`Local git repo ready: ${repoLocalPath}`)
     return { ...repo, cloneStatus: 'ready' }
   } catch (error: any) {
-    logger.error(`Failed to initialize local repo, rolling back: ${normalizedPath}`, error)
+    logger.error(`Failed to initialize local repo, rolling back: ${repoLocalPath}`, error)
     
     try {
       db.deleteRepo(database, repo.id)
@@ -176,16 +294,23 @@ export async function initLocalRepo(
       logger.error(`Failed to rollback database record for repo id ${repo.id}:`, dbError)
     }
     
-    if (directoryCreated) {
+    if (directoryCreated && !sourceWasGitRepo) {
       try {
-        await executeCommand(['rm', '-rf', normalizedPath], getReposPath())
-        logger.info(`Rolled back directory: ${normalizedPath}`)
+        await executeCommand(['rm', '-rf', repoLocalPath], getReposPath())
+        logger.info(`Rolled back directory: ${repoLocalPath}`)
       } catch (fsError: any) {
-        logger.error(`Failed to rollback directory ${normalizedPath}:`, fsError)
+        logger.error(`Failed to rollback directory ${repoLocalPath}:`, fsError)
+      }
+    } else if (sourceWasGitRepo) {
+      try {
+        await executeCommand(['rm', '-rf', repoLocalPath], getReposPath())
+        logger.info(`Cleaned up copied directory: ${repoLocalPath}`)
+      } catch (fsError: any) {
+        logger.error(`Failed to clean up copied directory ${repoLocalPath}:`, fsError)
       }
     }
     
-    throw new Error(`Failed to initialize local repository '${normalizedPath}': ${error.message}`)
+    throw new Error(`Failed to initialize local repository '${repoLocalPath}': ${error.message}`)
   }
 }
 
@@ -471,32 +596,7 @@ export async function switchBranch(database: Database, repoId: number, branch: s
 
     await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env })
     
-    let localBranchExists = false
-    try {
-      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/heads/${sanitizedBranch}`])
-      localBranchExists = true
-    } catch {
-      localBranchExists = false
-    }
-    
-    let remoteBranchExists = false
-    try {
-      await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${sanitizedBranch}`])
-      remoteBranchExists = true
-    } catch {
-      remoteBranchExists = false
-    }
-    
-    if (localBranchExists) {
-      logger.info(`Checking out existing local branch: ${sanitizedBranch}`)
-      await executeCommand(['git', '-C', repoPath, 'checkout', sanitizedBranch])
-    } else if (remoteBranchExists) {
-      logger.info(`Checking out remote branch: ${sanitizedBranch}`)
-      await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch, `origin/${sanitizedBranch}`])
-    } else {
-      logger.info(`Creating new branch: ${sanitizedBranch}`)
-      await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
-    }
+    await checkoutBranchSafely(repoPath, sanitizedBranch)
     
     logger.info(`Successfully switched to branch: ${sanitizedBranch}`)
   } catch (error: any) {

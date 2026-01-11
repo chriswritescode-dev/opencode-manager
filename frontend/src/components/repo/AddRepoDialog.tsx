@@ -83,31 +83,31 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
           </div>
 
           {repoType === 'remote' ? (
-             <div className="space-y-2">
-               <label className="text-sm text-zinc-400">Repository URL</label>
-               <Input
-                 placeholder="owner/repo or https://github.com/user/repo.git"
-                 value={repoUrl}
-                 onChange={(e) => setRepoUrl(e.target.value)}
-                 disabled={mutation.isPending}
-                 className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
-               />
-               <p className="text-xs text-zinc-500">
-                 Full URL or shorthand format (owner/repo for GitHub)
-               </p>
-             </div>
+            <div className="space-y-2">
+              <label className="text-sm text-zinc-400">Repository URL</label>
+              <Input
+                placeholder="owner/repo or https://github.com/user/repo.git"
+                value={repoUrl}
+                onChange={(e) => setRepoUrl(e.target.value)}
+                disabled={mutation.isPending}
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
+              />
+              <p className="text-xs text-zinc-500">
+                Full URL or shorthand format (owner/repo for GitHub)
+              </p>
+            </div>
           ) : (
             <div className="space-y-2">
               <label className="text-sm text-zinc-400">Local Path</label>
               <Input
-                placeholder="my-local-project"
+                placeholder="my-local-project OR /absolute/path/to/git-repo"
                 value={localPath}
                 onChange={(e) => setLocalPath(e.target.value)}
                 disabled={mutation.isPending}
                 className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
               />
               <p className="text-xs text-zinc-500">
-                Directory name will be created in the repos folder
+                Directory name for new repo, OR absolute path to existing Git repo (will be copied to workspace)
               </p>
             </div>
           )}
@@ -125,10 +125,14 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
               {branch 
                 ? repoType === 'remote' 
                   ? `Clones repository directly to '${branch}' branch`
-                  : `Initializes repository with '${branch}' branch`
+                  : localPath?.startsWith('/') 
+                    ? `Copies repo and checks out '${branch}' branch (creates if needed)`
+                    : `Initializes repository with '${branch}' branch`
                 : repoType === 'remote'
                   ? "Clones repository to default branch"
-                  : "Initializes repository with 'main' branch"
+                  : localPath?.startsWith('/')
+                    ? "Copies repo and checks out current branch"
+                    : "Initializes repository with 'main' branch"
               }
             </p>
           </div>
