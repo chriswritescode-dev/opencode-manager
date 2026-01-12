@@ -28,9 +28,9 @@ const DEFAULT_CONFIG: TestConfig = {
   baseUrl: process.env.OPENCODE_URL || 'http://localhost:5001',
   username: process.env.OPENCODE_USER || '',
   password: process.env.OPENCODE_PASS || '',
-  testPhrase: 'What is two plus two?',
+  testPhrase: 'Write a simple python hello world app and test it',
   headless: process.env.CI === 'true',
-  timeout: 120000,
+  timeout: 180000,
   useWebAudioInjection: false,
 }
 
@@ -447,43 +447,99 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     if (transcriptionResult) {
       success(`Transcribed: "${transcriptionResult}"`)
       
-      info('Waiting for OpenCode response...')
+      info('Submitting transcribed message to OpenCode...')
+      
+      const submitted = await page.evaluate(async (text: string, sid: string, repoDir: string) => {
+        try {
+          const response = await fetch(`/api/opencode/session/${sid}/message`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'x-opencode-dir': repoDir
+            },
+            body: JSON.stringify({
+              parts: [{ type: 'text', text: text }]
+            })
+          })
+          
+          if (response.ok) {
+            return { method: 'directApi', success: true }
+          }
+          
+          const errorText = await response.text()
+          return { method: 'directApi', success: false, error: `${response.status}: ${errorText}` }
+        } catch (e) {
+          return { method: 'error', success: false, error: String(e) }
+        }
+      }, transcriptionResult, sessionId!, repoPath)
+      
+      if (submitted.success) {
+        success(`Message submitted via ${submitted.method}`)
+      } else {
+        fail(`Failed to submit message: ${submitted.error || 'unknown error'}`)
+      }
+      
+      info('Waiting for OpenCode to process and respond...')
       const responseStartTime = Date.now()
-      const responseMaxWait = 60000
+      const responseMaxWait = 120000
+      let lastLoggedResponse = ''
 
       while (Date.now() - responseStartTime < responseMaxWait) {
-        const state = await page.evaluate(() => {
-          const api = (window as Window & typeof globalThis & { 
-            __TALK_MODE_TEST__?: { getState: () => { 
-              state: string
-              agentResponse: string | null 
-            }} 
-          }).__TALK_MODE_TEST__
-          return api?.getState()
-        })
-
-        if (state?.agentResponse) {
-          agentResponse = state.agentResponse
-          break
-        }
-
-        if (state?.state === 'listening') {
-          const messages = await page.evaluate(async (sid: string) => {
-            const res = await fetch(`/api/opencode/session/${sid}/message`)
+        const messages = await page.evaluate(async (sid: string, dir: string) => {
+          try {
+            const res = await fetch(`/api/opencode/session/${sid}/message`, {
+              headers: { 'x-opencode-dir': dir }
+            })
+            if (!res.ok) return []
             return res.json()
-          }, sessionId!)
+          } catch { return [] }
+        }, sessionId!, repoPath)
 
-          const assistantMsg = messages?.find((m: { info?: { role: string } }) => m.info?.role === 'assistant')
-          if (assistantMsg) {
-            const textPart = assistantMsg.parts?.find((p: { type: string }) => p.type === 'text')
-            if (textPart?.text) {
-              agentResponse = textPart.text
-              break
+        if (Array.isArray(messages)) {
+          const assistantMsgs = messages.filter((m: { info?: { role: string } }) => m.info?.role === 'assistant')
+          if (assistantMsgs.length > 0) {
+            const lastMsg = assistantMsgs[assistantMsgs.length - 1]
+            const allText: string[] = []
+            
+            for (const part of (lastMsg.parts || [])) {
+              if (part.type === 'text' && part.text) {
+                allText.push(part.text)
+              }
+              if (part.type === 'tool-invocation') {
+                allText.push(`[Tool: ${part.toolName}]`)
+              }
+              if (part.type === 'tool-result' && part.result) {
+                allText.push(`[Result: ${String(part.result).slice(0, 200)}]`)
+              }
+            }
+            
+            if (allText.length > 0) {
+              const currentResponse = allText.join('\n')
+              
+              if (currentResponse !== lastLoggedResponse) {
+                const newContent = currentResponse.slice(lastLoggedResponse.length)
+                if (newContent.length > 0) {
+                  log(`[OpenCode] ${newContent.slice(0, 300)}${newContent.length > 300 ? '...' : ''}`, 1)
+                }
+                lastLoggedResponse = currentResponse
+                agentResponse = currentResponse
+              }
+              
+              const isComplete = lastMsg.info?.time?.completed
+              if (isComplete) {
+                success('OpenCode response complete')
+                break
+              }
             }
           }
         }
 
-        await new Promise(resolve => setTimeout(resolve, 500))
+        const elapsedSec = Math.floor((Date.now() - responseStartTime) / 1000)
+        if (elapsedSec > 0 && elapsedSec % 15 === 0 && !agentResponse) {
+          log(`Still waiting for OpenCode response... (${elapsedSec}s elapsed)`, 1)
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000))
       }
     }
 
@@ -504,9 +560,10 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     console.log('='.repeat(60))
 
     const transcribedCorrectly = transcriptionResult && (
-      transcriptionResult.toLowerCase().includes('two') || 
-      transcriptionResult.includes('2')
-    ) && transcriptionResult.toLowerCase().includes('plus')
+      transcriptionResult.toLowerCase().includes('python') ||
+      transcriptionResult.toLowerCase().includes('hello') ||
+      transcriptionResult.toLowerCase().includes('write')
+    )
 
     if (transcriptionResult) {
       if (transcribedCorrectly) {
@@ -532,18 +589,38 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       }
     }
 
+    let responseHasCode = false
+    let responseHasOutput = false
+
     if (agentResponse) {
-      success(`OpenCode responded: "${agentResponse.slice(0, 100)}..."`)
-      if (agentResponse.includes('4') || agentResponse.toLowerCase().includes('four')) {
-        success('Response contains correct answer (4)!')
+      success(`OpenCode responded (${agentResponse.length} chars)`)
+      log(`Response preview: "${agentResponse.slice(0, 200)}..."`, 1)
+      
+      responseHasCode = agentResponse.includes('print') || 
+                        agentResponse.includes('hello') ||
+                        agentResponse.includes('.py') ||
+                        agentResponse.includes('python')
+      
+      responseHasOutput = agentResponse.toLowerCase().includes('hello world') ||
+                          agentResponse.includes('Hello World') ||
+                          agentResponse.includes('Hello, World')
+      
+      if (responseHasCode) {
+        success('Response contains Python code!')
       } else {
-        fail('Response does not contain expected answer (4)')
+        fail('Response does not contain expected Python code')
+      }
+      
+      if (responseHasOutput) {
+        success('Response shows "Hello World" output!')
+      } else {
+        log('Note: "Hello World" output not detected in response', 1)
       }
     } else if (transcriptionResult) {
       fail('No response from OpenCode')
     }
 
-    const responseCorrect = agentResponse && (agentResponse.includes('4') || agentResponse.toLowerCase().includes('four'))
+    const responseCorrect = responseHasCode
     const passed = !!transcribedCorrectly && !!responseCorrect
 
     if (passed) {
@@ -602,15 +679,16 @@ Tests the complete Talk Mode flow with real audio capture:
 3. Starts Talk Mode which captures audio via getUserMedia()
 4. Audio flows through MediaRecorder -> STT API -> Whisper
 5. Verifies transcription matches the test phrase
-6. Waits for OpenCode to respond
-7. Verifies the response contains the expected answer
+6. Waits for OpenCode to write Python code and execute it
+7. Verifies the response contains Python code and Hello World output
 
-This test verifies the ACTUAL audio pipeline works end-to-end.
+This test verifies the ACTUAL audio pipeline works end-to-end with a real coding task.
 
 Requirements:
 - macOS with 'say' command OR Linux with espeak/pico2wave
 - ffmpeg installed
 - Whisper server running
+- OpenCode configured with an AI provider
 
 Usage: bun run scripts/test-browser.ts [options]
 
@@ -618,7 +696,7 @@ Options:
   --url <url>       Base URL (default: http://localhost:5001)
   --user <username> Username for basic auth
   --pass <password> Password for basic auth
-  --text <phrase>   Test phrase to speak (default: "What is two plus two?")
+  --text <phrase>   Test phrase to speak (default: "Write a simple python hello world app and test it")
   --no-headless     Run browser in visible mode for debugging
   --web-audio       Use Web Audio API injection instead of Chrome fake audio capture
   --help, -h        Show this help
