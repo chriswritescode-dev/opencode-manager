@@ -978,9 +978,9 @@ volumes:
   const composeBase64 = Buffer.from(composeOverride).toString("base64");
   exec(`${sshCmd} "echo '${composeBase64}' | base64 -d > ~/opencode-manager/docker-compose.override.yml"`, { quiet: true });
 
-  // Rebuild and restart only the app container (preserve cloudflared tunnel URL)
-  console.log("Rebuilding and restarting app container (this may take a few minutes for first build)...");
-  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose up -d --build app"`, { quiet: false });
+  // Pull latest image and restart app container (preserve cloudflared tunnel URL)
+  console.log("Pulling latest image and restarting app container...");
+  exec(`${sshCmd} "cd ~/opencode-manager && sudo docker compose pull app && sudo docker compose up -d app"`, { quiet: false });
 
   // Wait for container to be ready
   console.log("Waiting for container to start...");
