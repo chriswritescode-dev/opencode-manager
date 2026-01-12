@@ -1,9 +1,14 @@
 import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
-import { Download, X, Edit3, Save, X as XIcon, WrapText } from 'lucide-react'
+import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { API_BASE_URL } from '@/config'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
+import rehypeRaw from 'rehype-raw'
+import 'highlight.js/styles/github-dark.css'
 
 
 const API_BASE = API_BASE_URL
@@ -20,17 +25,37 @@ interface FilePreviewProps {
 }
 
 export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
+  const isMarkdownFile = file.name.endsWith('.md') || file.name.endsWith('.mdx') || file.mimeType === 'text/markdown'
+  
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview')
   const [editContent, setEditContent] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [hasVirtualizedChanges, setHasVirtualizedChanges] = useState(false)
   const [highlightedLine, setHighlightedLine] = useState<number | undefined>(initialLineNumber)
   const [lineWrap, setLineWrap] = useState(true)
+  const [markdownPreview, setMarkdownPreview] = useState(isMarkdownFile)
+  const [fullMarkdownContent, setFullMarkdownContent] = useState<string | null>(null)
+  const [isLoadingFullContent, setIsLoadingFullContent] = useState(false)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   
   
   const shouldVirtualize = file.size > VIRTUALIZATION_THRESHOLD_BYTES && !file.mimeType?.startsWith('image/')
+  
+  useEffect(() => {
+    if (shouldVirtualize && isMarkdownFile && markdownPreview && !fullMarkdownContent) {
+      setIsLoadingFullContent(true)
+      fetch(`${API_BASE}/api/files/${file.path}?raw=true`)
+        .then(res => res.text())
+        .then(content => {
+          setFullMarkdownContent(content)
+          setIsLoadingFullContent(false)
+        })
+        .catch(() => {
+          setIsLoadingFullContent(false)
+        })
+    }
+  }, [shouldVirtualize, isMarkdownFile, markdownPreview, fullMarkdownContent, file.path])
   
   
 
@@ -165,6 +190,69 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
 
     if (shouldVirtualize && isTextFile) {
+      if (isMarkdownFile && markdownPreview && viewMode !== 'edit') {
+        if (isLoadingFullContent) {
+          return (
+            <div className="flex items-center justify-center h-32">
+              <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
+            </div>
+          )
+        }
+        if (fullMarkdownContent) {
+          return (
+            <div className="pb-[200px] p-4 prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                components={{
+                  code({ className, children, ...props }) {
+                    const isInline = !className || !className.includes('language-')
+                    if (isInline) {
+                      return (
+                        <code className={className || "bg-accent px-1.5 py-0.5 rounded text-sm text-foreground break-all"} {...props}>
+                          {children}
+                        </code>
+                      )
+                    }
+                    return <code className={className} {...props}>{children}</code>
+                  },
+                  pre({ children }) {
+                    return (
+                      <pre className="bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4">
+                        {children}
+                      </pre>
+                    )
+                  },
+                  p({ children }) {
+                    return <p className="text-foreground my-0.5 md:my-1">{children}</p>
+                  },
+                  strong({ children }) {
+                    return <strong className="font-semibold text-foreground">{children}</strong>
+                  },
+                  ul({ children }) {
+                    return <ul className="list-disc text-foreground my-0.5 md:my-1">{children}</ul>
+                  },
+                  ol({ children }) {
+                    return <ol className="list-decimal text-foreground my-0.5 md:my-1">{children}</ol>
+                  },
+                  li({ children }) {
+                    return <li className="text-foreground my-0.5 md:my-1">{children}</li>
+                  },
+                  table({ children }) {
+                    return (
+                      <div className="table-wrapper">
+                        <table>{children}</table>
+                      </div>
+                    )
+                  }
+                }}
+              >
+                {fullMarkdownContent}
+              </ReactMarkdown>
+            </div>
+          )
+        }
+      }
       return (
         <VirtualizedTextView
           ref={virtualizedRef}
@@ -208,6 +296,62 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
             </div>
           )
         }
+        
+        if (isMarkdownFile && markdownPreview) {
+          return (
+            <div className="pb-[200px] p-4 prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight, rehypeRaw]}
+                components={{
+                  code({ className, children, ...props }) {
+                    const isInline = !className || !className.includes('language-')
+                    if (isInline) {
+                      return (
+                        <code className={className || "bg-accent px-1.5 py-0.5 rounded text-sm text-foreground break-all"} {...props}>
+                          {children}
+                        </code>
+                      )
+                    }
+                    return <code className={className} {...props}>{children}</code>
+                  },
+                  pre({ children }) {
+                    return (
+                      <pre className="bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4">
+                        {children}
+                      </pre>
+                    )
+                  },
+                  p({ children }) {
+                    return <p className="text-foreground my-0.5 md:my-1">{children}</p>
+                  },
+                  strong({ children }) {
+                    return <strong className="font-semibold text-foreground">{children}</strong>
+                  },
+                  ul({ children }) {
+                    return <ul className="list-disc text-foreground my-0.5 md:my-1">{children}</ul>
+                  },
+                  ol({ children }) {
+                    return <ol className="list-decimal text-foreground my-0.5 md:my-1">{children}</ol>
+                  },
+                  li({ children }) {
+                    return <li className="text-foreground my-0.5 md:my-1">{children}</li>
+                  },
+                  table({ children }) {
+                    return (
+                      <div className="table-wrapper">
+                        <table>{children}</table>
+                      </div>
+                    )
+                  }
+                }}
+              >
+                {textContent}
+              </ReactMarkdown>
+            </div>
+          )
+        }
+        
         const lines = textContent.split('\n')
         return (
           <div className={`pb-[200px] text-sm bg-muted text-foreground rounded font-mono ${
@@ -288,7 +432,19 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
             </div>
             
             <div className="flex items-center gap-1 flex-shrink-0 mt-1">
-              {isTextFile && (
+              {isMarkdownFile && viewMode !== 'edit' && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMarkdownPreview(!markdownPreview) }} 
+                  className={`h-7 w-7 p-0 ${markdownPreview ? 'bg-primary text-primary-foreground' : ''}`}
+                  title={markdownPreview ? "Show raw markdown" : "Preview rendered markdown"}
+                >
+                  {markdownPreview ? <Code className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </Button>
+              )}
+              
+              {isTextFile && !markdownPreview && (
                 <Button 
                   variant="outline" 
                   size="sm" 
