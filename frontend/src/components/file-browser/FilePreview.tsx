@@ -4,11 +4,7 @@ import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code } from 'lucid
 import type { FileInfo } from '@/types/files'
 import { API_BASE_URL } from '@/config'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
-import rehypeRaw from 'rehype-raw'
-import 'highlight.js/styles/github-dark.css'
+import { MarkdownRenderer } from './MarkdownRenderer'
 
 
 const API_BASE = API_BASE_URL
@@ -199,58 +195,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
           )
         }
         if (fullMarkdownContent) {
-          return (
-            <div className="pb-[200px] p-4 prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight, rehypeRaw]}
-                components={{
-                  code({ className, children, ...props }) {
-                    const isInline = !className || !className.includes('language-')
-                    if (isInline) {
-                      return (
-                        <code className={className || "bg-accent px-1.5 py-0.5 rounded text-sm text-foreground break-all"} {...props}>
-                          {children}
-                        </code>
-                      )
-                    }
-                    return <code className={className} {...props}>{children}</code>
-                  },
-                  pre({ children }) {
-                    return (
-                      <pre className="bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4">
-                        {children}
-                      </pre>
-                    )
-                  },
-                  p({ children }) {
-                    return <p className="text-foreground my-0.5 md:my-1">{children}</p>
-                  },
-                  strong({ children }) {
-                    return <strong className="font-semibold text-foreground">{children}</strong>
-                  },
-                  ul({ children }) {
-                    return <ul className="list-disc text-foreground my-0.5 md:my-1">{children}</ul>
-                  },
-                  ol({ children }) {
-                    return <ol className="list-decimal text-foreground my-0.5 md:my-1">{children}</ol>
-                  },
-                  li({ children }) {
-                    return <li className="text-foreground my-0.5 md:my-1">{children}</li>
-                  },
-                  table({ children }) {
-                    return (
-                      <div className="table-wrapper">
-                        <table>{children}</table>
-                      </div>
-                    )
-                  }
-                }}
-              >
-                {fullMarkdownContent}
-              </ReactMarkdown>
-            </div>
-          )
+          return <MarkdownRenderer content={fullMarkdownContent} />
         }
       }
       return (
@@ -298,58 +243,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
         }
         
         if (isMarkdownFile && markdownPreview) {
-          return (
-            <div className="pb-[200px] p-4 prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeHighlight, rehypeRaw]}
-                components={{
-                  code({ className, children, ...props }) {
-                    const isInline = !className || !className.includes('language-')
-                    if (isInline) {
-                      return (
-                        <code className={className || "bg-accent px-1.5 py-0.5 rounded text-sm text-foreground break-all"} {...props}>
-                          {children}
-                        </code>
-                      )
-                    }
-                    return <code className={className} {...props}>{children}</code>
-                  },
-                  pre({ children }) {
-                    return (
-                      <pre className="bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4">
-                        {children}
-                      </pre>
-                    )
-                  },
-                  p({ children }) {
-                    return <p className="text-foreground my-0.5 md:my-1">{children}</p>
-                  },
-                  strong({ children }) {
-                    return <strong className="font-semibold text-foreground">{children}</strong>
-                  },
-                  ul({ children }) {
-                    return <ul className="list-disc text-foreground my-0.5 md:my-1">{children}</ul>
-                  },
-                  ol({ children }) {
-                    return <ol className="list-decimal text-foreground my-0.5 md:my-1">{children}</ol>
-                  },
-                  li({ children }) {
-                    return <li className="text-foreground my-0.5 md:my-1">{children}</li>
-                  },
-                  table({ children }) {
-                    return (
-                      <div className="table-wrapper">
-                        <table>{children}</table>
-                      </div>
-                    )
-                  }
-                }}
-              >
-                {textContent}
-              </ReactMarkdown>
-            </div>
-          )
+          return <MarkdownRenderer content={textContent} />
         }
         
         const lines = textContent.split('\n')
