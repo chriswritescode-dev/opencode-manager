@@ -420,6 +420,14 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     const isSecureContext = window.isSecureContext || (window.location.protocol === 'http:' && window.location.hostname === 'localhost')
 
     if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
+      try {
+        const text = await navigator.clipboard.readText()
+        if (text && text.trim()) {
+          return
+        }
+      } catch (err) {
+      }
+      
       event.preventDefault()
       try {
         const clipboardItems = await navigator.clipboard.read()
