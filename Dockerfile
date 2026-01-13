@@ -65,7 +65,11 @@ RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION}" && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
-    curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path && \
+    if [ "${OPENCODE_VERSION}" = "latest" ]; then \
+        curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path; \
+    else \
+        curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path; \
+    fi && \
     mv /root/.opencode /opt/opencode && \
     chmod -R 755 /opt/opencode && \
     ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
