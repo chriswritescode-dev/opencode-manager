@@ -121,3 +121,38 @@ export async function listDirectory(dirPath: string): Promise<Array<{
     throw new Error(`Failed to list directory ${dirPath}: ${error}`)
   }
 }
+
+export async function directoryExists(dirPath: string): Promise<boolean> {
+  try {
+    const fullPath = path.isAbsolute(dirPath) ? dirPath : path.join(getReposPath(), dirPath)
+    const stats = await fs.stat(fullPath)
+    return stats.isDirectory()
+  } catch {
+    return false
+  }
+}
+
+export async function removeDirectory(dirPath: string): Promise<void> {
+  try {
+    const fullPath = path.isAbsolute(dirPath) ? dirPath : path.join(getReposPath(), dirPath)
+    await fs.rm(fullPath, { recursive: true, force: true })
+  } catch (error) {
+    throw new Error(`Failed to remove directory ${dirPath}: ${error}`)
+  }
+}
+
+export async function listDirectoryNames(dirPath: string): Promise<string[]> {
+  try {
+    const fullPath = path.isAbsolute(dirPath) ? dirPath : path.join(getReposPath(), dirPath)
+    const entries = await fs.readdir(fullPath, { withFileTypes: true })
+    const directories: string[] = []
+    for (const entry of entries) {
+      if (entry.isDirectory()) {
+        directories.push(entry.name)
+      }
+    }
+    return directories
+  } catch {
+    return []
+  }
+}
