@@ -28,7 +28,12 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
 
-RUN curl -fsSL https://bun.sh/install | bash && \
+ARG BUN_RUNTIME=""
+RUN if [ -n "${BUN_RUNTIME}" ]; then \
+        curl -fsSL https://bun.sh/install | BUN_RUNTIME=${BUN_RUNTIME} bash; \
+    else \
+        curl -fsSL https://bun.sh/install | bash; \
+    fi && \
     mv /root/.bun /opt/bun && \
     chmod -R 755 /opt/bun && \
     ln -s /opt/bun/bin/bun /usr/local/bin/bun

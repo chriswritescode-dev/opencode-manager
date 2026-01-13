@@ -11,6 +11,13 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        variant:
+          - suffix: ""
+            bun_runtime: ""
+          - suffix: "-baseline"
+            bun_runtime: "baseline"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,10 +37,10 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest
+            type=semver,pattern={{version}}${{ matrix.variant.suffix }}
+            type=semver,pattern={{major}}.{{minor}}${{ matrix.variant.suffix }}
+            type=semver,pattern={{major}}${{ matrix.variant.suffix }}
+            type=raw,value=latest${{ matrix.variant.suffix }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -59,6 +66,7 @@ jobs:
           build-args: |
             UV_VERSION=${{ steps.versions.outputs.uv }}
             OPENCODE_VERSION=${{ steps.versions.outputs.opencode }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            BUN_RUNTIME=${{ matrix.variant.bun_runtime }}
+          cache-from: type=gha,scope=${{ matrix.variant.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant.suffix }}
           target: runner
