@@ -85,7 +85,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     refetchOnReconnect: true,
     staleTime: 30000,
     gcTime: 10 * 60 * 1000,
-    placeholderData: (previousData) => previousData,
+    
   });
 };
 

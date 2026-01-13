@@ -39,6 +39,13 @@ function isSessionInRetry(sessionStatus: { type?: string }): boolean {
   return sessionStatus?.type === 'retry'
 }
 
+const compareMessageIds = (id1: string, id2: string): number => {
+  const num1 = parseInt(id1, 10)
+  const num2 = parseInt(id2, 10)
+  if (!isNaN(num1) && !isNaN(num2)) return num1 - num2
+  return id1.localeCompare(id2)
+}
+
 const findLastMessageByRole = (
   messages: MessageWithParts[],
   role: 'user' | 'assistant',
@@ -147,7 +154,7 @@ const state = latestTodoPart.state
     <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
       {messages.map((msg, index) => {
         const streaming = isMessageStreaming(msg)
-        const isQueued = msg.info.role === 'user' && pendingAssistantId && msg.info.id > pendingAssistantId
+        const isQueued = msg.info.role === 'user' && pendingAssistantId && compareMessageIds(msg.info.id, pendingAssistantId) > 0
         const isLastUserMessage = msg.info.role === 'user' && msg.info.id === lastUserMessageId
         const messageTextContent = getMessageTextContent(msg)
 

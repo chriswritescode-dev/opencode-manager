@@ -37,6 +37,13 @@ import { useQuestions } from "@/contexts/EventContext";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 
+const compareMessageIds = (id1: string, id2: string): number => {
+  const num1 = parseInt(id1, 10)
+  const num2 = parseInt(id2, 10)
+  if (!isNaN(num1) && !isNaN(num2)) return num1 - num2
+  return id1.localeCompare(id2)
+}
+
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
@@ -95,7 +102,7 @@ export function SessionDetail() {
     if (!rawMessages) return undefined
     const revertMessageID = session?.revert?.messageID
     if (!revertMessageID) return rawMessages
-    return rawMessages.filter(msg => msg.info.id < revertMessageID)
+    return rawMessages.filter(msg => compareMessageIds(msg.info.id, revertMessageID) < 0)
   }, [rawMessages, session?.revert?.messageID]);
 
   const { scrollToBottom } = useAutoScroll({
