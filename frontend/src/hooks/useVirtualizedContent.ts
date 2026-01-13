@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { fetchFileRange, applyFilePatches } from '@/api/files'
 import type { PatchOperation } from '@/types/files'
 
@@ -30,6 +30,9 @@ interface UseVirtualizedContentReturn {
   isSaving: boolean
   hasUnsavedChanges: boolean
   prefetchAdjacent: (visibleStart: number, visibleEnd: number) => void
+  loadAll: () => Promise<void>
+  fullContent: string | null
+  isFullyLoaded: boolean
 }
 
 export function useVirtualizedContent({
@@ -234,6 +237,27 @@ export function useVirtualizedContent({
   
   const hasUnsavedChanges = editedLines.size > 0
   
+  const loadAll = useCallback(async () => {
+    if (!enabled || !filePath || totalLines === 0) return
+    if (isRangeLoaded(0, totalLines)) return
+    await loadRange(0, totalLines)
+  }, [enabled, filePath, totalLines, isRangeLoaded, loadRange])
+  
+  const isFullyLoaded = useMemo(() => {
+    if (totalLines === 0) return false
+    return isRangeLoaded(0, totalLines)
+  }, [totalLines, isRangeLoaded])
+  
+  const fullContent = useMemo(() => {
+    if (!isFullyLoaded || totalLines === 0) return null
+    const result: string[] = []
+    for (let i = 0; i < totalLines; i++) {
+      const lineData = lines.get(i)
+      result.push(lineData?.content ?? '')
+    }
+    return result.join('\n')
+  }, [isFullyLoaded, totalLines, lines])
+  
   return {
     lines,
     totalLines,
@@ -249,5 +273,8 @@ export function useVirtualizedContent({
     isSaving,
     hasUnsavedChanges,
     prefetchAdjacent,
+    loadAll,
+    fullContent,
+    isFullyLoaded,
   }
 }

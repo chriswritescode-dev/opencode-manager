@@ -17,6 +17,9 @@ interface VirtualizedTextViewProps {
 
 export interface VirtualizedTextViewHandle {
   save: () => Promise<void>
+  loadAll: () => Promise<void>
+  getFullContent: () => string | null
+  isFullyLoaded: () => boolean
 }
 
 const LINE_HEIGHT = 20
@@ -174,6 +177,9 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
     saveEdits,
     isSaving,
     hasUnsavedChanges,
+    loadAll,
+    fullContent,
+    isFullyLoaded,
   } = useVirtualizedContent({
     filePath,
     chunkSize,
@@ -389,7 +395,10 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
   
   useImperativeHandle(ref, () => ({
     save: handleSave,
-  }), [handleSave])
+    loadAll,
+    getFullContent: () => fullContent,
+    isFullyLoaded: () => isFullyLoaded,
+  }), [handleSave, loadAll, fullContent, isFullyLoaded])
   
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {

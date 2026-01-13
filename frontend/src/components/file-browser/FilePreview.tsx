@@ -10,6 +10,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 const API_BASE = API_BASE_URL
 
 const VIRTUALIZATION_THRESHOLD_BYTES = 8_000
+const MARKDOWN_PREVIEW_SIZE_LIMIT = 1_000_000
 
 interface FilePreviewProps {
   file: FileInfo
@@ -30,28 +31,31 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [highlightedLine, setHighlightedLine] = useState<number | undefined>(initialLineNumber)
   const [lineWrap, setLineWrap] = useState(true)
   const [markdownPreview, setMarkdownPreview] = useState(isMarkdownFile)
-  const [fullMarkdownContent, setFullMarkdownContent] = useState<string | null>(null)
-  const [isLoadingFullContent, setIsLoadingFullContent] = useState(false)
+  const [isLoadingAllContent, setIsLoadingAllContent] = useState(false)
+  const [fullContentLoaded, setFullContentLoaded] = useState(false)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   
-  
   const shouldVirtualize = file.size > VIRTUALIZATION_THRESHOLD_BYTES && !file.mimeType?.startsWith('image/')
+  const isMarkdownTooLarge = file.size > MARKDOWN_PREVIEW_SIZE_LIMIT
   
   useEffect(() => {
-    if (shouldVirtualize && isMarkdownFile && markdownPreview && !fullMarkdownContent) {
-      setIsLoadingFullContent(true)
-      fetch(`${API_BASE}/api/files/${file.path}?raw=true`)
-        .then(res => res.text())
-        .then(content => {
-          setFullMarkdownContent(content)
-          setIsLoadingFullContent(false)
-        })
-        .catch(() => {
-          setIsLoadingFullContent(false)
-        })
+    setFullContentLoaded(false)
+  }, [file.path])
+  
+  useEffect(() => {
+    if (shouldVirtualize && isMarkdownFile && markdownPreview && !isMarkdownTooLarge && !fullContentLoaded) {
+      const loadContent = async () => {
+        if (!virtualizedRef.current) return
+        setIsLoadingAllContent(true)
+        await virtualizedRef.current.loadAll()
+        setFullContentLoaded(true)
+        setIsLoadingAllContent(false)
+      }
+      const timer = setTimeout(loadContent, 50)
+      return () => clearTimeout(timer)
     }
-  }, [shouldVirtualize, isMarkdownFile, markdownPreview, fullMarkdownContent, file.path])
+  }, [shouldVirtualize, isMarkdownFile, markdownPreview, isMarkdownTooLarge, fullContentLoaded])
   
   
 
@@ -186,30 +190,43 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
 
     if (shouldVirtualize && isTextFile) {
-      if (isMarkdownFile && markdownPreview && viewMode !== 'edit') {
-        if (isLoadingFullContent) {
-          return (
-            <div className="flex items-center justify-center h-32">
-              <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
-            </div>
-          )
-        }
-        if (fullMarkdownContent) {
-          return <MarkdownRenderer content={fullMarkdownContent} />
-        }
-      }
+      const showMarkdownPreview = isMarkdownFile && markdownPreview && viewMode !== 'edit'
+      const fullContent = virtualizedRef.current?.getFullContent()
+      
       return (
-        <VirtualizedTextView
-          ref={virtualizedRef}
-          filePath={file.path}
-          totalLines={file.totalLines}
-          editable={viewMode === 'edit'}
-          onSaveStateChange={handleVirtualizedSaveStateChange}
-          onSave={handleVirtualizedSave}
-          className="h-full"
-          initialLineNumber={initialLineNumber}
-          lineWrap={lineWrap}
-        />
+        <>
+          <div className={showMarkdownPreview && fullContentLoaded ? 'hidden' : 'h-full'}>
+            <VirtualizedTextView
+              ref={virtualizedRef}
+              filePath={file.path}
+              totalLines={file.totalLines}
+              editable={viewMode === 'edit'}
+              onSaveStateChange={handleVirtualizedSaveStateChange}
+              onSave={handleVirtualizedSave}
+              className="h-full"
+              initialLineNumber={initialLineNumber}
+              lineWrap={lineWrap}
+            />
+          </div>
+          {showMarkdownPreview && (
+            <>
+              {isMarkdownTooLarge ? (
+                <div className="flex flex-col items-center justify-center h-32 gap-2 text-muted-foreground">
+                  <span>File too large for markdown preview (max 1MB)</span>
+                  <Button variant="outline" size="sm" onClick={() => setMarkdownPreview(false)}>
+                    View raw
+                  </Button>
+                </div>
+              ) : isLoadingAllContent || !fullContentLoaded ? (
+                <div className="flex items-center justify-center h-32">
+                  <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : fullContent ? (
+                <MarkdownRenderer content={fullContent} />
+              ) : null}
+            </>
+          )}
+        </>
       )
     }
 
