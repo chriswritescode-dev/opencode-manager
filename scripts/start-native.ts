@@ -35,22 +35,26 @@ opencode-manager native start
 Usage: bun scripts/start-native.ts [options]
 
 Options:
-  --client, -c    Connect to an existing opencode server instead of starting one
+  --client, -c    Connect to existing opencode server (starts one if not found)
   --tunnel, -t    Start a Cloudflare tunnel to expose the API publicly
   --port, -p      Port for the backend API (default: 5001)
   --help, -h      Show this help message
+
+The --client flag connects to the shared opencode server (port 5551 by default),
+which is the same server used by 'opencode-attach'. This enables notifications
+for all sessions that use 'opencode-attach' or 'oc' aliases.
 
 Examples:
   # Start normally (spawns opencode serve internally)
   bun scripts/start-native.ts
 
-  # Connect to existing opencode instance
+  # Connect to shared opencode server (recommended for notifications)
   bun scripts/start-native.ts --client
 
   # Start with Cloudflare tunnel
   bun scripts/start-native.ts --tunnel
 
-  # Connect to existing instance with tunnel
+  # Connect to shared server with tunnel
   bun scripts/start-native.ts --client --tunnel
 `)
 }
@@ -142,13 +146,60 @@ async function waitForBackendHealth(port: number, maxSeconds: number): Promise<b
   return false
 }
 
+const DEFAULT_OPENCODE_PORT = 5551
+
+async function startOpenCodeServer(port: number = DEFAULT_OPENCODE_PORT): Promise<OpenCodeInstance | null> {
+  console.log(`\n🚀 Starting opencode server on port ${port}...`)
+  
+  const serverProcess = spawn('opencode', ['serve', '--port', port.toString(), '--hostname', '127.0.0.1'], {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
+  })
+  
+  serverProcess.unref()
+  
+  serverProcess.stdout?.on('data', (data: Buffer) => {
+    const output = data.toString()
+    if (output.includes('listening')) {
+      console.log(`   ${output.trim()}`)
+    }
+  })
+  
+  serverProcess.stderr?.on('data', (data: Buffer) => {
+    const output = data.toString()
+    if (!output.includes('Warning')) {
+      process.stderr.write(`   ${output}`)
+    }
+  })
+
+  for (let i = 0; i < 30; i++) {
+    if (await checkServerHealth(port)) {
+      let version: string | undefined
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/global/health`, { signal: AbortSignal.timeout(2000) })
+        if (resp.ok) {
+          const data = await resp.json() as { version?: string }
+          version = data.version
+        }
+      } catch {}
+      
+      console.log(`✓ Server started on port ${port}`)
+      return { pid: serverProcess.pid || 0, port, cwd: process.cwd(), healthy: true, version }
+    }
+    await new Promise(r => setTimeout(r, 500))
+  }
+  
+  console.error('❌ Failed to start opencode server')
+  return null
+}
+
 async function promptUserSelection(instances: OpenCodeInstance[]): Promise<OpenCodeInstance | null> {
   const healthyInstances = instances.filter(i => i.healthy)
 
   if (healthyInstances.length === 0) {
-    console.log('\n❌ No healthy opencode servers found.')
-    console.log('Start opencode in a terminal first, or run without --client flag.\n')
-    return null
+    console.log('\n⚠️  No running opencode servers found.')
+    console.log('   Will start one automatically...')
+    return startOpenCodeServer(DEFAULT_OPENCODE_PORT)
   }
 
   if (healthyInstances.length === 1) {
@@ -297,15 +348,33 @@ async function main() {
   let opencodePort: number | undefined
 
   if (args.client) {
-    console.log('\n🔍 Searching for running opencode servers...')
-    const instances = await findOpenCodeInstances()
-    const selected = await promptUserSelection(instances)
+    console.log('\n🔍 Checking for opencode server...')
+    
+    // First check default port (used by opencode-attach)
+    if (await checkServerHealth(DEFAULT_OPENCODE_PORT)) {
+      let version: string | undefined
+      try {
+        const resp = await fetch(`http://127.0.0.1:${DEFAULT_OPENCODE_PORT}/global/health`, { signal: AbortSignal.timeout(2000) })
+        if (resp.ok) {
+          const data = await resp.json() as { version?: string }
+          version = data.version
+        }
+      } catch {}
+      
+      console.log(`✓ Found opencode server on default port ${DEFAULT_OPENCODE_PORT} (v${version || 'unknown'})`)
+      opencodePort = DEFAULT_OPENCODE_PORT
+    } else {
+      // Search for other instances
+      const instances = await findOpenCodeInstances()
+      const selected = await promptUserSelection(instances)
 
-    if (!selected) {
-      process.exit(1)
+      if (!selected) {
+        process.exit(1)
+      }
+
+      opencodePort = selected.port
     }
-
-    opencodePort = selected.port
+    
     console.log(`✓ Will connect to opencode server on port ${opencodePort}`)
   }
 
