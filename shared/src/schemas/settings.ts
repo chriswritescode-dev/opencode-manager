@@ -77,6 +77,13 @@ export const TalkModeConfigSchema = z.object({
   autoInterrupt: z.boolean().default(true),
 });
 
+export const NotificationConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  sessionComplete: z.boolean().default(true),
+  permissionRequests: z.boolean().default(true),
+  sound: z.boolean().default(false),
+});
+
 export const CustomAgentSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -112,6 +119,13 @@ export type TalkModeConfig = {
   silenceThresholdMs: number;
   minSpeechMs: number;
   autoInterrupt: boolean;
+};
+
+export type NotificationConfig = {
+  enabled: boolean;
+  sessionComplete: boolean;
+  permissionRequests: boolean;
+  sound: boolean;
 };
 
 const isBrowser = typeof navigator !== 'undefined';
@@ -150,6 +164,7 @@ export const UserPreferencesSchema = z.object({
   tts: TTSConfigSchema.optional(),
   stt: STTConfigSchema.optional(),
   talkMode: TalkModeConfigSchema.optional(),
+  notifications: NotificationConfigSchema.optional(),
   lastKnownGoodConfig: z.string().optional(),
 });
 
@@ -184,6 +199,13 @@ export const DEFAULT_TALK_MODE_CONFIG: TalkModeConfig = {
   autoInterrupt: true,
 };
 
+export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
+  enabled: false,
+  sessionComplete: true,
+  permissionRequests: true,
+  sound: false,
+};
+
 export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
   mode: "build" as const,
@@ -198,6 +220,7 @@ export const DEFAULT_USER_PREFERENCES = {
   tts: DEFAULT_TTS_CONFIG,
   stt: DEFAULT_STT_CONFIG,
   talkMode: DEFAULT_TALK_MODE_CONFIG,
+  notifications: DEFAULT_NOTIFICATION_CONFIG,
 };
 
 export const SettingsResponseSchema = z.object({

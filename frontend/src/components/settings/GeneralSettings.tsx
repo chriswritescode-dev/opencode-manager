@@ -11,6 +11,7 @@ import { X } from 'lucide-react'
 import { TTSSettings } from './TTSSettings'
 import { STTSettings } from './STTSettings'
 import { TalkModeSettings } from './TalkModeSettings'
+import { NotificationSettings } from './NotificationSettings'
 import { showToast } from '@/lib/toast'
 
 export function GeneralSettings() {
@@ -232,6 +233,10 @@ onClick={async () => {
 
       <div className="mt-6">
         <TalkModeSettings />
+      </div>
+
+      <div className="mt-6">
+        <NotificationSettings />
       </div>
     </div>
   )

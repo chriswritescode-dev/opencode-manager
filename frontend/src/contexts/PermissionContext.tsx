@@ -2,7 +2,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { OpenCodeClient } from '@/api/opencode'
 import { permissionEvents, usePermissionRequests } from '@/hooks/usePermissionRequests'
-import type { Permission, PermissionResponse } from '@/api/types'
+import { notificationEvents } from '@/lib/notificationEvents'
+import type { Permission, PermissionResponse, Repo } from '@/api/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
 
@@ -216,6 +217,14 @@ prevPendingCountRef.current = pendingCount
     return null
   }, [activeRepos, queryClient])
 
+  const getRepoIdByDirectory = useCallback((directory?: string): string | undefined => {
+    if (!directory) return undefined
+    const repos = queryClient.getQueryData<Repo[]>(['repos'])
+    if (!repos) return undefined
+    const repo = repos.find((r) => r.fullPath === directory)
+    return repo?.id?.toString()
+  }, [queryClient])
+
   useEffect(() => {
     const currentRefs = eventSourceRefs.current
     const currentClients = clientsRef.current
@@ -259,9 +268,9 @@ prevPendingCountRef.current = pendingCount
       }
       
       if (url.pathname.endsWith('/')) {
-        url.pathname += 'stream'
+        url.pathname += 'event'
       } else {
-        url.pathname += '/stream'
+        url.pathname += '/event'
       }
       
       if (repo.directory) {
@@ -305,6 +314,14 @@ prevPendingCountRef.current = pendingCount
               if (!success) {
                 console.error(`[Auto-approve] All retries failed, showing dialog`)
                 permissionEvents.emit({ type: 'add', permission })
+                const repoId = getRepoIdByDirectory(repo.directory)
+                const toolName = permission.tool || 'A tool'
+                notificationEvents.emit({
+                  type: 'permission-request',
+                  sessionId: permission.sessionID,
+                  repoId,
+                  toolName,
+                })
               }
             })
           }
@@ -328,6 +345,22 @@ prevPendingCountRef.current = pendingCount
         }
       })
 
+      es.addEventListener('session.idle', (e) => {
+        try {
+          const event = JSON.parse(e.data)
+          if ('sessionID' in event.properties) {
+            const repoId = getRepoIdByDirectory(repo.directory)
+            notificationEvents.emit({
+              type: 'session-complete',
+              sessionId: event.properties.sessionID,
+              repoId,
+            })
+          }
+        } catch (err) {
+          console.error('Failed to parse session.idle event:', err)
+        }
+      })
+
       es.onerror = (err) => {
         console.error(`SSE connection error for ${repo.url}:`, err)
         setTimeout(() => {
@@ -340,7 +373,7 @@ prevPendingCountRef.current = pendingCount
       currentRefs.forEach((es) => es.close())
       currentRefs.clear()
     }
-  }, [activeRepos])
+  }, [activeRepos, getRepoIdByDirectory])
 
   const respondToPermission = useCallback(
     async (permissionID: string, sessionID: string, response: PermissionResponse) => {

@@ -2,16 +2,18 @@ import {
   DEFAULT_TTS_CONFIG,
   DEFAULT_STT_CONFIG,
   DEFAULT_TALK_MODE_CONFIG,
+  DEFAULT_NOTIFICATION_CONFIG,
   DEFAULT_KEYBOARD_SHORTCUTS,
   DEFAULT_USER_PREFERENCES,
   type TTSConfig,
   type STTConfig,
   type TalkModeConfig,
+  type NotificationConfig,
   type OpenCodeConfigContent,
 } from '@opencode-manager/shared'
 
-export type { TTSConfig, STTConfig, TalkModeConfig, OpenCodeConfigContent }
-export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_TALK_MODE_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES }
+export type { TTSConfig, STTConfig, TalkModeConfig, NotificationConfig, OpenCodeConfigContent }
+export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_TALK_MODE_CONFIG, DEFAULT_NOTIFICATION_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES }
 
 export interface CustomCommand {
   name: string
@@ -41,6 +43,7 @@ export interface UserPreferences {
   tts?: TTSConfig
   stt?: STTConfig
   talkMode?: TalkModeConfig
+  notifications?: NotificationConfig
 }
 
 export interface SettingsResponse {

@@ -226,12 +226,16 @@ bun run scripts/test-voice.ts --skip-talkmode
 
 **Tests performed:**
 1. Health endpoint connectivity
-2. Voice settings (TTS, STT, TalkMode config)
-3. STT server status and available models
-4. STT transcription with generated audio
-5. TTS voices and synthesis endpoints
-6. OpenCode session creation
-7. Full talk mode flow: Audio -> STT -> OpenCode -> Response
+2. **Authentication enforcement** (401 without auth, 401 with wrong auth, 200 with correct auth)
+3. **OpenCode proxy dynamic port** (verifies proxy uses correct port in client mode)
+4. Voice settings (TTS, STT, TalkMode config)
+5. STT server status and available models
+6. STT transcription with generated audio
+7. STT error handling (invalid base64, empty input)
+8. TTS voices and synthesis endpoints
+9. OpenCode model configuration check
+10. OpenCode session creation
+11. Full talk mode flow: Audio -> STT -> OpenCode -> Response
 
 ### 5. TTS Tests
 
@@ -588,6 +592,93 @@ Verifies: audio capture -> STT -> OpenCode -> file creation
    python3 workspace/hello.py
    ```
 
+### Client Mode with Tunnel and Authentication Test
+
+Verifies that `pnpm start:client` exposes existing opencode sessions over Cloudflare tunnel with password protection, enabling remote access from mobile devices.
+
+**Pre-Conditions:**
+- An opencode server running locally (e.g., `opencode -c` in a terminal)
+- `cloudflared` installed (`brew install cloudflared`)
+- No processes on managed ports (5001, 5173, 5552-5554)
+
+**Steps:**
+
+1. **Clean State Setup**
+   ```bash
+   pnpm cleanup
+   ```
+
+2. **Verify OpenCode Server Running**
+   ```bash
+   # Find running opencode servers
+   lsof -i -P | grep opencode | grep LISTEN
+   # Should show at least one opencode process
+   ```
+
+3. **Start Client Mode with Auth**
+   ```bash
+   AUTH_USERNAME=admin AUTH_PASSWORD=secret123 pnpm start:client
+   # Wait for tunnel URL to appear (~30s)
+   # Note the tunnel URL: https://xxx.trycloudflare.com
+   ```
+
+4. **Test Authentication Required (from another terminal or device)**
+   ```bash
+   TUNNEL_URL="https://your-tunnel-url.trycloudflare.com"
+   
+   # Without auth - should return 401
+   curl -s -w "\nHTTP: %{http_code}\n" "$TUNNEL_URL/api/health"
+   # Expected: "Unauthorized" with HTTP: 401
+   
+   # With wrong password - should return 401
+   curl -s -u admin:wrongpass "$TUNNEL_URL/api/health"
+   # Expected: "Unauthorized"
+   
+   # With correct auth - should succeed
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/health" | jq '.status'
+   # Expected: "healthy"
+   ```
+
+5. **Test Session Access Over Tunnel**
+   ```bash
+   # Get sessions from connected opencode server
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/opencode/session" | jq '.[0] | {id, title}'
+   # Expected: Session object with id and title
+   
+   # Get session messages (realtime updates)
+   SESSION_ID=$(curl -s -u admin:secret123 "$TUNNEL_URL/api/opencode/session" | jq -r '.[0].id')
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/opencode/session/$SESSION_ID/message" | jq 'length'
+   # Expected: Number of messages in session
+   ```
+
+6. **Test Full API Suite Over Tunnel**
+   ```bash
+   # All these should work with auth
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/repos" | jq 'length'
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/settings" | jq '.preferences.theme'
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/stt/status" | jq '.server.running'
+   curl -s -u admin:secret123 "$TUNNEL_URL/api/opencode/config" | jq '.model'
+   ```
+
+7. **Test Mobile Access**
+   - Open tunnel URL in mobile browser
+   - Enter credentials when prompted (HTTP Basic Auth)
+   - Verify web UI loads and shows sessions
+   - Verify realtime updates when messages appear in local terminal
+
+8. **Cleanup**
+   ```bash
+   pnpm cleanup
+   ```
+
+**Success Criteria:**
+- [ ] Without auth: All endpoints return 401 Unauthorized
+- [ ] With wrong credentials: Returns 401 Unauthorized
+- [ ] With correct auth: All endpoints accessible
+- [ ] Sessions from local opencode visible over tunnel
+- [ ] Session messages accessible with realtime updates possible
+- [ ] Mobile browser can authenticate and view sessions
+
 ---
 
 ## CI/CD Integration
@@ -725,3 +816,178 @@ Before deployment, verify:
 - [ ] TTS works over tunnel
 - [ ] Browser E2E test passes
 - [ ] No console errors in browser DevTools
+
+---
+
+## Regression Tests for Known Bugs
+
+These tests verify fixes for bugs that were discovered and fixed. Run `bun run scripts/test-voice.ts` to execute them automatically.
+
+### Bug #1: Authentication bypass in startup health check
+
+**Issue:** When `AUTH_USERNAME` and `AUTH_PASSWORD` are set, `pnpm start:client` would hang indefinitely because `waitForBackendHealth()` didn't include auth headers.
+
+**Fix:** `scripts/start-native.ts` - Added auth headers to health check requests.
+
+**Test:** `testAuthEnforced()` in test-voice.ts
+- Verifies 401 returned without credentials
+- Verifies 401 returned with wrong credentials  
+- Verifies 200 returned with correct credentials
+
+**Manual verification:**
+```bash
+AUTH_USERNAME=admin AUTH_PASSWORD=secret pnpm start:client
+# Should complete startup within 30s, not hang
+```
+
+### Bug #2: OpenCode proxy uses wrong port in client mode
+
+**Issue:** When connecting to an existing opencode server on a non-default port (e.g., 3333 instead of 5551), the `/api/opencode/*` proxy would fail because `OPENCODE_SERVER_URL` was a constant evaluated at module import time, before the environment variable was set.
+
+**Fix:** `backend/src/services/proxy.ts` - Changed from constant to function `getOpenCodeServerUrl()` that reads the port dynamically at request time.
+
+**Test:** `testOpenCodeProxyDynamic()` in test-voice.ts
+- Checks health endpoint for configured opencode port
+- Verifies `/api/opencode/session` returns JSON (not HTML from frontend)
+- Confirms sessions are accessible from the connected server
+
+**Manual verification:**
+```bash
+# Start opencode on non-standard port
+opencode serve --port 3333 &
+
+# Connect via client mode
+pnpm start:client
+
+# Verify proxy works
+curl http://localhost:5001/api/opencode/session | head -c 100
+# Should return JSON array, not HTML
+```
+
+### Bug #3: Orphaned Coqui TTS process blocks port 5554
+
+**Issue:** `pnpm cleanup` didn't include port 5554 (Coqui TTS), causing orphaned Python processes to block TTS synthesis on subsequent runs.
+
+**Fix:** 
+- `scripts/cleanup.ts` - Added port 5554 to PORTS.coqui
+- `AGENTS.md` - Updated manual cleanup command to include 5554
+
+**Test:** TTS Synthesis test in test-voice.ts will fail if port is blocked.
+
+**Manual verification:**
+```bash
+# Check cleanup includes 5554
+pnpm cleanup --dry-run
+# Should show coqui on port 5554 if process exists
+
+# Verify port is in cleanup list
+grep 5554 scripts/cleanup.ts
+```
+
+### Bug #4: Model defaults missing in deployment config
+
+**Issue:** Deploy script didn't set default models, causing failures when OAuth tokens were used without explicit model configuration.
+
+**Fix:** `scripts/deploy.ts` - Added default `model` and `small_model` fields to `getBaseOpencodeConfig()`.
+
+**Test:** `testOpenCodeModelAvailable()` in test-voice.ts verifies model is configured.
+
+**Manual verification:**
+```bash
+curl http://localhost:5001/api/opencode/config | jq '{model, small_model}'
+# Should show configured models, not null
+```
+
+### Bug #5: SSE endpoint path incorrect in PermissionContext
+
+**Issue:** `frontend/src/contexts/PermissionContext.tsx` was connecting to `/stream` instead of `/event` for SSE events. This meant `session.idle` and `permission.updated` events were never received, breaking push notifications.
+
+**Fix:** Changed SSE endpoint from `/stream` to `/event` in PermissionContext.tsx (lines 271, 273).
+
+**Test:** Unit tests in `frontend/src/lib/notificationEvents.test.ts` verify event emission.
+
+**Manual verification:**
+```bash
+# Open browser DevTools Network tab
+# Filter by "event" 
+# Should see EventSource connection to /event endpoint
+# When session goes idle, should see session.idle event
+```
+
+---
+
+## 10. Browser Push Notification Tests
+
+Test the push notification system for session completion and permission requests.
+
+### Unit Tests
+
+```bash
+# Run all notification-related tests
+cd frontend && npm test -- --run \
+  src/hooks/useNotifications.test.tsx \
+  src/lib/notificationEvents.test.ts \
+  src/components/settings/NotificationSettings.test.tsx \
+  src/components/providers/NotificationProvider.test.tsx
+
+# Expected: 51 tests passing
+```
+
+### Manual Browser Test
+
+1. **Start the application**
+   ```bash
+   AUTH_USERNAME=admin AUTH_PASSWORD=secret123 pnpm start:client
+   # Note the tunnel URL
+   ```
+
+2. **Enable notifications in browser**
+   - Open app in browser (tunnel URL or localhost:5173)
+   - Go to Settings → Notifications
+   - Toggle "Enable notifications" ON
+   - Grant browser permission when prompted
+   - Toggle "Session complete" and "Permission requests" ON
+
+3. **Test session completion notification**
+   - Open a session and send a message
+   - Wait for the response to complete (session goes idle)
+   - Verify browser notification appears with session details
+   - Click notification to navigate to session
+
+4. **Test permission request notification** (requires YOLO mode OFF)
+   - Disable YOLO mode in settings if enabled
+   - Send a message that requires tool approval
+   - Verify notification appears for permission request
+   - Click notification to navigate and approve
+
+### Verify SSE Connection
+
+```bash
+# Check SSE events are being received
+# In browser DevTools → Network → Filter "event"
+# Should see EventSource connection with events streaming
+```
+
+### Mobile Push Notification Test
+
+1. **On mobile device:**
+   - Open tunnel URL in mobile browser (Chrome/Safari)
+   - Login with credentials
+   - Go to Settings → Notifications → Enable all
+   - Grant browser notification permission
+
+2. **On desktop (trigger events):**
+   - Open same session in desktop browser
+   - Send a message and wait for completion
+
+3. **Verify on mobile:**
+   - Push notification should appear
+   - Tapping notification opens app to correct session
+
+### Architecture Notes
+
+- Notifications handled globally via `PermissionContext`
+- SSE connects to `/event` endpoint for all active repos
+- `session.idle` events trigger session-complete notifications
+- `permission.updated` events (when auto-approve fails) trigger permission-request notifications
+- `repoId` included in events for proper navigation URL construction
