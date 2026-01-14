@@ -329,87 +329,77 @@ prevPendingCountRef.current = pendingCount
         console.error(`[SSE] Connection error for ${repo.directory}:`, err)
       }
 
-      es.addEventListener('permission.updated', (e) => {
+      es.onmessage = (e) => {
         try {
           const event = JSON.parse(e.data)
-          if ('id' in event.properties && 'sessionID' in event.properties) {
-            const permission = event.properties
-            
-            // Auto-approve: immediately respond to permission requests
-            const clientKey = `${repo.url}|${repo.directory ?? ''}`
-            let client = clientsRef.current.get(clientKey)
-            if (!client) {
-              client = new OpenCodeClient(repo.url, repo.directory)
-              clientsRef.current.set(clientKey, client)
-            }
-            
-            const autoApprove = async (retries = 3) => {
-              for (let i = 0; i < retries; i++) {
-                try {
-                  await client!.respondToPermission(permission.sessionID, permission.id, 'always')
-                  console.log(`[Auto-approve] Approved permission ${permission.id} (attempt ${i + 1})`)
-                  return true
-                } catch (err) {
-                  console.warn(`[Auto-approve] Attempt ${i + 1} failed:`, err)
-                  if (i < retries - 1) {
-                    await new Promise(r => setTimeout(r, 500 * (i + 1)))
+          const eventType = event.type
+          const props = event.properties
+
+          if (eventType === 'permission.updated') {
+            if ('id' in props && 'sessionID' in props) {
+              const permission = props
+              
+              const clientKey = `${repo.url}|${repo.directory ?? ''}`
+              let client = clientsRef.current.get(clientKey)
+              if (!client) {
+                client = new OpenCodeClient(repo.url, repo.directory)
+                clientsRef.current.set(clientKey, client)
+              }
+              
+              const autoApprove = async (retries = 3) => {
+                for (let i = 0; i < retries; i++) {
+                  try {
+                    await client!.respondToPermission(permission.sessionID, permission.id, 'always')
+                    console.log(`[Auto-approve] Approved permission ${permission.id} (attempt ${i + 1})`)
+                    return true
+                  } catch (err) {
+                    console.warn(`[Auto-approve] Attempt ${i + 1} failed:`, err)
+                    if (i < retries - 1) {
+                      await new Promise(r => setTimeout(r, 500 * (i + 1)))
+                    }
                   }
                 }
+                return false
               }
-              return false
+              
+              autoApprove().then(success => {
+                if (!success) {
+                  console.error(`[Auto-approve] All retries failed, showing dialog`)
+                  permissionEvents.emit({ type: 'add', permission })
+                  const repoId = getRepoIdByDirectory(repo.directory)
+                  const toolName = permission.tool || 'A tool'
+                  notificationEvents.emit({
+                    type: 'permission-request',
+                    sessionId: permission.sessionID,
+                    repoId,
+                    toolName,
+                  })
+                }
+              })
             }
-            
-            autoApprove().then(success => {
-              if (!success) {
-                console.error(`[Auto-approve] All retries failed, showing dialog`)
-                permissionEvents.emit({ type: 'add', permission })
-                const repoId = getRepoIdByDirectory(repo.directory)
-                const toolName = permission.tool || 'A tool'
-                notificationEvents.emit({
-                  type: 'permission-request',
-                  sessionId: permission.sessionID,
-                  repoId,
-                  toolName,
-                })
-              }
-            })
+          } else if (eventType === 'permission.replied') {
+            if ('permissionID' in props && 'sessionID' in props) {
+              permissionEvents.emit({
+                type: 'remove',
+                sessionID: props.sessionID,
+                permissionID: props.permissionID,
+              })
+            }
+          } else if (eventType === 'session.idle') {
+            if ('sessionID' in props) {
+              console.log('[SSE] session.idle event for session:', props.sessionID)
+              const repoId = getRepoIdByDirectory(repo.directory)
+              notificationEvents.emit({
+                type: 'session-complete',
+                sessionId: props.sessionID,
+                repoId,
+              })
+            }
           }
         } catch (err) {
-          console.error('Failed to parse permission.updated event:', err)
+          console.error('Failed to parse SSE event:', err)
         }
-      })
-
-      es.addEventListener('permission.replied', (e) => {
-        try {
-          const event = JSON.parse(e.data)
-          if ('permissionID' in event.properties && 'sessionID' in event.properties) {
-            permissionEvents.emit({
-              type: 'remove',
-              sessionID: event.properties.sessionID,
-              permissionID: event.properties.permissionID,
-            })
-          }
-        } catch (err) {
-          console.error('Failed to parse permission.replied event:', err)
-        }
-      })
-
-      es.addEventListener('session.idle', (e) => {
-        try {
-          const event = JSON.parse(e.data)
-          if ('sessionID' in event.properties) {
-            console.log('[SSE] session.idle event for session:', event.properties.sessionID)
-            const repoId = getRepoIdByDirectory(repo.directory)
-            notificationEvents.emit({
-              type: 'session-complete',
-              sessionId: event.properties.sessionID,
-              repoId,
-            })
-          }
-        } catch (err) {
-          console.error('Failed to parse session.idle event:', err)
-        }
-      })
+      }
     })
 
     return () => {
