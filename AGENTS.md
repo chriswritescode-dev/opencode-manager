@@ -9,7 +9,7 @@ Before committing any change that affects startup or core functionality:
 1. **Kill all processes and clean up:**
    ```bash
    pnpm cleanup
-   # Or manually: lsof -ti:5001,5173,5551,5552,5553 | xargs kill
+   # Or manually: lsof -ti:5001,5173,5551,5552,5553,5554 | xargs kill
    ```
 
 2. **Start fresh and verify:**
@@ -42,7 +42,7 @@ The user runs `opencode -c` in their terminal sessions. Killing these processes 
 
 Safe alternatives:
 - Kill specific PIDs you spawned: `kill <specific-pid>`
-- Use `pnpm cleanup` to kill only managed ports (5001, 5173, 5551, 5552, 5553)
+- Use `pnpm cleanup` to kill only managed ports (5001, 5173, 5551, 5552, 5553, 5554)
 - Kill by port: `lsof -ti:5551 | xargs kill` (only kills process on that port)
 
 ## Commands

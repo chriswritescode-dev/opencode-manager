@@ -111,10 +111,19 @@ async function checkServerHealth(port: number): Promise<boolean> {
 }
 
 async function waitForBackendHealth(port: number, maxSeconds: number): Promise<boolean> {
+  const authUser = process.env.AUTH_USERNAME
+  const authPass = process.env.AUTH_PASSWORD
+  const headers: Record<string, string> = {}
+  
+  if (authUser && authPass) {
+    headers['Authorization'] = `Basic ${Buffer.from(`${authUser}:${authPass}`).toString('base64')}`
+  }
+  
   for (let i = 0; i < maxSeconds; i++) {
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
-        signal: AbortSignal.timeout(2000)
+        signal: AbortSignal.timeout(2000),
+        headers
       })
       if (response.ok) {
         const data = await response.json() as { status?: string }
