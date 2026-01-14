@@ -10,14 +10,14 @@ interface PatchPartProps {
 
 export function PatchPart({ part, onFileClick }: PatchPartProps) {
   return (
-    <div className="border border-border rounded-lg overflow-hidden my-2">
-      <div className="px-3 py-1.5 bg-card flex items-center justify-between text-sm">
+    <details className="border border-border rounded-lg overflow-hidden my-2">
+      <summary className="px-3 py-1.5 bg-card hover:bg-accent cursor-pointer flex items-center justify-between text-sm">
         <span className="font-medium">
           File Changes ({part.files.length} file{part.files.length !== 1 ? 's' : ''})
         </span>
         <span className="text-muted-foreground text-xs font-mono">{part.hash.slice(0, 8)}</span>
-      </div>
-      
+      </summary>
+
       <div className="bg-card px-3 py-2 space-y-1">
         {part.files.map((file, index) => (
           <div
@@ -29,6 +29,6 @@ export function PatchPart({ part, onFileClick }: PatchPartProps) {
           </div>
         ))}
       </div>
-    </div>
+    </details>
   )
 }
