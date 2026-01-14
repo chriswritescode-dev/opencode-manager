@@ -7,7 +7,7 @@ import type { Permission, PermissionResponse, Repo } from '@/api/types'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
 import { listRepos } from '@/api/repos'
-import { OPENCODE_API_ENDPOINT } from '@/config'
+import { OPENCODE_API_ENDPOINT, API_BASE_URL } from '@/config'
 
 
 type SessionInfo = {
@@ -294,26 +294,40 @@ prevPendingCountRef.current = pendingCount
       const existingES = currentRefs.get(repoKey)
       if (existingES) return
 
-      let url: URL
+      let sseUrl: string
       try {
-        url = new URL(repo.url)
-      } catch {
-        console.error('Invalid URL for SSE:', repo.url)
+        if (repo.url.startsWith('/')) {
+          sseUrl = `${API_BASE_URL}${repo.url}/event`
+        } else {
+          const url = new URL(repo.url)
+          if (url.pathname.endsWith('/')) {
+            url.pathname += 'event'
+          } else {
+            url.pathname += '/event'
+          }
+          sseUrl = url.toString()
+        }
+        
+        if (repo.directory) {
+          const separator = sseUrl.includes('?') ? '&' : '?'
+          sseUrl += `${separator}directory=${encodeURIComponent(repo.directory)}`
+        }
+      } catch (err) {
+        console.error('Invalid URL for SSE:', repo.url, err)
         return
       }
-      
-      if (url.pathname.endsWith('/')) {
-        url.pathname += 'event'
-      } else {
-        url.pathname += '/event'
-      }
-      
-      if (repo.directory) {
-        url.searchParams.set('directory', repo.directory)
+
+      console.log('[SSE] Connecting to:', sseUrl)
+      const es = new EventSource(sseUrl)
+      currentRefs.set(repoKey, es)
+
+      es.onopen = () => {
+        console.log('[SSE] Connected:', sseUrl)
       }
 
-      const es = new EventSource(url.toString())
-      currentRefs.set(repoKey, es)
+      es.onerror = (err) => {
+        console.error(`[SSE] Connection error for ${repo.directory}:`, err)
+      }
 
       es.addEventListener('permission.updated', (e) => {
         try {
@@ -384,6 +398,7 @@ prevPendingCountRef.current = pendingCount
         try {
           const event = JSON.parse(e.data)
           if ('sessionID' in event.properties) {
+            console.log('[SSE] session.idle event for session:', event.properties.sessionID)
             const repoId = getRepoIdByDirectory(repo.directory)
             notificationEvents.emit({
               type: 'session-complete',
@@ -395,13 +410,6 @@ prevPendingCountRef.current = pendingCount
           console.error('Failed to parse session.idle event:', err)
         }
       })
-
-      es.onerror = (err) => {
-        console.error(`SSE connection error for ${repo.url}:`, err)
-        setTimeout(() => {
-          currentRefs.delete(repoKey)
-        }, 1000)
-      }
     })
 
     return () => {
