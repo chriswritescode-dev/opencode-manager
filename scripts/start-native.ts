@@ -348,9 +348,8 @@ async function main() {
   let opencodePort: number | undefined
 
   if (args.client) {
-    console.log('\n🔍 Checking for opencode server...')
+    console.log('\n🔍 Checking for opencode server on port', DEFAULT_OPENCODE_PORT, '...')
     
-    // First check default port (used by opencode-attach)
     if (await checkServerHealth(DEFAULT_OPENCODE_PORT)) {
       let version: string | undefined
       try {
@@ -361,21 +360,19 @@ async function main() {
         }
       } catch {}
       
-      console.log(`✓ Found opencode server on default port ${DEFAULT_OPENCODE_PORT} (v${version || 'unknown'})`)
+      console.log(`✓ Found existing server (v${version || 'unknown'})`)
       opencodePort = DEFAULT_OPENCODE_PORT
     } else {
-      // Search for other instances
-      const instances = await findOpenCodeInstances()
-      const selected = await promptUserSelection(instances)
-
-      if (!selected) {
+      console.log('   No server found, starting one...')
+      const instance = await startOpenCodeServer(DEFAULT_OPENCODE_PORT)
+      if (!instance) {
+        console.error('❌ Failed to start opencode server')
         process.exit(1)
       }
-
-      opencodePort = selected.port
+      opencodePort = instance.port
     }
     
-    console.log(`✓ Will connect to opencode server on port ${opencodePort}`)
+    console.log(`✓ Using opencode server on port ${opencodePort}`)
   }
 
   const processes: ReturnType<typeof spawn>[] = []
