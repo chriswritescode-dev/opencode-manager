@@ -15,6 +15,7 @@ import { PermissionProvider } from '@/contexts/PermissionContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { usePermissionContext } from './contexts/PermissionContext'
 import { GlobalPermissionNotification } from './components/permissions/GlobalPermissionNotification'
+import { NotificationProvider } from './components/providers/NotificationProvider'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,8 +82,10 @@ function App() {
         <STTProvider>
           <TalkModeProvider>
             <PermissionProvider>
-              <AppContent />
-              <PermissionDialogWrapper />
+              <NotificationProvider>
+                <AppContent />
+                <PermissionDialogWrapper />
+              </NotificationProvider>
             </PermissionProvider>
           </TalkModeProvider>
         </STTProvider>
