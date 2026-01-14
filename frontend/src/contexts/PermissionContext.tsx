@@ -4,8 +4,10 @@ import { OpenCodeClient } from '@/api/opencode'
 import { permissionEvents, usePermissionRequests } from '@/hooks/usePermissionRequests'
 import { notificationEvents } from '@/lib/notificationEvents'
 import type { Permission, PermissionResponse, Repo } from '@/api/types'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
+import { listRepos } from '@/api/repos'
+import { OPENCODE_API_ENDPOINT } from '@/config'
 
 
 type SessionInfo = {
@@ -139,10 +141,43 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
   const [showDialog, setShowDialog] = useState(true)
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
   const queryClient = useQueryClient()
-  const activeRepos = useActiveRepos(queryClient)
+  const activeReposFromCache = useActiveRepos(queryClient)
   const clientsRef = useRef<Map<string, OpenCodeClient>>(new Map())
   const eventSourceRefs = useRef<Map<string, EventSource>>(new Map())
   const prevPendingCountRef = useRef(0)
+
+  const { data: allRepos } = useQuery({
+    queryKey: ['repos'],
+    queryFn: listRepos,
+    staleTime: 30000,
+    refetchInterval: 60000,
+  })
+
+  const activeRepos = useMemo(() => {
+    const repoMap = new Map<string, ActiveRepo>()
+    
+    activeReposFromCache.forEach((repo) => {
+      const key = `${repo.url}|${repo.directory ?? ''}`
+      repoMap.set(key, repo)
+    })
+    
+    if (allRepos) {
+      allRepos.forEach((repo: Repo) => {
+        if (repo.fullPath) {
+          const key = `${OPENCODE_API_ENDPOINT}|${repo.fullPath}`
+          if (!repoMap.has(key)) {
+            repoMap.set(key, {
+              url: OPENCODE_API_ENDPOINT,
+              directory: repo.fullPath,
+              sessions: [],
+            })
+          }
+        }
+      })
+    }
+    
+    return Array.from(repoMap.values())
+  }, [activeReposFromCache, allRepos])
 
   const {
     currentPermission,
