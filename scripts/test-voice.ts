@@ -140,6 +140,75 @@ class VoiceTest {
     })
   }
 
+  async testAuthEnforced(): Promise<TestResult> {
+    return this.runTest('Authentication Enforced (when configured)', async () => {
+      if (!this.config.username || !this.config.password) {
+        return { passed: true, details: 'Skipped - no auth configured' }
+      }
+
+      const url = `${this.config.baseUrl}/api/health`
+      const noAuthResponse = await fetch(url)
+      
+      if (noAuthResponse.status !== 401) {
+        return { 
+          passed: false, 
+          details: `Expected 401 without auth, got ${noAuthResponse.status}` 
+        }
+      }
+
+      const wrongAuthResponse = await fetch(url, {
+        headers: { 'Authorization': `Basic ${Buffer.from('wrong:wrong').toString('base64')}` }
+      })
+      
+      if (wrongAuthResponse.status !== 401) {
+        return { 
+          passed: false, 
+          details: `Expected 401 with wrong auth, got ${wrongAuthResponse.status}` 
+        }
+      }
+
+      const correctAuthResponse = await this.fetch('/api/health')
+      
+      return {
+        passed: correctAuthResponse.status === 200,
+        details: `No auth: 401 ✓, Wrong auth: 401 ✓, Correct auth: ${correctAuthResponse.status}`
+      }
+    })
+  }
+
+  async testOpenCodeProxyDynamic(): Promise<TestResult> {
+    return this.runTest('OpenCode Proxy (dynamic port)', async () => {
+      const healthResponse = await this.fetch('/api/health')
+      if (healthResponse.status !== 200) {
+        return { passed: false, details: `Health check failed: ${healthResponse.status}` }
+      }
+      
+      const healthData = await healthResponse.json()
+      const configuredPort = healthData.opencodePort
+
+      const sessionResponse = await this.fetchOpenCode('/session')
+      
+      if (sessionResponse.status !== 200) {
+        const text = await sessionResponse.text()
+        const isHtml = text.includes('<!doctype html>') || text.includes('<html')
+        if (isHtml) {
+          return { 
+            passed: false, 
+            details: `Proxy returned HTML instead of JSON - port mismatch (configured: ${configuredPort})` 
+          }
+        }
+        return { passed: false, details: `Status: ${sessionResponse.status}` }
+      }
+      
+      const sessions = await sessionResponse.json()
+      
+      return {
+        passed: Array.isArray(sessions),
+        details: `OpenCode port: ${configuredPort}, Sessions: ${sessions.length}`
+      }
+    })
+  }
+
   async testSettings(): Promise<TestResult> {
     return this.runTest('Voice Settings', async () => {
       const response = await this.fetch('/api/settings')
@@ -411,6 +480,62 @@ class VoiceTest {
     })
   }
 
+  async testSTTErrorHandling(): Promise<TestResult> {
+    return this.runTest('STT Error Handling (Invalid Input)', async () => {
+      const response = await this.fetch('/api/stt/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: 'not_valid_base64!', format: 'wav' })
+      })
+
+      const data = await response.json()
+      
+      const hasError = data.error !== undefined
+      const hasDetails = data.details !== undefined
+      
+      return {
+        passed: hasError && response.status !== 200,
+        details: `Status: ${response.status}, Error: ${data.error || 'none'}`
+      }
+    })
+  }
+
+  async testSTTEmptyInput(): Promise<TestResult> {
+    return this.runTest('STT Empty Input Validation', async () => {
+      const response = await this.fetch('/api/stt/transcribe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ audio: '', format: 'wav' })
+      })
+
+      const data = await response.json()
+      
+      return {
+        passed: response.status === 400 && data.error === 'Invalid request',
+        details: `Status: ${response.status}, Response: ${JSON.stringify(data).slice(0, 100)}`
+      }
+    })
+  }
+
+  async testOpenCodeModelAvailable(): Promise<TestResult> {
+    return this.runTest('OpenCode Model Configured', async () => {
+      const response = await this.fetchOpenCode('/config')
+      
+      if (response.status !== 200) {
+        return { passed: false, details: `Status: ${response.status}` }
+      }
+      
+      const data = await response.json()
+      const hasModel = data.model && typeof data.model === 'string' && data.model.length > 0
+      const hasProvider = data.model?.includes('/')
+      
+      return {
+        passed: hasModel && hasProvider,
+        details: `Model: ${data.model || 'not set'}, Small: ${data.small_model || 'not set'}`
+      }
+    })
+  }
+
   async enableVoiceFeatures(): Promise<boolean> {
     const response = await this.fetch('/api/settings', {
       method: 'PATCH',
@@ -448,6 +573,8 @@ class VoiceTest {
     console.log('-'.repeat(60))
 
     await this.testHealth()
+    await this.testAuthEnforced()
+    await this.testOpenCodeProxyDynamic()
     await this.testSettings()
     await this.testSTTStatus()
     await this.testSTTModels()
@@ -460,10 +587,13 @@ class VoiceTest {
     }
     
     await this.testSTTTranscription()
+    await this.testSTTErrorHandling()
+    await this.testSTTEmptyInput()
     await this.testTTSVoices()
     await this.testTTSSynthesis()
     
     if (!skipTalkMode) {
+      await this.testOpenCodeModelAvailable()
       await this.testCreateSession()
       await this.testFullTalkModeFlow()
     }

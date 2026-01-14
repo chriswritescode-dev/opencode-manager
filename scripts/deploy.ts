@@ -592,6 +592,11 @@ async function updateEnv(ip: string) {
 function getBaseOpencodeConfig(): Record<string, any> {
   return {
     "$schema": "https://opencode.ai/config.json",
+    // Default to OpenAI models (requires OPENAI_API_KEY env var)
+    // GitHub Copilot models require specific subscription features
+    // OAuth tokens for Anthropic/OpenAI may not work reliably
+    "model": "openai/gpt-5-mini",
+    "small_model": "openai/gpt-5-nano",
     // YOLO mode: auto-allow all permissions without asking
     "permission": {
       "edit": "allow",
@@ -727,9 +732,10 @@ async function uploadOpencodeAuth(ip: string) {
   const authBase64 = Buffer.from(authContent).toString("base64");
   
   // Copy auth.json directly into the running container's workspace volume
-  exec(`${sshCmd} "sudo docker exec opencode-manager mkdir -p /workspace/.local/share/opencode"`, { quiet: true });
-  exec(`${sshCmd} "echo '${authBase64}' | base64 -d | sudo docker exec -i opencode-manager tee /workspace/.local/share/opencode/auth.json > /dev/null"`, { quiet: true });
-  exec(`${sshCmd} "sudo docker exec opencode-manager chmod 600 /workspace/.local/share/opencode/auth.json"`, { quiet: true });
+  // OpenCode reads auth from /workspace/.opencode/state/opencode/auth.json (not .local/share)
+  exec(`${sshCmd} "sudo docker exec opencode-manager mkdir -p /workspace/.opencode/state/opencode"`, { quiet: true });
+  exec(`${sshCmd} "echo '${authBase64}' | base64 -d | sudo docker exec -i opencode-manager tee /workspace/.opencode/state/opencode/auth.json > /dev/null"`, { quiet: true });
+  exec(`${sshCmd} "sudo docker exec opencode-manager chmod 600 /workspace/.opencode/state/opencode/auth.json"`, { quiet: true });
   console.log("OpenCode auth uploaded (GitHub Copilot, Anthropic OAuth, etc.)");
   return true;
 }

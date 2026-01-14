@@ -1,9 +1,12 @@
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 
-const OPENCODE_SERVER_URL = `http://127.0.0.1:${ENV.OPENCODE.PORT}`
+function getOpenCodeServerUrl(): string {
+  return `http://127.0.0.1:${ENV.OPENCODE.PORT}`
+}
 
 export async function patchOpenCodeConfig(config: Record<string, unknown>): Promise<boolean> {
+  const OPENCODE_SERVER_URL = getOpenCodeServerUrl()
   try {
     const response = await fetch(`${OPENCODE_SERVER_URL}/config`, {
       method: 'PATCH',
@@ -25,6 +28,7 @@ export async function patchOpenCodeConfig(config: Record<string, unknown>): Prom
 }
 
 export async function proxyRequest(request: Request) {
+  const OPENCODE_SERVER_URL = getOpenCodeServerUrl()
   const url = new URL(request.url)
   
   // Remove /api/opencode prefix from pathname before forwarding
@@ -77,6 +81,7 @@ export async function proxyToOpenCodeWithDirectory(
   body?: string,
   headers?: Record<string, string>
 ): Promise<Response> {
+  const OPENCODE_SERVER_URL = getOpenCodeServerUrl()
   const url = new URL(`${OPENCODE_SERVER_URL}${path}`)
   
   if (directory) {

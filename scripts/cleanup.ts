@@ -7,6 +7,7 @@ const PORTS = {
   opencode: [5551],
   whisper: [5552],
   chatterbox: [5553],
+  coqui: [5554],
 }
 
 const ALL_PORTS = Object.values(PORTS).flat()
@@ -82,6 +83,7 @@ Managed ports:
   OpenCode:    ${PORTS.opencode.join(', ')}
   Whisper:     ${PORTS.whisper.join(', ')}
   Chatterbox:  ${PORTS.chatterbox.join(', ')}
+  Coqui:       ${PORTS.coqui.join(', ')}
 
 Examples:
   bun scripts/cleanup.ts              # Interactive cleanup
