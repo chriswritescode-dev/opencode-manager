@@ -23,7 +23,9 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down -v",
     "docker:logs": "docker-compose logs -f",
-    "docker:restart": "docker-compose restart"
+    "docker:restart": "docker-compose restart",
+    "install:opencode-attach": "bun scripts/install-opencode-attach.ts",
+    "uninstall:opencode-attach": "bun scripts/install-opencode-attach.ts uninstall"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
