@@ -147,6 +147,42 @@ async function waitForBackendHealth(port: number, maxSeconds: number): Promise<b
 }
 
 const DEFAULT_OPENCODE_PORT = 5551
+const MANAGED_PORTS = [5001, 5002, 5003, 5173, 5174, 5175, 5176, 5552, 5553, 5554]
+
+function killProcessOnPort(port: number): boolean {
+  try {
+    const output = execSync(`lsof -ti:${port}`, { encoding: 'utf8' }).trim()
+    if (!output) return false
+    
+    const pids = output.split('\n').filter(Boolean).map(p => parseInt(p))
+    for (const pid of pids) {
+      try {
+        process.kill(pid, 'SIGTERM')
+        console.log(`   Killed orphaned process on port ${port} (PID ${pid})`)
+      } catch {
+        try {
+          process.kill(pid, 'SIGKILL')
+          console.log(`   Force killed orphaned process on port ${port} (PID ${pid})`)
+        } catch {}
+      }
+    }
+    return pids.length > 0
+  } catch {
+    return false
+  }
+}
+
+function cleanupManagedPorts(ports: number[]): void {
+  let cleaned = false
+  for (const port of ports) {
+    if (killProcessOnPort(port)) {
+      cleaned = true
+    }
+  }
+  if (cleaned) {
+    execSync('sleep 1')
+  }
+}
 
 async function startOpenCodeServer(port: number = DEFAULT_OPENCODE_PORT): Promise<OpenCodeInstance | null> {
   console.log(`\n🚀 Starting opencode server on port ${port}...`)
@@ -376,6 +412,9 @@ async function main() {
   }
 
   const processes: ReturnType<typeof spawn>[] = []
+
+  console.log('\n🧹 Cleaning up orphaned processes...')
+  cleanupManagedPorts(MANAGED_PORTS)
 
   const backendProcess = await startBackend(args.port, opencodePort)
   processes.push(backendProcess)
