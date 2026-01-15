@@ -31,6 +31,7 @@ import {
   ENV
 } from '@opencode-manager/shared/config/env'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import stripJsonComments from 'strip-json-comments'
 
 const { PORT, HOST } = ENV.SERVER
 const DB_PATH = getDatabasePath()
@@ -109,8 +110,8 @@ async function ensureDefaultConfigExists(): Promise<void> {
   if (await fileExists(workspaceConfigPath)) {
     logger.info(`Found workspace config at ${workspaceConfigPath}, syncing to database...`)
     try {
-      const content = await readFileContent(workspaceConfigPath)
-      const parsed = JSON.parse(content)
+      const rawContent = await readFileContent(workspaceConfigPath)
+      const parsed = JSON.parse(stripJsonComments(rawContent))
       const validation = OpenCodeConfigSchema.safeParse(parsed)
       
       if (!validation.success) {
@@ -119,14 +120,14 @@ async function ensureDefaultConfigExists(): Promise<void> {
         const existingDefault = settingsService.getOpenCodeConfigByName('default')
         if (existingDefault) {
           settingsService.updateOpenCodeConfig('default', {
-            content: validation.data,
+            content: rawContent,
             isDefault: true,
           })
           logger.info('Updated database config from workspace file')
         } else {
           settingsService.createOpenCodeConfig({
             name: 'default',
-            content: validation.data,
+            content: rawContent,
             isDefault: true,
           })
           logger.info('Created database config from workspace file')
@@ -142,26 +143,26 @@ async function ensureDefaultConfigExists(): Promise<void> {
   if (await fileExists(homeConfigPath)) {
     logger.info(`Found home config at ${homeConfigPath}, importing...`)
     try {
-      const content = await readFileContent(homeConfigPath)
-      const parsed = JSON.parse(content)
+      const rawContent = await readFileContent(homeConfigPath)
+      const parsed = JSON.parse(stripJsonComments(rawContent))
       const validation = OpenCodeConfigSchema.safeParse(parsed)
       
       if (validation.success) {
         const existingDefault = settingsService.getOpenCodeConfigByName('default')
         if (existingDefault) {
           settingsService.updateOpenCodeConfig('default', {
-            content: validation.data,
+            content: rawContent,
             isDefault: true,
           })
         } else {
           settingsService.createOpenCodeConfig({
             name: 'default',
-            content: validation.data,
+            content: rawContent,
             isDefault: true,
           })
         }
         
-        await writeFileContent(workspaceConfigPath, JSON.stringify(validation.data, null, 2))
+        await writeFileContent(workspaceConfigPath, rawContent)
         logger.info('Imported home config to workspace')
         return
       }
@@ -174,20 +175,20 @@ async function ensureDefaultConfigExists(): Promise<void> {
   if (existingDbConfigs.configs.length > 0) {
     const defaultConfig = settingsService.getDefaultOpenCodeConfig()
     if (defaultConfig) {
-      await writeFileContent(workspaceConfigPath, JSON.stringify(defaultConfig.content, null, 2))
+      await writeFileContent(workspaceConfigPath, defaultConfig.rawContent)
       logger.info('Wrote existing database config to workspace file')
     }
     return
   }
   
   logger.info('No existing config found, creating minimal seed config')
-  const seedConfig = { $schema: 'https://opencode.ai/config.json' }
+  const seedConfig = JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)
   settingsService.createOpenCodeConfig({
     name: 'default',
     content: seedConfig,
     isDefault: true,
   })
-  await writeFileContent(workspaceConfigPath, JSON.stringify(seedConfig, null, 2))
+  await writeFileContent(workspaceConfigPath, seedConfig)
   logger.info('Created minimal seed config')
 }
 

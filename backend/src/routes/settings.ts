@@ -150,8 +150,7 @@ export function createSettingsRoutes(db: Database) {
       
       if (config.isDefault) {
         const configPath = getOpenCodeConfigFilePath()
-        const configContent = JSON.stringify(config.content, null, 2)
-        await writeFileContent(configPath, configContent)
+        await writeFileContent(configPath, config.rawContent)
         logger.info(`Wrote default config to: ${configPath}`)
         
         await patchOpenCodeConfig(config.content)
@@ -184,8 +183,7 @@ export function createSettingsRoutes(db: Database) {
       
       if (config.isDefault) {
         const configPath = getOpenCodeConfigFilePath()
-        const configContent = JSON.stringify(config.content, null, 2)
-        await writeFileContent(configPath, configContent)
+        await writeFileContent(configPath, config.rawContent)
         logger.info(`Wrote default config to: ${configPath}`)
         
         await patchOpenCodeConfig(config.content)
@@ -231,8 +229,7 @@ export function createSettingsRoutes(db: Database) {
       }
 
       const configPath = getOpenCodeConfigFilePath()
-      const configContent = JSON.stringify(config.content, null, 2)
-      await writeFileContent(configPath, configContent)
+      await writeFileContent(configPath, config.rawContent)
       logger.info(`Wrote default config '${configName}' to: ${configPath}`)
 
       await patchOpenCodeConfig(config.content)
@@ -292,8 +289,7 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Failed to get default config after rollback' }, 500)
       }
 
-      const configContent = JSON.stringify(config.content, null, 2)
-      await writeFileContent(configPath, configContent)
+      await writeFileContent(configPath, config.rawContent)
       logger.info(`Rolled back to config '${rollbackConfig}'`)
 
       opencodeServerManager.clearStartupError()
