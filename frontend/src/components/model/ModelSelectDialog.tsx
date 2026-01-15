@@ -8,17 +8,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Search, Check, PlugZap, Key, Star } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Loader2, Search, Check, Star } from "lucide-react";
 import {
   getProvidersWithModels,
   formatModelName,
   formatProviderName,
 } from "@/api/providers";
 import { useModelSelection } from "@/hooks/useModelSelection";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { Model, ProviderWithModels } from "@/api/providers";
-import { ApiKeyDialog } from "./ApiKeyDialog";
 
 interface ModelSelectDialogProps {
   open: boolean;
@@ -94,18 +93,6 @@ const ModelCard = memo(function ModelCard({
     return null;
   }, [model.experimental, model.status]);
 
-  const connectionBadge = useMemo(() => {
-    if (!provider.isConnected) {
-      return (
-        <Badge variant="outline" className="text-xs px-1.5 py-0 border-orange-500/30 text-orange-500">
-          <Key className="h-2.5 w-2.5 mr-0.5" />
-          Setup
-        </Badge>
-      );
-    }
-    return null;
-  }, [provider.isConnected]);
-
   return (
     <div
       className={`p-3 sm:p-4 rounded-lg border cursor-pointer transition-colors ${
@@ -121,7 +108,6 @@ const ModelCard = memo(function ModelCard({
             <h4 className="font-semibold text-sm truncate">
               {formatModelName(model)}
             </h4>
-            {connectionBadge}
           </div>
           <p className="text-xs text-muted-foreground truncate">
             {formatProviderName(provider)}
@@ -258,16 +244,13 @@ const ModelGrid = memo(function ModelGrid({
 });
 
 interface ProviderSidebarProps {
-  groupedProviders: {
-    connected: ProviderWithModels[];
-    available: ProviderWithModels[];
-  };
+  providers: ProviderWithModels[];
   selectedProvider: string;
   onSelect: (providerId: string) => void;
 }
 
 const ProviderSidebar = memo(function ProviderSidebar({
-  groupedProviders,
+  providers,
   selectedProvider,
   onSelect,
 }: ProviderSidebarProps) {
@@ -283,47 +266,19 @@ const ProviderSidebar = memo(function ProviderSidebar({
           All Providers
         </Button>
 
-        {groupedProviders.connected.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold text-green-600 mb-2 flex items-center gap-1.5">
-              <PlugZap className="h-3 w-3" />
-              Connected
-            </h3>
-            <div className="space-y-1">
-              {groupedProviders.connected.map((provider) => (
-                <Button
-                  key={provider.id}
-                  variant={selectedProvider === provider.id ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => onSelect(provider.id)}
-                  className="w-full justify-start text-sm"
-                >
-                  {formatProviderName(provider)}
-                </Button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {groupedProviders.available.length > 0 && (
-          <div>
-            <h3 className="text-xs font-semibold text-muted-foreground mb-2 flex items-center gap-1.5">
-              <Key className="h-3 w-3" />
-              Available
-            </h3>
-            <div className="space-y-1">
-              {groupedProviders.available.map((provider) => (
-                <Button
-                  key={provider.id}
-                  variant={selectedProvider === provider.id ? "secondary" : "ghost"}
-                  size="sm"
-                  onClick={() => onSelect(provider.id)}
-                  className="w-full justify-start text-sm text-muted-foreground"
-                >
-                  {formatProviderName(provider)}
-                </Button>
-              ))}
-            </div>
+        {providers.length > 0 && (
+          <div className="space-y-1">
+            {providers.map((provider) => (
+              <Button
+                key={provider.id}
+                variant={selectedProvider === provider.id ? "secondary" : "ghost"}
+                size="sm"
+                onClick={() => onSelect(provider.id)}
+                className="w-full justify-start text-sm"
+              >
+                {formatProviderName(provider)}
+              </Button>
+            ))}
           </div>
         )}
       </div>
@@ -339,21 +294,21 @@ export function ModelSelectDialog({
 }: ModelSelectDialogProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProvider, setSelectedProvider] = useState<string>("");
-  const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false);
-  const [pendingSelection, setPendingSelection] = useState<{ providerId: string; modelId: string } | null>(null);
-  const [providerForApiKey, setProviderForApiKey] = useState<ProviderWithModels | null>(null);
 
-  const queryClient = useQueryClient();
   const { modelString, setModel, recentModels } = useModelSelection(opcodeUrl, directory);
   const currentModel = modelString || "";
 
-  const { data: providers = [], isLoading: loading } = useQuery({
+  const { data: allProviders = [], isLoading: loading } = useQuery({
     queryKey: ["providers-with-models"],
     queryFn: () => getProvidersWithModels(),
     enabled: open,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
+
+  const connectedProviders = useMemo(() => {
+    return allProviders.filter(p => p.isConnected);
+  }, [allProviders]);
 
   useEffect(() => {
     if (open) {
@@ -362,14 +317,14 @@ export function ModelSelectDialog({
   }, [open]);
 
   const flatModels = useMemo((): FlatModel[] => {
-    return providers.flatMap((provider) =>
+    return connectedProviders.flatMap((provider) =>
       provider.models.map((model) => ({
         model,
         provider,
         modelKey: `${provider.id}/${model.id}`,
       }))
     );
-  }, [providers]);
+  }, [connectedProviders]);
 
   const recentFlatModels = useMemo((): FlatModel[] => {
     return recentModels
@@ -400,15 +355,9 @@ export function ModelSelectDialog({
     return filtered;
   }, [flatModels, selectedProvider, searchQuery]);
 
-  const groupedProviders = useMemo(() => {
-    const connected = providers.filter(p => p.isConnected);
-    const available = providers.filter(p => !p.isConnected);
-    return { connected, available };
-  }, [providers]);
-
   const selectedProviderData = useMemo(
-    () => providers.find(p => p.id === selectedProvider),
-    [providers, selectedProvider]
+    () => connectedProviders.find(p => p.id === selectedProvider),
+    [connectedProviders, selectedProvider]
   );
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -421,38 +370,9 @@ export function ModelSelectDialog({
   }, []);
 
   const handleModelSelect = useCallback((providerId: string, modelId: string) => {
-    const provider = providers.find(p => p.id === providerId);
-    
-    if (provider && !provider.isConnected) {
-      setPendingSelection({ providerId, modelId });
-      setProviderForApiKey(provider);
-      setApiKeyDialogOpen(true);
-      return;
-    }
-    
     setModel({ providerID: providerId, modelID: modelId });
     onOpenChange(false);
-  }, [setModel, onOpenChange, providers]);
-
-  const handleApiKeySuccess = useCallback(async () => {
-    setApiKeyDialogOpen(false);
-    await queryClient.invalidateQueries({ queryKey: ["providers-with-models"] });
-    
-    if (pendingSelection) {
-      setModel({ providerID: pendingSelection.providerId, modelID: pendingSelection.modelId });
-      setPendingSelection(null);
-      setProviderForApiKey(null);
-      onOpenChange(false);
-    }
-  }, [queryClient, pendingSelection, setModel, onOpenChange]);
-
-  const handleApiKeyDialogClose = useCallback((open: boolean) => {
-    setApiKeyDialogOpen(open);
-    if (!open) {
-      setPendingSelection(null);
-      setProviderForApiKey(null);
-    }
-  }, []);
+  }, [setModel, onOpenChange]);
 
   const searchResetKey = selectedProvider;
 
@@ -467,7 +387,7 @@ export function ModelSelectDialog({
 
         <div className="flex flex-1 overflow-hidden">
           <ProviderSidebar
-            groupedProviders={groupedProviders}
+            providers={connectedProviders}
             selectedProvider={selectedProvider}
             onSelect={handleProviderSelect}
           />
@@ -479,32 +399,11 @@ export function ModelSelectDialog({
                   <SelectValue placeholder="Select a provider..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {groupedProviders.connected.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel className="flex items-center gap-1.5 text-green-600">
-                        <PlugZap className="h-3 w-3" />
-                        Connected
-                      </SelectLabel>
-                      {groupedProviders.connected.map((provider) => (
-                        <SelectItem key={provider.id} value={provider.id}>
-                          {formatProviderName(provider)} ({provider.models.length})
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
-                  {groupedProviders.available.length > 0 && (
-                    <SelectGroup>
-                      <SelectLabel className="flex items-center gap-1.5 text-muted-foreground">
-                        <Key className="h-3 w-3" />
-                        Available
-                      </SelectLabel>
-                      {groupedProviders.available.map((provider) => (
-                        <SelectItem key={provider.id} value={provider.id}>
-                          {formatProviderName(provider)} ({provider.models.length})
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  )}
+                  {connectedProviders.map((provider) => (
+                    <SelectItem key={provider.id} value={provider.id}>
+                      {formatProviderName(provider)} ({provider.models.length})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -536,13 +435,6 @@ export function ModelSelectDialog({
           </div>
         </div>
       </DialogContent>
-
-      <ApiKeyDialog
-        open={apiKeyDialogOpen}
-        onOpenChange={handleApiKeyDialogClose}
-        provider={providerForApiKey}
-        onSuccess={handleApiKeySuccess}
-      />
     </Dialog>
   );
 }

@@ -19,6 +19,7 @@ interface ApiKeyDialogProps {
   onOpenChange: (open: boolean) => void;
   provider: ProviderWithModels | null;
   onSuccess: () => void;
+  mode?: 'add' | 'edit';
 }
 
 export function ApiKeyDialog({
@@ -26,6 +27,7 @@ export function ApiKeyDialog({
   onOpenChange,
   provider,
   onSuccess,
+  mode = 'add',
 }: ApiKeyDialogProps) {
   const [apiKey, setApiKey] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -58,6 +60,7 @@ export function ApiKeyDialog({
   if (!provider) return null;
 
   const envVarName = provider.env?.[0] || `${provider.id.toUpperCase()}_API_KEY`;
+  const isEditMode = mode === 'edit';
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -65,10 +68,13 @@ export function ApiKeyDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
-            Connect {provider.name}
+            {isEditMode ? `Update ${provider.name} API Key` : `Connect ${provider.name}`}
           </DialogTitle>
           <DialogDescription>
-            Enter your API key to use models from {provider.name}.
+            {isEditMode 
+              ? `Enter a new API key for ${provider.name}.`
+              : `Enter your API key to use models from ${provider.name}.`
+            }
           </DialogDescription>
         </DialogHeader>
 
@@ -118,10 +124,10 @@ export function ApiKeyDialog({
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Connecting...
+                {isEditMode ? 'Updating...' : 'Connecting...'}
               </>
             ) : (
-              "Connect"
+              isEditMode ? 'Update' : 'Connect'
             )}
           </Button>
         </DialogFooter>
