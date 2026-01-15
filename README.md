@@ -104,6 +104,8 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 
 -  **Authentication** - User authentication and session management
 
+See the [Roadmap](ROADMAP.md) for planned features and future development.
+
 ## Installation
 
 ### Option 1: Docker (Recommended for Production)
