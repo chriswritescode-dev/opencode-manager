@@ -233,39 +233,5 @@ OpenCode WebUI supports OAuth authentication for select providers, offering a mo
 5. **Complete authorization** in the browser or enter the provided code
 6. **Connection status** will show as "Configured" when successful
 
-## Configuration
-
-### Environment Variables
-
-OpenCode Manager supports several environment variables for customization:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `WORKSPACE_PATH` | `./workspace` | Base workspace directory |
-| `OPENCODE_CONFIG_SYNC_MODE` | `db-to-file` | Config sync behavior (see below) |
-
-### Config Sync Modes
-
-The `OPENCODE_CONFIG_SYNC_MODE` environment variable controls how configuration is synchronized between the database and filesystem:
-
-| Mode | Description |
-|------|-------------|
-| `db-to-file` | **Default.** Database is source of truth. Config is written to filesystem on startup. UI changes are saved to database and synced to disk. |
-| `file-to-db` | Filesystem is source of truth. Config file is imported into database on every startup. Use this to preserve manual edits to config files. |
-| `none` | No sync. Database and filesystem are independent. |
-
-### Preserving Config File Edits
-
-By default (`db-to-file` mode), the database overwrites the config file on every startup. If you prefer to edit config files directly and have those changes persist:
-
-```yaml
-environment:
-  - OPENCODE_CONFIG_SYNC_MODE=file-to-db
-```
-
-With `file-to-db` mode:
-- Config files in the workspace volume are preserved
-- Changes to config files are imported into the database on startup
-- UI changes are saved to the database but don't overwrite the file
 
 
