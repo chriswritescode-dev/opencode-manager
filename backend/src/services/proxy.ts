@@ -3,6 +3,46 @@ import { ENV } from '@opencode-manager/shared/config/env'
 
 const OPENCODE_SERVER_URL = `http://127.0.0.1:${ENV.OPENCODE.PORT}`
 
+export async function setOpenCodeAuth(providerId: string, apiKey: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${OPENCODE_SERVER_URL}/auth/${providerId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'api', key: apiKey }),
+    })
+    
+    if (response.ok) {
+      logger.info(`Set OpenCode auth for provider: ${providerId}`)
+      return true
+    }
+    
+    logger.error(`Failed to set OpenCode auth: ${response.status} ${response.statusText}`)
+    return false
+  } catch (error) {
+    logger.error('Failed to set OpenCode auth:', error)
+    return false
+  }
+}
+
+export async function deleteOpenCodeAuth(providerId: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${OPENCODE_SERVER_URL}/auth/${providerId}`, {
+      method: 'DELETE',
+    })
+    
+    if (response.ok) {
+      logger.info(`Deleted OpenCode auth for provider: ${providerId}`)
+      return true
+    }
+    
+    logger.error(`Failed to delete OpenCode auth: ${response.status} ${response.statusText}`)
+    return false
+  } catch (error) {
+    logger.error('Failed to delete OpenCode auth:', error)
+    return false
+  }
+}
+
 export async function patchOpenCodeConfig(config: Record<string, unknown>): Promise<boolean> {
   try {
     const response = await fetch(`${OPENCODE_SERVER_URL}/config`, {

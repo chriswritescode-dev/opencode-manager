@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
+import { setOpenCodeAuth, deleteOpenCodeAuth } from '../services/proxy'
 
 export function createProvidersRoutes() {
   const app = new Hono()
@@ -35,6 +36,11 @@ export function createProvidersRoutes() {
       const body = await c.req.json()
       const validated = SetCredentialRequestSchema.parse(body)
       
+      const openCodeSuccess = await setOpenCodeAuth(providerId, validated.apiKey)
+      if (!openCodeSuccess) {
+        logger.warn(`Failed to set OpenCode auth for ${providerId}, saving locally only`)
+      }
+      
       await authService.set(providerId, validated.apiKey)
       return c.json({ success: true })
     } catch (error) {
@@ -49,6 +55,12 @@ export function createProvidersRoutes() {
   app.delete('/:id/credentials', async (c) => {
     try {
       const providerId = c.req.param('id')
+      
+      const openCodeSuccess = await deleteOpenCodeAuth(providerId)
+      if (!openCodeSuccess) {
+        logger.warn(`Failed to delete OpenCode auth for ${providerId}, removing locally only`)
+      }
+      
       await authService.delete(providerId)
       return c.json({ success: true })
     } catch (error) {
