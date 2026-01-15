@@ -24,6 +24,7 @@ export const DEFAULTS = {
     REPOS_DIR: 'repos',
     CONFIG_DIR: '.config/opencode',
     AUTH_FILE: '.opencode/state/opencode/auth.json',
+    CONFIG_SYNC_MODE: 'db-to-file' as const,
   },
 
   TIMEOUTS: {

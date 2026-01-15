@@ -26,6 +26,11 @@ services:
       - SANDBOX_TTL_HOURS=24
       - CLEANUP_INTERVAL_MINUTES=60
       - DEBUG=false
+      # Config sync mode: 'db-to-file' (default), 'file-to-db', or 'none'
+      # - db-to-file: Database overwrites config file on startup (default)
+      # - file-to-db: Config file is imported to database on startup (preserves file edits)
+      # - none: No sync between database and filesystem
+      # - OPENCODE_CONFIG_SYNC_MODE=file-to-db
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data

@@ -97,7 +97,7 @@ export function ProviderSettings() {
       <div>
         <h2 className="text-lg font-semibold text-foreground mb-2">OAuth Providers</h2>
         <p className="text-sm text-muted-foreground">
-          Connect to AI providers using OAuth. For API keys, configure them in your OpenCode config file.
+          Connect to AI providers using OAuth or enter API keys when selecting a model.
         </p>
       </div>
 

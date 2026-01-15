@@ -102,80 +102,111 @@ Prefer **pnpm** or **bun** over npm for installing dependencies to save disk spa
 - Repository-specific instructions take precedence for their respective codebases
 `
 
+async function importConfigFromFilesystem(settingsService: SettingsService): Promise<boolean> {
+  const homeConfigPath = path.join(os.homedir(), '.config/opencode/opencode.json')
+  const workspaceConfigPath = getOpenCodeConfigFilePath()
+  
+  const configSources = [
+    { path: homeConfigPath, name: 'home OpenCode config' },
+    { path: workspaceConfigPath, name: 'workspace config' },
+  ]
+  
+  for (const source of configSources) {
+    if (await fileExists(source.path)) {
+      logger.info(`Found ${source.name} at ${source.path}, importing...`)
+      try {
+        const content = await readFileContent(source.path)
+        const parsed = JSON.parse(content)
+        const validation = OpenCodeConfigSchema.safeParse(parsed)
+        
+        if (!validation.success) {
+          logger.warn(`${source.name} has invalid structure, will try other sources`, validation.error)
+          continue
+        }
+        
+        const existingDefault = settingsService.getOpenCodeConfigByName('default')
+        if (existingDefault) {
+          settingsService.updateOpenCodeConfig('default', {
+            content: validation.data,
+            isDefault: true,
+          })
+          logger.info(`Updated existing 'default' config from ${source.name}`)
+        } else {
+          settingsService.createOpenCodeConfig({
+            name: 'default',
+            content: validation.data,
+            isDefault: true,
+          })
+          logger.info(`Created 'default' config from ${source.name}`)
+        }
+        return true
+      } catch (error) {
+        logger.warn(`Failed to import ${source.name}, will try other sources`, error)
+      }
+    }
+  }
+  return false
+}
+
 async function ensureDefaultConfigExists(): Promise<void> {
   const settingsService = new SettingsService(db)
+  const syncMode = ENV.WORKSPACE.CONFIG_SYNC_MODE
   const existingDbConfigs = settingsService.getOpenCodeConfigs()
   
-  // Config already exists in database - nothing to do
+  logger.info(`Config sync mode: ${syncMode}`)
+  
+  if (syncMode === 'file-to-db') {
+    const imported = await importConfigFromFilesystem(settingsService)
+    if (!imported && existingDbConfigs.configs.length === 0) {
+      logger.info('No config file found and database empty, creating minimal seed config')
+      settingsService.createOpenCodeConfig({
+        name: 'default',
+        content: { $schema: 'https://opencode.ai/config.json' },
+        isDefault: true,
+      })
+    }
+    return
+  }
+  
+  if (syncMode === 'none') {
+    if (existingDbConfigs.configs.length === 0) {
+      logger.info('Config sync disabled, creating minimal seed config')
+      settingsService.createOpenCodeConfig({
+        name: 'default',
+        content: { $schema: 'https://opencode.ai/config.json' },
+        isDefault: true,
+      })
+    } else {
+      logger.info('Config sync disabled, using existing database config')
+    }
+    return
+  }
+  
   if (existingDbConfigs.configs.length > 0) {
     logger.info('OpenCode config already exists in database')
     return
   }
   
-  // Try to import from existing OpenCode installation (highest priority)
-  const homeConfigPath = path.join(os.homedir(), '.config/opencode/opencode.json')
-  if (await fileExists(homeConfigPath)) {
-    logger.info(`Found existing OpenCode config at ${homeConfigPath}, importing...`)
-    try {
-      const content = await readFileContent(homeConfigPath)
-      const parsed = JSON.parse(content)
-      const validation = OpenCodeConfigSchema.safeParse(parsed)
-      
-      if (!validation.success) {
-        logger.warn('Existing config has invalid structure, will try other sources', validation.error)
-      } else {
-        settingsService.createOpenCodeConfig({
-          name: 'default',
-          content: validation.data,
-          isDefault: true,
-        })
-        logger.info('Successfully imported existing OpenCode config')
-        return
-      }
-    } catch (error) {
-      logger.warn('Failed to import existing config, will try other sources', error)
-    }
+  const imported = await importConfigFromFilesystem(settingsService)
+  if (!imported) {
+    logger.info('No existing OpenCode config found, creating minimal seed config')
+    settingsService.createOpenCodeConfig({
+      name: 'default',
+      content: { $schema: 'https://opencode.ai/config.json' },
+      isDefault: true,
+    })
+    logger.info('Created minimal seed OpenCode config')
   }
-  
-  // Try to import from workspace config (if user reinstalls and workspace persists)
-  const workspaceConfigPath = getOpenCodeConfigFilePath()
-  if (await fileExists(workspaceConfigPath)) {
-    logger.info(`Found workspace config, importing...`)
-    try {
-      const content = await readFileContent(workspaceConfigPath)
-      const parsed = JSON.parse(content)
-      const validation = OpenCodeConfigSchema.safeParse(parsed)
-      
-      if (!validation.success) {
-        logger.warn('Workspace config has invalid structure, will use defaults', validation.error)
-      } else {
-        settingsService.createOpenCodeConfig({
-          name: 'default',
-          content: validation.data,
-          isDefault: true,
-        })
-        logger.info('Successfully imported workspace config')
-        return
-      }
-    } catch (error) {
-      logger.warn('Failed to import workspace config, will use defaults', error)
-    }
-  }
-  
-  // No existing config found - create minimal seed config
-  logger.info('No existing OpenCode config found, creating minimal seed config')
-  settingsService.createOpenCodeConfig({
-    name: 'default',
-    content: {
-      $schema: 'https://opencode.ai/config.json',
-      // Minimal seed - users can configure through Manager UI
-    },
-    isDefault: true,
-  })
-  logger.info('Created minimal seed OpenCode config')
 }
 
 async function syncDefaultConfigToDisk(): Promise<void> {
+  const syncMode = ENV.WORKSPACE.CONFIG_SYNC_MODE
+  
+  if (syncMode === 'file-to-db' || syncMode === 'none') {
+    logger.info(`Skipping config sync to disk (sync mode: ${syncMode})`)
+    return
+  }
+  
   const settingsService = new SettingsService(db)
   const defaultConfig = settingsService.getDefaultOpenCodeConfig()
   
