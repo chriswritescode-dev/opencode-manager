@@ -167,6 +167,18 @@ export interface SSESessionStatusEvent {
   }
 }
 
+export interface SSESessionErrorEvent {
+  type: 'session.error'
+  properties: {
+    sessionID?: string
+    error?: components['schemas']['ProviderAuthError'] 
+      | components['schemas']['UnknownError'] 
+      | components['schemas']['MessageOutputLengthError'] 
+      | components['schemas']['MessageAbortedError'] 
+      | components['schemas']['APIError']
+  }
+}
+
 export type SSEEvent =
   | SSEMessagePartUpdatedEvent
   | SSEMessageUpdatedEvent
@@ -177,6 +189,7 @@ export type SSEEvent =
   | SSESessionCompactedEvent
   | SSESessionIdleEvent
   | SSESessionStatusEvent
+  | SSESessionErrorEvent
   | SSETodoUpdatedEvent
   | SSEPermissionAskedEvent
   | SSEPermissionRepliedEvent

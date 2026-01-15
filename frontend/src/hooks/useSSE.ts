@@ -7,6 +7,7 @@ import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
 import { subscribeToSSE, reconnectSSE, addSSEDirectory, removeSSEDirectory } from '@/lib/sseManager'
+import { parseOpenCodeError } from '@/lib/opencode-errors'
 
 const handleRestartServer = async () => {
   showToast.loading('Restarting OpenCode server...', {
@@ -288,6 +289,19 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string)
           })
         }
         break
+
+      case 'session.error': {
+        if (!('error' in event.properties)) break
+        
+        const parsed = parseOpenCodeError(event.properties.error)
+        if (parsed) {
+          showToast.error(parsed.title, {
+            description: parsed.message,
+            duration: 6000,
+          })
+        }
+        break
+      }
 
       default:
         break

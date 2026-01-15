@@ -4,11 +4,13 @@ import { MessageActionButtons } from './MessageActionButtons'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { SessionTodoDisplay } from './SessionTodoDisplay'
+import { MessageError } from './MessageError'
 import type { MessageWithParts } from '@/api/types'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
 import type { components } from '@/api/opencode-types'
 import type { Todo } from '@/components/message/SessionTodoDisplay'
+import type { OpenCodeError } from '@/lib/opencode-errors'
 
 function getMessageTextContent(msg: MessageWithParts): string {
   return msg.parts
@@ -254,6 +256,9 @@ const state = latestTodoPart.state
                       />
                     </div>
                   ))
+                )}
+                {msg.info.role === 'assistant' && 'error' in msg.info && msg.info.error && (
+                  <MessageError error={msg.info.error as OpenCodeError} />
                 )}
               </div>
             </div>

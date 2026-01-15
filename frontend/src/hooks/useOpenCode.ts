@@ -8,6 +8,8 @@ import type {
   ContentPart,
 } from "../api/types";
 import type { paths, components } from "../api/opencode-types";
+import { parseNetworkError } from "../lib/opencode-errors";
+import { showToast } from "../lib/toast";
 
 const titleGeneratingSessionsState = new Set<string>();
 const titleGeneratingListeners = new Set<() => void>();
@@ -322,12 +324,18 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
 
       return { optimisticUserID, response, userPromptText };
     },
-    onError: (_, variables) => {
+    onError: (error, variables) => {
       const { sessionID } = variables;
       queryClient.setQueryData<MessageListResponse>(
         ["opencode", "messages", opcodeUrl, sessionID, directory],
         (old) => old?.filter((msg) => !msg.info.id.startsWith("optimistic_")),
       );
+      
+      const parsed = parseNetworkError(error);
+      showToast.error(parsed.title, {
+        description: parsed.message,
+        duration: 5000,
+      });
     },
     onSuccess: async (data, variables) => {
       const { sessionID } = variables;
