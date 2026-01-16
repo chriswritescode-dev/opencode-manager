@@ -14,6 +14,35 @@
   </head>
   <body>
     <div id="root"></div>
+    <div id="app-loader" style="
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      min-height: calc(100% + env(safe-area-inset-top));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      background: #000;
+      z-index: 9999;
+    ">
+      <img src="/opencode-wordmark-dark.svg" alt="OpenCode" style="height: 42px; width: auto;" />
+      <div style="
+        width: 24px;
+        height: 24px;
+        border: 2px solid rgba(255,255,255,0.1);
+        border-top-color: rgba(255,255,255,0.8);
+        border-radius: 50%;
+        animation: app-loader-spin 0.8s linear infinite;
+      "></div>
+    </div>
+    <style>
+      @keyframes app-loader-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import { Toaster } from 'sonner'
@@ -23,6 +24,15 @@ const queryClient = new QueryClient({
 function RouterContent() {
   const { isOpen, close } = useSettingsDialog()
   useTheme()
+
+  useEffect(() => {
+    const loader = document.getElementById('app-loader')
+    if (loader) {
+      loader.style.transition = 'opacity 0.2s ease-out'
+      loader.style.opacity = '0'
+      setTimeout(() => loader.remove(), 200)
+    }
+  }, [])
 
   return (
     <>

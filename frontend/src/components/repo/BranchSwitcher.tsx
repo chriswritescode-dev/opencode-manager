@@ -10,7 +10,6 @@ import {
 import { GitBranch, Check, Plus, GitCommit, Loader2 } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { listBranches, switchBranch, GitAuthError } from "@/api/repos";
-import { useGitStatus } from "@/api/git";
 import { AddBranchWorkspaceDialog } from "@/components/repo/AddBranchWorkspaceDialog";
 import { GitChangesSheet } from "@/components/file-browser/GitChangesSheet";
 import { showToast } from "@/lib/toast";
@@ -29,7 +28,6 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
   const [addBranchOpen, setAddBranchOpen] = useState(false);
   const [gitChangesOpen, setGitChangesOpen] = useState(false);
   const queryClient = useQueryClient();
-  const { data: gitStatus } = useGitStatus(repoId);
 
   const { data: branches, isLoading: branchesLoading, refetch: refetchBranches } = useQuery({
     queryKey: ["branches", repoId],
@@ -100,11 +98,6 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
                 <div className="flex items-center gap-2 w-full">
                   <GitCommit className="w-3 h-3" />
                   <span className="flex-1">View Changes</span>
-                  {gitStatus?.hasChanges && (
-                    <span className="text-xs text-yellow-500">
-                      {gitStatus.files.length}
-                    </span>
-                  )}
                 </div>
               </DropdownMenuItem>
             </>
@@ -117,11 +110,6 @@ export function BranchSwitcher({ repoId, currentBranch, isWorktree, repoUrl, rep
                 <div className="flex items-center gap-2 w-full">
                   <GitCommit className="w-3 h-3" />
                   <span className="flex-1">View Changes</span>
-                  {gitStatus?.hasChanges && (
-                    <span className="text-xs text-yellow-500">
-                      {gitStatus.files.length}
-                    </span>
-                  )}
                 </div>
               </DropdownMenuItem>
               {repoUrl && (
