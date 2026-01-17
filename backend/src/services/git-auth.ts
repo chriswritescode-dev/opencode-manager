@@ -35,6 +35,7 @@ export class GitAuthService {
 
       return {
         GIT_TERMINAL_PROMPT: '0',
+        GIT_ASKPASS: '/bin/true',
         GIT_CONFIG_COUNT: '1',
         GIT_CONFIG_KEY_0: `http.${normalizedHost}.extraheader`,
         GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicAuth}`
