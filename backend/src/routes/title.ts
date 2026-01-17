@@ -70,7 +70,7 @@ export function createTitleRoutes() {
       }
       const config = await configResponse.json() as { model?: string; small_model?: string }
 
-      const modelStr = config.small_model || config.model || 'anthropic/claude-3-haiku-20240307'
+      const modelStr = config.small_model || (config.model ?? "")
       const [providerID, modelID] = modelStr.split('/')
 
       const titleSessionResponse = await fetch(buildUrl('/session', directory), {

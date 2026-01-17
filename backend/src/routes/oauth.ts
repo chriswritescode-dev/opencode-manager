@@ -3,8 +3,8 @@ import { z } from 'zod'
 import { proxyRequest } from '../services/proxy'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
-import { 
-  OAuthAuthorizeRequestSchema, 
+import {
+  OAuthAuthorizeRequestSchema,
   OAuthAuthorizeResponseSchema,
   OAuthCallbackRequestSchema
 } from '../../../shared/src/schemas/auth'
@@ -78,8 +78,8 @@ export function createOAuthRoutes() {
 
       const data = await response.json()
       
-      logger.info(`OAuth callback successful for ${providerId}, restarting OpenCode server`)
-      await opencodeServerManager.restart()
+      logger.info(`OAuth callback successful for ${providerId}, reloading OpenCode configuration`)
+      await opencodeServerManager.reloadConfig()
       
       return c.json(data)
     } catch (error) {

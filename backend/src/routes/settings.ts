@@ -5,7 +5,7 @@ import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
-import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeConfigFilePath, getAgentsMdPath, ENV } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
   OpenCodeConfigSchema,
@@ -102,8 +102,8 @@ export function createSettingsRoutes(db: Database) {
       
       if (credentialsChanged || identityChanged) {
         const changeType = [credentialsChanged && 'credentials', identityChanged && 'identity'].filter(Boolean).join(' and ')
-        logger.info(`Git ${changeType} changed, restarting OpenCode server`)
-        await opencodeServerManager.restart()
+        logger.info(`Git ${changeType} changed, reloading OpenCode configuration`)
+        await opencodeServerManager.reloadConfig()
         serverRestarted = true
       }
 
@@ -273,6 +273,23 @@ export function createSettingsRoutes(db: Database) {
     }
   })
 
+  app.post('/opencode-reload', async (c) => {
+    try {
+      logger.info('OpenCode configuration reload requested')
+      await fetch(`http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}/config/`, {
+        method: 'GET'
+      })
+      await opencodeServerManager.reloadConfig()
+      return c.json({ success: true, message: 'OpenCode configuration reloaded successfully' })
+    } catch (error) {
+      logger.error('Failed to reload OpenCode config:', error)
+      return c.json({
+        error: 'Failed to reload OpenCode configuration',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
   app.post('/opencode-rollback', async (c) => {
     try {
       const userId = c.req.query('userId') || 'default'
@@ -294,9 +311,9 @@ export function createSettingsRoutes(db: Database) {
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.restart()
-      } catch (restartError) {
-        logger.error('Rollback config also failed to start server, attempting fallback:', restartError)
+        await opencodeServerManager.reloadConfig()
+      } catch (reloadError) {
+        logger.error('Rollback config reload failed, attempting restart:', reloadError)
 
         const deleted = settingsService.deleteFilesystemConfig()
         if (deleted) {
@@ -316,13 +333,13 @@ export function createSettingsRoutes(db: Database) {
 
         return c.json({
           error: 'Failed to rollback and could not delete filesystem config',
-          details: restartError instanceof Error ? restartError.message : 'Unknown error'
+          details: reloadError instanceof Error ? reloadError.message : 'Unknown error'
         }, 500)
       }
 
       return c.json({
         success: true,
-        message: `Server restarted with previous working config: ${rollbackConfig}`,
+        message: `Server reloaded with previous working config: ${rollbackConfig}`,
         configName: rollbackConfig
       })
     } catch (error) {
@@ -353,12 +370,18 @@ export function createSettingsRoutes(db: Database) {
       if (upgraded) {
         logger.info(`OpenCode upgraded from v${oldVersion} to v${newVersion}`)
         opencodeServerManager.clearStartupError()
-        await opencodeServerManager.restart()
-        logger.info('OpenCode server restarted after upgrade')
+        try {
+          await opencodeServerManager.reloadConfig()
+          logger.info('OpenCode server reloaded after upgrade')
+        } catch (reloadError) {
+          logger.warn('Config reload after upgrade failed, attempting full restart:', reloadError)
+          await opencodeServerManager.restart()
+          logger.info('OpenCode server restarted after upgrade')
+        }
 
         return c.json({
           success: true,
-          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and server restarted`,
+          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and configuration reloaded`,
           oldVersion,
           newVersion,
           upgraded: true
@@ -507,8 +530,8 @@ export function createSettingsRoutes(db: Database) {
       await writeFileContent(agentsMdPath, content)
       logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
       
-      await opencodeServerManager.restart()
-      logger.info('Restarted OpenCode server after AGENTS.md update')
+      await opencodeServerManager.reloadConfig()
+      logger.info('Reloaded OpenCode configuration after AGENTS.md update')
       
       return c.json({ success: true })
     } catch (error) {

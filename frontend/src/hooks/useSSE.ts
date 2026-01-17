@@ -10,14 +10,14 @@ import { subscribeToSSE, reconnectSSE, addSSEDirectory, removeSSEDirectory } fro
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 
 const handleRestartServer = async () => {
-  showToast.loading('Restarting OpenCode server...', {
+  showToast.loading('Reloading OpenCode configuration...', {
     id: 'restart-server',
   })
-  
+
   try {
-    const result = await settingsApi.restartOpenCodeServer()
+    const result = await settingsApi.reloadOpenCodeConfig()
     if (result.success) {
-      showToast.success(result.message || 'OpenCode server restarted successfully', {
+      showToast.success(result.message || 'OpenCode configuration reloaded successfully', {
         id: 'restart-server',
         duration: 3000,
       })
@@ -25,13 +25,13 @@ const handleRestartServer = async () => {
         window.location.reload()
       }, 2000)
     } else {
-      showToast.error(result.message || 'Failed to restart OpenCode server', {
+      showToast.error(result.message || 'Failed to reload OpenCode configuration', {
         id: 'restart-server',
         duration: 5000,
       })
     }
   } catch (error) {
-    showToast.error(error instanceof Error ? error.message : 'Failed to restart OpenCode server', {
+    showToast.error(error instanceof Error ? error.message : 'Failed to reload OpenCode configuration', {
       id: 'restart-server',
       duration: 5000,
     })
@@ -282,7 +282,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           showToast.info(`OpenCode v${event.properties.version} is available`, {
             description: 'A new version is ready to install.',
             action: {
-              label: 'Restart to Update',
+              label: 'Reload to Update',
               onClick: handleRestartServer
             },
             duration: 10000,

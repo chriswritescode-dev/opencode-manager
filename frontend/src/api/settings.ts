@@ -103,6 +103,19 @@ export const settingsApi = {
     return data
   },
 
+  reloadOpenCodeConfig: async (): Promise<{ success: boolean; message: string; details?: string }> => {
+    try {
+      const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-reload`)
+      return data
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        const result = await axios.post(`${API_BASE_URL}/api/settings/opencode-restart`)
+        return result.data
+      }
+      throw error
+    }
+  },
+
   rollbackOpenCodeConfig: async (): Promise<{ success: boolean; message: string; configName?: string }> => {
     const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-rollback`)
     return data

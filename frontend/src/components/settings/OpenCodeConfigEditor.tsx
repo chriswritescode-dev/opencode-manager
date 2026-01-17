@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Loader2 } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import type { OpenCodeConfig } from '@/api/types/settings'
 import { parseJsonc } from '@/lib/jsonc'
 
@@ -66,60 +66,59 @@ export function OpenCodeConfigEditor({
     }
   }
 
-  if (!isOpen || !config) return null
+  if (!config) return null
 
   return (
-    <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm">
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-        <div className="relative w-full max-w-6xl h-[90vh] bg-background border rounded-lg shadow-lg">
-          <div className="flex flex-col h-full">
-            <div className="flex items-center justify-between p-6 border-b">
-              <div>
-                <h2 className="text-lg font-semibold">Edit Config: {config.name}</h2>
-              </div>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={onClose}>
-                  Cancel
-                </Button>
-                <Button 
-                  onClick={updateConfig} 
-                  disabled={isUpdating || !editConfigContent.trim()}
-                >
-                  {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Update
-                </Button>
-              </div>
-            </div>
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent mobileFullscreen className="h-[90vh] max-w-6xl gap-0 flex flex-col p-0 sm:p-6">
+        <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
+          <DialogTitle className="text-lg sm:text-xl font-semibold">
+            {`Edit Config: ${config.name}`}
+          </DialogTitle>
+        </DialogHeader>
 
-            <div className="flex-1 p-6 overflow-hidden">
-              <div className="h-full flex flex-col">
-                <Label htmlFor="edit-config-content" className="mb-2">
-                  Config Content (JSON/JSONC)
-                </Label>
-                <Textarea
-                  id="edit-config-content"
-                  ref={editTextareaRef}
-                  value={editConfigContent}
-                  onChange={(e) => {
-                    setEditConfigContent(e.target.value)
-                    setEditError('')
-                    setEditErrorLine(null)
-                  }}
-                  className="flex-1 font-mono text-sm resize-none"
-                />
-                {editError && (
-                  <p className="text-sm text-red-500 mt-2">
-                    {editError}
-                    {editErrorLine && (
-                      <span className="ml-2 text-xs">(Line {editErrorLine})</span>
-                    )}
-                  </p>
+        <div className="flex-1 p-0 sm:p-4 overflow-hidden relative">
+          <Textarea
+            id="edit-config-content"
+            ref={editTextareaRef}
+            value={editConfigContent}
+            onChange={(e) => {
+              setEditConfigContent(e.target.value)
+              setEditError('')
+              setEditErrorLine(null)
+            }}
+            className="flex-1 font-mono text-xs sm:text-sm resize-none h-full rounded-none sm:rounded-md"
+          />
+          {editError && (
+            <div className="absolute bottom-0 left-0 right-0 bg-background/95 border-t p-2 sm:p-3">
+              <p className="text-xs sm:text-sm text-red-500">
+                {editError}
+                {editErrorLine && (
+                  <span className="ml-2 text-xs">(Line {editErrorLine})</span>
                 )}
-              </div>
+              </p>
             </div>
-          </div>
+          )}
         </div>
-      </div>
-    </div>
+
+        <DialogFooter className="p-3 sm:p-4 border-t gap-2">
+          <Button 
+            variant="outline" 
+            onClick={onClose}
+            className="flex-1 sm:flex-none"
+          >
+            Cancel
+          </Button>
+          <Button 
+            onClick={updateConfig} 
+            disabled={isUpdating || !editConfigContent.trim()}
+            className="flex-1 sm:flex-none"
+          >
+            {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Update
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

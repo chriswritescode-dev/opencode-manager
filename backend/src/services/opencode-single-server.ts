@@ -8,6 +8,7 @@ import type { Database } from 'bun:sqlite'
 import type { GitCredential } from '../utils/git-auth'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
+const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
 const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
 const MIN_OPENCODE_VERSION = '1.0.137'
@@ -119,7 +120,7 @@ class OpenCodeServerManager {
 
     this.serverProcess = spawn(
       'opencode',
-      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', '127.0.0.1'],
+      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', OPENCODE_SERVER_HOST],
       {
         cwd: OPENCODE_SERVER_DIRECTORY,
         detached: !isDevelopment,
@@ -200,10 +201,45 @@ class OpenCodeServerManager {
   }
 
   async restart(): Promise<void> {
-    logger.info('Restarting OpenCode server')
+    logger.info('Restarting OpenCode server (full process restart)')
     await this.stop()
     await new Promise(r => setTimeout(r, 1000))
     await this.start()
+  }
+
+  async reloadConfig(): Promise<void> {
+    logger.info('Reloading OpenCode configuration (via API)')
+    try {
+      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/config/`, {
+        method: 'GET'
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to get current config: ${response.status}`)
+      }
+
+      const currentConfig = await response.json()
+      logger.info('Triggering OpenCode config reload via PATCH')
+      const patchResponse = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/config/`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentConfig)
+      })
+
+      if (!patchResponse.ok) {
+        throw new Error(`Failed to reload config: ${patchResponse.status}`)
+      }
+
+      logger.info('OpenCode configuration reloaded successfully')
+      await new Promise(r => setTimeout(r, 500))
+      const healthy = await this.checkHealth()
+      if (!healthy) {
+        throw new Error('Server unhealthy after config reload')
+      }
+    } catch (error) {
+      logger.error('Failed to reload OpenCode config:', error)
+      throw error
+    }
   }
 
   getPort(): number {
@@ -233,7 +269,7 @@ class OpenCodeServerManager {
 
   async checkHealth(): Promise<boolean> {
     try {
-      const response = await fetch(`http://127.0.0.1:${OPENCODE_SERVER_PORT}/doc`, {
+      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
         signal: AbortSignal.timeout(3000)
       })
       return response.ok

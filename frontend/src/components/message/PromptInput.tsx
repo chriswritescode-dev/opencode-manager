@@ -419,19 +419,20 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as { MSStream?: boolean }).MSStream
     const isSecureContext = window.isSecureContext || (window.location.protocol === 'http:' && window.location.hostname === 'localhost')
 
-    if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
+if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read) {
       try {
         const text = await navigator.clipboard.readText()
         if (text && text.trim()) {
           return
         }
-      } catch (err) {
+      } catch {
       }
-      
+
       event.preventDefault()
+
       try {
         const clipboardItems = await navigator.clipboard.read()
-        
+
         for (const item of clipboardItems) {
           for (const type of item.types) {
             if (ACCEPTED_FILE_TYPES.includes(type) || type.startsWith('image/')) {

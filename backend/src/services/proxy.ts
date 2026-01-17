@@ -1,7 +1,7 @@
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 
-const OPENCODE_SERVER_URL = `http://127.0.0.1:${ENV.OPENCODE.PORT}`
+const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
 
 export async function setOpenCodeAuth(providerId: string, apiKey: string): Promise<boolean> {
   try {

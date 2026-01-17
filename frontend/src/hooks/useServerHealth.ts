@@ -31,19 +31,19 @@ export function useServerHealth(enabled = true) {
 
   const restartMutation = useMutation({
     mutationFn: async () => {
-      return await settingsApi.restartOpenCodeServer()
+      return await settingsApi.reloadOpenCodeConfig()
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['health'] })
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
-      toast.success('Server restarted successfully')
+      toast.success('Server configuration reloaded successfully')
     },
     onError: (error: unknown) => {
       const errorMessage = error && typeof error === 'object' && 'response' in error
         ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
            || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-           || 'Failed to restart server')
-        : 'Failed to restart server'
+           || 'Failed to reload configuration')
+        : 'Failed to reload configuration'
       toast.error(errorMessage)
     },
   })
@@ -81,7 +81,7 @@ export function useServerHealth(enabled = true) {
       toast.error(health.error || 'OpenCode server is currently unhealthy', {
         duration: Infinity,
         action: {
-          label: 'Restart',
+          label: 'Reload',
           onClick: () => restartMutation.mutate(),
         },
       })
