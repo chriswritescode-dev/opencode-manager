@@ -1,9 +1,11 @@
-import { GitAuthService } from '../git-auth-service'
+import { GitAuthService } from '../git-auth'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
 import * as db from '../../db/queries'
 import type { Database } from 'bun:sqlite'
 import { executeCommand } from '../../utils/process'
+import { SettingsService } from '../settings'
+import { resolveGitIdentity, createGitIdentityEnv } from '../../utils/git-auth'
 
 export class GitCommitService {
   constructor(private gitAuthService: GitAuthService) {}
@@ -16,7 +18,16 @@ export class GitCommitService {
       }
 
       const repoPath = repo.fullPath
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+      const authEnv = await this.gitAuthService.getGitEnvironment(repoId, database)
+
+      // Get identity env
+      const settingsService = new SettingsService(database)
+      const settings = settingsService.getSettings('default')
+      const gitCredentials = settings.preferences.gitCredentials || []
+      const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
+      const identityEnv = identity ? createGitIdentityEnv(identity) : {}
+
+      const env = { ...authEnv, ...identityEnv }
 
       const args = ['git', '-C', repoPath, 'commit', '-m', message]
 

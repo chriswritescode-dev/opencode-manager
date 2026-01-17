@@ -8,7 +8,9 @@ import { GitCommitService } from '../services/git/GitCommitService'
 import { GitPushService } from '../services/git/GitPushService'
 import { GitLogService } from '../services/git/GitLogService'
 import { GitStatusService } from '../services/git/GitStatusService'
-import { GitAuthService } from '../../utils/git-auth'
+import { GitFetchPullService } from '../services/git/GitFetchPullService'
+import { GitBranchService } from '../services/git/GitBranchService'
+import { GitAuthService } from '../services/git-auth'
 import type { GitStatusResponse } from '../types/git'
 
 export function createRepoGitRoutes(database: Database) {

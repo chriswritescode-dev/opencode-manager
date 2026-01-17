@@ -1,8 +1,9 @@
-import { SettingsService } from '../services/settings'
+import { SettingsService } from './settings'
 import type { Database } from 'bun:sqlite'
-import { executeCommand } from './process'
+import { executeCommand } from '../utils/process'
 import { getRepoById } from '../db/queries'
 import path from 'path'
+import { createNoPromptGitEnv, getCredentialForHost, getDefaultUsername, normalizeHost } from '../utils/git-auth'
 
 export class GitAuthService {
   async getGitEnvironment(repoId: number, database: Database): Promise<Record<string, string>> {

@@ -3,21 +3,20 @@ import { GitPushService } from '../../../src/services/git/GitPushService'
 import type { Database } from 'bun:sqlite'
 import { executeCommand } from '../../../src/utils/process'
 import { getRepoById } from '../../../src/db/queries'
-import { GitAuthService } from '../../src/utils/git-auth'
+import { GitAuthService } from '../../../src/services/git-auth'
 
-vi.mock('../../src/utils/process', () => ({
+vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
 }))
 
-vi.mock('../../src/db/queries', () => ({
+vi.mock('../../../src/db/queries', () => ({
   getRepoById: vi.fn(),
 }))
 
-vi.mock('../../src/utils/git-auth', () => ({
+vi.mock('../../../src/services/git-auth', () => ({
   GitAuthService: vi.fn().mockImplementation(() => ({
     getGitEnvironment: vi.fn(),
   })),
-  createNoPromptGitEnv: vi.fn(() => ({ GIT_TERMINAL_PROMPT: '0' })),
 }))
 
 describe('GitPushService', () => {
@@ -37,7 +36,7 @@ describe('GitPushService', () => {
       const mockRepo = {
         id: 1,
         fullPath: '/path/to/repo',
-      }
+      } as any
       getRepoById.mockReturnValue(mockRepo)
       executeCommand.mockResolvedValue('Everything up-to-date')
 
@@ -55,7 +54,7 @@ describe('GitPushService', () => {
       const mockRepo = {
         id: 1,
         fullPath: '/path/to/repo',
-      }
+      } as any
       getRepoById.mockReturnValue(mockRepo)
       executeCommand.mockResolvedValue('Branch set up to track remote branch')
 
@@ -78,30 +77,20 @@ describe('GitPushService', () => {
       const mockRepo = {
         id: 1,
         fullPath: '/path/to/repo',
-      }
+      } as any
       getRepoById.mockReturnValue(mockRepo)
       executeCommand.mockRejectedValue(new Error('Authentication failed'))
 
       await expect(service.push(1, {}, database)).rejects.toThrow()
     })
 
-    it('throws error when push command fails', async () => {
-      const mockRepo = {
-        id: 1,
-        fullPath: '/path/to/repo',
-      }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockRejectedValue(new Error('Authentication failed'))
-
-      await expect(service.push(1, {}, database)).rejects.toThrow()
-    })
   })
 
   describe('getCurrentBranch', () => {
     it('returns current branch name', async () => {
       executeCommand.mockResolvedValue('main\n')
 
-      const result = await service.getCurrentBranch('/path/to/repo', database)
+      const result = await service.getCurrentBranch('/path/to/repo')
 
       expect(executeCommand).toHaveBeenCalledWith(
         ['git', '-C', '/path/to/repo', 'rev-parse', '--abbrev-ref', 'HEAD'],
@@ -113,7 +102,7 @@ describe('GitPushService', () => {
     it('trims whitespace from branch name', async () => {
       executeCommand.mockResolvedValue('  develop  \n')
 
-      const result = await service.getCurrentBranch('/path/to/repo', database)
+      const result = await service.getCurrentBranch('/path/to/repo')
 
       expect(result).toBe('develop')
     })
@@ -121,13 +110,13 @@ describe('GitPushService', () => {
     it('throws error when command fails', async () => {
       executeCommand.mockRejectedValue(new Error('Not a git repository'))
 
-      await expect(service.getCurrentBranch('/path/to/repo', database)).rejects.toThrow()
+      await expect(service.getCurrentBranch('/path/to/repo')).rejects.toThrow()
     })
 
     it('throws error when HEAD is not a branch', async () => {
       executeCommand.mockResolvedValue('HEAD\n')
 
-      const result = await service.getCurrentBranch('/path/to/repo', database)
+      const result = await service.getCurrentBranch('/path/to/repo')
 
       expect(result).toBe('HEAD')
     })
@@ -137,7 +126,7 @@ describe('GitPushService', () => {
     it('returns upstream branch name', async () => {
       executeCommand.mockResolvedValue('origin/main\n')
 
-      const result = await service.getUpstreamBranch('/path/to/repo', database)
+      const result = await service.getUpstreamBranch('/path/to/repo')
 
       expect(executeCommand).toHaveBeenCalledWith(
         ['git', '-C', '/path/to/repo', 'rev-parse', '--abbrev-ref', '@{upstream}'],
@@ -149,7 +138,7 @@ describe('GitPushService', () => {
     it('returns null when no upstream configured', async () => {
       executeCommand.mockRejectedValue(new Error('fatal: no upstream configured'))
 
-      const result = await service.getUpstreamBranch('/path/to/repo', database)
+      const result = await service.getUpstreamBranch('/path/to/repo')
 
       expect(result).toBeNull()
     })
@@ -157,7 +146,7 @@ describe('GitPushService', () => {
     it('returns null when fatal error indicates no upstream', async () => {
       executeCommand.mockRejectedValue(new Error('fatal: invalid upstream'))
 
-      const result = await service.getUpstreamBranch('/path/to/repo', database)
+      const result = await service.getUpstreamBranch('/path/to/repo')
 
       expect(result).toBeNull()
     })
@@ -165,7 +154,7 @@ describe('GitPushService', () => {
     it('returns null when error indicates branch does not point at branch', async () => {
       executeCommand.mockRejectedValue(new Error('fatal: HEAD does not point at a branch'))
 
-      const result = await service.getUpstreamBranch('/path/to/repo', database)
+      const result = await service.getUpstreamBranch('/path/to/repo')
 
       expect(result).toBeNull()
     })
@@ -173,7 +162,7 @@ describe('GitPushService', () => {
     it('returns null when upstream is empty string', async () => {
       executeCommand.mockResolvedValue('  \n')
 
-      const result = await service.getUpstreamBranch('/path/to/repo', database)
+      const result = await service.getUpstreamBranch('/path/to/repo')
 
       expect(result).toBeNull()
     })
@@ -181,13 +170,13 @@ describe('GitPushService', () => {
     it('throws error on other failures', async () => {
       executeCommand.mockRejectedValue(new Error('Permission denied'))
 
-      await expect(service.getUpstreamBranch('/path/to/repo', database)).rejects.toThrow()
+      await expect(service.getUpstreamBranch('/path/to/repo')).rejects.toThrow()
     })
 
     it('trims whitespace from upstream branch', async () => {
       executeCommand.mockResolvedValue('  origin/feature  \n')
 
-      const result = await service.getUpstreamBranch('/path/to/repo', database)
+      const result = await service.getUpstreamBranch('/path/to/repo')
 
       expect(result).toBe('origin/feature')
     })

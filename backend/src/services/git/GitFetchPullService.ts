@@ -1,4 +1,4 @@
-import { GitAuthService } from '../git-auth-service'
+import { GitAuthService } from '../git-auth'
 import { executeCommand } from '../../utils/process'
 import { getRepoById } from '../../db/queries'
 import type { Database } from 'bun:sqlite'

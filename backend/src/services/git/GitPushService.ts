@@ -1,7 +1,7 @@
 import { executeCommand } from '../../utils/process'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
-import { GitAuthService } from '../git-auth-service'
+import { GitAuthService } from '../git-auth'
 import { createNoPromptGitEnv } from '../../utils/git-auth'
 import type { Database } from 'bun:sqlite'
 import * as db from '../../db/queries'

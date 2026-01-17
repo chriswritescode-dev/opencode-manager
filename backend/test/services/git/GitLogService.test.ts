@@ -15,11 +15,10 @@ vi.mock('../../../src/db/queries', () => ({
   getRepoById,
 }))
 
-vi.mock('../../../src/utils/git-auth', () => ({
+vi.mock('../../../src/services/git-auth', () => ({
   GitAuthService: vi.fn().mockImplementation(() => ({
     getGitEnvironment,
   })),
-  createNoPromptGitEnv: vi.fn(),
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
@@ -33,7 +32,7 @@ describe('GitLogService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     database = {} as Database
-    const { GitAuthService } = require('../../../src/utils/git-auth')
+    const { GitAuthService } = require('../../../src/services/git-auth')
     const gitAuthService = new GitAuthService()
     service = new GitLogService(gitAuthService)
     getGitEnvironment.mockReturnValue({})

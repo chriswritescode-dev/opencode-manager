@@ -1,4 +1,4 @@
-import { GitAuthService } from '../git-auth-service'
+import { GitAuthService } from '../git-auth'
 import { executeCommand } from '../../utils/process'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
