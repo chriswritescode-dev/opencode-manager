@@ -22,7 +22,7 @@ export class GitLogService {
     this.gitAuthService = gitAuthService
   }
 
-  async getLog(repoId: number, limit: number = 10, database: Database): Promise<GitCommit[]> {
+  async getLog(repoId: number, database: Database, limit: number = 10): Promise<GitCommit[]> {
     try {
       const repo = db.getRepoById(database, repoId)
       if (!repo) {
@@ -55,9 +55,9 @@ export class GitLogService {
         if (hash) {
           commits.push({
             hash,
-            authorName,
-            authorEmail,
-            date,
+            authorName: authorName || '',
+            authorEmail: authorEmail || '',
+            date: date || '',
             message: message || ''
           })
         }
@@ -104,9 +104,9 @@ export class GitLogService {
 
       return {
         hash: commitHash,
-        authorName,
-        authorEmail,
-        date,
+        authorName: authorName || '',
+        authorEmail: authorEmail || '',
+        date: date || '',
         message: message || ''
       }
     } catch (error: unknown) {

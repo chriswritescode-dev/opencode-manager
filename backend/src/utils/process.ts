@@ -5,12 +5,13 @@ interface ExecuteCommandOptions {
   cwd?: string
   silent?: boolean
   env?: Record<string, string>
+  ignoreExitCode?: boolean
 }
 
 export async function executeCommand(
   args: string[],
   cwdOrOptions?: string | ExecuteCommandOptions
-): Promise<string> {
+): Promise<string | { exitCode: number; stdout: string; stderr: string }> {
   const options: ExecuteCommandOptions = typeof cwdOrOptions === 'string' 
     ? { cwd: cwdOrOptions } 
     : cwdOrOptions || {}
@@ -43,7 +44,9 @@ export async function executeCommand(
     })
 
     proc.on('close', (code: number | null) => {
-      if (code === 0) {
+      if (options.ignoreExitCode) {
+        resolve({ exitCode: code || 0, stdout, stderr })
+      } else if (code === 0) {
         resolve(stdout)
       } else {
         const error = new Error(`Command failed with code ${code}: ${stderr || stdout}`)

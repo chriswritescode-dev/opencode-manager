@@ -34,7 +34,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 function isAuthenticationError(error: ErrorWithMessage): boolean {
-  const message = error?.message?.toLowerCase() || ''
+  const message = getErrorMessage(error).toLowerCase()
   return message.includes('authentication failed') || 
          message.includes('invalid username or token') ||
          message.includes('could not read username')
@@ -237,7 +237,7 @@ export async function initLocalRepo(
         throw new Error(`Directory exists but is not a valid Git repository. Please provide either a Git repository path or a simple directory name to create a new empty repository.`)
       }
     } catch (error: unknown) {
-      if (isErrorWithMessage(error) && error.message.includes('No such file or directory')) {
+      if (isErrorWithMessage(error) && getErrorMessage(error).includes('No such file or directory')) {
         throw error
       }
       throw new Error(`Failed to process absolute path '${normalizedInputPath}': ${getErrorMessage(error)}`)
@@ -420,7 +420,7 @@ export async function cloneRepo(
       try {
         await executeGitWithFallback(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
       } catch (error: unknown) {
-        if (isErrorWithMessage(error) && error.message.includes('destination path') && error.message.includes('already exists')) {
+        if (isErrorWithMessage(error) && getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
@@ -513,12 +513,12 @@ export async function cloneRepo(
         
         await executeGitWithFallback(cloneCmd, { cwd: getReposPath(), env })
       } catch (error: unknown) {
-        if (isErrorWithMessage(error) && error.message.includes('destination path') && error.message.includes('already exists')) {
+        if (isErrorWithMessage(error) && getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        if (branch && isErrorWithMessage(error) && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
+        if (branch && isErrorWithMessage(error) && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
           await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
           let localBranchExists = 'missing'
@@ -899,7 +899,7 @@ async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, 
       return
     } catch (error: unknown) {
       const isLastAttempt = attempt === maxRetries
-      const errorMessage = isErrorWithMessage(error) ? error.message : ''
+      const errorMessage = isErrorWithMessage(error) ? getErrorMessage(error) : ''
       
       if (errorMessage.includes('already used by worktree')) {
         logger.warn(`Worktree already exists, attempting cleanup (attempt ${attempt}/${maxRetries})`)

@@ -16,7 +16,7 @@ export async function getFileDiff(repoPath: string, fileName: string): Promise<F
     const filePath = path.resolve(repoPath, fileName)
 
     // First check if file is tracked
-    const isTracked = await executeCommand([
+    const isTrackedResult = await executeCommand([
       'git',
       '-C',
       repoPath,
@@ -25,7 +25,8 @@ export async function getFileDiff(repoPath: string, fileName: string): Promise<F
       fileName
     ], { ignoreExitCode: true })
 
-    const isTrackedExitCode = isTracked.exitCode
+    const isTracked = typeof isTrackedResult === 'string' ? isTrackedResult : isTrackedResult.stdout
+    const isTrackedExitCode = typeof isTrackedResult === 'string' ? 0 : isTrackedResult.exitCode
 
     let diff: string
     let status: 'untracked' | 'modified' | 'staged'
@@ -33,26 +34,27 @@ export async function getFileDiff(repoPath: string, fileName: string): Promise<F
     if (isTrackedExitCode !== 0) {
       // File is untracked, use git diff --no-index
       try {
-        diff = await executeCommand([
+        const diffResult = await executeCommand([
           'git',
           '--no-index',
           'diff',
           '/dev/null',
           filePath
-        ])
+        ], { ignoreExitCode: true })
+
+        if (typeof diffResult === 'string') {
+          diff = diffResult
+        } else {
+          diff = diffResult.stdout
+        }
         status = 'untracked'
       } catch (error: any) {
-        // git diff --no-index exits with 1 for differences, which is expected
-        if (error.exitCode === 1) {
-          diff = error.stdout || ''
-          status = 'untracked'
-        } else {
-          throw error
-        }
+        // This shouldn't happen with ignoreExitCode, but just in case
+        throw error
       }
     } else {
       // File is tracked, check if it's staged
-      const stagedDiff = await executeCommand([
+      const stagedDiffResult = await executeCommand([
         'git',
         '-C',
         repoPath,
@@ -62,9 +64,11 @@ export async function getFileDiff(repoPath: string, fileName: string): Promise<F
         fileName
       ], { ignoreExitCode: true })
 
-      if (stagedDiff.stdout.trim()) {
+      const stagedDiff = typeof stagedDiffResult === 'string' ? stagedDiffResult : stagedDiffResult.stdout
+
+      if (stagedDiff.trim()) {
         // File has staged changes
-        diff = stagedDiff.stdout
+        diff = stagedDiff
         status = 'staged'
       } else {
         // File has unstaged changes

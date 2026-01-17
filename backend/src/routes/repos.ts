@@ -421,7 +421,7 @@ app.get('/', async (c) => {
         return c.json({ error: 'message is required' }, 400)
       }
 
-      await gitCommandHandler.commit(id, message, stagedPaths, database)
+      await gitCommandHandler.commit(id, message, database, stagedPaths)
 
       const status = await gitCommandHandler.getStatus(id, database)
       return c.json(status)
@@ -515,7 +515,7 @@ app.get('/', async (c) => {
       }
 
       const limit = parseInt(c.req.query('limit') || '10', 10)
-      const log = await gitCommandHandler.getLog(id, limit, database)
+      const log = await gitCommandHandler.getLog(id, database, limit)
 
       return c.json(log)
     } catch (error: unknown) {

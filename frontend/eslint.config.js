@@ -24,7 +24,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
       parserOptions: {
-        project: true,
+        projectService: {
+          allowDefaultProject: ["*.ts", "*.tsx"],
+          defaultProject: "./tsconfig.app.json"
+        },
         tsconfigRootDir: __dirname,
       },
     },

@@ -56,8 +56,8 @@ export class GitCommandHandler {
     return this.pushService.push(repoId, options, database)
   }
 
-  async getLog(repoId: number, limit?: number, database: Database): Promise<GitCommit[]> {
-    return this.logService.getLog(repoId, limit ?? 10, database)
+  async getLog(repoId: number, database: Database, limit?: number): Promise<GitCommit[]> {
+    return this.logService.getLog(repoId, database, limit ?? 10)
   }
 
   async getDiff(repoId: number, path: string, database: Database): Promise<string> {
