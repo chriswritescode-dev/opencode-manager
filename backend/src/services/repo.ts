@@ -11,7 +11,7 @@ import path from 'path'
 import { GitAuthenticationError } from '../errors/git-errors'
 
 interface ErrorWithMessage {
-  message?: string
+  message: string
 }
 
 function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
@@ -65,7 +65,7 @@ async function executeGitWithFallback(
     if (!url) {
       try {
         return await executeCommand(cmd, { cwd, env: createNoPromptGitEnv(), silent })
-      } catch (finalError: unknown) {
+      } catch {
         throw new GitAuthenticationError(`Authentication failed for Git command: ${getErrorMessage(error)}`)
       }
     }
@@ -84,7 +84,7 @@ async function executeGitWithFallback(
     logger.warn(`All auth fallbacks failed, trying without auth (public repo)`)
     try {
       return await executeCommand(cmd, { cwd, env: createNoPromptGitEnv(), silent })
-    } catch (finalError: unknown) {
+    } catch {
       throw new GitAuthenticationError(`Authentication failed for Git command: ${getErrorMessage(error)}`)
     }
   }

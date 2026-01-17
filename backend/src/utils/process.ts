@@ -11,6 +11,14 @@ interface ExecuteCommandOptions {
 export async function executeCommand(
   args: string[],
   cwdOrOptions?: string | ExecuteCommandOptions
+): Promise<string>
+export async function executeCommand(
+  args: string[],
+  cwdOrOptions: string | (ExecuteCommandOptions & { ignoreExitCode: true })
+): Promise<string | { exitCode: number; stdout: string; stderr: string }>
+export async function executeCommand(
+  args: string[],
+  cwdOrOptions?: string | ExecuteCommandOptions
 ): Promise<string | { exitCode: number; stdout: string; stderr: string }> {
   const options: ExecuteCommandOptions = typeof cwdOrOptions === 'string' 
     ? { cwd: cwdOrOptions } 

@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { GitPushService } from '../../../src/services/git/GitPushService'
 import type { Database } from 'bun:sqlite'

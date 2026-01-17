@@ -25,33 +25,24 @@ export async function getFileDiff(repoPath: string, fileName: string): Promise<F
       fileName
     ], { ignoreExitCode: true })
 
-    const isTracked = typeof isTrackedResult === 'string' ? isTrackedResult : isTrackedResult.stdout
-    const isTrackedExitCode = typeof isTrackedResult === 'string' ? 0 : isTrackedResult.exitCode
+    const isTracked = typeof isTrackedResult === 'string' ? { exitCode: 0, stdout: isTrackedResult, stderr: '' } : isTrackedResult
+    const isTrackedExitCode = isTracked.exitCode
 
     let diff: string
     let status: 'untracked' | 'modified' | 'staged'
 
     if (isTrackedExitCode !== 0) {
-      // File is untracked, use git diff --no-index
-      try {
-        const diffResult = await executeCommand([
-          'git',
-          '--no-index',
-          'diff',
-          '/dev/null',
-          filePath
-        ], { ignoreExitCode: true })
+      const diffResult = await executeCommand([
+        'git',
+        '--no-index',
+        'diff',
+        '/dev/null',
+        filePath
+      ], { ignoreExitCode: true })
 
-        if (typeof diffResult === 'string') {
-          diff = diffResult
-        } else {
-          diff = diffResult.stdout
-        }
-        status = 'untracked'
-      } catch (error: any) {
-        // This shouldn't happen with ignoreExitCode, but just in case
-        throw error
-      }
+      const diffData = typeof diffResult === 'string' ? { exitCode: 0, stdout: diffResult, stderr: '' } : diffResult
+      diff = diffData.stdout
+      status = 'untracked'
     } else {
       // File is tracked, check if it's staged
       const stagedDiffResult = await executeCommand([
@@ -64,7 +55,8 @@ export async function getFileDiff(repoPath: string, fileName: string): Promise<F
         fileName
       ], { ignoreExitCode: true })
 
-      const stagedDiff = typeof stagedDiffResult === 'string' ? stagedDiffResult : stagedDiffResult.stdout
+      const stagedDiffData = typeof stagedDiffResult === 'string' ? { exitCode: 0, stdout: stagedDiffResult, stderr: '' } : stagedDiffResult
+      const stagedDiff = stagedDiffData.stdout
 
       if (stagedDiff.trim()) {
         // File has staged changes

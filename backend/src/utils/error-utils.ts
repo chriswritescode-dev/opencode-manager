@@ -36,7 +36,7 @@ export function getStatusCode(error: unknown): number {
   return VALID_STATUS_CODES.has(code) ? code : 500
 }
 
-export function handleGitError(error: unknown, c: Context<any, any, any>) {
+export function handleGitError(error: unknown, c: Context) {
   if (error instanceof GitAuthenticationError) {
     return c.json({ error: error.message, code: 'AUTH_FAILED' }, 401)
   }

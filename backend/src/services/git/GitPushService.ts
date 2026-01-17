@@ -53,7 +53,7 @@ export class GitPushService {
     }
   }
 
-  async getCurrentBranch(repoPath: string, database: Database): Promise<string> {
+  async getCurrentBranch(repoPath: string): Promise<string> {
     try {
       const fullPath = path.resolve(repoPath)
       const env = createNoPromptGitEnv()
@@ -77,7 +77,7 @@ export class GitPushService {
     }
   }
 
-  async getUpstreamBranch(repoPath: string, database: Database): Promise<string | null> {
+  async getUpstreamBranch(repoPath: string): Promise<string | null> {
     try {
       const fullPath = path.resolve(repoPath)
       const env = createNoPromptGitEnv()

@@ -25,7 +25,8 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["*.ts", "*.tsx"],
+          // Be more specific with allowed default projects
+          allowDefaultProject: [],
           defaultProject: "./tsconfig.app.json"
         },
         tsconfigRootDir: __dirname,
@@ -41,5 +42,17 @@ export default defineConfig([
     rules: {
       'react-refresh/only-export-components': 'off',
     },
+  },
+  // Special rules for test files
+  {
+    files: ['**/*.test.ts', '**/*.test.tsx', '**/*.spec.ts', '**/*.spec.tsx'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off', // Often needed for mocks
+      '@typescript-eslint/no-empty-function': 'off', // Common in test setup
+      '@typescript-eslint/no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        varsIgnorePattern: '^_'
+      }],
+    }
   },
 ])

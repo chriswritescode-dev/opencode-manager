@@ -1,4 +1,11 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
+import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
+import { GitFetchService } from '../../../src/services/git/GitFetchService'
+import type { Database } from 'bun:sqlite'
+import { spawn } from 'child_process'
+import { getRepoById } from '../../../src/db/queries'
+import { GitFetchPullService } from '../../../src/services/git/GitFetchPullService'
+import { GitBranchService } from '../../../src/services/git/GitBranchService'
+
 const mockFetchPullService = {
   fetch: vi.fn(),
   pull: vi.fn(),
@@ -12,6 +19,10 @@ const mockBranchService = {
   hasCommits: vi.fn(),
 }
 
+const mockGitAuthService = {
+  getGitEnvironment: vi.fn(),
+}
+
 vi.mock('../../../src/services/git/GitFetchPullService', () => ({
   GitFetchPullService: vi.fn().mockImplementation(() => mockFetchPullService),
 }))
@@ -20,14 +31,9 @@ vi.mock('../../../src/services/git/GitBranchService', () => ({
   GitBranchService: vi.fn().mockImplementation(() => mockBranchService),
 }))
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { GitFetchService } from '../../../src/services/git/GitFetchService'
-import type { Database } from 'bun:sqlite'
-import { spawn } from 'child_process'
-import { executeCommand } from '../../../src/utils/process'
-import { getRepoById } from '../../../src/db/queries'
-import { GitFetchPullService } from '../../../src/services/git/GitFetchPullService'
-import { GitBranchService } from '../../../src/services/git/GitBranchService'
+vi.mock('../../../src/utils/git-auth', () => ({
+  GitAuthService: vi.fn().mockImplementation(() => mockGitAuthService),
+}))
 
 vi.mock('../../../src/utils/process', () => ({
   executeCommand: vi.fn(),
@@ -41,6 +47,9 @@ vi.mock('child_process', () => ({
   spawn: vi.fn(),
 }))
 
+const spawnMock = spawn as MockedFunction<typeof spawn>
+const getRepoByIdMock = getRepoById as MockedFunction<typeof getRepoById>
+
 describe('GitFetchService', () => {
   let service: GitFetchService
   let database: Database
@@ -48,9 +57,9 @@ describe('GitFetchService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     database = {} as Database
-    spawn.mockClear()
-    const fetchPullService = new GitFetchPullService()
-    const branchService = new GitBranchService()
+    spawnMock.mockClear()
+    const fetchPullService = new GitFetchPullService(mockGitAuthService)
+    const branchService = new GitBranchService(mockGitAuthService)
     service = new GitFetchService(fetchPullService, branchService)
   })
 
@@ -60,7 +69,7 @@ describe('GitFetchService', () => {
         id: 1,
         fullPath: '/path/to/repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
+      getRepoByIdMock.mockReturnValue(mockRepo)
 
       mockFetchPullService.fetch.mockResolvedValue({ stdout: '', stderr: '' })
 
@@ -71,7 +80,7 @@ describe('GitFetchService', () => {
     })
 
     it('throws error when repository not found', async () => {
-      getRepoById.mockReturnValue(null)
+      getRepoByIdMock.mockReturnValue(null)
 
       mockFetchPullService.fetch.mockRejectedValue(new Error('Repository not found'))
 
@@ -83,7 +92,7 @@ describe('GitFetchService', () => {
         id: 1,
         fullPath: '/path/to/repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
+      getRepoByIdMock.mockReturnValue(mockRepo)
 
       mockFetchPullService.fetch.mockRejectedValue(new Error('Failed to fetch changes'))
 
@@ -95,7 +104,7 @@ describe('GitFetchService', () => {
         id: 1,
         fullPath: '/path/to/repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
+      getRepoByIdMock.mockReturnValue(mockRepo)
       const mockProc = {
         stdout: { on: vi.fn() },
         stderr: { on: vi.fn((event, callback) => { if (event === 'data') callback(Buffer.from('Fetch failed')) }) },
@@ -113,7 +122,7 @@ describe('GitFetchService', () => {
         id: 1,
         fullPath: '/path/to/repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
+      getRepoByIdMock.mockReturnValue(mockRepo)
 
       mockFetchPullService.pull.mockResolvedValue({ stdout: '', stderr: '' })
 
@@ -124,7 +133,7 @@ describe('GitFetchService', () => {
     })
 
     it('throws error when repository not found', async () => {
-      getRepoById.mockReturnValue(null)
+      getRepoByIdMock.mockReturnValue(null)
 
       mockFetchPullService.pull.mockRejectedValue(new Error('Repository not found'))
 
@@ -136,7 +145,7 @@ describe('GitFetchService', () => {
         id: 1,
         fullPath: '/path/to/repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
+      getRepoByIdMock.mockReturnValue(mockRepo)
 
       mockFetchPullService.pull.mockRejectedValue(new Error('Failed to pull changes'))
 
@@ -144,7 +153,7 @@ describe('GitFetchService', () => {
     })
 
     it('throws error when repository not found', async () => {
-      getRepoById.mockReturnValue(null)
+      getRepoByIdMock.mockReturnValue(null)
 
       mockFetchPullService.pull.mockRejectedValue(new Error('Repository not found'))
 
@@ -156,7 +165,7 @@ describe('GitFetchService', () => {
         id: 1,
         fullPath: '/path/to/repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
+      getRepoByIdMock.mockReturnValue(mockRepo)
 
       mockFetchPullService.pull.mockRejectedValue(new Error('Failed to pull changes'))
 

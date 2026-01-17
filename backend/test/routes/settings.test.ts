@@ -1,8 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
 import { createSettingsRoutes } from '../../src/routes/settings'
 import type { Hono } from 'hono'
 import { spawn } from 'child_process'
 import { mkdir, rm } from 'fs/promises'
+import type { Database } from 'bun:sqlite'
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 const mockSettingsService = {
   getSettings: vi.fn(),
@@ -58,9 +61,13 @@ vi.mock('fs/promises', () => ({
   rm: vi.fn(),
 }))
 
+const spawnMock = spawn as MockedFunction<typeof spawn>
+const mkdirMock = mkdir as MockedFunction<typeof mkdir>
+const rmMock = rm as MockedFunction<typeof rm>
+
 describe('Settings Routes', () => {
   let app: Hono
-  let mockDatabase: any
+  let mockDatabase: Database
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -69,9 +76,9 @@ describe('Settings Routes', () => {
       prepare: vi.fn(() => ({
         run: vi.fn()
       }))
-    }
+    } as Database
     Object.keys(mockSettingsService).forEach(key => {
-      (mockSettingsService as any)[key].mockClear()
+      mockSettingsService[key as keyof typeof mockSettingsService].mockClear()
     })
     app = createSettingsRoutes(mockDatabase)
   })
@@ -89,7 +96,7 @@ describe('Settings Routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ invalid: 'data' }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(400)
       expect(body).toHaveProperty('error')
@@ -102,7 +109,7 @@ describe('Settings Routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'test' }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(400)
       expect(body).toHaveProperty('error')
@@ -115,7 +122,7 @@ describe('Settings Routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: '', host: '', token: '' }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(400)
       expect(body).toHaveProperty('error')
@@ -123,7 +130,7 @@ describe('Settings Routes', () => {
     })
 
     it('should handle GitHub.com authentication successfully', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -132,15 +139,15 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validCredential),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
@@ -149,7 +156,7 @@ describe('Settings Routes', () => {
     })
 
     it('should handle GitLab.com authentication with default username', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -158,8 +165,8 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
@@ -169,7 +176,7 @@ describe('Settings Routes', () => {
           host: 'gitlab.com',
         }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
@@ -177,7 +184,7 @@ describe('Settings Routes', () => {
     })
 
     it('should handle custom username', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -186,8 +193,8 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
@@ -197,14 +204,14 @@ describe('Settings Routes', () => {
           username: 'custom-user',
         }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
     })
 
     it('should return 400 when git authentication fails', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(128) // Git auth failure exit code
         }),
@@ -215,15 +222,15 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validCredential),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(400)
       expect(body).toHaveProperty('success', false)
@@ -231,18 +238,18 @@ describe('Settings Routes', () => {
     })
 
     it('should return 500 when git process throws error', async () => {
-      spawn.mockImplementation(() => {
+      spawnMock.mockImplementation(() => {
         throw new Error('Spawn failed')
       })
 
-      mkdir.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(validCredential),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(500)
       expect(body).toHaveProperty('success', false)
@@ -250,7 +257,7 @@ describe('Settings Routes', () => {
     })
 
     it('should handle hosts with trailing slashes', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -259,8 +266,8 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
@@ -270,14 +277,14 @@ describe('Settings Routes', () => {
           host: 'github.com/',
         }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
     })
 
     it('should handle invalid URLs gracefully', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -286,8 +293,8 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
@@ -297,14 +304,14 @@ describe('Settings Routes', () => {
           host: 'not-a-valid-url',
         }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
     })
 
     it('should mask tokens correctly', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -313,8 +320,8 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
@@ -324,7 +331,7 @@ describe('Settings Routes', () => {
           token: 'ghp_very_long_token_that_should_be_masked_properly',
         }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
@@ -332,7 +339,7 @@ describe('Settings Routes', () => {
     })
 
     it('should handle very short tokens', async () => {
-      spawn.mockReturnValue({
+      spawnMock.mockReturnValue({
         on: vi.fn().mockImplementation((event, callback) => {
           if (event === 'close') callback(0)
         }),
@@ -341,8 +348,8 @@ describe('Settings Routes', () => {
         },
       } as any)
 
-      mkdir.mockResolvedValueOnce(undefined)
-      rm.mockResolvedValueOnce(undefined)
+      mkdirMock.mockResolvedValueOnce(undefined)
+      rmMock.mockResolvedValueOnce(undefined)
 
       const response = await app.request('/test-credential', {
         method: 'POST',
@@ -352,7 +359,7 @@ describe('Settings Routes', () => {
           token: 'short',
         }),
       })
-      const body = await response.json()
+      const body = await response.json() as any
 
       expect(response.status).toBe(200)
       expect(body).toHaveProperty('success', true)
