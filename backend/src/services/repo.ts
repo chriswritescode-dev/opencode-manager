@@ -47,9 +47,9 @@ interface GitCommandOptions {
 
 async function executeGitWithFallback(
   cmd: string[],
-  options: GitCommandOptions = {}
+  options: GitCommandOptions & { allowNoAuthFallback?: boolean } = {}
 ): Promise<string> {
-  const { cwd, env = createNoPromptGitEnv(), silent } = options
+  const { cwd, env = createNoPromptGitEnv(), allowNoAuthFallback = false, silent } = options
 
   try {
     return await executeCommand(cmd, { cwd, env, silent })
@@ -58,10 +58,8 @@ async function executeGitWithFallback(
       throw error
     }
 
-    logger.warn(`Git command failed with auth, trying CLI fallbacks`)
-
-    const url = cmd.find(arg => arg.includes('http://') || arg.includes('https://'))
-    if (!url) {
+    if (allowNoAuthFallback) {
+      logger.warn(`Git auth failed, trying without auth for public repo`)
       try {
         return await executeCommand(cmd, { cwd, env: createNoPromptGitEnv(), silent })
       } catch {
@@ -69,23 +67,7 @@ async function executeGitWithFallback(
       }
     }
 
-    try {
-      if (isGitHubHttpsUrl(url)) {
-        logger.warn(`Detected GitHub URL, trying gh auth token`)
-        const ghToken = (await executeCommand(['gh', 'auth', 'token'])).trim()
-        const ghEnv = createGitHubGitEnv(ghToken)
-        return await executeCommand(cmd, { cwd, env: ghEnv, silent })
-      }
-    } catch (cliError: unknown) {
-      logger.warn(`CLI auth fallback failed:`, getErrorMessage(cliError))
-    }
-
-    logger.warn(`All auth fallbacks failed, trying without auth (public repo)`)
-    try {
-      return await executeCommand(cmd, { cwd, env: createNoPromptGitEnv(), silent })
-    } catch {
-      throw new Error(`Authentication failed for Git command: ${getErrorMessage(error)}`)
-    }
+    throw new Error(`Authentication failed for Git command: ${getErrorMessage(error)}`)
   }
 }
 
@@ -383,7 +365,7 @@ export async function cloneRepo(
       const baseRepoPath = path.resolve(getReposPath(), baseRepoDirName)
       const worktreePath = path.resolve(getReposPath(), worktreeDirName)
       
-       await executeGitWithFallback(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env })
+       await executeGitWithFallback(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env, allowNoAuthFallback: true })
 
       
       await createWorktreeSafely(baseRepoPath, worktreePath, branch)
@@ -449,7 +431,7 @@ export async function cloneRepo(
           
           if (branch) {
             logger.info(`Switching to branch: ${branch}`)
-             await executeGitWithFallback(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { cwd: getReposPath(), env })
+             await executeGitWithFallback(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { cwd: getReposPath(), env, allowNoAuthFallback: true })
 
             
             let remoteBranchExists = false
@@ -562,7 +544,7 @@ export async function listBranches(database: Database, repo: Repo): Promise<{ lo
 
     if (!repo.isLocal) {
       try {
-        await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env })
+        await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env, allowNoAuthFallback: true })
       } catch (error) {
         logger.warn(`Failed to fetch remote for repo ${repo.id}, using cached branch info:`, error)
       }
@@ -616,7 +598,7 @@ export async function switchBranch(database: Database, repoId: number, branch: s
 
     logger.info(`Switching to branch: ${sanitizedBranch} in ${repo.localPath}`)
 
-    await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env })
+    await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env, allowNoAuthFallback: true })
     
     await checkoutBranchSafely(repoPath, sanitizedBranch)
     
@@ -665,7 +647,7 @@ export async function pullRepo(database: Database, repoId: number): Promise<void
     const env = getGitEnv(database)
 
     logger.info(`Pulling repo: ${repo.repoUrl}`)
-    await executeCommand(['git', '-C', path.resolve(getReposPath(), repo.localPath), 'pull'], { env })
+    await executeGitWithFallback(['git', '-C', path.resolve(getReposPath(), repo.localPath), 'pull'], { env, allowNoAuthFallback: true })
     
     db.updateLastPulled(database, repoId)
     logger.info(`Repo pulled successfully: ${repo.repoUrl}`)

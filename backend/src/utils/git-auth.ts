@@ -18,7 +18,8 @@ export function isGitHubHttpsUrl(repoUrl: string): boolean {
 
 export function createNoPromptGitEnv(): Record<string, string> {
   return {
-    GIT_TERMINAL_PROMPT: '0'
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '/bin/true'
   }
 }
 
@@ -49,6 +50,7 @@ export function normalizeHost(host: string): string {
 export function createGitEnv(credentials: GitCredential[]): Record<string, string> {
   const env: Record<string, string> = { 
     GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: '/bin/true',
     GIT_CONFIG_COUNT: '0'
   }
   

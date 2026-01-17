@@ -26,6 +26,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
+import { showToast } from '@/lib/toast'
 
 interface SourceControlPanelProps {
   repoId: number
@@ -60,9 +61,10 @@ export function SourceControlPanel({
       queryClient.setQueryData(['repo', repoId], updatedRepo)
       queryClient.invalidateQueries({ queryKey: ['repos'] })
       queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
+      queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
     },
     onError: (error) => {
-      console.error('Failed to switch branch', error)
+      showToast.error(getApiErrorMessage(error))
     },
   })
 
@@ -71,7 +73,7 @@ export function SourceControlPanel({
       await action()
     } catch (error: unknown) {
       const message = getApiErrorMessage(error)
-      console.error(message)
+      showToast.error(message)
     }
   }
 

@@ -8,6 +8,7 @@ import type { Database } from 'bun:sqlite'
 import type { GitCommit, FileDiffResponse } from '../../types/git'
 import path from 'path'
 import type { GitDiffService } from './GitDiffService'
+import { executeGitWithFallback } from '../repo'
 
 export class GitLogService {
   private gitAuthService: GitAuthService
@@ -28,15 +29,24 @@ export class GitLogService {
       const repoPath = path.resolve(getReposPath(), repo.localPath)
       const env = await this.gitAuthService.getGitEnvironment(repoId, database)
 
-      const output = await executeCommand([
+      if (!repo.isLocal) {
+        try {
+          await executeGitWithFallback(['git', '-C', repoPath, 'fetch', '--all'], { env, allowNoAuthFallback: true })
+        } catch (error) {
+          logger.warn(`Failed to fetch remote for repo ${repoId}, using cached branch info:`, error)
+        }
+      }
+
+      const output = await executeGitWithFallback([
         'git',
         '-C',
         repoPath,
         'log',
+        `--all`,
         `-n`,
         String(limit),
         '--format=%H|%an|%ae|%ai|%s'
-      ], { env })
+      ], { env, allowNoAuthFallback: true })
 
       const lines = output.trim().split('\n')
       const commits: GitCommit[] = []
@@ -76,7 +86,7 @@ export class GitLogService {
       const repoPath = path.resolve(getReposPath(), repo.localPath)
       const env = await this.gitAuthService.getGitEnvironment(repoId, database)
 
-      const output = await executeCommand([
+      const output = await executeGitWithFallback([
         'git',
         '-C',
         repoPath,
@@ -84,7 +94,7 @@ export class GitLogService {
         '--format=%H|%an|%ae|%ai|%s',
         hash,
         '-1'
-      ], { env })
+      ], { env, allowNoAuthFallback: true })
 
       if (!output.trim()) {
         return null
