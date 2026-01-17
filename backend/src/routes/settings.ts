@@ -27,6 +27,11 @@ function compareVersions(v1: string, v2: string): number {
   return 0
 }
 
+function maskToken(token: string): string {
+  if (!token || token.length <= 8) return '*******'
+  return token.substring(0, 8) + '...'
+}
+
 const UpdateSettingsSchema = z.object({
   preferences: UserPreferencesSchema.partial(),
 })
@@ -59,6 +64,13 @@ const UpdateCustomCommandSchema = z.object({
 
 const ConnectMcpDirectorySchema = z.object({
   directory: z.string().min(1),
+})
+
+const TestGitCredentialSchema = z.object({
+  name: z.string(),
+  host: z.string(),
+  token: z.string(),
+  username: z.string().optional(),
 })
 
 async function extractOpenCodeError(response: Response, defaultError: string): Promise<string> {
@@ -626,6 +638,85 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to remove MCP auth' }, 500)
+    }
+  })
+
+  app.post('/test-credential', async (c) => {
+    try {
+      const body = await c.req.json()
+      const credential = TestGitCredentialSchema.parse(body)
+
+      logger.info(`Testing git credential for host: ${credential.host}`)
+
+      try {
+        const { spawn } = await import('child_process')
+        
+        const normalizedHost = credential.host.endsWith('/') ? credential.host : `${credential.host}/`
+        const username = credential.username || (() => {
+          try {
+            const parsed = new URL(credential.host)
+            const hostname = parsed.hostname.toLowerCase()
+            if (hostname === 'github.com') return 'x-access-token'
+            if (hostname === 'gitlab.com' || hostname.includes('gitlab')) return 'oauth2'
+            return 'oauth2'
+          } catch {
+            return 'oauth2'
+          }
+        })()
+
+        const gitDir = await import('os').then(os => os.tmpdir())
+        const tempDir = `${gitDir}/git-test-${Date.now()}`
+
+        await import('fs/promises').then(fs => fs.mkdir(tempDir, { recursive: true }))
+
+        const env = {
+          ...process.env,
+          GIT_TERMINAL_PROMPT: '0',
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: `http.${normalizedHost}.extraheader`,
+          GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`${username}:${credential.token}`, 'utf8').toString('base64')}`
+        }
+
+        const lsRemote = spawn('git', ['ls-remote', normalizedHost], {
+          cwd: tempDir,
+          env,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          timeout: 10000
+        })
+
+        let stderr = ''
+        lsRemote.stderr.on('data', (data: Buffer) => {
+          stderr += data.toString()
+        })
+
+        const exitCode = await new Promise<number>((resolve) => {
+          lsRemote.on('close', resolve)
+        })
+
+        await import('fs/promises').then(fs => fs.rm(tempDir, { recursive: true, force: true }))
+
+        if (exitCode === 0) {
+          logger.info(`Git credential test successful for: ${credential.host}`)
+          return c.json({ 
+            success: true, 
+            maskedToken: maskToken(credential.token)
+          })
+        } else {
+          const errorMsg = stderr.trim() || 'Authentication failed'
+          logger.warn(`Git credential test failed for ${credential.host}: ${errorMsg}`)
+          return c.json({ success: false, error: errorMsg }, 400)
+        }
+      } catch (testError) {
+        const errorMsg = testError instanceof Error ? testError.message : 'Unknown error'
+        logger.error(`Git credential test error for ${credential.host}:`, errorMsg)
+        return c.json({ success: false, error: errorMsg }, 500)
+      }
+    } catch (error) {
+      logger.error('Failed to test git credential:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid credential data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to test git credential' }, 500)
     }
   })
 

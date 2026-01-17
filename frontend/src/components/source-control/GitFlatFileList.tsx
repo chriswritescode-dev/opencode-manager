@@ -1,0 +1,174 @@
+import { useMemo, useState } from 'react'
+import { ChevronDown, ChevronRight, Plus, Minus } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { GitFlatFileItem } from './GitFlatFileItem'
+import { cn } from '@/lib/utils'
+import type { GitFileStatus, GitFileStatusType } from '@/types/git'
+
+interface GitFlatFileListProps {
+  files: GitFileStatus[]
+  staged: boolean
+  onFileSelect: (path: string) => void
+  onStage?: (paths: string[]) => void
+  onUnstage?: (paths: string[]) => void
+  selectedFile?: string
+}
+
+interface GroupedFiles {
+  status: GitFileStatusType
+  files: GitFileStatus[]
+}
+
+const statusOrder: GitFileStatusType[] = ['modified', 'added', 'deleted', 'renamed', 'copied', 'untracked']
+
+const statusLabels: Record<GitFileStatusType, string> = {
+  modified: 'Modified',
+  added: 'Added',
+  deleted: 'Deleted',
+  renamed: 'Renamed',
+  untracked: 'Untracked',
+  copied: 'Copied',
+}
+
+const statusColors: Record<GitFileStatusType, string> = {
+  modified: 'text-yellow-500',
+  added: 'text-green-500',
+  deleted: 'text-red-500',
+  renamed: 'text-blue-500',
+  untracked: 'text-gray-400',
+  copied: 'text-green-500',
+}
+
+export function GitFlatFileList({
+  files,
+  staged,
+  onFileSelect,
+  onStage,
+  onUnstage,
+  selectedFile,
+}: GitFlatFileListProps) {
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<GitFileStatusType>>(new Set())
+
+  const filteredFiles = useMemo(() => {
+    return files.filter(f => f.staged === staged)
+  }, [files, staged])
+
+  const groupedFiles = useMemo(() => {
+    const groups: GroupedFiles[] = []
+
+    for (const status of statusOrder) {
+      const statusFiles = filteredFiles.filter(f => f.status === status)
+      if (statusFiles.length > 0) {
+        groups.push({ status, files: statusFiles })
+      }
+    }
+
+    return groups
+  }, [filteredFiles])
+
+  const toggleGroup = (status: GitFileStatusType) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(status)) {
+        next.delete(status)
+      } else {
+        next.add(status)
+      }
+      return next
+    })
+  }
+
+  const handleStageFile = (path: string) => {
+    onStage?.([path])
+  }
+
+  const handleUnstageFile = (path: string) => {
+    onUnstage?.([path])
+  }
+
+  const handleStageAll = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (onStage) {
+      onStage(filteredFiles.map(f => f.path))
+    }
+  }
+
+  const handleUnstageAll = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (onUnstage) {
+      onUnstage(filteredFiles.map(f => f.path))
+    }
+  }
+
+  if (filteredFiles.length === 0) {
+    return null
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between px-2 py-1">
+        <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+          {staged ? 'Staged Changes' : 'Changes'} ({filteredFiles.length})
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={staged ? handleUnstageAll : handleStageAll}
+        >
+          {staged ? (
+            <>
+              <Minus className="w-3 h-3 mr-1" />
+              Unstage All
+            </>
+          ) : (
+            <>
+              <Plus className="w-3 h-3 mr-1" />
+              Stage All
+            </>
+          )}
+        </Button>
+      </div>
+
+      {groupedFiles.map(({ status, files: groupFiles }) => {
+        const isCollapsed = collapsedGroups.has(status)
+
+        return (
+          <div key={status}>
+            <button
+              className="flex items-center gap-1 px-2 py-1 w-full text-left hover:bg-accent/30 rounded transition-colors"
+              onClick={() => toggleGroup(status)}
+            >
+              {isCollapsed ? (
+                <ChevronRight className="w-3 h-3 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="w-3 h-3 text-muted-foreground" />
+              )}
+              <span className={cn('text-xs font-medium', statusColors[status])}>
+                {statusLabels[status]}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                ({groupFiles.length})
+              </span>
+            </button>
+
+            {!isCollapsed && (
+              <div className="ml-4">
+                {groupFiles.map(file => (
+                  <GitFlatFileItem
+                    key={file.path}
+                    file={file}
+                    isSelected={selectedFile === file.path}
+                    onSelect={onFileSelect}
+                    onStage={handleStageFile}
+                    onUnstage={handleUnstageFile}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}

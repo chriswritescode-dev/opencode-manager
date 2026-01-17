@@ -1,288 +1,111 @@
 import { executeCommand } from '../utils/process'
 import { logger } from '../utils/logger'
 import { getErrorMessage } from '../utils/error-utils'
-import { SettingsService } from './settings'
-import type { Database } from 'bun:sqlite'
 import path from 'path'
-import fs from 'fs/promises'
-import { createGitEnv, createNoPromptGitEnv } from '../utils/git-auth'
 
-async function hasCommits(repoPath: string): Promise<boolean> {
-  try {
-    await executeCommand(['git', '-C', repoPath, 'rev-parse', 'HEAD'], { silent: true })
-    return true
-  } catch {
-    return false
-  }
-}
-
-function getGitEnvironment(database: Database): Record<string, string> {
-  try {
-    const settingsService = new SettingsService(database)
-    const settings = settingsService.getSettings('default')
-    const gitCredentials = settings.preferences.gitCredentials || []
-
-    return createGitEnv(gitCredentials)
-  } catch (error) {
-    logger.warn('Failed to get git credentials from settings:', error)
-    return createNoPromptGitEnv()
-  }
-}
-
-export type GitFileStatusType = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'copied'
-
-export interface GitFileStatus {
-  path: string
-  status: GitFileStatusType
-  staged: boolean
-  oldPath?: string
-}
-
-export interface GitStatusResponse {
-  branch: string
-  ahead: number
-  behind: number
-  files: GitFileStatus[]
-  hasChanges: boolean
-}
-
-export interface FileDiffResponse {
-  path: string
-  status: GitFileStatusType
-  diff: string | null
+interface FileDiffResult {
+  status: 'untracked' | 'modified' | 'staged'
+  diff: string
   additions: number
   deletions: number
   isBinary: boolean
 }
 
-function parseStatusCode(code: string): GitFileStatusType {
-  switch (code) {
-    case 'M': return 'modified'
-    case 'A': return 'added'
-    case 'D': return 'deleted'
-    case 'R': return 'renamed'
-    case 'C': return 'copied'
-    case '?': return 'untracked'
-    default: return 'modified'
-  }
-}
-
-function parsePorcelainV2(output: string): { branch: string; ahead: number; behind: number; files: GitFileStatus[] } {
-  const lines = output.split('\n').filter(line => line.trim())
-  let branch = 'HEAD'
-  let ahead = 0
-  let behind = 0
-  const files: GitFileStatus[] = []
-
-  for (const line of lines) {
-    if (line.startsWith('# branch.head ')) {
-      branch = line.replace('# branch.head ', '')
-    } else if (line.startsWith('# branch.ab ')) {
-      const match = line.match(/# branch\.ab \+(\d+) -(\d+)/)
-      if (match && match[1] && match[2]) {
-        ahead = parseInt(match[1], 10)
-        behind = parseInt(match[2], 10)
-      }
-    } else if (line.startsWith('1 ') || line.startsWith('2 ')) {
-      const parts = line.split(' ')
-      const xy = parts[1]
-      if (!xy || xy.length < 2) continue
-      const stagedStatus = xy[0] as string
-      const unstagedStatus = xy[1] as string
-
-      if (line.startsWith('2 ')) {
-        const pathParts = parts.slice(8).join(' ').split('\t')
-        const filePath = pathParts[1] || pathParts[0] || ''
-        const oldPath = pathParts[0] || ''
-
-        if (stagedStatus !== '.') {
-          files.push({
-            path: filePath,
-            status: parseStatusCode(stagedStatus),
-            staged: true,
-            oldPath: stagedStatus === 'R' || stagedStatus === 'C' ? oldPath : undefined
-          })
-        }
-        if (unstagedStatus !== '.') {
-          files.push({
-            path: filePath,
-            status: parseStatusCode(unstagedStatus),
-            staged: false
-          })
-        }
-      } else {
-        const filePath = parts.slice(8).join(' ') || ''
-
-        if (stagedStatus !== '.') {
-          files.push({
-            path: filePath,
-            status: parseStatusCode(stagedStatus),
-            staged: true
-          })
-        }
-        if (unstagedStatus !== '.') {
-          files.push({
-            path: filePath,
-            status: parseStatusCode(unstagedStatus),
-            staged: false
-          })
-        }
-      }
-    } else if (line.startsWith('? ')) {
-      const filePath = line.substring(2)
-      files.push({
-        path: filePath,
-        status: 'untracked',
-        staged: false
-      })
-    }
-  }
-
-  return { branch, ahead, behind, files }
-}
-
-async function expandUntrackedDirectory(repoPath: string, dirPath: string): Promise<GitFileStatus[]> {
-  const cleanDirPath = dirPath.endsWith('/') ? dirPath.slice(0, -1) : dirPath
-  const fullDirPath = path.join(repoPath, cleanDirPath)
-  const files: GitFileStatus[] = []
-  
-  async function walkDir(currentPath: string, relativePath: string): Promise<void> {
-    try {
-      const entries = await fs.readdir(currentPath, { withFileTypes: true })
-      for (const entry of entries) {
-        const entryRelPath = relativePath ? `${relativePath}/${entry.name}` : entry.name
-        const entryFullPath = path.join(currentPath, entry.name)
-        
-        if (entry.isDirectory()) {
-          await walkDir(entryFullPath, entryRelPath)
-        } else {
-          files.push({
-            path: `${cleanDirPath}/${entryRelPath}`,
-            status: 'untracked',
-            staged: false
-          })
-        }
-      }
-    } catch {
-      // Ignore errors reading directory
-    }
-  }
-  
-  await walkDir(fullDirPath, '')
-  return files
-}
-
-export async function getGitStatus(repoPath: string, database?: Database): Promise<GitStatusResponse> {
+export async function getFileDiff(repoPath: string, fileName: string): Promise<FileDiffResult> {
   try {
-    const fullPath = path.resolve(repoPath)
-    const env = database ? getGitEnvironment(database) : undefined
-    const output = await executeCommand(['git', '-C', fullPath, 'status', '--porcelain=v2', '--branch'], { env })
-    const { branch, ahead, behind, files } = parsePorcelainV2(output)
+    const filePath = path.resolve(repoPath, fileName)
 
-    const expandedFiles: GitFileStatus[] = []
-    for (const file of files) {
-      if (file.status === 'untracked' && file.path.endsWith('/')) {
-        const dirFiles = await expandUntrackedDirectory(fullPath, file.path)
-        if (dirFiles.length > 0) {
-          expandedFiles.push(...dirFiles)
+    // First check if file is tracked
+    const isTracked = await executeCommand([
+      'git',
+      '-C',
+      repoPath,
+      'ls-files',
+      '--error-unmatch',
+      fileName
+    ], { ignoreExitCode: true })
+
+    const isTrackedExitCode = isTracked.exitCode
+
+    let diff: string
+    let status: 'untracked' | 'modified' | 'staged'
+
+    if (isTrackedExitCode !== 0) {
+      // File is untracked, use git diff --no-index
+      try {
+        diff = await executeCommand([
+          'git',
+          '--no-index',
+          'diff',
+          '/dev/null',
+          filePath
+        ])
+        status = 'untracked'
+      } catch (error: any) {
+        // git diff --no-index exits with 1 for differences, which is expected
+        if (error.exitCode === 1) {
+          diff = error.stdout || ''
+          status = 'untracked'
         } else {
-          expandedFiles.push(file)
+          throw error
         }
+      }
+    } else {
+      // File is tracked, check if it's staged
+      const stagedDiff = await executeCommand([
+        'git',
+        '-C',
+        repoPath,
+        'diff',
+        '--cached',
+        '--',
+        fileName
+      ], { ignoreExitCode: true })
+
+      if (stagedDiff.stdout.trim()) {
+        // File has staged changes
+        diff = stagedDiff.stdout
+        status = 'staged'
       } else {
-        expandedFiles.push(file)
+        // File has unstaged changes
+        diff = await executeCommand([
+          'git',
+          '-C',
+          repoPath,
+          'diff',
+          '--',
+          fileName
+        ])
+        status = 'modified'
       }
     }
 
-    return {
-      branch,
-      ahead,
-      behind,
-      files: expandedFiles,
-      hasChanges: expandedFiles.length > 0
-    }
-  } catch (error: unknown) {
-    logger.error(`Failed to get git status for ${repoPath}:`, error)
-    throw new Error(`Failed to get git status: ${getErrorMessage(error)}`)
-  }
-}
-
-export async function getFileDiff(repoPath: string, filePath: string, database?: Database): Promise<FileDiffResponse> {
-  try {
-    const fullRepoPath = path.resolve(repoPath)
-    const status = await getGitStatus(repoPath, database)
-    const fileStatus = status.files.find(f => f.path === filePath)
-
-    if (!fileStatus) {
-      return {
-        path: filePath,
-        status: 'modified',
-        diff: null,
-        additions: 0,
-        deletions: 0,
-        isBinary: false
-      }
-    }
-
-    let diff: string | null = null
+    // Parse diff to count additions/deletions
+    const lines = diff.split('\n')
     let additions = 0
     let deletions = 0
     let isBinary = false
 
-    const env = database ? getGitEnvironment(database) : undefined
-    
-    if (fileStatus.status === 'untracked') {
-      try {
-        const content = await executeCommand(['git', '-C', fullRepoPath, 'diff', '--no-index', '--', '/dev/null', filePath], { env, silent: true })
-        diff = content
-      } catch (error: unknown) {
-        const errorMessage = getErrorMessage(error)
-        if (errorMessage?.includes('exit code 1') || errorMessage?.includes('Command failed with code 1')) {
-          const output = errorMessage || ''
-          const diffMatch = output.match(/diff --git[\s\S]*(?=\n\n No newline|$)/)
-          diff = diffMatch ? diffMatch[0] : output.substring(output.indexOf('diff --git'))
-        } else {
-          diff = `New file: ${filePath}`
-        }
-      }
-    } else {
-      try {
-        const repoHasCommits = await hasCommits(fullRepoPath)
-        if (repoHasCommits) {
-          diff = await executeCommand(['git', '-C', fullRepoPath, 'diff', 'HEAD', '--', filePath], { env })
-        } else {
-          diff = `New file (no commits yet): ${filePath}`
-        }
-      } catch (error: unknown) {
-        logger.warn(`Failed to get diff for ${filePath}:`, getErrorMessage(error))
-        diff = null
-      }
-    }
-
-    if (diff) {
-      if (diff.includes('Binary files') || diff.includes('GIT binary patch')) {
+    for (const line of lines) {
+      if (line.startsWith('+') && !line.startsWith('+++')) {
+        additions++
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        deletions++
+      } else if (line.includes('Binary files')) {
         isBinary = true
-      } else {
-        const lines = diff.split('\n')
-        for (const line of lines) {
-          if (line.startsWith('+') && !line.startsWith('+++')) {
-            additions++
-          } else if (line.startsWith('-') && !line.startsWith('---')) {
-            deletions++
-          }
-        }
+        break
       }
     }
 
     return {
-      path: filePath,
-      status: fileStatus.status,
+      status,
       diff,
       additions,
       deletions,
       isBinary
     }
   } catch (error: unknown) {
-    logger.error(`Failed to get file diff for ${filePath}:`, error)
+    logger.error(`Failed to get file diff for ${fileName}:`, error)
     throw new Error(`Failed to get file diff: ${getErrorMessage(error)}`)
   }
 }

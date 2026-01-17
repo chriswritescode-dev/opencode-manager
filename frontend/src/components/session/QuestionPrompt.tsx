@@ -155,7 +155,7 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
 
   return (
     <div 
-      className="w-full bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-2 border-blue-500/30 rounded-xl shadow-lg shadow-blue-500/10 backdrop-blur-sm mb-3 overflow-hidden"
+      className="w-full bg-linear-to-br from-blue-500/10 to-blue-600/5 border-2 border-blue-500/30 rounded-xl shadow-lg shadow-blue-500/10 backdrop-blur-sm mb-3 overflow-hidden"
     >
       <div className="flex items-center justify-between px-3 py-2 border-b border-blue-500/20 bg-blue-500/5">
         <div className="flex items-center gap-2">

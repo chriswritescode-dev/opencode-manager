@@ -1,3 +1,6 @@
+import type { Context } from 'hono'
+import { GitAuthenticationError, GitConflictError, GitNotFoundError, GitOperationError } from '../errors/git-errors'
+
 export function isError(error: unknown): error is Error {
   return error instanceof Error
 }
@@ -31,4 +34,17 @@ export function getStatusCode(error: unknown): number {
     code = (error as ErrorWithStatusCode).status || 500
   }
   return VALID_STATUS_CODES.has(code) ? code : 500
+}
+
+export function handleGitError(error: unknown, c: Context<any, any, any>) {
+  if (error instanceof GitAuthenticationError) {
+    return c.json({ error: error.message, code: 'AUTH_FAILED' }, 401)
+  }
+  if (error instanceof GitConflictError) {
+    return c.json({ error: error.message, code: 'CONFLICT' }, 409)
+  }
+  if (error instanceof GitNotFoundError) {
+    return c.json({ error: error.message, code: 'NOT_FOUND' }, 404)
+  }
+  return c.json({ error: getErrorMessage(error), code: 'UNKNOWN' }, 500)
 }

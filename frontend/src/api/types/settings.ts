@@ -89,3 +89,16 @@ export interface OpenCodeConfigResponse {
   configs: OpenCodeConfig[]
   defaultConfig: OpenCodeConfig | null
 }
+
+export interface TestCredentialResponse {
+  success: boolean
+  error?: string
+  maskedToken?: string
+}
+
+export interface TestCredentialRequest {
+  name: string
+  host: string
+  token: string
+  username?: string
+}

@@ -2,7 +2,12 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { gitReuseDir, setupGitTestRepo, cleanupTestRepo, createTestFile, stageAndCommitTestFile } from '../fixtures/git-helpers'
 
 vi.mock('bun:sqlite', () => ({
-  Database: vi.fn()
+  Database: vi.fn(() => ({
+    run: vi.fn(),
+    prepare: vi.fn(() => ({
+      run: vi.fn()
+    }))
+  })),
 }))
 
 vi.mock('../../src/services/settings', () => ({

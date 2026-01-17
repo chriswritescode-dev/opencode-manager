@@ -7,6 +7,7 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
+import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useSSE } from "@/hooks/useSSE";
 import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BranchSwitcher } from "@/components/repo/BranchSwitcher";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Plug, FolderOpen, Plus, GitBranch, Loader2 } from "lucide-react";
+import { Plug, FolderOpen, Plus, GitBranch, Loader2, GitCommitHorizontal } from "lucide-react";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 
 export function RepoDetail() {
@@ -26,6 +27,7 @@ export function RepoDetail() {
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [switchConfigOpen, setSwitchConfigOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [sourceControlOpen, setSourceControlOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   
   const handleSwipeBack = useCallback(() => {
@@ -119,7 +121,7 @@ export function RepoDetail() {
   return (
     <div
       ref={pageRef}
-      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
+      className="h-dvh max-h-dvh overflow-hidden bg-linear-to-br from-background via-background to-background flex flex-col"
       style={swipeStyles}
     >
     <Header>
@@ -137,7 +139,7 @@ export function RepoDetail() {
             currentBranch={currentBranch}
             isWorktree={false}
             repoUrl={repo.repoUrl}
-            className="hidden sm:flex w-[140px] max-w-[140px]"
+            className="hidden sm:flex w-35 max-w-35"
           />
         ) : null}
       </div>
@@ -153,6 +155,15 @@ export function RepoDetail() {
         >
           <Plug className="w-4 h-4 sm:mr-2" />
           <span className="hidden sm:inline">MCP</span>
+        </Button>
+        <Button
+          variant="outline"
+          onClick={() => setSourceControlOpen(true)}
+          size="sm"
+          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+        >
+          <GitCommitHorizontal className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">Source</span>
         </Button>
         <Button
           variant="outline"
@@ -179,6 +190,9 @@ export function RepoDetail() {
               <div className="h-px bg-border my-1" />
             </>
           )}
+          <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
+            <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
             <Plug className="w-4 h-4 mr-2" /> MCP
           </DropdownMenuItem>
@@ -220,6 +234,13 @@ export function RepoDetail() {
         onOpenChange={setMcpDialogOpen}
         config={settings}
         directory={repoDirectory}
+      />
+
+      <SourceControlPanel
+        repoId={repoId}
+        isOpen={sourceControlOpen}
+        onClose={() => setSourceControlOpen(false)}
+        currentBranch={currentBranch}
       />
 
 {repo && (

@@ -2,10 +2,11 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Trash2, Download, GitBranch, FolderOpen } from "lucide-react";
+import { Loader2, Trash2, Download, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { downloadRepo } from "@/api/repos";
 import { showToast } from "@/lib/toast";
+import type { GitStatusResponse } from "@/types/git";
 
 import { BranchSwitcher } from "./BranchSwitcher";
 
@@ -24,6 +25,7 @@ interface RepoCardProps {
   isDeleting: boolean;
   isSelected?: boolean;
   onSelect?: (id: number, selected: boolean) => void;
+  gitStatus?: GitStatusResponse;
 }
 
 export function RepoCard({
@@ -32,6 +34,7 @@ export function RepoCard({
   isDeleting,
   isSelected = false,
   onSelect,
+  gitStatus,
 }: RepoCardProps) {
   const navigate = useNavigate();
   const [isDownloading, setIsDownloading] = useState(false);
@@ -39,9 +42,15 @@ export function RepoCard({
   const repoName = repo.repoUrl 
     ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
     : repo.localPath || "Local Repo";
-  const branchToDisplay = repo.currentBranch || repo.branch;
+  const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
   const isCloning = repo.cloneStatus === "cloning";
+
+  const isDirty = gitStatus?.hasChanges || false;
+  const ahead = gitStatus?.ahead || 0;
+  const behind = gitStatus?.behind || 0;
+  const stagedCount = gitStatus?.files.filter((f) => f.staged).length || 0;
+  const unstagedCount = gitStatus?.files.filter((f) => !f.staged).length || 0;
 
   const handleCardClick = () => {
     if (isReady) {
@@ -84,6 +93,9 @@ export function RepoCard({
               <h3 className="font-semibold text-base text-foreground truncate">
                 {repoName}
               </h3>
+              {isReady && (
+                <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-orange-500' : 'bg-green-500'}`} />
+              )}
               {repo.isWorktree && (
                 <Badge variant="secondary" className="text-xs px-1.5 py-0 shrink-0">
                   worktree
@@ -105,6 +117,25 @@ export function RepoCard({
                     <GitBranch className="w-3.5 h-3.5" />
                     {branchToDisplay || "main"}
                   </span>
+                  {isDirty && (
+                    <span className="flex items-center gap-1.5 text-orange-600 dark:text-orange-400">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      <span className="text-xs">
+                        {unstagedCount > 0 && `${unstagedCount} unstaged`}
+                        {unstagedCount > 0 && stagedCount > 0 && ", "}
+                        {stagedCount > 0 && `${stagedCount} staged`}
+                      </span>
+                    </span>
+                  )}
+                  {(ahead > 0 || behind > 0) && (
+                    <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+                      <span className="text-xs">
+                        {ahead > 0 && `${ahead} ahead`}
+                        {ahead > 0 && behind > 0 && ", "}
+                        {behind > 0 && `${behind} behind`}
+                      </span>
+                    </span>
+                  )}
                   {repo.isLocal && (
                     <span className="flex items-center gap-1">
                       <FolderOpen className="w-3.5 h-3.5" />
@@ -121,7 +152,6 @@ export function RepoCard({
                 currentBranch={branchToDisplay || ""}
                 isWorktree={repo.isWorktree}
                 repoUrl={repo.repoUrl}
-                repoLocalPath={repo.localPath}
                 iconOnly={true}
                 className="h-8 w-8"
               />

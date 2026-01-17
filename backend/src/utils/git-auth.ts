@@ -1,3 +1,5 @@
+
+
 export interface GitCredential {
   name: string
   host: string
@@ -45,7 +47,10 @@ function normalizeHost(host: string): string {
 }
 
 export function createGitEnv(credentials: GitCredential[]): Record<string, string> {
-  const env: Record<string, string> = { GIT_TERMINAL_PROMPT: '0' }
+  const env: Record<string, string> = { 
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_CONFIG_COUNT: '0'
+  }
   
   if (!credentials || credentials.length === 0) {
     return env
@@ -67,21 +72,13 @@ export function createGitEnv(credentials: GitCredential[]): Record<string, strin
     configIndex++
   }
 
-  if (configIndex > 0) {
-    env.GIT_CONFIG_COUNT = String(configIndex)
-  }
+  env.GIT_CONFIG_COUNT = String(configIndex)
 
   return env
 }
 
 export function createGitHubGitEnv(gitToken: string): Record<string, string> {
   return createGitEnv([{ name: 'GitHub', host: 'https://github.com/', token: gitToken }])
-}
-
-export interface GitHubUserInfo {
-  name: string | null
-  email: string
-  login: string
 }
 
 export function findGitHubCredential(credentials: GitCredential[]): GitCredential | null {
@@ -95,6 +92,45 @@ export function findGitHubCredential(credentials: GitCredential[]): GitCredentia
       return false
     }
   }) || null
+}
+
+export function getCredentialForHost(credentials: GitCredential[], host: string): GitCredential | null {
+  if (!credentials || credentials.length === 0) return null
+  
+  // Extract hostname from host
+  let hostname: string
+  try {
+    hostname = new URL(host.startsWith('http') ? host : `https://${host}`).hostname.toLowerCase()
+  } catch {
+    hostname = host.toLowerCase()
+  }
+  
+  return credentials.find(cred => {
+    let credHostname: string
+    try {
+      credHostname = new URL(cred.host.startsWith('http') ? cred.host : `https://${cred.host}`).hostname.toLowerCase()
+    } catch {
+      credHostname = cred.host.toLowerCase()
+    }
+    return credHostname === hostname
+  }) || null
+}
+
+
+
+export interface GitHubUserInfo {
+  name: string | null
+  email: string
+  login: string
+}
+
+export function findGitHubCredentialFromToken(token: string): GitCredential {
+  return {
+    name: 'GitHub',
+    host: 'https://github.com/',
+    token,
+    username: 'x-access-token'
+  }
 }
 
 export interface GitIdentity {
@@ -182,5 +218,51 @@ export async function fetchGitHubUserInfo(token: string): Promise<GitHubUserInfo
     }
   } catch {
     return null
+  }
+}
+
+import { SettingsService } from '../services/settings'
+import type { Database } from 'bun:sqlite'
+import { executeCommand } from './process'
+import { getRepoById } from '../db/queries'
+import path from 'path'
+
+export class GitAuthService {
+  async getGitEnvironment(repoId: number, database: Database): Promise<Record<string, string>> {
+    try {
+      const settingsService = new SettingsService(database)
+      const settings = settingsService.getSettings('default')
+      const gitCredentials = settings.preferences.gitCredentials || []
+
+      // Get repo host
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        return createNoPromptGitEnv()
+      }
+
+      const fullPath = path.resolve(repo.fullPath)
+      const remoteUrl = await executeCommand(['git', '-C', fullPath, 'remote', 'get-url', 'origin'], { silent: true })
+      const host = new URL(remoteUrl.trim()).hostname
+
+      // Find matching credential
+      const credential = getCredentialForHost(gitCredentials, host)
+      if (!credential) {
+        return createNoPromptGitEnv()
+      }
+
+      // Create env with specific credential
+      const username = credential.username || getDefaultUsername(credential.host)
+      const basicAuth = Buffer.from(`${username}:${credential.token}`, 'utf8').toString('base64')
+      const normalizedHost = normalizeHost(credential.host)
+
+      return {
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: `http.${normalizedHost}.extraheader`,
+        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicAuth}`
+      }
+    } catch {
+      return createNoPromptGitEnv()
+    }
   }
 }

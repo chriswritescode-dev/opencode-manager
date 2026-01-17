@@ -4,10 +4,12 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, 
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { listRepos, deleteRepo, updateRepoOrder } from "@/api/repos"
+import { fetchReposGitStatus } from "@/api/git"
 import { DeleteDialog } from "@/components/ui/delete-dialog"
 import { ListToolbar } from "@/components/ui/list-toolbar"
 import { GitBranch, Search, GripVertical } from "lucide-react"
 import type { Repo } from "@/api/types"
+import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
 import { RepoCardSkeleton } from "./RepoCardSkeleton"
 
@@ -17,12 +19,14 @@ function SortableRepoCard({
   isDeleting,
   isSelected,
   onSelect,
+  gitStatus,
 }: {
   repo: Repo
   onDelete: (id: number) => void
   isDeleting: boolean
   isSelected: boolean
   onSelect: (id: number, selected: boolean) => void
+  gitStatus?: GitStatusResponse
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id })
 
@@ -45,6 +49,7 @@ function SortableRepoCard({
             isDeleting={isDeleting}
             isSelected={isSelected}
             onSelect={onSelect}
+            gitStatus={gitStatus}
           />
         </div>
       </div>
@@ -66,6 +71,14 @@ export function RepoList() {
   } = useQuery({
     queryKey: ["repos"],
     queryFn: listRepos,
+  })
+
+  const repoIds = repos?.map((repo) => repo.id) || []
+
+  const { data: gitStatuses } = useQuery({
+    queryKey: ["reposGitStatus", repoIds],
+    queryFn: () => fetchReposGitStatus(repoIds),
+    enabled: repoIds.length > 0,
   })
 
   const deleteMutation = useMutation({
@@ -297,6 +310,7 @@ export function RepoList() {
                         }
                         isSelected={selectedRepos.has(repo.id)}
                         onSelect={handleSelectRepo}
+                        gitStatus={gitStatuses?.get(repo.id)}
                       />
                     ))}
                   </div>

@@ -16,7 +16,30 @@ export class GitAuthenticationError extends Error {
   }
 }
 
-function isAuthenticationError(error: any): boolean {
+interface ErrorWithMessage {
+  message?: string
+}
+
+function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'message' in error &&
+    typeof (error as ErrorWithMessage).message === 'string'
+  )
+}
+
+function getErrorMessage(error: unknown): string {
+  if (isErrorWithMessage(error)) {
+    return error.message
+  }
+  if (error instanceof Error) {
+    return error.message
+  }
+  return String(error)
+}
+
+function isAuthenticationError(error: ErrorWithMessage): boolean {
   const message = error?.message?.toLowerCase() || ''
   return message.includes('authentication failed') || 
          message.includes('invalid username or token') ||
@@ -37,8 +60,8 @@ async function executeGitWithFallback(
 
   try {
     return await executeCommand(cmd, { cwd, env, silent })
-  } catch (error: any) {
-    if (!isAuthenticationError(error)) {
+  } catch (error: unknown) {
+    if (!isAuthenticationError(error as ErrorWithMessage)) {
       throw error
     }
 
@@ -58,8 +81,8 @@ async function executeGitWithFallback(
       }
 
 
-    } catch (cliError: any) {
-      logger.warn(`CLI auth fallback failed:`, cliError.message)
+    } catch (cliError: unknown) {
+      logger.warn(`CLI auth fallback failed:`, getErrorMessage(cliError))
     }
 
     logger.warn(`All auth fallbacks failed, trying without auth (public repo)`)
@@ -213,11 +236,11 @@ export async function initLocalRepo(
       } else {
         throw new Error(`Directory exists but is not a valid Git repository. Please provide either a Git repository path or a simple directory name to create a new empty repository.`)
       }
-    } catch (error: any) {
-      if (error.message.includes('No such file or directory')) {
+    } catch (error: unknown) {
+      if (isErrorWithMessage(error) && error.message.includes('No such file or directory')) {
         throw error
       }
-      throw new Error(`Failed to process absolute path '${normalizedInputPath}': ${error.message}`)
+      throw new Error(`Failed to process absolute path '${normalizedInputPath}': ${getErrorMessage(error)}`)
     }
   } else {
     repoLocalPath = normalizedInputPath
@@ -245,9 +268,9 @@ export async function initLocalRepo(
   try {
     repo = db.createRepo(database, createRepoInput)
     logger.info(`Created database record for local repo: ${repoLocalPath} (id: ${repo.id})`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to create database record for local repo: ${repoLocalPath}`, error)
-    throw new Error(`Failed to register local repository '${repoLocalPath}': ${error.message}`)
+    throw new Error(`Failed to register local repository '${repoLocalPath}': ${getErrorMessage(error)}`)
   }
   
   try {
@@ -284,33 +307,33 @@ export async function initLocalRepo(
     db.updateRepoStatus(database, repo.id, 'ready')
     logger.info(`Local git repo ready: ${repoLocalPath}`)
     return { ...repo, cloneStatus: 'ready' }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to initialize local repo, rolling back: ${repoLocalPath}`, error)
     
     try {
       db.deleteRepo(database, repo.id)
       logger.info(`Rolled back database record for repo id: ${repo.id}`)
-    } catch (dbError: any) {
-      logger.error(`Failed to rollback database record for repo id ${repo.id}:`, dbError)
+    } catch (dbError: unknown) {
+      logger.error(`Failed to rollback database record for repo id ${repo.id}:`, getErrorMessage(dbError))
     }
     
     if (directoryCreated && !sourceWasGitRepo) {
       try {
         await executeCommand(['rm', '-rf', repoLocalPath], getReposPath())
         logger.info(`Rolled back directory: ${repoLocalPath}`)
-      } catch (fsError: any) {
-        logger.error(`Failed to rollback directory ${repoLocalPath}:`, fsError)
+      } catch (fsError: unknown) {
+        logger.error(`Failed to rollback directory ${repoLocalPath}:`, getErrorMessage(fsError))
       }
     } else if (sourceWasGitRepo) {
       try {
         await executeCommand(['rm', '-rf', repoLocalPath], getReposPath())
         logger.info(`Cleaned up copied directory: ${repoLocalPath}`)
-      } catch (fsError: any) {
-        logger.error(`Failed to clean up copied directory ${repoLocalPath}:`, fsError)
+      } catch (fsError: unknown) {
+        logger.error(`Failed to clean up copied directory ${repoLocalPath}:`, getErrorMessage(fsError))
       }
     }
     
-    throw new Error(`Failed to initialize local repository '${repoLocalPath}': ${error.message}`)
+    throw new Error(`Failed to initialize local repository '${repoLocalPath}': ${getErrorMessage(error)}`)
   }
 }
 
@@ -388,7 +411,7 @@ export async function cloneRepo(
           if (verifyRemoved.trim() === 'exists') {
             throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
           }
-        } catch (cleanupError: any) {
+        } catch (cleanupError: unknown) {
           logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
           throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
         }
@@ -396,8 +419,8 @@ export async function cloneRepo(
       
       try {
         await executeGitWithFallback(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
-      } catch (error: any) {
-        if (error.message.includes('destination path') && error.message.includes('already exists')) {
+      } catch (error: unknown) {
+        if (isErrorWithMessage(error) && error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
@@ -474,28 +497,28 @@ export async function cloneRepo(
         try {
           await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
           const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-          if (verifyRemoved.trim() === 'exists') {
-            throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
-          }
-        } catch (cleanupError: any) {
-          logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
-          throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
+        if (verifyRemoved.trim() === 'exists') {
+          throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
         }
+      } catch (cleanupError: unknown) {
+        logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
+        throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
       }
-      
+    }
+    
       try {
         const cloneCmd = branch
           ? ['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName]
           : ['git', 'clone', normalizedRepoUrl, worktreeDirName]
         
         await executeGitWithFallback(cloneCmd, { cwd: getReposPath(), env })
-      } catch (error: any) {
-        if (error.message.includes('destination path') && error.message.includes('already exists')) {
+      } catch (error: unknown) {
+        if (isErrorWithMessage(error) && error.message.includes('destination path') && error.message.includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        if (branch && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
+        if (branch && isErrorWithMessage(error) && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
           await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
           let localBranchExists = 'missing'
@@ -520,7 +543,7 @@ export async function cloneRepo(
     db.updateRepoStatus(database, repo.id, 'ready')
     logger.info(`Repo ready: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}${shouldUseWorktree ? ' (worktree)' : ''}`)
     return { ...repo, cloneStatus: 'ready' }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to create repo: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`, error)
     db.deleteRepo(database, repo.id)
     throw error
@@ -571,7 +594,7 @@ export async function listBranches(database: Database, repo: Repo): Promise<{ lo
       all: allBranches,
       current
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to list branches for repo ${repo.id}:`, error)
     throw error
   }
@@ -599,7 +622,7 @@ export async function switchBranch(database: Database, repoId: number, branch: s
     await checkoutBranchSafely(repoPath, sanitizedBranch)
     
     logger.info(`Successfully switched to branch: ${sanitizedBranch}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to switch branch for repo ${repoId}:`, error)
     throw error
   }
@@ -622,7 +645,7 @@ export async function createBranch(database: Database, repoId: number, branch: s
     logger.info(`Creating new branch: ${sanitizedBranch} in ${repo.localPath}`)
     await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
     logger.info(`Successfully created and switched to branch: ${sanitizedBranch}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to create branch for repo ${repoId}:`, error)
     throw error
   }
@@ -647,7 +670,7 @@ export async function pullRepo(database: Database, repoId: number): Promise<void
     
     db.updateLastPulled(database, repoId)
     logger.info(`Repo pulled successfully: ${repo.repoUrl}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to pull repo: ${repo.repoUrl}`, error)
     throw error
   }
@@ -679,23 +702,21 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
         // First try to remove the worktree properly
         await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', fullPath])
         logger.info(`Successfully removed worktree: ${dirName}`)
-      } catch (worktreeError: any) {
-        logger.warn(`Failed to remove worktree with normal command, trying force: ${worktreeError.message}`)
+      } catch (worktreeError: unknown) {
+        logger.warn(`Failed to remove worktree with normal command, trying force: ${getErrorMessage(worktreeError)}`)
         
         try {
-          // Try force removal
           await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', fullPath])
           logger.info(`Successfully force-removed worktree: ${dirName}`)
-        } catch (forceError: any) {
-          logger.warn(`Force worktree removal failed, trying prune: ${forceError.message}`)
+        } catch (forceError: unknown) {
+          logger.warn(`Force worktree removal failed, trying prune: ${getErrorMessage(forceError)}`)
           
           try {
-            // Prune worktree references and try again
             await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'])
             await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', fullPath])
             logger.info(`Successfully removed worktree after prune: ${dirName}`)
-          } catch (pruneError: any) {
-            logger.error(`All worktree removal methods failed: ${pruneError.message}`)
+          } catch (pruneError: unknown) {
+            logger.error(`All worktree removal methods failed: ${getErrorMessage(pruneError)}`)
             // Continue with directory removal anyway
           }
         }
@@ -720,21 +741,21 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
       try {
         logger.info(`Pruning worktree references in base repo: ${baseRepoPath}`)
         await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'])
-      } catch (pruneError: any) {
-        logger.warn(`Failed to prune worktree references: ${pruneError.message}`)
+      } catch (pruneError: unknown) {
+        logger.warn(`Failed to prune worktree references: ${getErrorMessage(pruneError)}`)
       }
     }
     
     db.deleteRepo(database, repoId)
     logger.info(`Repo deleted successfully: ${repoIdentifier}`)
-  } catch (error: any) {
+  } catch (error: unknown) {
     logger.error(`Failed to delete repo: ${repoIdentifier}`, error)
     throw error
   }
 }
 
 function normalizeRepoUrl(url: string): { url: string; name: string } {
-  const shorthandMatch = url.match(/^([^\/]+)\/([^\/]+)$/)
+  const shorthandMatch = url.match(/^([^/]+)\/([^/]+)$/)
   if (shorthandMatch) {
     const [, owner, repoName] = shorthandMatch as [string, string, string]
     return {
@@ -745,8 +766,8 @@ function normalizeRepoUrl(url: string): { url: string; name: string } {
 
   if (url.startsWith('http://') || url.startsWith('https://')) {
     const httpsUrl = url.replace(/^http:/, 'https:')
-    const urlWithoutGit = httpsUrl.replace(/\.git$/, '')
-    const match = urlWithoutGit.match(/\/([^\/]+)$/)
+    const urlWithoutGit = httpsUrl.replace(/.git$/, '')
+    const match = urlWithoutGit.match(/([^/]+)$/)
     return {
       url: urlWithoutGit,
       name: match?.[1] || `repo-${Date.now()}`
@@ -800,8 +821,8 @@ async function pruneWorktreeReferences(baseRepoPath: string): Promise<void> {
     logger.info(`Pruning worktree references for: ${baseRepoPath}`)
     await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'])
     logger.info(`Successfully pruned worktree references`)
-  } catch (error: any) {
-    logger.warn(`Failed to prune worktree references:`, error.message)
+  } catch (error: unknown) {
+    logger.warn(`Failed to prune worktree references:`, getErrorMessage(error))
   }
 }
 
@@ -824,8 +845,8 @@ async function cleanupStaleWorktree(baseRepoPath: string, worktreePath: string):
     logger.info(`No worktree reference found for ${worktreePath}, attempting prune`)
     await pruneWorktreeReferences(baseRepoPath)
     return true
-  } catch (error: any) {
-    logger.warn(`Failed to cleanup worktree ${worktreePath}:`, error.message)
+  } catch (error: unknown) {
+    logger.warn(`Failed to cleanup worktree ${worktreePath}:`, getErrorMessage(error))
     return false
   }
 }
@@ -876,9 +897,9 @@ async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, 
       
       logger.info(`Successfully created worktree: ${worktreePath}`)
       return
-    } catch (error: any) {
+    } catch (error: unknown) {
       const isLastAttempt = attempt === maxRetries
-      const errorMessage = error.message || ''
+      const errorMessage = isErrorWithMessage(error) ? error.message : ''
       
       if (errorMessage.includes('already used by worktree')) {
         logger.warn(`Worktree already exists, attempting cleanup (attempt ${attempt}/${maxRetries})`)
