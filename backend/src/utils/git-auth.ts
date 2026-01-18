@@ -14,13 +14,6 @@ export function isGitHubHttpsUrl(repoUrl: string): boolean {
   }
 }
 
-export function createSilentGitEnv(): Record<string, string> {
-  return {
-    GIT_TERMINAL_PROMPT: '0',
-    VSCODE_GIT_FETCH_SILENT: 'true'
-  }
-}
-
 export function getDefaultUsername(host: string): string {
   try {
     const parsed = new URL(host)

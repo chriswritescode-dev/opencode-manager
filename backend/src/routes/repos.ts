@@ -35,12 +35,14 @@ export function createRepoRoutes(database: Database, gitAuthService: GitAuthServ
       if (localPath) {
         repo = await repoService.initLocalRepo(
           database,
+          gitAuthService,
           localPath,
           branch
         )
       } else {
         repo = await repoService.cloneRepo(
           database,
+          gitAuthService,
           repoUrl!,
           branch,
           useWorktree
@@ -74,7 +76,8 @@ app.get('/', async (c) => {
 
       const reposWithCurrentBranch = await Promise.all(
         repos.map(async (repo) => {
-          const currentBranch = await repoService.getCurrentBranch(repo)
+          const env = gitAuthService.getGitEnvironment()
+          const currentBranch = await repoService.getCurrentBranch(repo, env)
           return { ...repo, currentBranch }
         })
       )
@@ -114,7 +117,7 @@ app.get('/', async (c) => {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const currentBranch = await repoService.getCurrentBranch(repo)
+      const currentBranch = await repoService.getCurrentBranch(repo, gitAuthService.getGitEnvironment())
       
       return c.json({ ...repo, currentBranch })
     } catch (error: unknown) {
@@ -144,7 +147,7 @@ app.get('/', async (c) => {
   app.post('/:id/pull', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      await repoService.pullRepo(database, id)
+      await repoService.pullRepo(database, gitAuthService, id)
       
       const repo = db.getRepoById(database, id)
       return c.json(repo)
@@ -214,10 +217,10 @@ app.get('/', async (c) => {
         return c.json({ error: 'branch is required' }, 400)
       }
       
-      await repoService.switchBranch(database, id, branch)
+      await repoService.switchBranch(database, gitAuthService, id, branch)
       
       const updatedRepo = db.getRepoById(database, id)
-      const currentBranch = await repoService.getCurrentBranch(updatedRepo!)
+      const currentBranch = await repoService.getCurrentBranch(updatedRepo!, gitAuthService.getGitEnvironment())
       
       return c.json({ ...updatedRepo, currentBranch })
     } catch (error: unknown) {
@@ -242,10 +245,10 @@ app.get('/', async (c) => {
         return c.json({ error: 'branch is required' }, 400)
       }
       
-      await repoService.createBranch(database, id, branch)
+      await repoService.createBranch(database, gitAuthService, id, branch)
       
       const updatedRepo = db.getRepoById(database, id)
-      const currentBranch = await repoService.getCurrentBranch(updatedRepo!)
+      const currentBranch = await repoService.getCurrentBranch(updatedRepo!, gitAuthService.getGitEnvironment())
       
       return c.json({ ...updatedRepo, currentBranch })
     } catch (error: unknown) {
@@ -262,8 +265,8 @@ app.get('/', async (c) => {
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
-      
-       const branches = await repoService.listBranches(database, repo)
+       
+       const branches = await repoService.listBranches(database, gitAuthService, repo)
 
       
       return c.json(branches)

@@ -2,7 +2,6 @@ import { executeCommand } from '../../utils/process'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
 import { GitAuthService } from '../git-auth'
-import { createSilentGitEnv } from '../../utils/git-auth'
 import type { Database } from 'bun:sqlite'
 import * as db from '../../db/queries'
 import path from 'path'
@@ -46,7 +45,7 @@ export class GitPushService {
   async getCurrentBranch(repoPath: string): Promise<string> {
     try {
       const fullPath = path.resolve(repoPath)
-      const env = createSilentGitEnv()
+      const env = this.gitAuthService.getGitEnvironment()
 
       const stdout = await executeCommand(
         ['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', 'HEAD'],
@@ -63,7 +62,7 @@ export class GitPushService {
   async getUpstreamBranch(repoPath: string): Promise<string | null> {
     try {
       const fullPath = path.resolve(repoPath)
-      const env = createSilentGitEnv()
+      const env = this.gitAuthService.getGitEnvironment()
 
       const stdout = await executeCommand(
         ['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', '@{upstream}'],

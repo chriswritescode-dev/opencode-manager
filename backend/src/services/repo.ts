@@ -4,9 +4,8 @@ import * as db from '../db/queries'
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
-import { SettingsService } from './settings'
-import { createGitEnv, createSilentGitEnv } from '../utils/git-auth'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import type { GitAuthService } from './git-auth'
 import path from 'path'
 
 interface ErrorWithMessage {
@@ -32,18 +31,18 @@ function getErrorMessage(error: unknown): string {
   return String(error)
 }
 
-async function hasCommits(repoPath: string): Promise<boolean> {
+async function hasCommits(repoPath: string, env: Record<string, string>): Promise<boolean> {
   try {
-    await executeCommand(['git', '-C', repoPath, 'rev-parse', 'HEAD'], { silent: true })
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', 'HEAD'], { env, silent: true })
     return true
   } catch {
     return false
   }
 }
 
-async function isValidGitRepo(repoPath: string): Promise<boolean> {
+async function isValidGitRepo(repoPath: string, env: Record<string, string>): Promise<boolean> {
   try {
-    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--git-dir'], { silent: true })
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--git-dir'], { env, silent: true })
     return true
   } catch {
     return false
@@ -61,36 +60,35 @@ async function checkRepoNameAvailable(name: string): Promise<boolean> {
   }
 }
 
-async function copyRepoToWorkspace(sourcePath: string, targetName: string): Promise<void> {
+async function copyRepoToWorkspace(sourcePath: string, targetName: string, env: Record<string, string>): Promise<void> {
   const reposPath = getReposPath()
   const targetPath = path.join(reposPath, targetName)
   
   logger.info(`Copying repo from ${sourcePath} to ${targetPath}`)
-  await executeCommand(['git', 'clone', '--local', sourcePath, targetName], { cwd: reposPath })
+  await executeCommand(['git', 'clone', '--local', sourcePath, targetName], { cwd: reposPath, env })
   logger.info(`Successfully copied repo to ${targetPath}`)
 }
 
 
-
-async function safeGetCurrentBranch(repoPath: string): Promise<string | null> {
+async function safeGetCurrentBranch(repoPath: string, env: Record<string, string>): Promise<string | null> {
   try {
-    const repoHasCommits = await hasCommits(repoPath)
+    const repoHasCommits = await hasCommits(repoPath, env)
     if (!repoHasCommits) {
       try {
-        const symbolicRef = await executeCommand(['git', '-C', repoPath, 'symbolic-ref', '--short', 'HEAD'], { silent: true })
+        const symbolicRef = await executeCommand(['git', '-C', repoPath, 'symbolic-ref', '--short', 'HEAD'], { env, silent: true })
         return symbolicRef.trim()
       } catch {
         return null
       }
     }
-    const currentBranch = await executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { silent: true })
+    const currentBranch = await executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { env, silent: true })
     return currentBranch.trim()
   } catch {
     return null
   }
 }
 
-async function checkoutBranchSafely(repoPath: string, branch: string): Promise<void> {
+async function checkoutBranchSafely(repoPath: string, branch: string, env: Record<string, string>): Promise<void> {
   const sanitizedBranch = branch
     .replace(/^refs\/heads\//, '')
     .replace(/^refs\/remotes\//, '')
@@ -98,7 +96,7 @@ async function checkoutBranchSafely(repoPath: string, branch: string): Promise<v
 
   let localBranchExists = false
   try {
-    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/heads/${sanitizedBranch}`], { silent: true })
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/heads/${sanitizedBranch}`], { env, silent: true })
     localBranchExists = true
   } catch {
     localBranchExists = false
@@ -106,7 +104,7 @@ async function checkoutBranchSafely(repoPath: string, branch: string): Promise<v
 
   let remoteBranchExists = false
   try {
-    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${sanitizedBranch}`], { silent: true })
+    await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', `refs/remotes/origin/${sanitizedBranch}`], { env, silent: true })
     remoteBranchExists = true
   } catch {
     remoteBranchExists = false
@@ -114,34 +112,24 @@ async function checkoutBranchSafely(repoPath: string, branch: string): Promise<v
 
   if (localBranchExists) {
     logger.info(`Checking out existing local branch: ${sanitizedBranch}`)
-    await executeCommand(['git', '-C', repoPath, 'checkout', sanitizedBranch])
+    await executeCommand(['git', '-C', repoPath, 'checkout', sanitizedBranch], { env })
   } else if (remoteBranchExists) {
     logger.info(`Checking out remote branch: ${sanitizedBranch}`)
-    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch, `origin/${sanitizedBranch}`])
+    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch, `origin/${sanitizedBranch}`], { env })
   } else {
     logger.info(`Creating new branch: ${sanitizedBranch}`)
-    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
-  }
-}
-
-function getGitEnv(database: Database): Record<string, string> {
-  try {
-    const settingsService = new SettingsService(database)
-    const settings = settingsService.getSettings('default')
-    const gitCredentials = settings.preferences.gitCredentials || []
-
-    return createGitEnv(gitCredentials)
-  } catch {
-    return createSilentGitEnv()
+    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch], { env })
   }
 }
 
 export async function initLocalRepo(
   database: Database,
+  gitAuthService: GitAuthService,
   localPath: string,
   branch?: string
 ): Promise<Repo> {
   const normalizedInputPath = localPath.trim().replace(/\/+$/, '')
+  const env = gitAuthService.getGitEnvironment()
   
   let targetPath: string
   let repoLocalPath: string
@@ -159,7 +147,7 @@ export async function initLocalRepo(
         throw new Error(`No such file or directory: '${normalizedInputPath}'`)
       }
       
-      const isGit = await isValidGitRepo(normalizedInputPath)
+      const isGit = await isValidGitRepo(normalizedInputPath, env)
       
       if (isGit) {
         sourceWasGitRepo = true
@@ -173,7 +161,7 @@ export async function initLocalRepo(
         repoLocalPath = baseName
         
         logger.info(`Copying existing git repo from ${normalizedInputPath} to workspace as ${baseName}`)
-        await copyRepoToWorkspace(normalizedInputPath, baseName)
+        await copyRepoToWorkspace(normalizedInputPath, baseName, env)
         targetPath = path.join(getReposPath(), baseName)
       } else {
         throw new Error(`Directory exists but is not a valid Git repository. Please provide either a Git repository path or a simple directory name to create a new empty repository.`)
@@ -230,10 +218,10 @@ export async function initLocalRepo(
     } else {
       if (branch) {
         logger.info(`Switching to branch ${branch} for copied repo`)
-        const currentBranch = await safeGetCurrentBranch(targetPath)
+        const currentBranch = await safeGetCurrentBranch(targetPath, env)
         
         if (currentBranch !== branch) {
-          await checkoutBranchSafely(targetPath, branch)
+          await checkoutBranchSafely(targetPath, branch, env)
         }
       }
     }
@@ -281,6 +269,7 @@ export async function initLocalRepo(
 
 export async function cloneRepo(
   database: Database,
+  gitAuthService: GitAuthService,
   repoUrl: string,
   branch?: string,
   useWorktree: boolean = false
@@ -318,7 +307,7 @@ export async function cloneRepo(
   const repo = db.createRepo(database, createRepoInput)
 
   try {
-    const env = getGitEnv(database)
+    const env = gitAuthService.getGitEnvironment()
 
     if (shouldUseWorktree) {
       logger.info(`Creating worktree for branch: ${branch}`)
@@ -329,7 +318,7 @@ export async function cloneRepo(
        await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env })
 
       
-      await createWorktreeSafely(baseRepoPath, worktreePath, branch)
+       await createWorktreeSafely(baseRepoPath, worktreePath, branch, env)
       
       const worktreeVerified = await executeCommand(['test', '-d', worktreePath])
         .then(() => true)
@@ -492,16 +481,20 @@ export async function cloneRepo(
   }
 }
 
-export async function getCurrentBranch(repo: Repo): Promise<string | null> {
+export async function getCurrentBranch(repo: Repo, env: Record<string, string>): Promise<string | null> {
   const repoPath = path.resolve(getReposPath(), repo.localPath)
-  const branch = await safeGetCurrentBranch(repoPath)
+  const branch = await safeGetCurrentBranch(repoPath, env)
   return branch || repo.branch || repo.defaultBranch || null
 }
 
-export async function listBranches(database: Database, repo: Repo): Promise<{ local: string[], all: string[], current: string | null }> {
+export async function listBranches(
+  database: Database,
+  gitAuthService: GitAuthService,
+  repo: Repo
+): Promise<{ local: string[], all: string[], current: string | null }> {
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
-    const env = getGitEnv(database)
+    const env = gitAuthService.getGitEnvironment()
 
     if (!repo.isLocal) {
       try {
@@ -523,7 +516,7 @@ export async function listBranches(database: Database, repo: Repo): Promise<{ lo
       logger.warn(`Failed to get remote branches for repo ${repo.id}:`, error)
     }
     
-    const current = await getCurrentBranch(repo)
+    const current = await getCurrentBranch(repo, env)
     
     const remoteOnlyBranches = remoteBranches
       .map(b => b.replace(/^[^/]+\//, ''))
@@ -542,7 +535,12 @@ export async function listBranches(database: Database, repo: Repo): Promise<{ lo
   }
 }
 
-export async function switchBranch(database: Database, repoId: number, branch: string): Promise<void> {
+export async function switchBranch(
+  database: Database,
+  gitAuthService: GitAuthService,
+  repoId: number,
+  branch: string
+): Promise<void> {
   const repo = db.getRepoById(database, repoId)
   if (!repo) {
     throw new Error(`Repo not found: ${repoId}`)
@@ -550,7 +548,7 @@ export async function switchBranch(database: Database, repoId: number, branch: s
   
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
-    const env = getGitEnv(database)
+    const env = gitAuthService.getGitEnvironment()
 
     const sanitizedBranch = branch
       .replace(/^refs\/heads\//, '')
@@ -561,7 +559,7 @@ export async function switchBranch(database: Database, repoId: number, branch: s
 
     await executeCommand(['git', '-C', repoPath, 'fetch', '--all'], { env })
     
-    await checkoutBranchSafely(repoPath, sanitizedBranch)
+    await checkoutBranchSafely(repoPath, sanitizedBranch, env)
     
     logger.info(`Successfully switched to branch: ${sanitizedBranch}`)
   } catch (error: unknown) {
@@ -570,7 +568,7 @@ export async function switchBranch(database: Database, repoId: number, branch: s
   }
 }
 
-export async function createBranch(database: Database, repoId: number, branch: string): Promise<void> {
+export async function createBranch(database: Database, gitAuthService: GitAuthService, repoId: number, branch: string): Promise<void> {
   const repo = db.getRepoById(database, repoId)
   if (!repo) {
     throw new Error(`Repo not found: ${repoId}`)
@@ -578,6 +576,7 @@ export async function createBranch(database: Database, repoId: number, branch: s
   
   try {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
+    const env = gitAuthService.getGitEnvironment()
     
     const sanitizedBranch = branch
       .replace(/^refs\/heads\//, '')
@@ -585,7 +584,7 @@ export async function createBranch(database: Database, repoId: number, branch: s
       .replace(/^origin\//, '')
 
     logger.info(`Creating new branch: ${sanitizedBranch} in ${repo.localPath}`)
-    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch])
+    await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch], { env })
     logger.info(`Successfully created and switched to branch: ${sanitizedBranch}`)
   } catch (error: unknown) {
     logger.error(`Failed to create branch for repo ${repoId}:`, error)
@@ -593,7 +592,11 @@ export async function createBranch(database: Database, repoId: number, branch: s
   }
 }
 
-export async function pullRepo(database: Database, repoId: number): Promise<void> {
+export async function pullRepo(
+  database: Database,
+  gitAuthService: GitAuthService,
+  repoId: number
+): Promise<void> {
   const repo = db.getRepoById(database, repoId)
   if (!repo) {
     throw new Error(`Repo not found: ${repoId}`)
@@ -605,7 +608,7 @@ export async function pullRepo(database: Database, repoId: number): Promise<void
   }
   
   try {
-    const env = getGitEnv(database)
+    const env = gitAuthService.getGitEnvironment()
 
     logger.info(`Pulling repo: ${repo.repoUrl}`)
     await executeCommand(['git', '-C', path.resolve(getReposPath(), repo.localPath), 'pull'], { env })
@@ -795,29 +798,29 @@ async function cleanupStaleWorktree(baseRepoPath: string, worktreePath: string):
 
 
 
-async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string): Promise<void> {
-  const currentBranch = await safeGetCurrentBranch(baseRepoPath)
+async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>): Promise<void> {
+  const currentBranch = await safeGetCurrentBranch(baseRepoPath, env)
   if (currentBranch === branch) {
     logger.info(`Branch '${branch}' is checked out in main repo, switching away...`)
-    const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'])
+    const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'], { env })
       .then(ref => ref.trim().replace('origin/', ''))
       .catch(() => 'main')
     
     try {
-      await executeCommand(['git', '-C', baseRepoPath, 'checkout', defaultBranch])
+      await executeCommand(['git', '-C', baseRepoPath, 'checkout', defaultBranch], { env })
     } catch {
       logger.warn(`Could not switch to ${defaultBranch}, trying 'main'`)
-      await executeCommand(['git', '-C', baseRepoPath, 'checkout', 'main'])
+      await executeCommand(['git', '-C', baseRepoPath, 'checkout', 'main'], { env })
     }
   }
   
   let branchExists = false
   try {
-    await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/heads/${branch}`])
+    await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/heads/${branch}`], { env })
     branchExists = true
   } catch {
     try {
-      await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/remotes/origin/${branch}`])
+      await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/remotes/origin/${branch}`], { env })
       branchExists = true
     } catch {
       branchExists = false
@@ -831,10 +834,10 @@ async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, 
       logger.info(`Creating worktree (attempt ${attempt}/${maxRetries}): ${branch} -> ${worktreePath}`)
       
       if (branchExists) {
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', worktreePath, branch])
+        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', worktreePath, branch], { env })
       } else {
         logger.info(`Branch '${branch}' does not exist, creating it in worktree`)
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', '-b', branch, worktreePath])
+        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', '-b', branch, worktreePath], { env })
       }
       
       logger.info(`Successfully created worktree: ${worktreePath}`)
