@@ -30,8 +30,9 @@ function main(argv: string[]): void {
     return fatal(`Invalid type: ${askpassType}`)
   }
 
-  if (process.env['VSCODE_GIT_COMMAND'] === 'fetch' && process.env['VSCODE_GIT_FETCH_SILENT']) {
-    return fatal('Skip silent fetch commands')
+  if (process.env['VSCODE_GIT_FETCH_SILENT']) {
+    fs.writeFileSync(output, '\n')
+    return process.exit(0)
   }
 
   const ipcHandlePath = process.env['VSCODE_GIT_IPC_HANDLE']
