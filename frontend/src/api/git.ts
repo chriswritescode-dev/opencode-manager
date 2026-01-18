@@ -81,7 +81,7 @@ export async function fetchGitLog(repoId: number, limit?: number): Promise<{ com
   return response.json()
 }
 
-export async function gitFetch(repoId: number): Promise<{ stdout: string; stderr: string }> {
+export async function gitFetch(repoId: number): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/fetch`, {
     method: 'POST',
   })
@@ -93,7 +93,7 @@ export async function gitFetch(repoId: number): Promise<{ stdout: string; stderr
   return response.json()
 }
 
-export async function gitPull(repoId: number): Promise<{ stdout: string; stderr: string }> {
+export async function gitPull(repoId: number): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/pull`, {
     method: 'POST',
   })
@@ -105,9 +105,11 @@ export async function gitPull(repoId: number): Promise<{ stdout: string; stderr:
   return response.json()
 }
 
-export async function gitPush(repoId: number): Promise<{ stdout: string; stderr: string }> {
+export async function gitPush(repoId: number, setUpstream: boolean = false): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/push`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ setUpstream }),
   })
 
   if (!response.ok) {
@@ -117,7 +119,7 @@ export async function gitPush(repoId: number): Promise<{ stdout: string; stderr:
   return response.json()
 }
 
-export async function gitCommit(repoId: number, message: string, stagedPaths?: string[]): Promise<{ stdout: string; stderr: string }> {
+export async function gitCommit(repoId: number, message: string, stagedPaths?: string[]): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -131,7 +133,7 @@ export async function gitCommit(repoId: number, message: string, stagedPaths?: s
   return response.json()
 }
 
-export async function gitStageFiles(repoId: number, paths: string[]): Promise<{ stdout: string; stderr: string }> {
+export async function gitStageFiles(repoId: number, paths: string[]): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/stage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -145,7 +147,7 @@ export async function gitStageFiles(repoId: number, paths: string[]): Promise<{ 
   return response.json()
 }
 
-export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<{ stdout: string; stderr: string }> {
+export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/unstage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

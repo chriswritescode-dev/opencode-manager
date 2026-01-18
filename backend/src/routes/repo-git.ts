@@ -272,9 +272,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       }
 
       const limit = parseInt(c.req.query('limit') || '10', 10)
-      const log = await gitLogService.getLog(id, database, limit)
+      const commits = await gitLogService.getLog(id, database, limit)
 
-      return c.json(log)
+      return c.json({ commits })
     } catch (error: unknown) {
       logger.error('Failed to get git log:', error)
       return c.json({ error: getErrorMessage(error) }, 500)

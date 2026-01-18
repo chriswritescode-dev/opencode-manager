@@ -41,9 +41,9 @@ export function useGit(repoId: number | undefined) {
   })
 
   const push = useMutation({
-    mutationFn: () => {
+    mutationFn: (options?: { setUpstream?: boolean }) => {
       if (!repoId) throw new Error('No repo ID')
-      return gitPush(repoId)
+      return gitPush(repoId, options?.setUpstream ?? false)
     },
     onSuccess: () => {
       invalidateCache()

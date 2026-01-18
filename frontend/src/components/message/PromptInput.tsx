@@ -426,7 +426,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           return
         }
       } catch {
-        // Ignore clipboard read errors
       }
 
       event.preventDefault()
