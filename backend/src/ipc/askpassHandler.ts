@@ -36,6 +36,8 @@ export class AskpassHandler implements IPCHandler {
       VSCODE_GIT_ASKPASS_MAIN: path.join(scriptsDir, 'askpass-main.ts'),
     }
 
+    logger.info(`AskpassHandler initialized: execPath=${process.execPath}, GIT_ASKPASS=${this.env.GIT_ASKPASS}, VSCODE_GIT_ASKPASS_NODE=${this.env.VSCODE_GIT_ASKPASS_NODE}, VSCODE_GIT_ASKPASS_MAIN=${this.env.VSCODE_GIT_ASKPASS_MAIN}`)
+
     if (this.ipcServer) {
       this.ipcServer.registerHandler('askpass', this)
       logger.info('AskpassHandler registered with IPC server')
