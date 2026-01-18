@@ -12,11 +12,13 @@ import { GitFetchPullService } from '../services/git/GitFetchPullService'
 import { GitBranchService } from '../services/git/GitBranchService'
 import { GitAuthService } from '../services/git-auth'
 import { GitDiffService } from '../services/git/GitDiffService'
+import { GitAskpassService } from '../services/git/GitAskpassService'
 import type { GitStatusResponse } from '../types/git'
 
 export function createRepoGitRoutes(database: Database) {
   const app = new Hono()
   const gitAuthService = new GitAuthService()
+  const gitAskpassService = new GitAskpassService()
   const gitDiffService = new GitDiffService(gitAuthService)
   const gitFetchPullService = new GitFetchPullService(gitAuthService)
   const gitBranchService = new GitBranchService(gitAuthService)
@@ -307,6 +309,42 @@ export function createRepoGitRoutes(database: Database) {
     } catch (error: unknown) {
       logger.error('Failed to reset to commit:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.get('/:id/git/branches', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = db.getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const branches = await gitBranchService.getBranches(id, database)
+      const status = await gitBranchService.getBranchStatus(id, database)
+
+      return c.json({ branches, status })
+    } catch (error: unknown) {
+      logger.error('Failed to get branches:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.post('/git/askpass', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { prompt, cwd } = body
+
+      if (!prompt || !cwd) {
+        return c.json({ token: '' })
+      }
+
+      const token = await gitAskpassService.getCredential(prompt, cwd, database)
+      return c.json({ token })
+    } catch (error: unknown) {
+      logger.error('Failed to get askpass credential:', error)
+      return c.json({ token: '' })
     }
   })
 

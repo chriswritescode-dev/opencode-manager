@@ -48,23 +48,16 @@ export class GitDiffService implements GitDiffProvider {
   }
 
   private async getUntrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>): Promise<FileDiffResponse> {
-    try {
-      const diff = await executeCommand([
-        'git', '-C', repoPath, 'diff', '--no-index', '--', '/dev/null', filePath
-      ], { env })
+    const result = await executeCommand([
+      'git', '-C', repoPath, 'diff', '--no-index', '--', '/dev/null', filePath
+    ], { env, ignoreExitCode: true })
 
-      return this.parseDiffOutput(diff, 'untracked', filePath)
-    } catch (error) {
-      logger.warn(`Failed to get diff for untracked file ${filePath}:`, error)
-      return {
-        path: filePath,
-        status: 'untracked',
-        diff: `New file: ${filePath}`,
-        additions: 0,
-        deletions: 0,
-        isBinary: false
-      }
+    if (typeof result === 'string') {
+      return this.parseDiffOutput(result, 'untracked', filePath)
     }
+
+    // Non-zero exit, but still parse stdout
+    return this.parseDiffOutput((result as { stdout: string }).stdout, 'untracked', filePath)
   }
 
   private async getTrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>, options?: GitDiffOptions): Promise<FileDiffResponse> {

@@ -93,7 +93,7 @@ export function SourceControlPanel({
         <div className="flex items-center gap-2">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 hover:bg-accent/50 rounded px-1 py-0.5 transition-colors">
+              <button className="flex items-center gap-2 hover:bg-accent rounded px-1 py-0.5 transition-colors">
                 <GitBranch className="w-4 h-4 text-muted-foreground" />
                 <span className="text-sm font-medium">{currentBranch}</span>
                 <ChevronDown className="w-3 h-3 text-muted-foreground" />
@@ -185,7 +185,7 @@ export function SourceControlPanel({
                 'flex items-center gap-1.5 px-3 py-2 text-sm transition-colors border-b-2 -mb-px',
                 activeTab === tab.id
                   ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/30'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
               )}
               onClick={() => setActiveTab(tab.id)}
             >

@@ -119,7 +119,7 @@ export function GitFlatFileList({
         return (
           <div key={status}>
             <button
-              className="flex items-center gap-1 px-2 py-1 w-full text-left hover:bg-accent/30 rounded transition-colors"
+              className="flex items-center gap-1 px-2 py-1 w-full text-left hover:bg-accent rounded transition-colors"
               onClick={() => toggleGroup(status)}
             >
               {isCollapsed ? (

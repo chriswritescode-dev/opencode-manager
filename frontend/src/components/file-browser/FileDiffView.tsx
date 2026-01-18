@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { CopyButton } from '@/components/ui/copy-button'
 import { cn } from '@/lib/utils'
 import type { GitFileStatusType } from '@/types/git'
+import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
 
 interface FileDiffViewProps {
   repoId: number
@@ -53,12 +54,12 @@ function parseDiff(diff: string): DiffLine[] {
 }
 
 const statusConfig: Record<GitFileStatusType, { icon: typeof FileText; color: string; bgColor: string; label: string }> = {
-  modified: { icon: FileEdit, color: 'text-yellow-500', bgColor: 'bg-yellow-500/10', label: 'Modified' },
-  added: { icon: FilePlus, color: 'text-green-500', bgColor: 'bg-green-500/10', label: 'Added' },
-  deleted: { icon: FileX, color: 'text-red-500', bgColor: 'bg-red-500/10', label: 'Deleted' },
-  renamed: { icon: FileText, color: 'text-blue-500', bgColor: 'bg-blue-500/10', label: 'Renamed' },
-  untracked: { icon: File, color: 'text-muted-foreground', bgColor: 'bg-muted/50', label: 'Untracked' },
-  copied: { icon: FileText, color: 'text-purple-500', bgColor: 'bg-purple-500/10', label: 'Copied' },
+  modified: { icon: FileEdit, color: GIT_STATUS_COLORS.modified, bgColor: 'bg-amber-500/10', label: GIT_STATUS_LABELS.modified },
+  added: { icon: FilePlus, color: GIT_STATUS_COLORS.added, bgColor: 'bg-emerald-500/10', label: GIT_STATUS_LABELS.added },
+  deleted: { icon: FileX, color: GIT_STATUS_COLORS.deleted, bgColor: 'bg-rose-500/10', label: GIT_STATUS_LABELS.deleted },
+  renamed: { icon: FileText, color: GIT_STATUS_COLORS.renamed, bgColor: 'bg-blue-500/10', label: GIT_STATUS_LABELS.renamed },
+  untracked: { icon: File, color: GIT_STATUS_COLORS.untracked, bgColor: 'bg-muted/50', label: GIT_STATUS_LABELS.untracked },
+  copied: { icon: FileText, color: GIT_STATUS_COLORS.copied, bgColor: 'bg-emerald-500/10', label: GIT_STATUS_LABELS.copied },
 }
 
 
@@ -80,17 +81,17 @@ function DiffLineComponent({ line, showLineNumbers, onLineClick }: { line: DiffL
     )
   }
 
-  const bgClass = line.type === 'add' 
-    ? 'bg-green-500/10' 
-    : line.type === 'remove' 
-      ? 'bg-red-500/10' 
+  const bgClass = line.type === 'add'
+    ? 'bg-emerald-500/10'
+    : line.type === 'remove'
+      ? 'bg-rose-500/10'
       : ''
 
   const textClass = line.type === 'add'
-    ? 'text-green-600 dark:text-green-400'
+    ? 'text-emerald-600 dark:text-emerald-400'
     : line.type === 'remove'
-      ? 'text-red-600 dark:text-red-400'
-      : 'text-foreground'
+      ? 'text-rose-600 dark:text-rose-400'
+    : 'text-foreground'
 
   const lineNumber = line.newLineNumber ?? line.oldLineNumber
   const isClickable = onLineClick && lineNumber !== undefined

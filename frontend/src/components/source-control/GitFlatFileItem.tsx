@@ -40,7 +40,7 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
   return (
     <div
       className={cn(
-        'group flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent/50 transition-colors',
+        'group flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent transition-colors',
         isSelected && 'bg-accent'
       )}
       onClick={() => onSelect(file.path)}

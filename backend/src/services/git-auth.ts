@@ -11,7 +11,7 @@ function isWriteOperation(gitCommand: string[]): boolean {
 }
 
 export class GitAuthService {
-  async getGitEnvironment(repoId: number, database: Database, gitCommand: string[] = []): Promise<Record<string, string>> {
+  async getGitEnvironment(repoId: number, database: Database, gitCommand: string[] = [], silent: boolean = false): Promise<Record<string, string>> {
     try {
       const settingsService = new SettingsService(database)
       const settings = settingsService.getSettings('default')
@@ -20,13 +20,6 @@ export class GitAuthService {
       // Get repo host
       const repo = getRepoById(database, repoId)
       if (!repo) {
-        return createNoPromptGitEnv()
-      }
-
-      const isWrite = isWriteOperation(gitCommand)
-      const requiresAuth = repo.requiresAuth || repo.requires_auth || false
-
-      if (!isWrite && !requiresAuth) {
         return createNoPromptGitEnv()
       }
 
@@ -40,17 +33,17 @@ export class GitAuthService {
         return createNoPromptGitEnv()
       }
 
-      // Create env with specific credential
-      const username = credential.username || getDefaultUsername(credential.host)
-      const basicAuth = Buffer.from(`${username}:${credential.token}`, 'utf8').toString('base64')
-      const normalizedHost = normalizeHost(credential.host)
+      if (silent) {
+        return createNoPromptGitEnv()
+      }
 
+      // Create env with askpass script
+      const askpassPath = path.join(__dirname, '../../utils/git-askpass.ts')
       return {
         GIT_TERMINAL_PROMPT: '0',
-        GIT_ASKPASS: '/bin/true',
-        GIT_CONFIG_COUNT: '1',
-        GIT_CONFIG_KEY_0: `http.${normalizedHost}.extraheader`,
-        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicAuth}`
+        GIT_ASKPASS: `bun run ${askpassPath}`,
+        SSH_ASKPASS: `bun run ${askpassPath}`,
+        GIT_CONFIG_COUNT: '0'
       }
     } catch {
       return createNoPromptGitEnv()

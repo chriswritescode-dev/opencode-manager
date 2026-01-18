@@ -22,7 +22,7 @@ export class GitBranchService {
       .split('\n')
       .map(line => line.trim().replace(/^\*?\s*/, ''))
       .filter(line => line.length > 0)
-      .map(branch => branch.replace('remotes/origin/', ''))
+      .map(branch => branch.startsWith('remotes/origin/') ? branch.replace('remotes/origin/', 'origin/') : branch)
       .filter((value, index, self) => self.indexOf(value) === index)
 
     return branches

@@ -15,7 +15,7 @@ export class GitFetchPullService {
 
     const fullPath = path.resolve(repo.fullPath)
     const args = ['git', '-C', fullPath, 'fetch', '--all', '--prune-tags']
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args)
+    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args, true)
 
     const result = await executeCommand(args, { env })
 
@@ -29,8 +29,29 @@ export class GitFetchPullService {
     }
 
     const fullPath = path.resolve(repo.fullPath)
+
+    // Check if has upstream
+    try {
+      await executeCommand(['git', '-C', fullPath, 'rev-parse', '@{upstream}'], { silent: true })
+    } catch {
+      // No upstream, try to set it
+      const currentBranch = (await executeCommand(['git', '-C', fullPath, 'branch', '--show-current'], { silent: true })).trim()
+      if (!currentBranch) {
+        throw new Error('No current branch')
+      }
+
+      // Check if remote origin exists
+      try {
+        await executeCommand(['git', '-C', fullPath, 'remote', 'get-url', 'origin'], { silent: true })
+        // Set upstream
+        await executeCommand(['git', '-C', fullPath, 'branch', '--set-upstream-to=origin/' + currentBranch, currentBranch], { silent: true })
+      } catch {
+        throw new Error('No upstream branch set and no remote origin available')
+      }
+    }
+
     const args = ['git', '-C', fullPath, 'pull']
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args)
+    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args, false)
 
     const result = await executeCommand(args, { env })
 

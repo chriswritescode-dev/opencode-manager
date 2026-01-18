@@ -7,6 +7,11 @@ export interface GitCredential {
   username?: string
 }
 
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
   try {
     const parsed = new URL(repoUrl)
@@ -19,7 +24,7 @@ export function isGitHubHttpsUrl(repoUrl: string): boolean {
 export function createNoPromptGitEnv(): Record<string, string> {
   return {
     GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: '/bin/true'
+    GIT_ASKPASS: ''
   }
 }
 
@@ -48,9 +53,11 @@ export function normalizeHost(host: string): string {
 }
 
 export function createGitEnv(credentials: GitCredential[]): Record<string, string> {
-  const env: Record<string, string> = { 
+  const askpassPath = path.join(__dirname, 'git-askpass.ts')
+  const env: Record<string, string> = {
     GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: '/bin/true',
+    GIT_ASKPASS: `bun run ${askpassPath}`,
+    SSH_ASKPASS: `bun run ${askpassPath}`,
     GIT_CONFIG_COUNT: '0'
   }
   

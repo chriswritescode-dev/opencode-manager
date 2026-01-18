@@ -27,15 +27,7 @@ export class GitLogService {
 
       const repoPath = path.resolve(getReposPath(), repo.localPath)
 
-      if (!repo.isLocal) {
-        try {
-          const fetchArgs = ['git', '-C', repoPath, 'fetch', '--all']
-          const fetchEnv = await this.gitAuthService.getGitEnvironment(repoId, database, fetchArgs)
-          await executeCommand(fetchArgs, { env: fetchEnv })
-        } catch (error) {
-          logger.warn(`Failed to fetch remote for repo ${repoId}, using cached branch info:`, error)
-        }
-      }
+
 
       const logArgs = [
         'git',
@@ -47,7 +39,7 @@ export class GitLogService {
         String(limit),
         '--format=%H|%an|%ae|%ai|%s'
       ]
-      const logEnv = await this.gitAuthService.getGitEnvironment(repoId, database, logArgs)
+      const logEnv = await this.gitAuthService.getGitEnvironment(repoId, database, logArgs, true)
       const output = await executeCommand(logArgs, { env: logEnv })
 
       const lines = output.trim().split('\n')
@@ -95,7 +87,7 @@ export class GitLogService {
         hash,
         '-1'
       ]
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database, logArgs)
+      const env = await this.gitAuthService.getGitEnvironment(repoId, database, logArgs, true)
 
       const output = await executeCommand(logArgs, { env })
 
