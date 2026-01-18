@@ -39,7 +39,7 @@ export class GitLogService {
         String(limit),
         '--format=%H|%an|%ae|%ai|%s'
       ]
-      const logEnv = await this.gitAuthService.getGitEnvironment(repoId, database, logArgs, true)
+      const logEnv = this.gitAuthService.getGitEnvironment(true)
       const output = await executeCommand(logArgs, { env: logEnv })
 
       const lines = output.trim().split('\n')
@@ -87,7 +87,7 @@ export class GitLogService {
         hash,
         '-1'
       ]
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database, logArgs, true)
+      const env = this.gitAuthService.getGitEnvironment(true)
 
       const output = await executeCommand(logArgs, { env })
 

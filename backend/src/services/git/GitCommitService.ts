@@ -1,6 +1,5 @@
 import { GitAuthService } from '../git-auth'
 import { logger } from '../../utils/logger'
-import { getErrorMessage } from '../../utils/error-utils'
 import * as db from '../../db/queries'
 import type { Database } from 'bun:sqlite'
 import { executeCommand } from '../../utils/process'
@@ -18,7 +17,7 @@ export class GitCommitService {
       }
 
       const repoPath = repo.fullPath
-      const authEnv = await this.gitAuthService.getGitEnvironment(repoId, database)
+      const authEnv = this.gitAuthService.getGitEnvironment()
 
       // Get identity env
       const settingsService = new SettingsService(database)
@@ -53,7 +52,7 @@ export class GitCommitService {
       }
 
       const repoPath = repo.fullPath
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+      const env = this.gitAuthService.getGitEnvironment()
 
       if (paths.length === 0) {
         return ''
@@ -77,7 +76,7 @@ export class GitCommitService {
       }
 
       const repoPath = repo.fullPath
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+      const env = this.gitAuthService.getGitEnvironment()
 
       if (paths.length === 0) {
         return ''
@@ -103,7 +102,7 @@ export class GitCommitService {
       }
 
       const repoPath = repo.fullPath
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+      const env = this.gitAuthService.getGitEnvironment()
 
       const args = ['git', '-C', repoPath, 'reset', '--hard', commitHash]
       const result = await executeCommand(args, { env })

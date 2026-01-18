@@ -1,7 +1,6 @@
 import { GitAuthService } from '../git-auth'
 import { executeCommand } from '../../utils/process'
 import { logger } from '../../utils/logger'
-import { getErrorMessage } from '../../utils/error-utils'
 import * as db from '../../db/queries'
 import type { Database } from 'bun:sqlite'
 import type { GitFileStatus, GitStatusResponse } from '../../types/git'
@@ -17,7 +16,7 @@ export class GitStatusService {
       }
 
       const repoPath = repo.fullPath
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+      const env = this.gitAuthService.getGitEnvironment()
 
       const [branch, branchStatus, porcelainOutput] = await Promise.all([
         this.getCurrentBranch(repoPath, env),

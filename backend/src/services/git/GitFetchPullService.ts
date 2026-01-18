@@ -15,7 +15,7 @@ export class GitFetchPullService {
 
     const fullPath = path.resolve(repo.fullPath)
     const args = ['git', '-C', fullPath, 'fetch', '--all', '--prune-tags']
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args, true)
+    const env = this.gitAuthService.getGitEnvironment(true)
 
     const result = await executeCommand(args, { env })
 
@@ -51,7 +51,7 @@ export class GitFetchPullService {
     }
 
     const args = ['git', '-C', fullPath, 'pull']
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args, false)
+    const env = this.gitAuthService.getGitEnvironment(false)
 
     const result = await executeCommand(args, { env })
 

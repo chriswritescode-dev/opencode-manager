@@ -1,52 +1,29 @@
-import { SettingsService } from './settings'
+import type { IPCServer } from '../ipc/ipcServer'
 import type { Database } from 'bun:sqlite'
-import { executeCommand } from '../utils/process'
-import { getRepoById } from '../db/queries'
-import path from 'path'
-import { createSilentGitEnv, getCredentialForHost, getDefaultUsername, normalizeHost } from '../utils/git-auth'
-
-function isWriteOperation(gitCommand: string[]): boolean {
-  const writeOps = ['push']
-  return gitCommand.some(arg => writeOps.includes(arg))
-}
+import { AskpassHandler } from '../ipc/askpassHandler'
 
 export class GitAuthService {
-  async getGitEnvironment(repoId: number, database: Database, gitCommand: string[] = [], silent: boolean = false): Promise<Record<string, string>> {
-    try {
-      const settingsService = new SettingsService(database)
-      const settings = settingsService.getSettings('default')
-      const gitCredentials = settings.preferences.gitCredentials || []
+  private askpassHandler: AskpassHandler | null = null
 
-      // Get repo host
-      const repo = getRepoById(database, repoId)
-      if (!repo) {
-        return createSilentGitEnv()
-      }
+  initialize(ipcServer: IPCServer | undefined, database: Database): void {
+    this.askpassHandler = new AskpassHandler(ipcServer, database)
+  }
 
-      const fullPath = path.resolve(repo.fullPath)
-      const remoteUrl = await executeCommand(['git', '-C', fullPath, 'remote', 'get-url', 'origin'], { silent: true })
-      const host = new URL(remoteUrl.trim()).hostname
-
-      // Find matching credential
-      const credential = getCredentialForHost(gitCredentials, host)
-      if (!credential) {
-        return createSilentGitEnv()
-      }
-
-      if (silent) {
-        return createSilentGitEnv()
-      }
-
-      // Create env with askpass script
-      const askpassPath = path.join(__dirname, '../../utils/git-askpass.ts')
-      return {
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_ASKPASS: `bun run ${askpassPath}`,
-        SSH_ASKPASS: `bun run ${askpassPath}`,
-        GIT_CONFIG_COUNT: '0'
-      }
-    } catch {
-      return createSilentGitEnv()
+  getGitEnvironment(silent: boolean = false): Record<string, string> {
+    const env: Record<string, string> = {
+      GIT_TERMINAL_PROMPT: '0',
+      LANG: 'en_US.UTF-8',
+      LC_ALL: 'en_US.UTF-8',
     }
+
+    if (silent) {
+      env.VSCODE_GIT_FETCH_SILENT = 'true'
+    }
+
+    if (this.askpassHandler) {
+      Object.assign(env, this.askpassHandler.getEnv())
+    }
+
+    return env
   }
 }

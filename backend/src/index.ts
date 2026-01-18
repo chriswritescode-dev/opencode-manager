@@ -6,6 +6,8 @@ import os from 'os'
 import path from 'path'
 import { initializeDatabase } from './db/schema'
 import { createRepoRoutes } from './routes/repos'
+import { createIPCServer, type IPCServer } from './ipc/ipcServer'
+import { GitAuthService } from './services/git-auth'
 import { createSettingsRoutes } from './routes/settings'
 import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
@@ -45,6 +47,9 @@ app.use('/*', cors({
 }))
 
 const db = initializeDatabase(DB_PATH)
+
+let ipcServer: IPCServer | undefined
+const gitAuthService = new GitAuthService()
 
 export const DEFAULT_AGENTS_MD = `# OpenCode Manager - Global Agent Instructions
 
@@ -219,6 +224,10 @@ try {
   const settingsService = new SettingsService(db)
   settingsService.initializeLastKnownGoodConfig()
 
+  ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
+  gitAuthService.initialize(ipcServer, db)
+  logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
+
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
@@ -226,7 +235,7 @@ try {
   logger.error('Failed to initialize workspace:', error)
 }
 
-app.route('/api/repos', createRepoRoutes(db))
+app.route('/api/repos', createRepoRoutes(db, gitAuthService))
 app.route('/api/settings', createSettingsRoutes(db))
 app.route('/api/health', createHealthRoutes(db))
 app.route('/api/files', createFileRoutes())
@@ -304,11 +313,15 @@ let isShuttingDown = false
 const shutdown = async (signal: string) => {
   if (isShuttingDown) return
   isShuttingDown = true
-  
+
   logger.info(`${signal} received, shutting down gracefully...`)
   try {
     sseAggregator.shutdown()
     logger.info('SSE Aggregator stopped')
+    if (ipcServer) {
+      ipcServer.dispose()
+      logger.info('Git IPC server stopped')
+    }
     await opencodeServerManager.stop()
     logger.info('OpenCode server stopped')
   } catch (error) {

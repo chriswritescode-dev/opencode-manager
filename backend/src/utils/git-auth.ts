@@ -1,16 +1,9 @@
-
-
 export interface GitCredential {
   name: string
   host: string
   token: string
   username?: string
 }
-
-import { fileURLToPath } from 'url'
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
   try {
@@ -32,7 +25,7 @@ export function getDefaultUsername(host: string): string {
   try {
     const parsed = new URL(host)
     const hostname = parsed.hostname.toLowerCase()
-    
+
     if (hostname === 'github.com') {
       return 'x-access-token'
     }
@@ -53,14 +46,11 @@ export function normalizeHost(host: string): string {
 }
 
 export function createGitEnv(credentials: GitCredential[]): Record<string, string> {
-  const askpassPath = path.join(__dirname, 'askpass.js')
   const env: Record<string, string> = {
     GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: askpassPath,
-    SSH_ASKPASS: askpassPath,
     GIT_CONFIG_COUNT: '0'
   }
-  
+
   if (!credentials || credentials.length === 0) {
     return env
   }
@@ -92,7 +82,7 @@ export function createGitHubGitEnv(gitToken: string): Record<string, string> {
 
 export function findGitHubCredential(credentials: GitCredential[]): GitCredential | null {
   if (!credentials || credentials.length === 0) return null
-  
+
   return credentials.find(cred => {
     try {
       const parsed = new URL(cred.host)
@@ -114,14 +104,11 @@ export function getCredentialForHost(credentials: GitCredential[], host: string)
   })
 }
 
-
-
 export interface GitHubUserInfo {
   name: string | null
   email: string
   login: string
 }
-
 
 export interface GitIdentity {
   name: string
@@ -208,65 +195,5 @@ export async function fetchGitHubUserInfo(token: string): Promise<GitHubUserInfo
     }
   } catch {
     return null
-  }
-}
-
-import { SettingsService } from '../services/settings'
-import type { Database } from 'bun:sqlite'
-import { executeCommand } from '../utils/process'
-import { getRepoById } from '../db/queries'
-import path from 'path'
-
-export class GitAuthService {
-  async getGitEnvironment(repoId: number, database: Database, silent: boolean = false): Promise<Record<string, string>> {
-    try {
-      const settingsService = new SettingsService(database)
-      const settings = settingsService.getSettings('default')
-      const gitCredentials: GitCredential[] = settings.preferences.gitCredentials || []
-
-      // Get repo host
-      const repo = getRepoById(database, repoId)
-      if (!repo) {
-        return silent ? createSilentGitEnv() : {}
-      }
-
-      const fullPath = path.resolve(repo.fullPath)
-      const remoteUrl = await executeCommand(['git', '-C', fullPath, 'remote', 'get-url', 'origin'], { silent: true })
-      const host = new URL(remoteUrl.trim()).hostname
-
-      // Find matching credential
-      const credential = getCredentialForHost(gitCredentials, host)
-      if (!credential) {
-        return silent ? createSilentGitEnv() : {}
-      }
-
-      // Create env with askpass for all operations
-      const askpassPath = path.join(__dirname, 'askpass.js')
-      const baseEnv: Record<string, string> = {
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_ASKPASS: askpassPath,
-        SSH_ASKPASS: askpassPath,
-        GIT_CONFIG_COUNT: '0'
-      }
-
-      // Add silent flag if requested
-      if (silent) {
-        baseEnv.VSCODE_GIT_FETCH_SILENT = 'true'
-      }
-
-      // Add credential config
-      const username = credential.username || getDefaultUsername(credential.host)
-      const basicAuth = Buffer.from(`${username}:${credential.token}`, 'utf8').toString('base64')
-      const normalizedHost = normalizeHost(credential.host)
-
-      return {
-        ...baseEnv,
-        GIT_CONFIG_COUNT: '1',
-        GIT_CONFIG_KEY_0: `http.${normalizedHost}.extraheader`,
-        GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${basicAuth}`
-      }
-    } catch {
-      return silent ? createSilentGitEnv() : {}
-    }
   }
 }

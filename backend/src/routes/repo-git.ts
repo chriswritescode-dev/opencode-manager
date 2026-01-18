@@ -10,15 +10,12 @@ import { GitLogService } from '../services/git/GitLogService'
 import { GitStatusService } from '../services/git/GitStatusService'
 import { GitFetchPullService } from '../services/git/GitFetchPullService'
 import { GitBranchService } from '../services/git/GitBranchService'
-import { GitAuthService } from '../services/git-auth'
+import type { GitAuthService } from '../services/git-auth'
 import { GitDiffService } from '../services/git/GitDiffService'
-import { GitAskpassService } from '../services/git/GitAskpassService'
 import type { GitStatusResponse } from '../types/git'
 
-export function createRepoGitRoutes(database: Database) {
+export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthService) {
   const app = new Hono()
-  const gitAuthService = new GitAuthService()
-  const gitAskpassService = new GitAskpassService()
   const gitDiffService = new GitDiffService(gitAuthService)
   const gitFetchPullService = new GitFetchPullService(gitAuthService)
   const gitBranchService = new GitBranchService(gitAuthService)
@@ -328,23 +325,6 @@ export function createRepoGitRoutes(database: Database) {
     } catch (error: unknown) {
       logger.error('Failed to get branches:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
-    }
-  })
-
-  app.post('/git/askpass', async (c) => {
-    try {
-      const body = await c.req.json()
-      const { prompt, cwd, hostname } = body
-
-      if (!prompt || !cwd) {
-        return c.json({})
-      }
-
-      const result = await gitAskpassService.getCredential(prompt, cwd, hostname || 'unknown', database)
-      return c.json(result)
-    } catch (error: unknown) {
-      logger.error('Failed to get askpass credential:', error)
-      return c.json({})
     }
   })
 

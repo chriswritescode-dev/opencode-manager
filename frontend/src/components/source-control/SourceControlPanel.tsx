@@ -19,7 +19,7 @@ import {
   Upload,
   ArrowUp,
   ArrowDown,
-  ArrowUpFromLine,
+  RefreshCw,
   ArrowDownFromLine,
   X,
   ChevronDown,
@@ -141,7 +141,7 @@ export function SourceControlPanel({
             {git.fetch.isPending ? (
               <Loader2 className="w-4 h-4 animate-spin" />
             ) : (
-              <ArrowUpFromLine className="w-4 h-4" />
+              <RefreshCw className="w-4 h-4" />
             )}
           </Button>
           <Button

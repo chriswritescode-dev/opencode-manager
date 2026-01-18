@@ -18,7 +18,7 @@ export class GitDiffService implements GitDiffProvider {
     }
 
     const repoPath = path.resolve(getReposPath(), repo.localPath)
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+    const env = this.gitAuthService.getGitEnvironment()
 
     // Get file status first
     const status = await this.getFileStatus(repoPath, filePath, env)

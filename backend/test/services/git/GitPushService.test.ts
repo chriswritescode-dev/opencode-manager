@@ -3,7 +3,7 @@ import { GitPushService } from '../../../src/services/git/GitPushService'
 import type { Database } from 'bun:sqlite'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { getRepoById } from '../../../src/db/queries'
-import { GitAuthService } from '../../../src/utils/git-auth'
+import { GitAuthService } from '../../../src/services/git-auth'
 
 vi.mock('../../../src/utils/process', () => ({
   executeCommandMock: vi.fn(),
