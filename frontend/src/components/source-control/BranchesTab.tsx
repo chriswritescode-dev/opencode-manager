@@ -4,7 +4,7 @@ import { listBranches, switchBranch, GitAuthError } from '@/api/repos'
 import { useGitStatus } from '@/api/git'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, GitBranch, Check, Plus, AlertCircle, ArrowUp, ArrowDown, RefreshCw, Globe } from 'lucide-react'
+import { Loader2, GitBranch, Check, Plus, AlertCircle, ArrowUp, ArrowDown, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
@@ -23,7 +23,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
 
   const { data: status } = useGitStatus(repoId)
 
-  const { data: branches, isLoading, error, refetch, isRefetching } = useQuery({
+  const { data: branches, isLoading, error, refetch } = useQuery({
     queryKey: ['branches', repoId],
     queryFn: () => listBranches(repoId),
     staleTime: 30000,
@@ -107,10 +107,10 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
             size="sm"
             className="h-7 w-7 p-0"
             onClick={() => refetch()}
-            disabled={isRefetching}
+            disabled={isLoading}
             title="Refresh branches"
           >
-            <RefreshCw className={cn('w-4 h-4', isRefetching && 'animate-spin')} />
+            <Loader2 className={cn('w-4 h-4', isLoading && 'animate-spin')} />
           </Button>
         </div>
 
