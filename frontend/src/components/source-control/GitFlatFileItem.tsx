@@ -7,7 +7,7 @@ import { GIT_STATUS_COLORS, GIT_UI_COLORS } from '@/lib/git-status-styles'
 interface GitFlatFileItemProps {
   file: GitFileStatus
   isSelected: boolean
-  onSelect: (path: string) => void
+  onSelect: (path: string, staged: boolean) => void
   onStage?: (path: string) => void
   onUnstage?: (path: string) => void
 }
@@ -43,7 +43,7 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
         'group flex items-center gap-2 px-2 py-1 rounded cursor-pointer hover:bg-accent transition-colors',
         isSelected && 'bg-accent'
       )}
-      onClick={() => onSelect(file.path)}
+      onClick={() => onSelect(file.path, file.staged)}
     >
       <StatusIcon className={cn('w-4 h-4 flex-shrink-0', statusColor)} />
       <div className="flex-1 min-w-0 flex items-center gap-1">

@@ -27,8 +27,6 @@ export class GitLogService {
 
       const repoPath = path.resolve(getReposPath(), repo.localPath)
 
-
-
       const logArgs = [
         'git',
         '-C',
@@ -63,10 +61,28 @@ export class GitLogService {
         }
       }
 
-      return commits
+      const unpushedCommits = await this.getUnpushedCommitHashes(repoPath, logEnv)
+
+      return commits.map(commit => ({
+        ...commit,
+        unpushed: unpushedCommits.has(commit.hash)
+      }))
     } catch (error: unknown) {
       logger.error(`Failed to get git log for repo ${repoId}:`, error)
       throw new Error(`Failed to get git log: ${getErrorMessage(error)}`)
+    }
+  }
+
+  private async getUnpushedCommitHashes(repoPath: string, env: Record<string, string>): Promise<Set<string>> {
+    try {
+      const output = await executeCommand(
+        ['git', '-C', repoPath, 'log', '--not', '--remotes', '--format=%H'],
+        { env, silent: true }
+      )
+      const hashes = output.trim().split('\n').filter(Boolean)
+      return new Set(hashes)
+    } catch {
+      return new Set()
     }
   }
 
@@ -121,7 +137,7 @@ export class GitLogService {
     return result.diff
   }
 
-  async getFullDiff(repoId: number, filePath: string, database: Database): Promise<FileDiffResponse> {
-    return this.gitDiffService.getFileDiff(repoId, filePath, database)
+  async getFullDiff(repoId: number, filePath: string, database: Database, includeStaged?: boolean): Promise<FileDiffResponse> {
+    return this.gitDiffService.getFileDiff(repoId, filePath, database, { includeStaged })
   }
 }

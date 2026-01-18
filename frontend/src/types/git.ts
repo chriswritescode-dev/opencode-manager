@@ -15,6 +15,15 @@ export interface GitCommit {
   message: string
 }
 
+export interface GitCommit {
+  hash: string
+  authorName: string
+  authorEmail: string
+  date: string
+  message: string
+  unpushed?: boolean
+}
+
 export interface GitStatusResponse {
   branch: string
   ahead: number

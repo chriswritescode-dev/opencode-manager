@@ -514,6 +514,8 @@ export async function switchBranch(
     await checkoutBranchSafely(repoPath, sanitizedBranch, env)
     
     logger.info(`Successfully switched to branch: ${sanitizedBranch}`)
+
+    db.updateRepoBranch(database, repoId, sanitizedBranch)
   } catch (error: unknown) {
     logger.error(`Failed to switch branch for repo ${repoId}:`, error)
     throw error
@@ -538,6 +540,8 @@ export async function createBranch(database: Database, gitAuthService: GitAuthSe
     logger.info(`Creating new branch: ${sanitizedBranch} in ${repo.localPath}`)
     await executeCommand(['git', '-C', repoPath, 'checkout', '-b', sanitizedBranch], { env })
     logger.info(`Successfully created and switched to branch: ${sanitizedBranch}`)
+
+    db.updateRepoBranch(database, repoId, sanitizedBranch)
   } catch (error: unknown) {
     logger.error(`Failed to create branch for repo ${repoId}:`, error)
     throw error

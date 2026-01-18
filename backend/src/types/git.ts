@@ -13,6 +13,7 @@ export interface GitCommit {
   authorEmail: string
   date: string
   message: string
+  unpushed?: boolean
 }
 
 export interface GitStatusResponse {

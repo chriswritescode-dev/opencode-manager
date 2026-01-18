@@ -45,7 +45,7 @@ export function SourceControlPanel({
   currentBranch,
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
-  const [selectedFile, setSelectedFile] = useState<string | undefined>()
+  const [selectedFile, setSelectedFile] = useState<{path: string, staged: boolean} | undefined>()
   const { data: status } = useGitStatus(repoId)
   const { data: branches } = useQuery({
     queryKey: ['branches', repoId],
@@ -209,8 +209,8 @@ export function SourceControlPanel({
           {activeTab === 'changes' && (
             <ChangesTab
               repoId={repoId}
-              onFileSelect={setSelectedFile}
-              selectedFile={selectedFile}
+              onFileSelect={(path, staged) => setSelectedFile({ path, staged })}
+              selectedFile={selectedFile?.path}
             />
           )}
           {activeTab === 'commits' && (
@@ -224,7 +224,7 @@ export function SourceControlPanel({
         {selectedFile && !isMobile && (
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-              <span className="text-sm font-medium truncate">{selectedFile}</span>
+              <span className="text-sm font-medium truncate">{selectedFile.path}</span>
               <Button
                 variant="ghost"
                 size="sm"
@@ -235,7 +235,7 @@ export function SourceControlPanel({
               </Button>
             </div>
             <div className="flex-1 overflow-auto">
-              <FileDiffView repoId={repoId} filePath={selectedFile} />
+              <FileDiffView repoId={repoId} filePath={selectedFile.path} includeStaged={selectedFile.staged} />
             </div>
           </div>
         )}

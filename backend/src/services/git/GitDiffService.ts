@@ -11,7 +11,7 @@ import type { GitDiffProvider } from './interfaces'
 export class GitDiffService implements GitDiffProvider {
   constructor(private gitAuthService: GitAuthService) {}
 
-  async getFileDiff(repoId: number, filePath: string, database: Database, options?: GitDiffOptions): Promise<FileDiffResponse> {
+  async getFileDiff(repoId: number, filePath: string, database: Database, options?: GitDiffOptions & { includeStaged?: boolean }): Promise<FileDiffResponse> {
     const repo = getRepoById(database, repoId)
     if (!repo) {
       throw new Error(`Repository not found: ${repoId}`)
@@ -20,14 +20,15 @@ export class GitDiffService implements GitDiffProvider {
     const repoPath = path.resolve(getReposPath(), repo.localPath)
     const env = this.gitAuthService.getGitEnvironment()
 
-    // Get file status first
+    const includeStaged = options?.includeStaged ?? true
+
     const status = await this.getFileStatus(repoPath, filePath, env)
 
     if (status.status === 'untracked') {
       return this.getUntrackedFileDiff(repoPath, filePath, env)
     }
 
-    return this.getTrackedFileDiff(repoPath, filePath, env, options)
+    return this.getTrackedFileDiff(repoPath, filePath, env, includeStaged, options)
   }
 
   private async getFileStatus(repoPath: string, filePath: string, env: Record<string, string>): Promise<{ status: string }> {
@@ -60,7 +61,7 @@ export class GitDiffService implements GitDiffProvider {
     return this.parseDiffOutput((result as { stdout: string }).stdout, 'untracked', filePath)
   }
 
-  private async getTrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>, options?: GitDiffOptions): Promise<FileDiffResponse> {
+  private async getTrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>, includeStaged: boolean, options?: GitDiffOptions): Promise<FileDiffResponse> {
     try {
       const hasCommits = await this.hasCommits(repoPath)
       const diffArgs = ['git', '-C', repoPath, 'diff']
@@ -78,7 +79,11 @@ export class GitDiffService implements GitDiffProvider {
       }
 
       if (hasCommits) {
-        diffArgs.push('HEAD', '--', filePath)
+        if (includeStaged) {
+          diffArgs.push('HEAD', '--', filePath)
+        } else {
+          diffArgs.push('--', filePath)
+        }
       } else {
         return {
           path: filePath,

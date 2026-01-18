@@ -20,6 +20,7 @@ import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from "@/lib/git-status-styles";
 interface FileDiffViewProps {
   repoId: number;
   filePath: string;
+  includeStaged?: boolean;
   onBack?: () => void;
   onOpenFile?: (path: string, lineNumber?: number) => void;
   isMobile?: boolean;
@@ -213,11 +214,12 @@ function DiffLineComponent({
 export function FileDiffView({
   repoId,
   filePath,
+  includeStaged,
   onBack,
   onOpenFile,
   isMobile = false,
 }: FileDiffViewProps) {
-  const { data: diffData, isLoading, error } = useFileDiff(repoId, filePath);
+  const { data: diffData, isLoading, error } = useFileDiff(repoId, filePath, includeStaged);
 
   const fileName = filePath.split("/").pop() || filePath;
   const dirPath = filePath.includes("/")

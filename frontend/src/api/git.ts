@@ -49,8 +49,12 @@ export async function fetchReposGitStatus(repoIds: number[]): Promise<Map<number
   return new Map(Object.entries(data).map(([id, status]) => [Number(id), status as GitStatusResponse]))
 }
 
-export async function fetchFileDiff(repoId: number, path: string): Promise<FileDiffResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff-full?path=${encodeURIComponent(path)}`)
+export async function fetchFileDiff(repoId: number, path: string, includeStaged?: boolean): Promise<FileDiffResponse> {
+  const params = new URLSearchParams({ path })
+  if (includeStaged !== undefined) {
+    params.set('includeStaged', String(includeStaged))
+  }
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff-full?${params}`)
 
   if (!response.ok) {
     await handleApiError(response)
@@ -161,19 +165,33 @@ export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<
   return response.json()
 }
 
+export async function gitReset(repoId: number, commitHash: string): Promise<GitStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ commitHash }),
+  })
+
+  if (!response.ok) {
+    await handleApiError(response)
+  }
+
+  return response.json()
+}
+
 export function useGitStatus(repoId: number | undefined) {
   return useQuery({
     queryKey: ['gitStatus', repoId],
     queryFn: () => repoId ? fetchGitStatus(repoId) : Promise.reject(new Error('No repo ID')),
     enabled: !!repoId,
-    refetchInterval: 10000,
+    refetchInterval: false,
   })
 }
 
-export function useFileDiff(repoId: number | undefined, path: string | undefined) {
+export function useFileDiff(repoId: number | undefined, path: string | undefined, includeStaged?: boolean) {
   return useQuery({
-    queryKey: ['fileDiff', repoId, path],
-    queryFn: () => (repoId && path) ? fetchFileDiff(repoId, path) : Promise.reject(new Error('Missing params')),
+    queryKey: ['fileDiff', repoId, path, includeStaged],
+    queryFn: () => (repoId && path) ? fetchFileDiff(repoId, path, includeStaged) : Promise.reject(new Error('Missing params')),
     enabled: !!repoId && !!path,
   })
 }

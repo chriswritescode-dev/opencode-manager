@@ -106,6 +106,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
     try {
       const id = parseInt(c.req.param('id'))
       const filePath = c.req.query('path')
+      const includeStaged = c.req.query('includeStaged') === 'true'
 
       if (!filePath) {
         return c.json({ error: 'path query parameter is required' }, 400)
@@ -116,7 +117,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      const diffResponse = await gitLogService.getFullDiff(id, filePath, database)
+      const diffResponse = await gitLogService.getFullDiff(id, filePath, database, includeStaged)
       return c.json(diffResponse)
     } catch (error: unknown) {
       logger.error('Failed to get full file diff:', error)

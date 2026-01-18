@@ -8,7 +8,7 @@ import { Loader2, GitCommit, FileText, AlertCircle, X } from 'lucide-react'
 
 interface ChangesTabProps {
   repoId: number
-  onFileSelect: (path: string) => void
+  onFileSelect: (path: string, staged: boolean) => void
   selectedFile?: string
 }
 
@@ -86,7 +86,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile }: ChangesTabPro
               <GitFlatFileList
                 files={status.files}
                 staged={true}
-                onFileSelect={onFileSelect}
+                onSelect={onFileSelect}
                 onUnstage={handleUnstage}
                 selectedFile={selectedFile}
               />
@@ -96,7 +96,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile }: ChangesTabPro
               <GitFlatFileList
                 files={status.files}
                 staged={false}
-                onFileSelect={onFileSelect}
+                onSelect={onFileSelect}
                 onStage={handleStage}
                 selectedFile={selectedFile}
               />

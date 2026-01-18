@@ -9,7 +9,7 @@ import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
 interface GitFlatFileListProps {
   files: GitFileStatus[]
   staged: boolean
-  onFileSelect: (path: string) => void
+  onSelect: (path: string, staged: boolean) => void
   onStage?: (paths: string[]) => void
   onUnstage?: (paths: string[]) => void
   selectedFile?: string
@@ -25,7 +25,7 @@ const statusOrder: GitFileStatusType[] = ['modified', 'added', 'deleted', 'renam
 export function GitFlatFileList({
   files,
   staged,
-  onFileSelect,
+  onSelect,
   onStage,
   onUnstage,
   selectedFile,
@@ -142,7 +142,7 @@ export function GitFlatFileList({
                     key={file.path}
                     file={file}
                     isSelected={selectedFile === file.path}
-                    onSelect={onFileSelect}
+                    onSelect={onSelect}
                     onStage={handleStageFile}
                     onUnstage={handleUnstageFile}
                   />

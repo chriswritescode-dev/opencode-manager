@@ -171,6 +171,11 @@ export function updateLastPulled(db: Database, id: number): void {
   stmt.run(Date.now(), id)
 }
 
+export function updateRepoBranch(db: Database, id: number, branch: string): void {
+  const stmt = db.prepare('UPDATE repos SET branch = ? WHERE id = ?')
+  stmt.run(branch, id)
+}
+
 export function deleteRepo(db: Database, id: number): void {
   const stmt = db.prepare('DELETE FROM repos WHERE id = ?')
   stmt.run(id)

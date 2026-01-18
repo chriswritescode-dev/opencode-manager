@@ -1,5 +1,7 @@
 import { useGitLog } from '@/api/git'
-import { Loader2, GitCommit, AlertCircle } from 'lucide-react'
+import { Loader2, GitCommit, AlertCircle, ArrowUp } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 
 interface CommitsTabProps {
   repoId: number
@@ -74,6 +76,12 @@ export function CommitsTab({ repoId, onSelectCommit }: CommitsTabProps) {
               <span className="truncate">{commit.authorName}</span>
               <span>·</span>
               <span className="flex-shrink-0">{formatRelativeTime(commit.date)}</span>
+              {commit.unpushed && (
+                <span className={cn('flex items-center gap-0.5 px-1 rounded', GIT_UI_COLORS.unpushed)}>
+                  <ArrowUp className="w-3 h-3" />
+                  Local
+                </span>
+              )}
             </div>
           </div>
         </button>
