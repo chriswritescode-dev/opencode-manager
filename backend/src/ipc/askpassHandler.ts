@@ -45,7 +45,7 @@ export class AskpassHandler implements IPCHandler {
   }
 
   async handle(request: AskpassRequest): Promise<string> {
-    logger.info(`Askpass request: type=${request.askpassType}, argv=${request.argv.join(', ')}`)
+    logger.info(`Askpass request received: type=${request.askpassType}, argv=${JSON.stringify(request.argv)}`)
     if (request.askpassType === 'https') {
       return this.handleHttpsAskpass(request.argv)
     }

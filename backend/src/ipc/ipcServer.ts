@@ -40,7 +40,7 @@ export class IPCServer {
   private onRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
     const handler = this.handlers.get(req.url || '')
     if (!handler) {
-      logger.warn(`IPC handler not found for path: ${req.url}`)
+      logger.warn(`IPC handler not found for path: ${req.url}, registered paths: ${Array.from(this.handlers.keys()).join(', ')}`)
       res.writeHead(404)
       res.end()
       return
@@ -58,7 +58,9 @@ export class IPCServer {
           return
         }
         const request = JSON.parse(body)
+        logger.info(`IPC calling handler for ${req.url} with:`, request)
         const result = await handler.handle(request)
+        logger.info(`IPC handler result for ${req.url}:`, result)
         res.writeHead(200)
         res.end(JSON.stringify(result))
       } catch (error) {
