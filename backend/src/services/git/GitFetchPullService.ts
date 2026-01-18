@@ -14,9 +14,10 @@ export class GitFetchPullService {
     }
 
     const fullPath = path.resolve(repo.fullPath)
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+    const args = ['git', '-C', fullPath, 'fetch', '--all', '--prune-tags']
+    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args)
 
-    const result = await executeCommand(['git', '-C', fullPath, 'fetch', '--all', '--prune-tags'], { env })
+    const result = await executeCommand(args, { env })
 
     return result
   }
@@ -28,9 +29,10 @@ export class GitFetchPullService {
     }
 
     const fullPath = path.resolve(repo.fullPath)
-    const env = await this.gitAuthService.getGitEnvironment(repoId, database)
+    const args = ['git', '-C', fullPath, 'pull']
+    const env = await this.gitAuthService.getGitEnvironment(repoId, database, args)
 
-    const result = await executeCommand(['git', '-C', fullPath, 'pull'], { env })
+    const result = await executeCommand(args, { env })
 
     return result
   }

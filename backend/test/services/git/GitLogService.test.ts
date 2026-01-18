@@ -1,30 +1,36 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/* eslint-disable @typescript-eslint/no-require-imports */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
 import { GitLogService } from '../../../src/services/git/GitLogService'
 import type { Database } from 'bun:sqlite'
+import { executeCommand } from '../../../src/utils/process'
+import { getRepoById } from '../../../src/db/queries'
 
-const executeCommand = vi.fn() as any
-const getRepoById = vi.fn() as any
-const getGitEnvironment = vi.fn() as any
+const mockGitAuthService = {
+  getGitEnvironment: vi.fn(),
+}
+
+const mockGitDiffService = {
+  getFileDiff: vi.fn(),
+}
 
 vi.mock('../../../src/utils/process', () => ({
-  executeCommand,
+  executeCommand: vi.fn(),
 }))
 
 vi.mock('../../../src/db/queries', () => ({
-  getRepoById,
+  getRepoById: vi.fn(),
 }))
 
 vi.mock('../../../src/services/git-auth', () => ({
-  GitAuthService: vi.fn().mockImplementation(() => ({
-    getGitEnvironment,
-  })),
+  GitAuthService: vi.fn().mockImplementation(() => mockGitAuthService),
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getReposPath: vi.fn(() => '/repos'),
 }))
+
+const executeCommandMock = executeCommand as MockedFunction<typeof executeCommand>
+const getRepoByIdMock = getRepoById as MockedFunction<typeof getRepoById>
 
 describe('GitLogService', () => {
   let service: GitLogService
@@ -33,10 +39,8 @@ describe('GitLogService', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     database = {} as Database
-    const { GitAuthService } = require('../../../src/services/git-auth')
-    const gitAuthService = new GitAuthService()
-    service = new GitLogService(gitAuthService)
-    getGitEnvironment.mockReturnValue({})
+    service = new GitLogService(mockGitAuthService as any, mockGitDiffService as any)
+    mockGitAuthService.getGitEnvironment.mockResolvedValue({})
   })
 
   describe('getLog', () => {
@@ -45,17 +49,17 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue(
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue(
         'abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|First commit\n' +
         'def456|Jane Smith|jane@example.com|2024-01-02 13:00:00 +0000|Second commit'
       )
 
       const result = await service.getLog(1, database, 10)
 
-      expect(getRepoById).toHaveBeenCalledWith(database, 1)
-      expect(executeCommand).toHaveBeenCalledWith(
-        ['git', '-C', '/repos/test-repo', 'log', '-n', '10', '--format=%H|%an|%ae|%ai|%s'],
+      expect(getRepoByIdMock).toHaveBeenCalledWith(database, 1)
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', '/repos/test-repo', 'log', '--all', '-n', '10', '--format=%H|%an|%ae|%ai|%s'],
         { env: expect.any(Object) }
       )
       expect(result).toHaveLength(2)
@@ -80,13 +84,13 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|First commit')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|First commit')
 
       await service.getLog(1, database, 5)
 
-      expect(executeCommand).toHaveBeenCalledWith(
-        ['git', '-C', '/repos/test-repo', 'log', '-n', '5', '--format=%H|%an|%ae|%ai|%s'],
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', '/repos/test-repo', 'log', '--all', '-n', '5', '--format=%H|%an|%ae|%ai|%s'],
         { env: expect.any(Object) }
       )
     })
@@ -96,8 +100,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|')
 
       const result = await service.getLog(1, database, 10)
 
@@ -110,8 +114,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Multi|line commit')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Multi|line commit')
 
       const result = await service.getLog(1, database, 10)
 
@@ -124,8 +128,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('')
 
       const result = await service.getLog(1, database, 10)
 
@@ -137,8 +141,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('\n\nabc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Test\n\n')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('\n\nabc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Test\n\n')
 
       const result = await service.getLog(1, database, 10)
 
@@ -151,8 +155,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('|John Doe|john@example.com|2024-01-01 12:00:00 +0000|No hash')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('|John Doe|john@example.com|2024-01-01 12:00:00 +0000|No hash')
 
       const result = await service.getLog(1, database, 10)
 
@@ -160,7 +164,7 @@ describe('GitLogService', () => {
     })
 
     it('throws error when repository not found', async () => {
-      getRepoById.mockReturnValue(null)
+      getRepoByIdMock.mockReturnValue(null)
 
       await expect(service.getLog(999, database, 10)).rejects.toThrow('Repository not found: 999')
     })
@@ -170,8 +174,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockRejectedValue(new Error('Not a git repository'))
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockRejectedValue(new Error('Not a git repository'))
 
       await expect(service.getLog(1, database, 10)).rejects.toThrow('Failed to get git log')
     })
@@ -183,13 +187,13 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Test commit')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Test commit')
 
       const result = await service.getCommit(1, 'abc123', database)
 
-      expect(getRepoById).toHaveBeenCalledWith(database, 1)
-      expect(executeCommand).toHaveBeenCalledWith(
+      expect(getRepoByIdMock).toHaveBeenCalledWith(database, 1)
+      expect(executeCommandMock).toHaveBeenCalledWith(
         ['git', '-C', '/repos/test-repo', 'log', '--format=%H|%an|%ae|%ai|%s', 'abc123', '-1'],
         { env: expect.any(Object) }
       )
@@ -207,8 +211,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('')
 
       const result = await service.getCommit(1, 'nonexistent', database)
 
@@ -220,8 +224,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('  ')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('  ')
 
       const result = await service.getCommit(1, 'abc123', database)
 
@@ -233,8 +237,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Test')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Test')
 
       const result = await service.getCommit(1, 'abc123', database)
 
@@ -246,8 +250,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|')
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|')
 
       const result = await service.getCommit(1, 'abc123', database)
 
@@ -256,7 +260,7 @@ describe('GitLogService', () => {
     })
 
     it('throws error when repository not found', async () => {
-      getRepoById.mockReturnValue(null)
+      getRepoByIdMock.mockReturnValue(null)
 
       await expect(service.getCommit(999, 'abc123', database)).rejects.toThrow('Repository not found: 999')
     })
@@ -266,8 +270,8 @@ describe('GitLogService', () => {
         id: 1,
         localPath: 'test-repo',
       }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockRejectedValue(new Error('Invalid commit hash'))
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockRejectedValue(new Error('Invalid commit hash'))
 
       await expect(service.getCommit(1, 'invalid', database)).rejects.toThrow('Failed to get commit')
     })
@@ -275,84 +279,27 @@ describe('GitLogService', () => {
 
   describe('getDiff', () => {
     it('returns diff for file', async () => {
-      const mockRepo = {
-        id: 1,
-        localPath: 'test-repo',
-      }
-      getRepoById.mockReturnValue(mockRepo)
       const expectedDiff = 'diff --git a/file.ts b/file.ts\nindex 123..456 100644\n--- a/file.ts\n+++ b/file.ts\n@@ -1,1 +1,1 @@\n-old line\n+new line'
-      executeCommand.mockResolvedValue(expectedDiff)
+      mockGitDiffService.getFileDiff.mockResolvedValue({ diff: expectedDiff })
 
       const result = await service.getDiff(1, 'file.ts', database)
 
-      expect(getRepoById).toHaveBeenCalledWith(database, 1)
-      expect(executeCommand).toHaveBeenCalledWith(
-        ['git', '-C', '/repos/test-repo', 'diff', '--', 'file.ts'],
-        { env: expect.any(Object) }
-      )
+      expect(mockGitDiffService.getFileDiff).toHaveBeenCalledWith(1, 'file.ts', database)
       expect(result).toBe(expectedDiff)
     })
 
     it('returns empty diff when file has no changes', async () => {
-      const mockRepo = {
-        id: 1,
-        localPath: 'test-repo',
-      }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('')
+      mockGitDiffService.getFileDiff.mockResolvedValue({ diff: '' })
 
       const result = await service.getDiff(1, 'file.ts', database)
 
       expect(result).toBe('')
     })
 
-    it('handles file path with spaces', async () => {
-      const mockRepo = {
-        id: 1,
-        localPath: 'test-repo',
-      }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('diff --git a/file name.ts b/file name.ts')
-
-      await service.getDiff(1, 'file name.ts', database)
-
-      expect(executeCommand).toHaveBeenCalledWith(
-        ['git', '-C', '/repos/test-repo', 'diff', '--', 'file name.ts'],
-        { env: expect.any(Object) }
-      )
-    })
-
-    it('handles nested file paths', async () => {
-      const mockRepo = {
-        id: 1,
-        localPath: 'test-repo',
-      }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockResolvedValue('diff --git a/src/utils/file.ts b/src/utils/file.ts')
-
-      await service.getDiff(1, 'src/utils/file.ts', database)
-
-      expect(executeCommand).toHaveBeenCalledWith(
-        ['git', '-C', '/repos/test-repo', 'diff', '--', 'src/utils/file.ts'],
-        { env: expect.any(Object) }
-      )
-    })
-
-    it('throws error when repository not found', async () => {
-      getRepoById.mockReturnValue(null)
+    it('throws error when diff command fails', async () => {
+      mockGitDiffService.getFileDiff.mockRejectedValue(new Error('Repository not found: 999'))
 
       await expect(service.getDiff(999, 'file.ts', database)).rejects.toThrow('Repository not found: 999')
-    })
-
-    it('throws error when diff command fails', async () => {
-      const mockRepo = {
-        id: 1,
-        localPath: 'test-repo',
-      }
-      getRepoById.mockReturnValue(mockRepo)
-      executeCommand.mockRejectedValue(new Error('Path does not exist'))
-
-      await expect(service.getDiff(1, 'nonexistent.ts', database)).rejects.toThrow('Failed to get diff')
     })
   })
 })

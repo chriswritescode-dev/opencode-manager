@@ -10,6 +10,7 @@ import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import {
   Loader2,
   GitBranch,
@@ -108,7 +109,7 @@ export function SourceControlPanel({
                 >
                   <GitBranch className="w-4 h-4" />
                   <span className="flex-1 truncate">{branch}</span>
-                  {branch === currentBranch && <Check className="w-4 h-4 text-green-500" />}
+                  {branch === currentBranch && <Check className={`w-4 h-4 ${GIT_UI_COLORS.current}`} />}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -116,12 +117,12 @@ export function SourceControlPanel({
           {status && (status.ahead > 0 || status.behind > 0) && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               {status.ahead > 0 && (
-                <span className="flex items-center gap-0.5 text-green-500">
+                <span className={`flex items-center gap-0.5 ${GIT_UI_COLORS.ahead}`}>
                   <ArrowUp className="w-3 h-3" />{status.ahead}
                 </span>
               )}
               {status.behind > 0 && (
-                <span className="flex items-center gap-0.5 text-yellow-500">
+                <span className={`flex items-center gap-0.5 ${GIT_UI_COLORS.behind}`}>
                   <ArrowDown className="w-3 h-3" />{status.behind}
                 </span>
               )}

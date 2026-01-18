@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { GitFlatFileItem } from './GitFlatFileItem'
 import { cn } from '@/lib/utils'
 import type { GitFileStatus, GitFileStatusType } from '@/types/git'
+import { GIT_STATUS_COLORS, GIT_STATUS_LABELS } from '@/lib/git-status-styles'
 
 interface GitFlatFileListProps {
   files: GitFileStatus[]
@@ -20,24 +21,6 @@ interface GroupedFiles {
 }
 
 const statusOrder: GitFileStatusType[] = ['modified', 'added', 'deleted', 'renamed', 'copied', 'untracked']
-
-const statusLabels: Record<GitFileStatusType, string> = {
-  modified: 'Modified',
-  added: 'Added',
-  deleted: 'Deleted',
-  renamed: 'Renamed',
-  untracked: 'Untracked',
-  copied: 'Copied',
-}
-
-const statusColors: Record<GitFileStatusType, string> = {
-  modified: 'text-yellow-500',
-  added: 'text-green-500',
-  deleted: 'text-red-500',
-  renamed: 'text-blue-500',
-  untracked: 'text-gray-400',
-  copied: 'text-green-500',
-}
 
 export function GitFlatFileList({
   files,
@@ -144,8 +127,8 @@ export function GitFlatFileList({
               ) : (
                 <ChevronDown className="w-3 h-3 text-muted-foreground" />
               )}
-              <span className={cn('text-xs font-medium', statusColors[status])}>
-                {statusLabels[status]}
+              <span className={cn('text-xs font-medium', GIT_STATUS_COLORS[status])}>
+                {GIT_STATUS_LABELS[status]}
               </span>
               <span className="text-xs text-muted-foreground">
                 ({groupFiles.length})

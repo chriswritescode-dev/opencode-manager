@@ -22,7 +22,6 @@ export class GitPushService {
       }
 
       const fullPath = path.resolve(repo.fullPath)
-      const env = await this.gitAuthService.getGitEnvironment(repoId, database)
       const args = ['git', '-C', fullPath, 'push']
 
       if (options.setUpstream) {
@@ -31,6 +30,7 @@ export class GitPushService {
         args.push('HEAD')
       }
 
+      const env = await this.gitAuthService.getGitEnvironment(repoId, database, args)
       const stdout = await executeCommand(args, { env })
 
       logger.info(`Successfully pushed changes for repo ${repoId}`)

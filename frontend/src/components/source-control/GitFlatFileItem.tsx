@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button'
 import { Plus, Minus, FileText, FilePlus, FileX, FileSearch, CircleDot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { GitFileStatus } from '@/types/git'
+import { GIT_STATUS_COLORS, GIT_UI_COLORS } from '@/lib/git-status-styles'
 
 interface GitFlatFileItemProps {
   file: GitFileStatus
@@ -20,18 +21,9 @@ const statusIcons = {
   copied: FilePlus,
 }
 
-const statusColors = {
-  modified: 'text-yellow-500',
-  added: 'text-green-500',
-  deleted: 'text-red-500',
-  renamed: 'text-blue-500',
-  untracked: 'text-gray-400',
-  copied: 'text-green-500',
-}
-
 export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage }: GitFlatFileItemProps) {
   const StatusIcon = statusIcons[file.status] || FileText
-  const statusColor = statusColors[file.status] || 'text-muted-foreground'
+  const statusColor = GIT_STATUS_COLORS[file.status] || 'text-muted-foreground'
 
   const fileName = file.path.split('/').pop() || file.path
   const dirPath = file.path.includes('/') ? file.path.substring(0, file.path.lastIndexOf('/')) : ''
@@ -63,7 +55,7 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
         )}
       </div>
       {file.staged && (
-        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-500/10 text-green-500 flex-shrink-0">
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded flex-shrink-0', GIT_UI_COLORS.stagedBadge)}>
           staged
         </span>
       )}
@@ -74,9 +66,9 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
         onClick={handleAction}
       >
         {file.staged ? (
-          <Minus className="w-3 h-3 text-red-500" />
+          <Minus className={cn('w-3 h-3', GIT_UI_COLORS.unstage)} />
         ) : (
-          <Plus className="w-3 h-3 text-green-500" />
+          <Plus className={cn('w-3 h-3', GIT_UI_COLORS.stage)} />
         )}
       </Button>
     </div>

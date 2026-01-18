@@ -8,6 +8,7 @@ import { Loader2, GitBranch, Check, Plus, AlertCircle, ArrowUp, ArrowDown } from
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
+import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 
 interface BranchesTabProps {
   repoId: number
@@ -173,10 +174,10 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                 >
                   <GitBranch className={cn(
                     'w-4 h-4',
-                    isRemote ? 'text-blue-500' : 'text-muted-foreground'
+                    isRemote ? GIT_UI_COLORS.remote : 'text-muted-foreground'
                   )} />
                   <span className="flex-1 text-sm truncate">{branch}</span>
-                  {isCurrent && <Check className="w-4 h-4 text-green-500" />}
+                  {isCurrent && <Check className={`w-4 h-4 ${GIT_UI_COLORS.current}`} />}
                   {switchBranchMutation.isPending && switchBranchMutation.variables === branch && (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   )}

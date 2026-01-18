@@ -171,6 +171,11 @@ export function updateLastPulled(db: Database, id: number): void {
   stmt.run(Date.now(), id)
 }
 
+export function updateRepoRequiresAuth(db: Database, id: number, requiresAuth: boolean): void {
+  const stmt = db.prepare('UPDATE repos SET requires_auth = ? WHERE id = ?')
+  stmt.run(requiresAuth ? 1 : 0, id)
+}
+
 export function deleteRepo(db: Database, id: number): void {
   const stmt = db.prepare('DELETE FROM repos WHERE id = ?')
   stmt.run(id)

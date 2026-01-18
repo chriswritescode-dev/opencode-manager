@@ -5,8 +5,13 @@ import { getRepoById } from '../db/queries'
 import path from 'path'
 import { createNoPromptGitEnv, getCredentialForHost, getDefaultUsername, normalizeHost } from '../utils/git-auth'
 
+function isWriteOperation(gitCommand: string[]): boolean {
+  const writeOps = ['push']
+  return gitCommand.some(arg => writeOps.includes(arg))
+}
+
 export class GitAuthService {
-  async getGitEnvironment(repoId: number, database: Database): Promise<Record<string, string>> {
+  async getGitEnvironment(repoId: number, database: Database, gitCommand: string[] = []): Promise<Record<string, string>> {
     try {
       const settingsService = new SettingsService(database)
       const settings = settingsService.getSettings('default')
@@ -15,6 +20,13 @@ export class GitAuthService {
       // Get repo host
       const repo = getRepoById(database, repoId)
       if (!repo) {
+        return createNoPromptGitEnv()
+      }
+
+      const isWrite = isWriteOperation(gitCommand)
+      const requiresAuth = repo.requiresAuth || repo.requires_auth || false
+
+      if (!isWrite && !requiresAuth) {
         return createNoPromptGitEnv()
       }
 

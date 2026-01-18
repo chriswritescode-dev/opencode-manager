@@ -316,7 +316,20 @@ export async function cloneRepo(
   }
   
   const repo = db.createRepo(database, createRepoInput)
-  
+
+  let requiresAuth = false
+  try {
+    const noAuthEnv = createNoPromptGitEnv()
+    await executeCommand(['git', 'ls-remote', normalizedRepoUrl, 'HEAD'], { env: noAuthEnv, silent: true })
+    requiresAuth = false
+    logger.info(`Repository is public: ${normalizedRepoUrl}`)
+  } catch {
+    requiresAuth = true
+    logger.info(`Repository requires authentication: ${normalizedRepoUrl}`)
+  }
+
+  db.updateRepoRequiresAuth(database, repo.id, requiresAuth)
+
   try {
     const env = getGitEnv(database)
 
