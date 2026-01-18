@@ -487,54 +487,6 @@ export async function getCurrentBranch(repo: Repo, env: Record<string, string>):
   return branch || repo.branch || repo.defaultBranch || null
 }
 
-export async function listBranches(
-  database: Database,
-  gitAuthService: GitAuthService,
-  repo: Repo
-): Promise<{ local: string[], all: string[], current: string | null }> {
-  try {
-    const repoPath = path.resolve(getReposPath(), repo.localPath)
-    const env = gitAuthService.getGitEnvironment()
-
-    if (!repo.isLocal) {
-      try {
-        await executeCommand(['git', '-C', repoPath, 'fetch', '--all'], { env })
-      } catch (error) {
-        logger.warn(`Failed to fetch remote for repo ${repo.id}, using cached branch info:`, error)
-      }
-    }
-    
-    const localBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '--format=%(refname:short)'])
-    const localBranches = localBranchesOutput.trim().split('\n').filter(b => b.trim())
-    
-    let remoteBranches: string[] = []
-    try {
-      const remoteBranchesOutput = await executeCommand(['git', '-C', repoPath, 'branch', '-r', '--format=%(refname:short)'])
-      remoteBranches = remoteBranchesOutput.trim().split('\n')
-        .filter(b => b.trim() && !b.includes('HEAD') && b.includes('/'))
-    } catch (error) {
-      logger.warn(`Failed to get remote branches for repo ${repo.id}:`, error)
-    }
-    
-    const current = await getCurrentBranch(repo, env)
-    
-    const remoteOnlyBranches = remoteBranches
-      .map(b => b.replace(/^[^/]+\//, ''))
-      .filter(b => !localBranches.includes(b))
-    
-    const allBranches = [...localBranches, ...remoteOnlyBranches]
-    
-    return {
-      local: localBranches,
-      all: allBranches,
-      current
-    }
-  } catch (error: unknown) {
-    logger.error(`Failed to list branches for repo ${repo.id}:`, error)
-    throw error
-  }
-}
-
 export async function switchBranch(
   database: Database,
   gitAuthService: GitAuthService,
@@ -626,83 +578,41 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
   if (!repo) {
     throw new Error(`Repo not found: ${repoId}`)
   }
-  
-  const repoIdentifier = repo.repoUrl || repo.localPath
-  
-  try {
-    logger.info(`Deleting repo files: ${repoIdentifier}`)
-    
-    // Extract just the directory name from the localPath
-    const dirName = repo.localPath.split('/').pop() || repo.localPath
-    const fullPath = path.resolve(getReposPath(), dirName)
-    
-    // If this is a worktree, properly remove it from git first
-    if (repo.isWorktree && repo.branch && repo.repoUrl) {
-      const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
-      const baseRepoPath = path.resolve(getReposPath(), repoName)
-      
-      logger.info(`Removing worktree: ${dirName} from base repo: ${baseRepoPath}`)
-      
-      try {
-        // First try to remove the worktree properly
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', fullPath])
-        logger.info(`Successfully removed worktree: ${dirName}`)
-      } catch (worktreeError: unknown) {
-        logger.warn(`Failed to remove worktree with normal command, trying force: ${getErrorMessage(worktreeError)}`)
-        
-        try {
-          await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', fullPath])
-          logger.info(`Successfully force-removed worktree: ${dirName}`)
-        } catch (forceError: unknown) {
-          logger.warn(`Force worktree removal failed, trying prune: ${getErrorMessage(forceError)}`)
-          
-          try {
-            await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'])
-            await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', fullPath])
-            logger.info(`Successfully removed worktree after prune: ${dirName}`)
-          } catch (pruneError: unknown) {
-            logger.error(`All worktree removal methods failed: ${getErrorMessage(pruneError)}`)
-            // Continue with directory removal anyway
-          }
-        }
-      }
+
+  const dirName = repo.localPath.split('/').pop() || repo.localPath
+  const fullPath = path.resolve(getReposPath(), dirName)
+
+  if (repo.isWorktree && repo.repoUrl) {
+    const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
+    const baseRepoPath = path.resolve(getReposPath(), repoName)
+
+    try {
+      await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', fullPath])
+    } catch {
+      // Worktree removal failed, continue with directory removal
+    } finally {
+      await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune']).catch(() => {})
     }
-    
-    // Remove the directory
-    logger.info(`Removing directory: ${dirName} from ${getReposPath()}`)
-    await executeCommand(['rm', '-rf', dirName], getReposPath())
-    
-    const checkExists = await executeCommand(['bash', '-c', `test -d ${dirName} && echo exists || echo deleted`], getReposPath())
-    if (checkExists.trim() === 'exists') {
-      logger.error(`Directory still exists after deletion: ${dirName}`)
-      throw new Error(`Failed to delete workspace directory: ${dirName}`)
-    }
-    
-    // If this was a worktree, also prune the base repo to clean up any remaining references
-    if (repo.isWorktree && repo.branch && repo.repoUrl) {
-      const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
-      const baseRepoPath = path.resolve(getReposPath(), repoName)
-      
-      try {
-        logger.info(`Pruning worktree references in base repo: ${baseRepoPath}`)
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'])
-      } catch (pruneError: unknown) {
-        logger.warn(`Failed to prune worktree references: ${getErrorMessage(pruneError)}`)
-      }
-    }
-    
-    db.deleteRepo(database, repoId)
-    logger.info(`Repo deleted successfully: ${repoIdentifier}`)
-  } catch (error: unknown) {
-    logger.error(`Failed to delete repo: ${repoIdentifier}`, error)
-    throw error
   }
+
+  await executeCommand(['rm', '-rf', dirName], getReposPath())
+  db.deleteRepo(database, repoId)
 }
 
 function normalizeRepoUrl(url: string): { url: string; name: string } {
+  const sshMatch = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/)
+  if (sshMatch) {
+    const [, host, pathPart] = sshMatch
+    const repoName = pathPart.split('/').pop() || `repo-${Date.now()}`
+    return {
+      url: `https://${host}/${pathPart.replace(/\.git$/, '')}`,
+      name: repoName
+    }
+  }
+
   const shorthandMatch = url.match(/^([^/]+)\/([^/]+)$/)
   if (shorthandMatch) {
-    const [, owner, repoName] = shorthandMatch as [string, string, string]
+    const [, owner, repoName] = shorthandMatch
     return {
       url: `https://github.com/${owner}/${repoName}`,
       name: repoName
@@ -710,11 +620,10 @@ function normalizeRepoUrl(url: string): { url: string; name: string } {
   }
 
   if (url.startsWith('http://') || url.startsWith('https://')) {
-    const httpsUrl = url.replace(/^http:/, 'https:')
-    const urlWithoutGit = httpsUrl.replace(/.git$/, '')
-    const match = urlWithoutGit.match(/([^/]+)$/)
+    const httpsUrl = url.replace(/^http:/, 'https:').replace(/\.git$/, '')
+    const match = httpsUrl.match(/([^/]+)$/)
     return {
-      url: urlWithoutGit,
+      url: httpsUrl,
       name: match?.[1] || `repo-${Date.now()}`
     }
   }
@@ -729,140 +638,55 @@ export async function cleanupOrphanedDirectories(database: Database): Promise<vo
   try {
     const reposPath = getReposPath()
     await ensureDirectoryExists(reposPath)
-    
+
     const dirResult = await executeCommand(['ls', '-1'], reposPath).catch(() => '')
     const directories = dirResult.split('\n').filter(d => d.trim())
-    
+
     if (directories.length === 0) {
       return
     }
-    
+
     const allRepos = db.listRepos(database)
     const trackedPaths = new Set(allRepos.map(r => r.localPath.split('/').pop()))
-    
     const orphanedDirs = directories.filter(dir => !trackedPaths.has(dir))
-    
-    if (orphanedDirs.length > 0) {
-      logger.info(`Found ${orphanedDirs.length} orphaned directories: ${orphanedDirs.join(', ')}`)
-      
-      for (const dir of orphanedDirs) {
-        try {
-          logger.info(`Removing orphaned directory: ${dir}`)
-          await executeCommand(['rm', '-rf', dir], reposPath)
-        } catch (error) {
-          logger.warn(`Failed to remove orphaned directory ${dir}:`, error)
-        }
-      }
+
+    for (const dir of orphanedDirs) {
+      await executeCommand(['rm', '-rf', dir], reposPath).catch(() => {})
     }
-  } catch (error) {
-    logger.warn('Failed to cleanup orphaned directories:', error)
+  } catch {
+    // Cleanup is best-effort
   }
 }
-
-
-
-async function pruneWorktreeReferences(baseRepoPath: string): Promise<void> {
-  try {
-    logger.info(`Pruning worktree references for: ${baseRepoPath}`)
-    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'])
-    logger.info(`Successfully pruned worktree references`)
-  } catch (error: unknown) {
-    logger.warn(`Failed to prune worktree references:`, getErrorMessage(error))
-  }
-}
-
-async function cleanupStaleWorktree(baseRepoPath: string, worktreePath: string): Promise<boolean> {
-  try {
-    logger.info(`Cleaning up stale worktree: ${worktreePath}`)
-    
-    const worktreeList = await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'list', '--porcelain'])
-    const lines = worktreeList.split('\n').filter(line => line.trim())
-    
-    for (const line of lines) {
-      if (line.includes(worktreePath)) {
-        logger.info(`Found worktree reference: ${line}`)
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', worktreePath])
-        logger.info(`Successfully removed worktree: ${worktreePath}`)
-        return true
-      }
-    }
-    
-    logger.info(`No worktree reference found for ${worktreePath}, attempting prune`)
-    await pruneWorktreeReferences(baseRepoPath)
-    return true
-  } catch (error: unknown) {
-    logger.warn(`Failed to cleanup worktree ${worktreePath}:`, getErrorMessage(error))
-    return false
-  }
-}
-
-
 
 async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>): Promise<void> {
   const currentBranch = await safeGetCurrentBranch(baseRepoPath, env)
   if (currentBranch === branch) {
-    logger.info(`Branch '${branch}' is checked out in main repo, switching away...`)
     const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'], { env })
       .then(ref => ref.trim().replace('origin/', ''))
       .catch(() => 'main')
-    
-    try {
-      await executeCommand(['git', '-C', baseRepoPath, 'checkout', defaultBranch], { env })
-    } catch {
-      logger.warn(`Could not switch to ${defaultBranch}, trying 'main'`)
-      await executeCommand(['git', '-C', baseRepoPath, 'checkout', 'main'], { env })
-    }
+
+    await executeCommand(['git', '-C', baseRepoPath, 'checkout', defaultBranch], { env })
+      .catch(() => executeCommand(['git', '-C', baseRepoPath, 'checkout', 'main'], { env }))
   }
-  
+
+  await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'], { env }).catch(() => {})
+
   let branchExists = false
   try {
-    await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/heads/${branch}`], { env })
+    await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/heads/${branch}`], { env, silent: true })
     branchExists = true
   } catch {
     try {
-      await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/remotes/origin/${branch}`], { env })
+      await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--verify', `refs/remotes/origin/${branch}`], { env, silent: true })
       branchExists = true
     } catch {
       branchExists = false
     }
   }
-  
-  const maxRetries = 3
-  
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      logger.info(`Creating worktree (attempt ${attempt}/${maxRetries}): ${branch} -> ${worktreePath}`)
-      
-      if (branchExists) {
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', worktreePath, branch], { env })
-      } else {
-        logger.info(`Branch '${branch}' does not exist, creating it in worktree`)
-        await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', '-b', branch, worktreePath], { env })
-      }
-      
-      logger.info(`Successfully created worktree: ${worktreePath}`)
-      return
-    } catch (error: unknown) {
-      const isLastAttempt = attempt === maxRetries
-      const errorMessage = isErrorWithMessage(error) ? getErrorMessage(error) : ''
-      
-      if (errorMessage.includes('already used by worktree')) {
-        logger.warn(`Worktree already exists, attempting cleanup (attempt ${attempt}/${maxRetries})`)
-        
-        const cleaned = await cleanupStaleWorktree(baseRepoPath, worktreePath)
-        if (!cleaned && isLastAttempt) {
-          throw new Error(`Failed to create worktree: '${branch}' is already used by a worktree and cleanup failed. Manual intervention may be required.`)
-        }
-        
-        if (!cleaned) {
-          logger.warn(`Cleanup failed, will retry...`)
-          continue
-        }
-      } else if (isLastAttempt) {
-        throw new Error(`Failed to create worktree after ${maxRetries} attempts: ${errorMessage}`)
-      } else {
-        logger.warn(`Worktree creation failed (attempt ${attempt}/${maxRetries}): ${errorMessage}, retrying...`)
-      }
-    }
+
+  if (branchExists) {
+    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', worktreePath, branch], { env })
+  } else {
+    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', '-b', branch, worktreePath], { env })
   }
 }

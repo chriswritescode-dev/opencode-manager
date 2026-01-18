@@ -159,54 +159,6 @@ export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<
   return response.json()
 }
 
-export async function fetchFullFileDiff(repoId: number, path: string): Promise<FileDiffResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff-full?path=${encodeURIComponent(path)}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
-}
-
-export async function fetchBranches(repoId: number): Promise<{ branches: string[]; status: { ahead: number; behind: number } }> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/branches`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
-}
-
-export async function createBranch(repoId: number, branchName: string): Promise<{ stdout: string; stderr: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/branch/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ branch: branchName })
-  })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
-}
-
-export async function switchBranch(repoId: number, branchName: string): Promise<{ stdout: string; stderr: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/branch/switch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ branch: branchName })
-  })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
-}
-
 export function useGitStatus(repoId: number | undefined) {
   return useQuery({
     queryKey: ['gitStatus', repoId],
@@ -232,37 +184,51 @@ export function useGitLog(repoId: number | undefined, limit?: number) {
   })
 }
 
-export function useBranches(repoId: number | undefined) {
-  return useQuery({
-    queryKey: ['branches', repoId],
-    queryFn: () => repoId ? fetchBranches(repoId) : Promise.reject(new Error('No repo ID')),
-    enabled: !!repoId,
-    staleTime: 30000,
-  })
+function parseGitErrorMessage(message: string): string {
+  if (message.includes('no upstream') || message.includes('does not have any commits yet')) {
+    return 'No upstream branch configured. Push with --set-upstream or create commits first.'
+  }
+  if (message.includes('non-fast-forward') || message.includes('rejected')) {
+    return 'Push rejected. Pull changes first, then push again.'
+  }
+  if (message.includes('CONFLICT') || message.includes('Merge conflict')) {
+    return 'Merge conflict detected. Resolve conflicts before continuing.'
+  }
+  if (message.includes('Authentication failed') || message.includes('could not read Username')) {
+    return 'Git authentication failed. Check your credentials in Settings.'
+  }
+  if (message.includes('Permission denied')) {
+    return 'Permission denied. Check your repository access.'
+  }
+  if (message.includes('not a git repository')) {
+    return 'Not a valid Git repository.'
+  }
+  return message
 }
 
 export function getApiErrorMessage(error: unknown): string {
   if (error instanceof GitError) {
     if (error.code === 'AUTH_FAILED') {
-      return 'Authentication failed. Please update your Git token in Settings.'
+      return 'Git authentication failed. Check your credentials in Settings.'
     }
     if (error.code === 'CONFLICT') {
-      return 'Merge conflict detected. Please resolve conflicts first.'
+      return 'Merge conflict detected. Resolve conflicts before continuing.'
     }
     if (error.code === 'NOT_FOUND') {
       return 'Repository or file not found.'
     }
-    return error.message
+    return parseGitErrorMessage(error.message)
   }
   if (error instanceof Error) {
-    return error.message
+    return parseGitErrorMessage(error.message)
   }
   if (typeof error === 'string') {
-    return error
+    return parseGitErrorMessage(error)
   }
   const err = error as { status?: number; message?: string; error?: string }
-  if (err?.status === 401) return 'Authentication failed. Please update your Git token in Settings.'
-  if (err?.status === 409) return 'Merge conflict detected. Please resolve conflicts first.'
+  if (err?.status === 401) return 'Git authentication failed. Check your credentials in Settings.'
+  if (err?.status === 409) return 'Merge conflict detected. Resolve conflicts before continuing.'
   if (err?.status === 404) return 'Repository or file not found.'
-  return err?.message || err?.error || String(error) || 'An error occurred'
+  const message = err?.message || err?.error || String(error) || 'An error occurred'
+  return parseGitErrorMessage(message)
 }

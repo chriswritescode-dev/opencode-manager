@@ -257,25 +257,6 @@ app.get('/', async (c) => {
     }
   })
 
-  app.get('/:id/branches', async (c) => {
-    try {
-      const id = parseInt(c.req.param('id'))
-      const repo = db.getRepoById(database, id)
-      
-      if (!repo) {
-        return c.json({ error: 'Repo not found' }, 404)
-      }
-       
-       const branches = await repoService.listBranches(database, gitAuthService, repo)
-
-      
-      return c.json(branches)
-    } catch (error: unknown) {
-      logger.error('Failed to list branches:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
-    }
-  })
-
   app.get('/:id/download', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))

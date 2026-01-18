@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { createGitHubGitEnv } from '../../src/utils/git-auth'
+import type { GitAuthService } from '../../src/services/git-auth'
 
 const executeCommand = vi.fn()
 const ensureDirectoryExists = vi.fn()
@@ -25,18 +25,15 @@ vi.mock('../../src/db/queries', () => ({
   deleteRepo,
 }))
 
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: () => ({
-      preferences: {
-        gitCredentials: [
-          { name: 'GitHub', host: 'https://github.com/', token: 'ghp_test_token' }
-        ],
-      },
-      updatedAt: Date.now(),
-    }),
-  })),
-}))
+const mockEnv = {
+  GIT_TERMINAL_PROMPT: '0',
+  LANG: 'en_US.UTF-8',
+  LC_ALL: 'en_US.UTF-8',
+}
+
+const mockGitAuthService = {
+  getGitEnvironment: vi.fn().mockReturnValue(mockEnv),
+} as unknown as GitAuthService
 
 describe('repoService.cloneRepo auth env', () => {
   beforeEach(() => {
@@ -64,14 +61,12 @@ describe('repoService.cloneRepo auth env', () => {
       .mockResolvedValueOnce('missing')
       .mockResolvedValueOnce('')
 
-    await cloneRepo(database, repoUrl)
-
-    const expectedEnv = createGitHubGitEnv('ghp_test_token')
+    await cloneRepo(database, mockGitAuthService, repoUrl)
 
     expect(executeCommand).toHaveBeenNthCalledWith(
       3,
       ['git', 'clone', 'https://github.com/acme/forge', 'forge'],
-      { cwd: getReposPath(), env: expectedEnv, silent: undefined }
+      expect.objectContaining({ cwd: getReposPath(), env: mockEnv })
     )
 
     expect(ensureDirectoryExists).toHaveBeenCalledWith(getReposPath())

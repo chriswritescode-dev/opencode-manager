@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, fetchGitLog, fetchGitDiff, createBranch, switchBranch, getApiErrorMessage } from '@/api/git'
+import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, fetchGitLog, fetchGitDiff, getApiErrorMessage } from '@/api/git'
+import { createBranch, switchBranch } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 
 export function useGit(repoId: number | undefined) {

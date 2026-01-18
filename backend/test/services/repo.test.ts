@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import type { GitAuthService } from '../../src/services/git-auth'
 
 const executeCommand = vi.fn()
 const ensureDirectoryExists = vi.fn()
@@ -35,6 +36,10 @@ vi.mock('../../src/services/settings', () => ({
   })),
 }))
 
+const mockGitAuthService = {
+  getGitEnvironment: vi.fn().mockReturnValue({}),
+} as unknown as GitAuthService
+
 describe('initLocalRepo', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -59,8 +64,8 @@ describe('initLocalRepo', () => {
       isLocal: true,
     })
     
-    const result = await initLocalRepo(database, localPath)
-    
+    const result = await initLocalRepo(database, mockGitAuthService, localPath)
+
     expect(executeCommand).toHaveBeenCalledWith(['git', 'init'], expect.any(Object))
     expect(ensureDirectoryExists).toHaveBeenCalledWith(expect.stringContaining('my-new-repo'))
     expect(updateRepoStatus).toHaveBeenCalledWith(database, 1, 'ready')
@@ -71,7 +76,7 @@ describe('initLocalRepo', () => {
     const { initLocalRepo } = await import('../../src/services/repo')
     const database = {} as any
     const absolutePath = '/Users/test/existing-repo'
-    
+
     getRepoByLocalPath.mockReturnValue(null)
     createRepo.mockImplementation((_, input) => ({
       id: 2,
@@ -82,7 +87,7 @@ describe('initLocalRepo', () => {
       clonedAt: Date.now(),
       isLocal: true,
     }))
-    
+
     let callCount = 0
     executeCommand.mockImplementation(async () => {
       callCount++
@@ -92,10 +97,10 @@ describe('initLocalRepo', () => {
       return ''
     })
 
-    const result = await initLocalRepo(database, absolutePath)
-    
+    const result = await initLocalRepo(database, mockGitAuthService, absolutePath)
+
     expect(executeCommand).toHaveBeenCalledWith(['test', '-d', '/Users/test/existing-repo'], { silent: true })
-    expect(executeCommand).toHaveBeenCalledWith(['git', '-C', '/Users/test/existing-repo', 'rev-parse', '--git-dir'], { silent: true })
+    expect(executeCommand).toHaveBeenCalledWith(['git', '-C', '/Users/test/existing-repo', 'rev-parse', '--git-dir'], expect.objectContaining({ silent: true }))
     expect(executeCommand).toHaveBeenCalledWith(['git', 'clone', '--local', '/Users/test/existing-repo', 'existing-repo'], expect.objectContaining({ cwd: getReposPath() }))
     expect(updateRepoStatus).toHaveBeenCalledWith(database, 2, 'ready')
     expect(result.cloneStatus).toBe('ready')
@@ -111,11 +116,11 @@ describe('initLocalRepo', () => {
       localPath: 'existing-repo',
       cloneStatus: 'ready' as const,
     }
-    
+
     getRepoByLocalPath.mockReturnValue(existingRepo)
-    
-    const result = await initLocalRepo(database, localPath)
-    
+
+    const result = await initLocalRepo(database, mockGitAuthService, localPath)
+
     expect(result).toBe(existingRepo)
     expect(createRepo).not.toHaveBeenCalled()
     expect(executeCommand).not.toHaveBeenCalled()
@@ -125,17 +130,17 @@ describe('initLocalRepo', () => {
     const { initLocalRepo } = await import('../../src/services/repo')
     const database = {} as any
     const nonExistentPath = '/Users/test/non-existent'
-    
+
     executeCommand.mockRejectedValueOnce(new Error('Command failed'))
 
-    await expect(initLocalRepo(database, nonExistentPath)).rejects.toThrow("No such file or directory")
+    await expect(initLocalRepo(database, mockGitAuthService, nonExistentPath)).rejects.toThrow("No such file or directory")
   })
 
   it('throws error when repo name already exists in workspace', async () => {
     const { initLocalRepo } = await import('../../src/services/repo')
     const database = {} as any
     const absolutePath = '/Users/test/existing-repo'
-    
+
     let callCount = 0
     executeCommand.mockImplementation(async () => {
       callCount++
@@ -144,14 +149,14 @@ describe('initLocalRepo', () => {
       return ''
     })
 
-    await expect(initLocalRepo(database, absolutePath)).rejects.toThrow("A repository named 'existing-repo' already exists in the workspace")
+    await expect(initLocalRepo(database, mockGitAuthService, absolutePath)).rejects.toThrow("A repository named 'existing-repo' already exists in the workspace")
   })
 
   it('throws error when absolute path is not a git repo', async () => {
     const { initLocalRepo } = await import('../../src/services/repo')
     const database = {} as any
     const nonGitPath = '/Users/test/not-a-repo'
-    
+
     let callCount = 0
     executeCommand.mockImplementation(async () => {
       callCount++
@@ -159,7 +164,7 @@ describe('initLocalRepo', () => {
       return ''
     })
 
-    await expect(initLocalRepo(database, nonGitPath)).rejects.toThrow("Directory exists but is not a valid Git repository")
+    await expect(initLocalRepo(database, mockGitAuthService, nonGitPath)).rejects.toThrow("Directory exists but is not a valid Git repository")
   })
 
   it('creates new empty repo with custom branch', async () => {
@@ -167,7 +172,7 @@ describe('initLocalRepo', () => {
     const database = {} as any
     const localPath = 'custom-branch-repo'
     const branch = 'develop'
-    
+
     getRepoByLocalPath.mockReturnValue(null)
     createRepo.mockReturnValue({
       id: 3,
@@ -179,9 +184,9 @@ describe('initLocalRepo', () => {
       clonedAt: Date.now(),
       isLocal: true,
     })
-    
-    const result = await initLocalRepo(database, localPath, branch)
-    
+
+    const result = await initLocalRepo(database, mockGitAuthService, localPath, branch)
+
     expect(executeCommand).toHaveBeenCalledWith(['git', 'init'], expect.any(Object))
     expect(executeCommand).toHaveBeenCalledWith(['git', '-C', expect.any(String), 'checkout', '-b', 'develop'])
     expect(result.defaultBranch).toBe('develop')
@@ -191,7 +196,7 @@ describe('initLocalRepo', () => {
     const { initLocalRepo } = await import('../../src/services/repo')
     const database = {} as any
     const localPath = 'my-repo/'
-    
+
     getRepoByLocalPath.mockReturnValue(null)
     createRepo.mockReturnValue({
       id: 4,
@@ -202,9 +207,9 @@ describe('initLocalRepo', () => {
       clonedAt: Date.now(),
       isLocal: true,
     })
-    
-    const result = await initLocalRepo(database, localPath)
-    
+
+    const result = await initLocalRepo(database, mockGitAuthService, localPath)
+
     expect(result.localPath).toBe('my-repo')
   })
 })

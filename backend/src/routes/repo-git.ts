@@ -3,7 +3,6 @@ import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import { logger } from '../utils/logger'
 import { getErrorMessage } from '../utils/error-utils'
-import { GitFetchService } from '../services/git/GitFetchService'
 import { GitCommitService } from '../services/git/GitCommitService'
 import { GitPushService } from '../services/git/GitPushService'
 import { GitLogService } from '../services/git/GitLogService'
@@ -19,7 +18,6 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   const gitDiffService = new GitDiffService(gitAuthService)
   const gitFetchPullService = new GitFetchPullService(gitAuthService)
   const gitBranchService = new GitBranchService(gitAuthService)
-  const gitFetchService = new GitFetchService(gitFetchPullService, gitBranchService)
   const gitCommitService = new GitCommitService(gitAuthService)
   const gitPushService = new GitPushService(gitAuthService)
   const gitLogService = new GitLogService(gitAuthService, gitDiffService)
@@ -135,7 +133,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      await gitFetchService.fetch(id, database)
+      await gitFetchPullService.fetch(id, database)
 
       const status = await gitStatusService.getStatus(id, database)
       return c.json(status)
@@ -154,7 +152,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      await gitFetchService.pull(id, database)
+      await gitFetchPullService.pull(id, database)
 
       const status = await gitStatusService.getStatus(id, database)
       return c.json(status)
