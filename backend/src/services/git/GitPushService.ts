@@ -31,6 +31,7 @@ export class GitPushService {
       }
 
       const env = this.gitAuthService.getGitEnvironment()
+      logger.info(`Git push environment: GIT_ASKPASS=${env.GIT_ASKPASS}, VSCODE_GIT_IPC_HANDLE=${env.VSCODE_GIT_IPC_HANDLE}, VSCODE_GIT_ASKPASS_NODE=${env.VSCODE_GIT_ASKPASS_NODE}, VSCODE_GIT_ASKPASS_MAIN=${env.VSCODE_GIT_ASKPASS_MAIN}`)
       const stdout = await executeCommand(args, { env })
 
       logger.info(`Successfully pushed changes for repo ${repoId}`)

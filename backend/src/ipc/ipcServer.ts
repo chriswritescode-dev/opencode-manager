@@ -38,11 +38,12 @@ export class IPCServer {
   }
 
   private onRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
+    logger.info(`IPC request received: url=${req.url}, method=${req.method}`)
     const handler = this.handlers.get(req.url || '')
     if (!handler) {
       logger.warn(`IPC handler not found for path: ${req.url}, registered paths: ${Array.from(this.handlers.keys()).join(', ')}`)
       res.writeHead(404)
-      res.end()
+      res.end(JSON.stringify({ error: 'Handler not found' }))
       return
     }
 
@@ -51,6 +52,7 @@ export class IPCServer {
     req.on('end', async () => {
       try {
         const body = Buffer.concat(chunks).toString('utf8')
+        logger.info(`IPC request body: "${body}"`)
         if (!body) {
           logger.warn(`Empty request body for path: ${req.url}`)
           res.writeHead(400)

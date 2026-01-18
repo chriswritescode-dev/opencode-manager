@@ -27,10 +27,20 @@ export async function executeCommand(
   return new Promise((resolve, reject) => {
     const [command, ...cmdArgs] = args
     
+    const effectiveEnv = { ...process.env, ...options.env }
+    
+    // Log key git-related environment variables
+    if (command === 'git') {
+      logger.info(`executeCommand: ${args.join(' ')}`)
+      logger.info(`  GIT_ASKPASS: ${effectiveEnv.GIT_ASKPASS || '(not set)'}`)
+      logger.info(`  VSCODE_GIT_IPC_HANDLE: ${effectiveEnv.VSCODE_GIT_IPC_HANDLE || '(not set)'}`)
+      logger.info(`  GIT_TERMINAL_PROMPT: ${effectiveEnv.GIT_TERMINAL_PROMPT || '(not set)'}`)
+    }
+    
     const proc: ChildProcess = spawn(command || '', cmdArgs, {
       cwd: options.cwd,
       shell: false,
-      env: { ...process.env, ...options.env }
+      env: effectiveEnv
     })
 
     let stdout = ''
