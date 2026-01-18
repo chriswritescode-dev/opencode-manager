@@ -46,10 +46,17 @@ export class GitBranchService {
       const isCurrent = trimmed.startsWith('*')
       const namePart = trimmed.replace(/^\*?\s*/, '')
 
+      const firstSpace = namePart.indexOf(' ')
+      const firstBracket = namePart.indexOf('[')
+      const cutIndex = firstSpace === -1 ? (firstBracket === -1 ? namePart.length : firstBracket) : (firstBracket === -1 ? firstSpace : Math.min(firstSpace, firstBracket))
+      const branchName = namePart.slice(0, cutIndex)
+
+      if (!branchName) continue
+
       const branch: GitBranch = {
-        name: namePart,
-        type: namePart.startsWith('remotes/') ? 'remote' : 'local',
-        current: isCurrent && (namePart === currentBranch || namePart === `remotes/${currentBranch}`)
+        name: branchName,
+        type: branchName.startsWith('remotes/') ? 'remote' : 'local',
+        current: isCurrent && (branchName === currentBranch || branchName === `remotes/${currentBranch}`)
       }
 
       if (seenNames.has(branch.name)) continue

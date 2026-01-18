@@ -174,6 +174,16 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
               const isCurrent = branch.name === activeBranch || branch.name === `remotes/${activeBranch}`
               const isRemote = branch.type === 'remote'
 
+              const handleClick = () => {
+                if (isCurrent) return
+                
+                let branchToCheckout = branch.name
+                if (isRemote) {
+                  branchToCheckout = branch.name.replace(/^remotes\/[^/]+\//, '')
+                }
+                switchBranchMutation.mutate(branchToCheckout)
+              }
+
               return (
                 <button
                   key={branch.name}
@@ -181,8 +191,8 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
                     'flex items-center gap-2 px-3 py-2 w-full text-left hover:bg-accent/50 transition-colors',
                     isCurrent && 'bg-accent'
                   )}
-                  onClick={() => !isCurrent && !isRemote && switchBranchMutation.mutate(branch.name)}
-                  disabled={isCurrent || switchBranchMutation.isPending || isRemote}
+                  onClick={handleClick}
+                  disabled={isCurrent || switchBranchMutation.isPending}
                 >
                   {isRemote ? (
                     <Globe className="w-4 h-4 text-blue-500" />

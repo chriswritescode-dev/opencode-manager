@@ -204,13 +204,14 @@ export function SourceControlPanel({
       <div className={cn('flex-1 min-h-0', isMobile ? 'flex flex-col' : 'flex')}>
         <div className={cn(
           'overflow-hidden',
-          isMobile ? 'flex-1' : selectedFile ? 'w-[40%] border-r border-border' : 'flex-1'
+          isMobile ? 'flex-1' : selectedFile ? 'w-[35%] border-r border-border' : 'flex-1'
         )}>
           {activeTab === 'changes' && (
             <ChangesTab
               repoId={repoId}
               onFileSelect={(path, staged) => setSelectedFile({ path, staged })}
-              selectedFile={selectedFile?.path}
+              selectedFile={selectedFile}
+              isMobile={isMobile}
             />
           )}
           {activeTab === 'commits' && (
@@ -248,8 +249,8 @@ export function SourceControlPanel({
       <DialogContent
         mobileFullscreen
         className={cn(
-          'p-0 flex flex-col',
-          isMobile ? 'h-[85vh]' : 'w-[600px] sm:max-w-[600px]'
+          'p-0 flex flex-col bg-card border-border',
+          isMobile ? 'h-[85vh]' : 'w-[90vw] sm:max-w-6xl h-[90vh]'
         )}
       >
         <DialogHeader className="px-4 py-3 border-b border-border flex-shrink-0">
