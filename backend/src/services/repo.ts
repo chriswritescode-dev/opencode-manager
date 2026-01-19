@@ -1,5 +1,5 @@
 import { executeCommand } from '../utils/process'
-import { ensureDirectoryExists } from './file-operations'
+import { ensureDirectoryExists, directoryExists, removeDirectory, listDirectoryNames } from './file-operations'
 import * as db from '../db/queries'
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
@@ -88,12 +88,7 @@ async function isValidGitRepo(repoPath: string): Promise<boolean> {
 async function checkRepoNameAvailable(name: string): Promise<boolean> {
   const reposPath = getReposPath()
   const targetPath = path.join(reposPath, name)
-  try {
-    await executeCommand(['test', '-e', targetPath], { silent: true })
-    return false
-  } catch {
-    return true
-  }
+  return !(await directoryExists(targetPath))
 }
 
 async function copyRepoToWorkspace(sourcePath: string, targetName: string): Promise<void> {
@@ -186,9 +181,7 @@ export async function initLocalRepo(
     logger.info(`Absolute path detected: ${normalizedInputPath}`)
     
     try {
-      const exists = await executeCommand(['test', '-d', normalizedInputPath], { silent: true })
-        .then(() => true)
-        .catch(() => false)
+      const exists = await directoryExists(normalizedInputPath)
       
       if (!exists) {
         throw new Error(`No such file or directory: '${normalizedInputPath}'`)
@@ -296,14 +289,14 @@ export async function initLocalRepo(
     
     if (directoryCreated && !sourceWasGitRepo) {
       try {
-        await executeCommand(['rm', '-rf', repoLocalPath], getReposPath())
+        await removeDirectory(path.join(getReposPath(), repoLocalPath))
         logger.info(`Rolled back directory: ${repoLocalPath}`)
       } catch (fsError: any) {
         logger.error(`Failed to rollback directory ${repoLocalPath}:`, fsError)
       }
     } else if (sourceWasGitRepo) {
       try {
-        await executeCommand(['rm', '-rf', repoLocalPath], getReposPath())
+        await removeDirectory(path.join(getReposPath(), repoLocalPath))
         logger.info(`Cleaned up copied directory: ${repoLocalPath}`)
       } catch (fsError: any) {
         logger.error(`Failed to clean up copied directory ${repoLocalPath}:`, fsError)
@@ -333,9 +326,9 @@ export async function cloneRepo(
   }
   
   await ensureDirectoryExists(getReposPath())
-  const baseRepoExists = await executeCommand(['bash', '-c', `test -d ${baseRepoDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
+  const baseRepoExists = await directoryExists(path.join(getReposPath(), baseRepoDirName))
   
-  const shouldUseWorktree = useWorktree && branch && baseRepoExists.trim() === 'exists'
+  const shouldUseWorktree = useWorktree && branch && baseRepoExists
   
   const createRepoInput: CreateRepoInput = {
     repoUrl: normalizedRepoUrl,
@@ -366,9 +359,7 @@ export async function cloneRepo(
       
       await createWorktreeSafely(baseRepoPath, worktreePath, branch)
       
-      const worktreeVerified = await executeCommand(['test', '-d', worktreePath])
-        .then(() => true)
-        .catch(() => false)
+      const worktreeVerified = await directoryExists(worktreePath)
       
       if (!worktreeVerified) {
         throw new Error(`Worktree directory was not created at: ${worktreePath}`)
@@ -376,16 +367,16 @@ export async function cloneRepo(
       
       logger.info(`Worktree verified at: ${worktreePath}`)
       
-    } else if (branch && baseRepoExists.trim() === 'exists' && useWorktree) {
+    } else if (branch && baseRepoExists && useWorktree) {
       logger.info(`Base repo exists but worktree creation failed, cloning branch separately`)
       
-      const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
-      if (worktreeExists.trim() === 'exists') {
+      const worktreeExists = await directoryExists(path.join(getReposPath(), worktreeDirName))
+      if (worktreeExists) {
         logger.info(`Workspace directory exists, removing it: ${worktreeDirName}`)
         try {
-          await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
-          const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-          if (verifyRemoved.trim() === 'exists') {
+          await removeDirectory(path.join(getReposPath(), worktreeDirName))
+          const verifyRemoved = !(await directoryExists(path.join(getReposPath(), worktreeDirName)))
+          if (!verifyRemoved) {
             throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
           }
         } catch (cleanupError: any) {
@@ -402,27 +393,32 @@ export async function cloneRepo(
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        logger.info(`Branch '${branch}' not found during clone, cloning default branch and creating branch locally`)
-        await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
-        let localBranchExists = 'missing'
-        try {
-          await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
-          localBranchExists = 'exists'
-        } catch {
-          localBranchExists = 'missing'
-        }
-          if (localBranchExists.trim() === 'missing') {
+        if (error.message.includes('Remote branch') || error.message.includes('not found')) {
+          logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
+          await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
+          let localBranchExists: 'exists' | 'missing'
+          try {
+            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
+            localBranchExists = 'exists'
+          } catch {
+            localBranchExists = 'missing'
+          }
+          
+          if (localBranchExists === 'missing') {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', '-b', branch])
           } else {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
           }
+        } else {
+          throw error
+        }
       }
     } else {
-      if (baseRepoExists.trim() === 'exists') {
+      if (baseRepoExists) {
         logger.info(`Repository directory already exists, verifying it's a valid git repo: ${baseRepoDirName}`)
         const isValidRepo = await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--git-dir'], path.resolve(getReposPath())).then(() => 'valid').catch(() => 'invalid')
         
-        if (isValidRepo.trim() === 'valid') {
+        if (isValidRepo === 'valid') {
           logger.info(`Valid repository found: ${normalizedRepoUrl}`)
           
           if (branch) {
@@ -462,19 +458,19 @@ export async function cloneRepo(
           return { ...repo, cloneStatus: 'ready' }
         } else {
           logger.warn(`Invalid repository directory found, removing and recloning: ${baseRepoDirName}`)
-          await executeCommand(['rm', '-rf', baseRepoDirName], getReposPath())
+          await removeDirectory(path.join(getReposPath(), baseRepoDirName))
         }
       }
       
       logger.info(`Cloning repo: ${normalizedRepoUrl}${branch ? ` to branch ${branch}` : ''}`)
       
-      const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], getReposPath())
-      if (worktreeExists.trim() === 'exists') {
+      const worktreeExists = await directoryExists(path.join(getReposPath(), worktreeDirName))
+      if (worktreeExists) {
         logger.info(`Workspace directory exists, removing it: ${worktreeDirName}`)
         try {
-          await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
-          const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-          if (verifyRemoved.trim() === 'exists') {
+          await removeDirectory(path.join(getReposPath(), worktreeDirName))
+          const verifyRemoved = !(await directoryExists(path.join(getReposPath(), worktreeDirName)))
+          if (!verifyRemoved) {
             throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
           }
         } catch (cleanupError: any) {
@@ -506,7 +502,7 @@ export async function cloneRepo(
             localBranchExists = 'missing'
           }
           
-          if (localBranchExists.trim() === 'missing') {
+          if (localBranchExists === 'missing') {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', '-b', branch])
           } else {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
@@ -704,10 +700,10 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     
     // Remove the directory
     logger.info(`Removing directory: ${dirName} from ${getReposPath()}`)
-    await executeCommand(['rm', '-rf', dirName], getReposPath())
+    await removeDirectory(path.join(getReposPath(), dirName))
     
-    const checkExists = await executeCommand(['bash', '-c', `test -d ${dirName} && echo exists || echo deleted`], getReposPath())
-    if (checkExists.trim() === 'exists') {
+    const checkExists = await directoryExists(path.join(getReposPath(), dirName))
+    if (checkExists) {
       logger.error(`Directory still exists after deletion: ${dirName}`)
       throw new Error(`Failed to delete workspace directory: ${dirName}`)
     }
@@ -764,8 +760,7 @@ export async function cleanupOrphanedDirectories(database: Database): Promise<vo
     const reposPath = getReposPath()
     await ensureDirectoryExists(reposPath)
     
-    const dirResult = await executeCommand(['ls', '-1'], reposPath).catch(() => '')
-    const directories = dirResult.split('\n').filter(d => d.trim())
+    const directories = await listDirectoryNames(reposPath)
     
     if (directories.length === 0) {
       return
@@ -782,7 +777,7 @@ export async function cleanupOrphanedDirectories(database: Database): Promise<vo
       for (const dir of orphanedDirs) {
         try {
           logger.info(`Removing orphaned directory: ${dir}`)
-          await executeCommand(['rm', '-rf', dir], reposPath)
+          await removeDirectory(path.join(reposPath, dir))
         } catch (error) {
           logger.warn(`Failed to remove orphaned directory ${dir}:`, error)
         }
