@@ -152,7 +152,8 @@ export async function listDirectoryNames(dirPath: string): Promise<string[]> {
       }
     }
     return directories
-  } catch {
+  } catch (error) {
+    logger.error(`Failed to list directory names for ${dirPath}:`, error)
     return []
   }
 }
