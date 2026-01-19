@@ -393,7 +393,7 @@ export async function cloneRepo(
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        if (branch && (error.message.includes('Remote branch') || error.message.includes('not found'))) {
+        if (error.message.includes('Remote branch') || error.message.includes('not found')) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
           await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
           let localBranchExists = 'missing'
