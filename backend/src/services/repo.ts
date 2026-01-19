@@ -396,7 +396,7 @@ export async function cloneRepo(
         if (error.message.includes('Remote branch') || error.message.includes('not found')) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
           await executeGitWithFallback(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
-          let localBranchExists = 'missing'
+          let localBranchExists: 'exists' | 'missing'
           try {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
             localBranchExists = 'exists'
