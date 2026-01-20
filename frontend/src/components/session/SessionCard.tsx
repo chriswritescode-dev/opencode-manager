@@ -1,9 +1,9 @@
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { MiniScanner } from "@/components/ui/mini-scanner";
 import { Trash2, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
-import { useSessionStatusForSession } from "@/stores/sessionStatusStore";
 
 interface SessionCardProps {
   session: Session;
@@ -22,8 +22,6 @@ export const SessionCard = ({
   onToggleSelection,
   onDelete,
 }: SessionCardProps) => {
-  const sessionStatus = useSessionStatusForSession(session.id);
-  const isSessionBusy = sessionStatus.type === 'busy' || sessionStatus.type === 'retry' || sessionStatus.type === 'compact';
 
   return (
     <Card
@@ -49,12 +47,7 @@ export const SessionCard = ({
               }}
               className="w-5 h-5 flex-shrink-0"
             />
-            {isSessionBusy && (
-              <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
-              </span>
-            )}
+            <MiniScanner sessionID={session.id} />
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
