@@ -5,12 +5,16 @@ import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
+import { Login } from './pages/Login'
+import { Register } from './pages/Register'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
+import { AuthProvider } from './contexts/AuthContext'
 import { EventProvider, usePermissions } from '@/contexts/EventContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
+import { ProtectedRoute } from './components/auth/ProtectedRoute'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -37,9 +41,32 @@ function RouterContent() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<Repos />} />
-        <Route path="/repos/:id" element={<RepoDetail />} />
-        <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <Repos />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/repos/:id"
+          element={
+            <ProtectedRoute>
+              <RepoDetail />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/repos/:id/sessions/:sessionId"
+          element={
+            <ProtectedRoute>
+              <SessionDetail />
+            </ProtectedRoute>
+          }
+        />
       </Routes>
       <SettingsDialog open={isOpen} onOpenChange={close} />
       <Toaster
@@ -79,10 +106,12 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <TTSProvider>
         <BrowserRouter>
-          <EventProvider>
-            <RouterContent />
-            <PermissionDialogWrapper />
-          </EventProvider>
+          <AuthProvider>
+            <EventProvider>
+              <RouterContent />
+              <PermissionDialogWrapper />
+            </EventProvider>
+          </AuthProvider>
         </BrowserRouter>
       </TTSProvider>
     </QueryClientProvider>

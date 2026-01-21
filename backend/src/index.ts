@@ -16,6 +16,9 @@ import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTitleRoutes } from './routes/title'
 import { createSSERoutes } from './routes/sse'
+import { createAuthRoutes, createAuthInfoRoutes } from './routes/auth'
+import { createAuth } from './auth'
+import { createAuthMiddleware } from './auth/middleware'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -47,6 +50,8 @@ app.use('/*', cors({
 }))
 
 const db = initializeDatabase(DB_PATH)
+const auth = createAuth(db)
+const requireAuth = createAuthMiddleware(auth)
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
@@ -235,17 +240,26 @@ try {
   logger.error('Failed to initialize workspace:', error)
 }
 
-app.route('/api/repos', createRepoRoutes(db, gitAuthService))
-app.route('/api/settings', createSettingsRoutes(db))
-app.route('/api/health', createHealthRoutes(db))
-app.route('/api/files', createFileRoutes())
-app.route('/api/providers', createProvidersRoutes())
-app.route('/api/oauth', createOAuthRoutes())
-app.route('/api/tts', createTTSRoutes(db))
-app.route('/api/generate-title', createTitleRoutes())
-app.route('/api/sse', createSSERoutes())
+app.route('/api/auth', createAuthRoutes(auth, db))
+app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 
-app.all('/api/opencode/*', async (c) => {
+app.route('/api/health', createHealthRoutes(db))
+
+const protectedApi = new Hono()
+protectedApi.use('/*', requireAuth)
+
+protectedApi.route('/repos', createRepoRoutes(db, gitAuthService))
+protectedApi.route('/settings', createSettingsRoutes(db))
+protectedApi.route('/files', createFileRoutes())
+protectedApi.route('/providers', createProvidersRoutes())
+protectedApi.route('/oauth', createOAuthRoutes())
+protectedApi.route('/tts', createTTSRoutes(db))
+protectedApi.route('/generate-title', createTitleRoutes())
+protectedApi.route('/sse', createSSERoutes())
+
+app.route('/api', protectedApi)
+
+app.all('/api/opencode/*', requireAuth, async (c) => {
   const request = c.req.raw
   return proxyRequest(request)
 })

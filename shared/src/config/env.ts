@@ -37,6 +37,15 @@ const resolveWorkspacePath = (): string => {
 
 const workspaceBasePath = resolveWorkspacePath()
 
+const generateDefaultSecret = (): string => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let result = ''
+  for (let i = 0; i < 32; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  return result
+}
+
 export const ENV = {
   SERVER: {
     PORT: getEnvNumber('PORT', DEFAULTS.SERVER.PORT),
@@ -76,6 +85,20 @@ export const ENV = {
   LOGGING: {
     DEBUG: getEnvBoolean('DEBUG', DEFAULTS.LOGGING.DEBUG),
     LOG_LEVEL: getEnvString('LOG_LEVEL', DEFAULTS.LOGGING.LOG_LEVEL),
+  },
+
+  AUTH: {
+    SECRET: getEnvString('AUTH_SECRET', generateDefaultSecret()),
+    TRUSTED_ORIGINS: getEnvString('AUTH_TRUSTED_ORIGINS', 'http://localhost:5173,http://localhost:5001'),
+    GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
+    GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+    DISCORD_CLIENT_ID: process.env.DISCORD_CLIENT_ID,
+    DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
+    PASSKEY_RP_ID: getEnvString('PASSKEY_RP_ID', 'localhost'),
+    PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
+    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5173'),
   },
 } as const
 

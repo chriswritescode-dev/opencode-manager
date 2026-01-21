@@ -11,6 +11,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@better-auth/passkey": "^1.4.17",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
@@ -29,6 +30,7 @@
     "@tailwindcss/vite": "^4.1.14",
     "@tanstack/react-query": "^5.90.5",
     "axios": "^1.12.2",
+    "better-auth": "^1.4.17",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
