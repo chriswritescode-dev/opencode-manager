@@ -137,7 +137,8 @@ class OpenCodeServerManager {
         env: {
           ...process.env,
           ...gitEnv,
-          XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
+          // Use system default XDG_DATA_HOME (~/.local/share) to share sessions with CLI
+          // Only override XDG_CONFIG_HOME for workspace-specific config
           XDG_CONFIG_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.config'),
           OPENCODE_CONFIG: OPENCODE_CONFIG_PATH,
         }
