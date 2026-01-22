@@ -114,6 +114,10 @@ Start Options:
 Service Options:
   --no-tunnel        Disable Cloudflare tunnel (tunnel enabled by default)
 
+Note: Service runs in client mode by default, connecting to existing
+opencode CLI sessions. If no opencode server is found on port 5551,
+one will be started automatically.
+
 Examples:
   opencode-manager start
   opencode-manager start --tunnel
@@ -454,7 +458,7 @@ function commandInstallService(args: string[]): void {
   const bunPath = execSync('which bun', { encoding: 'utf8' }).trim()
   const fullPath = getFullPath()
 
-  const startArgs = ['start']
+  const startArgs = ['start', '--client']
   if (hasTunnel) startArgs.push('--tunnel')
 
   if (platform === 'darwin') {
