@@ -16,7 +16,7 @@ export const DEFAULTS = {
   },
 
   DATABASE: {
-    PATH: './data/opencode.db',
+    PATH: '', // Will be resolved to ~/.lib/run/opencode-manager/opencode.db
   },
 
   WORKSPACE: {

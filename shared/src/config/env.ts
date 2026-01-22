@@ -37,6 +37,11 @@ const resolveWorkspacePath = (): string => {
 
 const workspaceBasePath = resolveWorkspacePath()
 
+const getDefaultDatabasePath = (): string => {
+  const configDir = path.join(os.homedir(), '.lib', 'run', 'opencode-manager')
+  return path.join(configDir, 'opencode.db')
+}
+
 export const ENV = {
   SERVER: {
     PORT: getEnvNumber('PORT', DEFAULTS.SERVER.PORT),
@@ -53,7 +58,7 @@ export const ENV = {
   },
 
   DATABASE: {
-    PATH: getEnvString('DATABASE_PATH', DEFAULTS.DATABASE.PATH),
+    PATH: getEnvString('DATABASE_PATH', getDefaultDatabasePath()),
   },
 
   WORKSPACE: {
