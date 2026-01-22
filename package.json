@@ -9,11 +9,13 @@
   },
   "files": [
     "bin/",
-    "backend/dist/",
-    "frontend/dist/",
+    "backend/",
+    "frontend/",
     "shared/src/",
     "scripts/whisper-server.py",
-    "scripts/chatterbox-server.py"
+    "scripts/chatterbox-server.py",
+    "backend-dist.tar.gz",
+    "frontend-dist.tar.gz"
   ],
   "repository": {
     "type": "git",
@@ -30,6 +32,7 @@
   "author": "Anthropic",
   "license": "MIT",
   "scripts": {
+    "postinstall": "if [ ! -d backend/dist ]; then tar -xzf backend-dist.tar.gz 2>/dev/null || true; fi && if [ ! -d frontend/dist ]; then tar -xzf frontend-dist.tar.gz 2>/dev/null || true; fi",
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
     "dev:backend": "bun --watch backend/src/index.ts",
