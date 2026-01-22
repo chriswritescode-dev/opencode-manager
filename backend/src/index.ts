@@ -16,6 +16,7 @@ import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTerminalRoutes, registerTerminalSocketIO } from './routes/terminal'
+import { createPushRoutes } from './routes/push'
 import { terminalService } from './services/terminal'
 import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
@@ -299,6 +300,7 @@ app.route('/api/oauth', createOAuthRoutes())
 app.route('/api/tts', createTTSRoutes(db))
 app.route('/api/stt', createSTTRoutes(db))
 app.route('/api/terminal', createTerminalRoutes())
+app.route('/api/push', createPushRoutes(db))
 
 app.all('/api/opencode/*', async (c) => {
   const request = c.req.raw

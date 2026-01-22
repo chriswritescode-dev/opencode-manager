@@ -1,0 +1,52 @@
+# Development files
+.git/
+.github/
+.opencode/
+.secrets/
+temp/
+tmp/
+workspace/
+docs/
+
+# Source files (use built versions)
+backend/src/
+frontend/src/
+frontend/public/
+frontend/*.ts
+frontend/*.json
+
+# Config files
+*.config.ts
+*.config.js
+vitest.*
+tsconfig*.json
+eslint.*
+.prettierrc*
+.editorconfig
+
+# Test files
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/test/
+**/tests/
+**/__tests__/
+
+# Development scripts (keep whisper/chatterbox)
+scripts/*.ts
+!scripts/whisper-server.py
+!scripts/chatterbox-server.py
+
+# Docker (not needed for npm install)
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+Caddyfile
+
+# Misc
+*.log
+*.md
+!README.md
+.env*
+.DS_Store
+node_modules/

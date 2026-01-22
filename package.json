@@ -1,9 +1,34 @@
 {
   "name": "opencode-manager",
   "version": "0.5.4",
-  "private": true,
+  "description": "Web UI for managing OpenCode AI coding assistant sessions",
   "type": "module",
   "packageManager": "pnpm@9.15.0",
+  "bin": {
+    "opencode-manager": "./bin/cli.ts"
+  },
+  "files": [
+    "bin/",
+    "backend/dist/",
+    "frontend/dist/",
+    "shared/src/",
+    "scripts/whisper-server.py",
+    "scripts/chatterbox-server.py"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dzianisv/opencode-manager.git"
+  },
+  "keywords": [
+    "opencode",
+    "ai",
+    "coding",
+    "assistant",
+    "web-ui",
+    "claude"
+  ],
+  "author": "Anthropic",
+  "license": "MIT",
   "scripts": {
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
@@ -16,6 +41,7 @@
     "build": "pnpm run build:backend && pnpm run build:frontend",
     "build:backend": "pnpm --filter backend build",
     "build:frontend": "pnpm --filter frontend build",
+    "prepublishOnly": "pnpm run build",
     "test": "pnpm run test:backend",
     "test:backend": "pnpm --filter backend test",
     "generate:openapi": "bun scripts/generate-openapi.ts",
@@ -38,5 +64,9 @@
     "dotenv": "^17.2.3",
     "node-pty": "^1.1.0",
     "ws": "^8.18.3"
+  },
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.0"
   }
 }

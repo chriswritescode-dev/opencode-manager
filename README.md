@@ -154,7 +154,75 @@ Use `@qa-tester` in OpenCode or run `scripts/qa-test.sh` for quick tests.
 
 ## Installation
 
-### Option 1: Docker (Recommended)
+### Option 1: npm/bun (Recommended for Local Use)
+
+Install OpenCode Manager as a global CLI tool directly from GitHub:
+
+```bash
+# Install with bun (recommended)
+bun install -g github:dzianisv/opencode-manager
+
+# Or with npm
+npm install -g github:dzianisv/opencode-manager
+```
+
+**Prerequisites:**
+- [Bun](https://bun.sh/) installed (for running the CLI)
+- [OpenCode](https://opencode.ai) installed: `curl -fsSL https://opencode.ai/install | bash`
+- (Optional) [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/) for tunnel mode: `brew install cloudflared`
+
+**CLI Commands:**
+
+```bash
+# Start the server
+opencode-manager start
+
+# Start with Cloudflare tunnel for remote access
+opencode-manager start --tunnel
+
+# Connect to an existing opencode instance
+opencode-manager start --client
+
+# Install as a user service (runs on login)
+opencode-manager install-service
+
+# Install as a service with tunnel enabled
+opencode-manager install-service --tunnel
+
+# Check service status
+opencode-manager status
+
+# View service logs
+opencode-manager logs
+
+# Uninstall the service
+opencode-manager uninstall-service
+
+# Show help
+opencode-manager help
+```
+
+**Service Installation:**
+
+The `install-service` command installs OpenCode Manager as a user-level service that starts automatically on login:
+
+- **macOS**: Creates a launchd plist at `~/Library/LaunchAgents/com.opencode-manager.plist`
+- **Linux**: Creates a systemd user service at `~/.config/systemd/user/opencode-manager.service`
+
+**Configuration Files:**
+
+All configuration is stored in `~/.lib/run/opencode-manager/`:
+
+| File | Description |
+|------|-------------|
+| `auth.json` | Basic auth credentials (`{"username": "admin", "password": "..."}`) |
+| `endpoints.json` | Active endpoints (local URL and tunnel URL if enabled) |
+| `stdout.log` | Service stdout (macOS only) |
+| `stderr.log` | Service stderr (macOS only) |
+
+On first run, credentials are automatically generated and saved. Use these to authenticate when accessing the web UI.
+
+### Option 2: Docker (Recommended for Servers)
 
 ```bash
 # Simple one-liner
@@ -172,7 +240,7 @@ Access the application at http://localhost:5003
 **With Docker Compose** (for persistent volumes and env vars):
 
 ```bash
-git clone https://github.com/VibeTechnologies/opencode-manager.git
+git clone https://github.com/dzianisv/opencode-manager.git
 cd opencode-manager
 
 # Configure API keys (optional)
@@ -239,7 +307,7 @@ OpenCode Manager creates a default `AGENTS.md` file in the workspace config dire
 
 This file is merged with any repository-specific `AGENTS.md` files, with repository instructions taking precedence for their respective codebases.
 
-### Option 2: Azure VM Deployment (Quick Start)
+### Option 3: Azure VM Deployment (Quick Start)
 
 Deploy OpenCode Manager to an Azure VM with a single command. Includes automatic HTTPS via Cloudflare tunnel and Basic Auth protection.
 
@@ -252,7 +320,7 @@ Deploy OpenCode Manager to an Azure VM with a single command. Includes automatic
 
 ```bash
 # Clone the repository
-git clone https://github.com/VibeTechnologies/opencode-manager.git
+git clone https://github.com/dzianisv/opencode-manager.git
 cd opencode-manager
 
 # Install dependencies
@@ -358,7 +426,7 @@ ssh azureuser@<VM_IP> "sudo docker logs opencode-manager -f"
 - Standard_D2s_v5 (2 vCPU, 8GB RAM): ~$70/month
 - Use `--destroy` when not in use to avoid charges
 
-### Option 3: Native Local Development (macOS)
+### Option 4: Native Local Development (macOS)
 
 Run OpenCode Manager natively on macOS without Docker. This is ideal for development or when you want the web UI to connect to an existing OpenCode instance running in your terminal.
 
@@ -372,7 +440,7 @@ Run OpenCode Manager natively on macOS without Docker. This is ideal for develop
 
 ```bash
 # Clone the repository
-git clone https://github.com/VibeTechnologies/opencode-manager.git
+git clone https://github.com/dzianisv/opencode-manager.git
 cd opencode-manager
 
 # Install dependencies
@@ -453,11 +521,11 @@ bun scripts/start-native.ts --port 3000
 bun scripts/start-native.ts --client --port 3000
 ```
 
-### Option 4: Local Development (Hot Reload)
+### Option 5: Local Development (Hot Reload)
 
 ```bash
 # Clone the repository
-git clone https://github.com/VibeTechnologies/opencode-manager.git
+git clone https://github.com/dzianisv/opencode-manager.git
 cd opencode-manager
 
 # Install dependencies (uses Bun workspaces)

@@ -1,16 +1,31 @@
+import { useState, useEffect, useCallback } from 'react'
 import { useNotifications } from '@/hooks/useNotifications'
 import { useSettings } from '@/hooks/useSettings'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
-import { Bell, BellOff, BellRing } from 'lucide-react'
+import { Bell, BellOff, BellRing, Send, Loader2 } from 'lucide-react'
 import { DEFAULT_NOTIFICATION_CONFIG } from '@opencode-manager/shared'
+import { 
+  subscribePushNotifications, 
+  unsubscribePushNotifications, 
+  isPushSubscribed,
+  testPushNotification,
+} from '@/api/push'
+import { showToast } from '@/lib/toast'
 
 export function NotificationSettings() {
   const { preferences, updateSettings } = useSettings()
   const { isSupported, permission, requestPermission } = useNotifications()
+  const [pushSubscribed, setPushSubscribed] = useState(false)
+  const [isSubscribing, setIsSubscribing] = useState(false)
+  const [isTesting, setIsTesting] = useState(false)
   
   const notificationConfig = preferences?.notifications ?? DEFAULT_NOTIFICATION_CONFIG
+
+  useEffect(() => {
+    isPushSubscribed().then(setPushSubscribed)
+  }, [])
 
   const handleChange = (updates: Partial<typeof notificationConfig>) => {
     updateSettings({
@@ -21,6 +36,47 @@ export function NotificationSettings() {
     })
   }
 
+  const handlePushSubscribe = useCallback(async () => {
+    setIsSubscribing(true)
+    try {
+      if (pushSubscribed) {
+        await unsubscribePushNotifications()
+        setPushSubscribed(false)
+        showToast.success('Push notifications disabled')
+      } else {
+        const subscription = await subscribePushNotifications()
+        if (subscription) {
+          setPushSubscribed(true)
+          showToast.success('Push notifications enabled')
+        } else {
+          showToast.error('Failed to enable push notifications')
+        }
+      }
+    } catch (error) {
+      console.error('Push subscription error:', error)
+      showToast.error('Failed to toggle push notifications')
+    } finally {
+      setIsSubscribing(false)
+    }
+  }, [pushSubscribed])
+
+  const handleTestPush = useCallback(async () => {
+    setIsTesting(true)
+    try {
+      const result = await testPushNotification()
+      if (result.success) {
+        showToast.success('Test notification sent')
+      } else {
+        showToast.error(result.message || 'Failed to send test notification')
+      }
+    } catch (error) {
+      console.error('Test push error:', error)
+      showToast.error('Failed to send test notification')
+    } finally {
+      setIsTesting(false)
+    }
+  }, [])
+
   const getPermissionStatus = () => {
     if (!isSupported) return { icon: BellOff, text: 'Not supported', color: 'text-muted-foreground' }
     if (permission === 'granted') return { icon: Bell, text: 'Allowed', color: 'text-green-500' }
@@ -30,6 +86,8 @@ export function NotificationSettings() {
 
   const status = getPermissionStatus()
   const StatusIcon = status.icon
+
+  const isPushSupported = 'serviceWorker' in navigator && 'PushManager' in window
 
   return (
     <div className="bg-card border border-border rounded-lg p-6">
@@ -62,11 +120,60 @@ export function NotificationSettings() {
           </p>
         )}
 
+        {isPushSupported && permission === 'granted' && (
+          <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4 bg-primary/5">
+            <div className="space-y-0.5">
+              <Label className="text-base">Push Notifications (Background)</Label>
+              <p className="text-sm text-muted-foreground">
+                Receive notifications even when the browser tab is closed
+              </p>
+              {pushSubscribed && (
+                <p className="text-xs text-green-500 mt-1">
+                  Subscribed to push notifications
+                </p>
+              )}
+            </div>
+            <div className="flex gap-2">
+              {pushSubscribed && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTestPush}
+                  disabled={isTesting}
+                >
+                  {isTesting ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Send className="h-4 w-4 mr-1" />
+                      Test
+                    </>
+                  )}
+                </Button>
+              )}
+              <Button
+                variant={pushSubscribed ? 'destructive' : 'default'}
+                size="sm"
+                onClick={handlePushSubscribe}
+                disabled={isSubscribing}
+              >
+                {isSubscribing ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : pushSubscribed ? (
+                  'Disable'
+                ) : (
+                  'Enable Push'
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
           <div className="space-y-0.5">
             <Label htmlFor="notificationsEnabled" className="text-base">Enable Notifications</Label>
             <p className="text-sm text-muted-foreground">
-              Receive push notifications when you're away from the tab
+              Receive notifications when you're away from the tab
             </p>
           </div>
           <Switch
