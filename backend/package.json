@@ -23,6 +23,7 @@
     "node-pty": "^1.1.0",
     "socket.io": "^4.8.3",
     "strip-json-comments": "^3.1.1",
+    "web-push": "^3.6.7",
     "ws": "^8.18.3",
     "zod": "^4.1.12"
   },
@@ -30,6 +31,7 @@
     "@types/archiver": "^7.0.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "latest",
+    "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "@vitest/ui": "^3.2.4",
     "axios": "^1.9.0",

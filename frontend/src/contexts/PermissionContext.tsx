@@ -394,6 +394,18 @@ prevPendingCountRef.current = pendingCount
                 sessionId: props.sessionID,
                 repoId,
               })
+              
+              fetch(`${API_BASE_URL}/api/push/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  title: 'Session Complete',
+                  body: 'Your OpenCode session has finished',
+                  tag: `session-complete-${props.sessionID}`,
+                  sessionId: props.sessionID,
+                  repoId,
+                }),
+              }).catch((err) => console.warn('[Push] Failed to send push notification:', err))
             }
           }
         } catch (err) {
