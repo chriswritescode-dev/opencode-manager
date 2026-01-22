@@ -183,11 +183,11 @@ opencode-manager start --tunnel
 # Connect to an existing opencode instance
 opencode-manager start --client
 
-# Install as a user service (runs on login)
+# Install as a user service (runs on login, tunnel enabled by default)
 opencode-manager install-service
 
-# Install as a service with tunnel enabled
-opencode-manager install-service --tunnel
+# Install as a service without tunnel (local only)
+opencode-manager install-service --no-tunnel
 
 # Check service status
 opencode-manager status
