@@ -112,12 +112,13 @@ Start Options:
   --no-auth          Disable basic authentication
 
 Service Options:
-  --tunnel           Enable Cloudflare tunnel in service mode
+  --no-tunnel        Disable Cloudflare tunnel (tunnel enabled by default)
 
 Examples:
   opencode-manager start
   opencode-manager start --tunnel
-  opencode-manager install-service --tunnel
+  opencode-manager install-service
+  opencode-manager install-service --no-tunnel
   opencode-manager status
 `)
 }
@@ -440,7 +441,8 @@ function getFullPath(): string {
 }
 
 function commandInstallService(args: string[]): void {
-  const hasTunnel = args.includes('--tunnel') || args.includes('-t')
+  const noTunnel = args.includes('--no-tunnel')
+  const hasTunnel = !noTunnel
   const platform = os.platform()
 
   console.log('\n🔧 Installing OpenCode Manager as a user service...\n')
