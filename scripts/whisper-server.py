@@ -10,6 +10,8 @@ import sys
 import json
 import tempfile
 import logging
+import subprocess
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -47,6 +49,33 @@ AVAILABLE_MODELS = ["tiny", "tiny.en", "base", "base.en", "small", "small.en", "
 
 model_cache: dict[str, WhisperModel] = {}
 current_model_name: Optional[str] = None
+
+
+def convert_to_wav(input_path: str) -> str:
+    """Convert audio file to WAV format using ffmpeg for better compatibility."""
+    output_path = input_path.rsplit('.', 1)[0] + '_converted.wav'
+    
+    ffmpeg_path = shutil.which('ffmpeg')
+    if not ffmpeg_path:
+        logger.warning("ffmpeg not found, using original file")
+        return input_path
+    
+    try:
+        result = subprocess.run([
+            ffmpeg_path, '-y', '-i', input_path,
+            '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+            output_path
+        ], capture_output=True, timeout=30)
+        
+        if result.returncode == 0 and os.path.exists(output_path):
+            logger.debug(f"Converted {input_path} to {output_path}")
+            return output_path
+        else:
+            logger.warning(f"ffmpeg conversion failed: {result.stderr.decode()[:200]}")
+            return input_path
+    except Exception as e:
+        logger.warning(f"Audio conversion failed: {e}")
+        return input_path
 
 
 def get_model(model_name: str = DEFAULT_MODEL) -> WhisperModel:
@@ -129,6 +158,7 @@ async def transcribe(
     
     suffix = Path(audio.filename).suffix or ".webm"
     tmp_path = None
+    converted_path = None
     
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
@@ -136,10 +166,16 @@ async def transcribe(
             tmp_file.write(content)
             tmp_path = tmp_file.name
         
+        audio_path = tmp_path
+        if suffix.lower() in ['.webm', '.ogg', '.mp4', '.m4a', '.opus']:
+            converted_path = convert_to_wav(tmp_path)
+            if converted_path != tmp_path:
+                audio_path = converted_path
+        
         whisper_model = get_model(model)
         
         segments, info = whisper_model.transcribe(
-            tmp_path,
+            audio_path,
             language=language,
             task=task,
             vad_filter=True,
@@ -181,6 +217,11 @@ async def transcribe(
                 os.unlink(tmp_path)
             except:
                 pass
+        if converted_path and converted_path != tmp_path:
+            try:
+                os.unlink(converted_path)
+            except:
+                pass
 
 
 @app.post("/transcribe-base64")
@@ -196,6 +237,7 @@ async def transcribe_base64(request: dict):
         raise HTTPException(status_code=400, detail="No audio data provided")
     
     tmp_path = None
+    converted_path = None
     
     try:
         if "," in audio_data:
@@ -207,10 +249,16 @@ async def transcribe_base64(request: dict):
             tmp_file.write(audio_bytes)
             tmp_path = tmp_file.name
         
+        audio_path = tmp_path
+        if file_format.lower() in ['webm', 'ogg', 'mp4', 'm4a', 'opus']:
+            converted_path = convert_to_wav(tmp_path)
+            if converted_path != tmp_path:
+                audio_path = converted_path
+        
         whisper_model = get_model(model_name)
         
         segments, info = whisper_model.transcribe(
-            tmp_path,
+            audio_path,
             language=language,
             task="transcribe",
             vad_filter=True,
@@ -238,6 +286,11 @@ async def transcribe_base64(request: dict):
         if tmp_path:
             try:
                 os.unlink(tmp_path)
+            except:
+                pass
+        if converted_path and converted_path != tmp_path:
+            try:
+                os.unlink(converted_path)
             except:
                 pass
 
