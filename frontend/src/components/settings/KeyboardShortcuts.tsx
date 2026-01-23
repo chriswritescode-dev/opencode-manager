@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { Loader2 } from 'lucide-react'
 import { DEFAULT_KEYBOARD_SHORTCUTS } from '@/api/types/settings'
@@ -16,59 +16,10 @@ export function KeyboardShortcuts() {
   const [tempShortcuts, setTempShortcuts] = useState<Record<string, string>>({})
   const [currentKeys, setCurrentKeys] = useState<string>('')
 
-  const shortcuts = { ...DEFAULT_KEYBOARD_SHORTCUTS, ...preferences?.keyboardShortcuts, ...tempShortcuts }
-
-  const handleKeyDown = (e: KeyboardEvent, action: string) => {
-    e.preventDefault()
-    
-    const keys = []
-    if (e.ctrlKey) keys.push('Ctrl')
-    if (e.metaKey) keys.push('Cmd')
-    if (e.altKey) keys.push('Alt')
-    if (e.shiftKey) keys.push('Shift')
-    
-    // Get the actual key pressed (excluding modifier keys)
-    const mainKey = e.key
-    if (!['Control', 'Meta', 'Alt', 'Shift'].includes(mainKey)) {
-      // Handle special keys
-      let displayKey = mainKey
-      if (mainKey === ' ') displayKey = 'Space'
-      else if (mainKey === 'ArrowUp') displayKey = 'Up'
-      else if (mainKey === 'ArrowDown') displayKey = 'Down'
-      else if (mainKey === 'ArrowLeft') displayKey = 'Left'
-      else if (mainKey === 'ArrowRight') displayKey = 'Right'
-      else if (mainKey === 'Enter') displayKey = 'Return'
-      else if (mainKey === 'Escape') displayKey = 'Esc'
-      else if (mainKey === 'Tab') displayKey = 'Tab'
-      else if (mainKey === 'Backspace') displayKey = 'Backspace'
-      else if (mainKey === 'Delete') displayKey = 'Delete'
-      else if (mainKey.length === 1) displayKey = mainKey.toUpperCase()
-      
-      keys.push(displayKey)
-      
-      // Only complete recording if we have a non-modifier key
-      if (keys.length > 0) {
-        const shortcut = keys.join('+')
-        setTempShortcuts(prev => ({ ...prev, [action]: shortcut }))
-        setRecordingKey(null)
-        setCurrentKeys('')
-        
-        updateSettings({
-          keyboardShortcuts: { ...shortcuts, [action]: shortcut }
-        })
-      }
-    } else {
-      // Show current modifier keys being held
-      setCurrentKeys(keys.join('+'))
-    }
-  }
-
-  const handleKeyUp = (e: KeyboardEvent) => {
-    // Clear current keys display when modifiers are released
-    if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) {
-      setCurrentKeys('')
-    }
-  }
+  const shortcuts = useMemo(
+    () => ({ ...DEFAULT_KEYBOARD_SHORTCUTS, ...preferences?.keyboardShortcuts, ...tempShortcuts }),
+    [preferences?.keyboardShortcuts, tempShortcuts]
+  )
 
   const startRecording = (action: string) => {
     setRecordingKey(action)
@@ -82,22 +33,61 @@ export function KeyboardShortcuts() {
 
   useEffect(() => {
     if (recordingKey) {
-      const handleGlobalKeyDown = (e: KeyboardEvent) => {
-        handleKeyDown(e, recordingKey)
+      const handleKeyDown = (e: KeyboardEvent) => {
+        e.preventDefault()
+        
+        const keys = []
+        if (e.ctrlKey) keys.push('Ctrl')
+        if (e.metaKey) keys.push('Cmd')
+        if (e.altKey) keys.push('Alt')
+        if (e.shiftKey) keys.push('Shift')
+        
+        const mainKey = e.key
+        if (!['Control', 'Meta', 'Alt', 'Shift'].includes(mainKey)) {
+          let displayKey = mainKey
+          if (mainKey === ' ') displayKey = 'Space'
+          else if (mainKey === 'ArrowUp') displayKey = 'Up'
+          else if (mainKey === 'ArrowDown') displayKey = 'Down'
+          else if (mainKey === 'ArrowLeft') displayKey = 'Left'
+          else if (mainKey === 'ArrowRight') displayKey = 'Right'
+          else if (mainKey === 'Enter') displayKey = 'Return'
+          else if (mainKey === 'Escape') displayKey = 'Esc'
+          else if (mainKey === 'Tab') displayKey = 'Tab'
+          else if (mainKey === 'Backspace') displayKey = 'Backspace'
+          else if (mainKey === 'Delete') displayKey = 'Delete'
+          else if (mainKey.length === 1) displayKey = mainKey.toUpperCase()
+          
+          keys.push(displayKey)
+          
+          if (keys.length > 0) {
+            const shortcut = keys.join('+')
+            setTempShortcuts(prev => ({ ...prev, [recordingKey]: shortcut }))
+            setRecordingKey(null)
+            setCurrentKeys('')
+            
+            updateSettings({
+              keyboardShortcuts: { ...shortcuts, [recordingKey]: shortcut }
+            })
+          }
+        } else {
+          setCurrentKeys(keys.join('+'))
+        }
+      }
+
+      const handleKeyUp = (e: KeyboardEvent) => {
+        if (['Control', 'Meta', 'Alt', 'Shift'].includes(e.key)) {
+          setCurrentKeys('')
+        }
       }
       
-      const handleGlobalKeyUp = (e: KeyboardEvent) => {
-        handleKeyUp(e)
-      }
-      
-      document.addEventListener('keydown', handleGlobalKeyDown)
-      document.addEventListener('keyup', handleGlobalKeyUp)
+      document.addEventListener('keydown', handleKeyDown)
+      document.addEventListener('keyup', handleKeyUp)
       return () => {
-        document.removeEventListener('keydown', handleGlobalKeyDown)
-        document.removeEventListener('keyup', handleGlobalKeyUp)
+        document.removeEventListener('keydown', handleKeyDown)
+        document.removeEventListener('keyup', handleKeyUp)
       }
     }
-  }, [recordingKey, handleKeyDown, handleKeyUp])
+  }, [recordingKey, shortcuts, updateSettings])
 
   if (isLoading) {
     return (

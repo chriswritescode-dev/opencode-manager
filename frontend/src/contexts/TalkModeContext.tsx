@@ -40,6 +40,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const userTranscriptRef = useRef<string | null>(null)
   const agentResponseRef = useRef<string | null>(null)
   const sessionIDRef = useRef<string | null>(null)
+  const startPollingRef = useRef<() => void>(() => {})
 
   const talkModeConfig = preferences?.talkMode
   const sttConfig = preferences?.stt
@@ -85,7 +86,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
         throw new Error('Failed to send message')
       }
 
-      startPollingForResponse()
+      startPollingRef.current()
 
     } catch (err) {
       if (!isActiveRef.current) return
@@ -161,6 +162,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       }
     }, 500)
   }, [speak, updateState])
+
+  startPollingRef.current = startPollingForResponse
 
   const handleTranscriptUpdate = useCallback((transcript: string, isFinal: boolean) => {
     if (!isActiveRef.current) return

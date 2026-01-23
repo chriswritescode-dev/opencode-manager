@@ -248,10 +248,50 @@ jobs:
             sleep 2
           done
 
+      - name: Create test repository in container
+        run: |
+          # Create a test git repo inside the container
+          docker exec opencode-manager bash -c '
+            mkdir -p /workspaces/test-project
+            cd /workspaces/test-project
+            git init
+            git config user.email "test@example.com"
+            git config user.name "Test User"
+            echo "# Test Project" > README.md
+            git add README.md
+            git commit -m "Initial commit"
+          '
+          
+          # Register the test repo with the backend
+          curl -sf -X POST http://localhost:5003/api/repos \
+            -H "Content-Type: application/json" \
+            -d '{"localPath": "/workspaces/test-project"}' | jq .
+          
+          # Verify repo was registered
+          REPOS=$(curl -sf http://localhost:5003/api/repos)
+          echo "Registered repos: $REPOS"
+          
+          if echo "$REPOS" | jq -e '.[0].id' > /dev/null 2>&1; then
+            echo "Test repository registered successfully!"
+          else
+            echo "Failed to register test repository"
+            exit 1
+          fi
+
       - name: Run Browser E2E Tests
-        run: bun run scripts/test-browser.ts --url http://localhost:5003 --web-audio --stt-only
+        run: |
+          # Run full test if API keys are available, otherwise STT-only
+          if [ -n "$ANTHROPIC_API_KEY" ] || [ -n "$OPENAI_API_KEY" ]; then
+            echo "API keys available - running full E2E test"
+            bun run scripts/test-browser.ts --url http://localhost:5003 --web-audio
+          else
+            echo "No API keys - running STT-only test"
+            bun run scripts/test-browser.ts --url http://localhost:5003 --web-audio --stt-only
+          fi
         env:
           CI: true
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
       - name: Container logs on failure
         if: failure()
