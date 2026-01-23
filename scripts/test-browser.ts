@@ -14,6 +14,7 @@ interface TestConfig {
   headless: boolean
   timeout: number
   useWebAudioInjection: boolean
+  sttOnly: boolean
 }
 
 interface TestResult {
@@ -32,6 +33,7 @@ const DEFAULT_CONFIG: TestConfig = {
   headless: process.env.CI === 'true',
   timeout: 180000,
   useWebAudioInjection: false,
+  sttOnly: false,
 }
 
 function log(message: string, indent = 0) {
@@ -466,7 +468,8 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     if (transcriptionResult) {
       success(`Transcribed: "${transcriptionResult}"`)
       
-      info('Submitting transcribed message to OpenCode...')
+      if (!config.sttOnly) {
+        info('Submitting transcribed message to OpenCode...')
       
       const submitted = await page.evaluate(async (text: string, sid: string, repoDir: string) => {
         try {
@@ -560,6 +563,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
+      }
     }
 
     info('Stopping Talk Mode...')
@@ -635,23 +639,28 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       } else {
         log('Note: "Hello World" output not detected in response', 1)
       }
-    } else if (transcriptionResult) {
+    } else if (transcriptionResult && !config.sttOnly) {
       fail('No response from OpenCode')
     }
 
-    const responseCorrect = responseHasCode
+    const responseCorrect = config.sttOnly ? true : responseHasCode
     const passed = !!transcribedCorrectly && !!responseCorrect
 
     if (passed) {
       console.log('\n' + '='.repeat(60))
-      success('FULL E2E TEST PASSED')
-      console.log('  Real audio -> MediaRecorder -> STT -> Transcription -> OpenCode -> Response')
+      if (config.sttOnly) {
+        success('STT-ONLY TEST PASSED')
+        console.log('  Real audio -> MediaRecorder -> STT -> Transcription')
+      } else {
+        success('FULL E2E TEST PASSED')
+        console.log('  Real audio -> MediaRecorder -> STT -> Transcription -> OpenCode -> Response')
+      }
       console.log('='.repeat(60))
     } else {
       console.log('\n' + '='.repeat(60))
       fail('TEST FAILED')
       if (!transcribedCorrectly) console.log('  - Transcription failed or incorrect')
-      if (!responseCorrect) console.log('  - OpenCode response missing or incorrect')
+      if (!config.sttOnly && !responseCorrect) console.log('  - OpenCode response missing or incorrect')
       console.log('='.repeat(60))
     }
 
@@ -688,6 +697,8 @@ async function main() {
       config.headless = false
     } else if (args[i] === '--web-audio') {
       config.useWebAudioInjection = true
+    } else if (args[i] === '--stt-only') {
+      config.sttOnly = true
     } else if (args[i] === '--help' || args[i] === '-h') {
       console.log(`
 Browser E2E Test - Full Talk Mode Pipeline
@@ -718,6 +729,7 @@ Options:
   --text <phrase>   Test phrase to speak (default: "Write a simple python hello world app and test it")
   --no-headless     Run browser in visible mode for debugging
   --web-audio       Use Web Audio API injection instead of Chrome fake audio capture
+  --stt-only        Only test STT pipeline, skip OpenCode response validation (for CI without API keys)
   --help, -h        Show this help
 
 Environment Variables:
