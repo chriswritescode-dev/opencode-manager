@@ -53,20 +53,10 @@ ENV WHISPER_VENV=/opt/whisper-venv
 
 WORKDIR /app
 
-# Full base with TTS (Chatterbox + Coqui)
+# Full base with TTS (Coqui only)
 FROM base AS base-full
 
-# Chatterbox TTS - CPU-only PyTorch (smaller than CUDA version)
-RUN python3 -m venv /opt/chatterbox-venv && \
-    /opt/chatterbox-venv/bin/pip install --no-cache-dir \
-    torch torchaudio --index-url https://download.pytorch.org/whl/cpu && \
-    /opt/chatterbox-venv/bin/pip install --no-cache-dir \
-    chatterbox-tts \
-    fastapi \
-    uvicorn \
-    python-multipart
-
-# Coqui TTS (Jenny voice) - faster and lighter than Chatterbox
+# Coqui TTS (Jenny voice)
 RUN python3 -m venv /opt/coqui-venv && \
     /opt/coqui-venv/bin/pip install --no-cache-dir \
     TTS \
@@ -74,7 +64,6 @@ RUN python3 -m venv /opt/coqui-venv && \
     uvicorn \
     python-multipart
 
-ENV CHATTERBOX_VENV=/opt/chatterbox-venv
 ENV COQUI_VENV=/opt/coqui-venv
 
 FROM base AS deps
@@ -111,15 +100,12 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=base /opt/whisper-venv /opt/whisper-venv
-COPY --from=base-full /opt/chatterbox-venv /opt/chatterbox-venv
 COPY --from=base-full /opt/coqui-venv /opt/coqui-venv
 COPY scripts/whisper-server.py ./scripts/whisper-server.py
-COPY scripts/chatterbox-server.py ./scripts/chatterbox-server.py
 COPY scripts/coqui-server.py ./scripts/coqui-server.py
 COPY package.json pnpm-workspace.yaml ./
 
 ENV WHISPER_VENV=/opt/whisper-venv
-ENV CHATTERBOX_VENV=/opt/chatterbox-venv
 ENV COQUI_VENV=/opt/coqui-venv
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
