@@ -99,25 +99,51 @@ class VoiceTest {
   }
 
   private async generateAudio(text: string, outputPath: string): Promise<boolean> {
-    const aiffPath = outputPath.replace('.wav', '.aiff')
-    
-    const sayResult = await this.execCommand('say', ['-o', aiffPath, text])
-    if (sayResult.code !== 0) {
-      console.error('say command failed:', sayResult.stderr)
-      return false
-    }
-    this.tempFiles.push(aiffPath)
+    if (process.platform === 'darwin') {
+      const aiffPath = outputPath.replace('.wav', '.aiff')
+      
+      const sayResult = await this.execCommand('say', ['-o', aiffPath, text])
+      if (sayResult.code !== 0) {
+        console.error('say command failed:', sayResult.stderr)
+        return false
+      }
+      this.tempFiles.push(aiffPath)
 
-    const ffmpegResult = await this.execCommand('ffmpeg', [
-      '-y', '-i', aiffPath, '-ar', '16000', '-ac', '1', '-sample_fmt', 's16', outputPath
-    ])
-    if (ffmpegResult.code !== 0) {
-      console.error('ffmpeg conversion failed:', ffmpegResult.stderr)
+      const ffmpegResult = await this.execCommand('ffmpeg', [
+        '-y', '-i', aiffPath, '-ar', '16000', '-ac', '1', '-sample_fmt', 's16', outputPath
+      ])
+      if (ffmpegResult.code !== 0) {
+        console.error('ffmpeg conversion failed:', ffmpegResult.stderr)
+        return false
+      }
+      this.tempFiles.push(outputPath)
+      
+      return existsSync(outputPath)
+    } else {
+      const espeakResult = await this.execCommand('espeak', ['-w', outputPath, text])
+      if (espeakResult.code === 0 && existsSync(outputPath)) {
+        this.tempFiles.push(outputPath)
+        return true
+      }
+      
+      const picoResult = await this.execCommand('pico2wave', ['-w', outputPath, text])
+      if (picoResult.code === 0 && existsSync(outputPath)) {
+        this.tempFiles.push(outputPath)
+        return true
+      }
+      
+      console.log('No TTS available, creating silent audio with speech-like duration')
+      const ffmpegResult = await this.execCommand('ffmpeg', [
+        '-y', '-f', 'lavfi', '-i', 'anullsrc=r=16000:cl=mono', '-t', '3', outputPath
+      ])
+      if (ffmpegResult.code === 0 && existsSync(outputPath)) {
+        this.tempFiles.push(outputPath)
+        return true
+      }
+      
+      console.error('Failed to generate audio on Linux')
       return false
     }
-    this.tempFiles.push(outputPath)
-    
-    return existsSync(outputPath)
   }
 
   private sleep(ms: number): Promise<void> {
