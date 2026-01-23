@@ -121,45 +121,64 @@ async function generateTestAudio(phrase: string): Promise<string | null> {
 }
 
 async function injectAudioViaWebAPI(page: Page, audioPath: string): Promise<boolean> {
-  info('Injecting audio via Web Audio API override...')
+  info('Injecting audio via Web Audio API override (evaluateOnNewDocument)...')
   
   try {
     const audioBuffer = readFileSync(audioPath)
     const audioBase64 = audioBuffer.toString('base64')
     
-    await page.evaluate(async (base64Audio: string) => {
-      const binaryString = atob(base64Audio)
-      const bytes = new Uint8Array(binaryString.length)
-      for (let i = 0; i < binaryString.length; i++) {
-        bytes[i] = binaryString.charCodeAt(i)
-      }
-      const audioBlob = new Blob([bytes], { type: 'audio/wav' })
+    await page.evaluateOnNewDocument((base64Audio: string) => {
+      (window as Window & typeof globalThis & { __AUDIO_INJECTED__?: boolean }).__AUDIO_INJECTED__ = false;
       
-      const audioContext = new AudioContext({ sampleRate: 16000 })
-      const arrayBuffer = await audioBlob.arrayBuffer()
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
-      
-      const source = audioContext.createBufferSource()
-      source.buffer = audioBuffer
-      
-      const destination = audioContext.createMediaStreamDestination()
-      source.connect(destination)
-      
-      const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
-      
-      navigator.mediaDevices.getUserMedia = async (constraints) => {
-        if (constraints?.audio) {
-          console.log('[Test] Returning injected audio stream')
-          source.start()
-          return destination.stream
+      const setupAudioInjection = async () => {
+        if ((window as Window & typeof globalThis & { __AUDIO_INJECTED__?: boolean }).__AUDIO_INJECTED__) {
+          return
         }
-        return originalGetUserMedia(constraints)
+        (window as Window & typeof globalThis & { __AUDIO_INJECTED__?: boolean }).__AUDIO_INJECTED__ = true
+        
+        const binaryString = atob(base64Audio)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i)
+        }
+        const audioBlob = new Blob([bytes], { type: 'audio/wav' })
+        
+        const audioContext = new AudioContext({ sampleRate: 16000 })
+        const arrayBuffer = await audioBlob.arrayBuffer()
+        const decodedBuffer = await audioContext.decodeAudioData(arrayBuffer)
+        
+        console.log('[Test] Audio decoded:', decodedBuffer.duration, 'seconds,', decodedBuffer.numberOfChannels, 'channels')
+        
+        const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+        
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          if (constraints?.audio) {
+            console.log('[Test] getUserMedia called with audio - returning injected stream')
+            
+            const source = audioContext.createBufferSource()
+            source.buffer = decodedBuffer
+            
+            const destination = audioContext.createMediaStreamDestination()
+            source.connect(destination)
+            source.start()
+            
+            console.log('[Test] Audio stream started, duration:', decodedBuffer.duration, 'seconds')
+            return destination.stream
+          }
+          return originalGetUserMedia(constraints)
+        }
+        
+        console.log('[Test] Audio injection ready - getUserMedia overridden')
       }
       
-      console.log('[Test] Audio injection prepared')
+      if (document.readyState === 'complete') {
+        setupAudioInjection()
+      } else {
+        window.addEventListener('load', () => setupAudioInjection())
+      }
     }, audioBase64)
     
-    success('Audio injection setup complete')
+    success('Audio injection script registered (will activate on page load)')
     return true
   } catch (error) {
     fail(`Audio injection failed: ${error instanceof Error ? error.message : error}`)
@@ -279,10 +298,10 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     }
 
     info('Loading page...')
-    await page.goto(config.baseUrl, { waitUntil: 'networkidle2', timeout: 60000 })
-    success('Page loaded')
+    await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+    success('Page loaded (DOM ready)')
 
-    await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 15000 })
+    await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
     success('App rendered')
 
     info('Checking repos...')
@@ -309,7 +328,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
     const sessions = await page.evaluate(async (directory: string) => {
       try {
-        const response = await fetch(`/api/opencode/sessions?directory=${encodeURIComponent(directory)}`)
+        const response = await fetch(`/api/opencode/session?directory=${encodeURIComponent(directory)}`)
         if (!response.ok) return []
         return await response.json()
       } catch { return [] }
@@ -337,12 +356,12 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     }
 
     await page.goto(`${config.baseUrl}/repos/${repoId}/sessions/${sessionId}`, { 
-      waitUntil: 'networkidle2', 
-      timeout: 60000 
+      waitUntil: 'domcontentloaded', 
+      timeout: 30000 
     })
     success('Navigated to session page')
 
-    await new Promise(resolve => setTimeout(resolve, 2000))
+    await new Promise(resolve => setTimeout(resolve, 3000))
 
     info('Verifying STT server is running...')
     const sttStatus = await page.evaluate(async () => {
