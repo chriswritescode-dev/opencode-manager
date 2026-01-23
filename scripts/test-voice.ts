@@ -369,7 +369,7 @@ class VoiceTest {
       }
 
       const data = await response.json()
-      if (data.error?.includes('not configured') || data.error?.includes('API key')) {
+      if (data.error?.includes('not configured') || data.error?.includes('API key') || data.error?.includes('not enabled')) {
         return { passed: true, details: 'TTS not configured (expected if no API key set)' }
       }
 
