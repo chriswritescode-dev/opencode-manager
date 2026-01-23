@@ -377,6 +377,137 @@ See [docs/testing.md](docs/testing.md) for detailed test procedures:
 - Client Mode Auto-Registration Test
 - Voice Mode End-to-End Test (full voice-to-code pipeline)
 
+## Feature Development Workflow
+
+Follow this workflow for all features, bug fixes, and improvements.
+
+### 1. Create GitHub Issue
+
+Before starting work, create a GitHub issue:
+
+```bash
+gh issue create --repo dzianisv/opencode-manager \
+  --title "Brief description of feature/bug" \
+  --body "Description, root cause (if bug), acceptance criteria"
+```
+
+Include:
+- Problem description
+- Proposed solution
+- Acceptance criteria (checkboxes)
+
+### 2. Create Feature Branch
+
+```bash
+git checkout main
+git pull origin main
+git checkout -b feature/issue-NUMBER-short-description
+# Example: git checkout -b feature/issue-4-talk-mode-audio-fix
+```
+
+### 3. Development
+
+- Follow code style in AGENTS.md (no comments, strict TypeScript, named imports)
+- Keep commits atomic with clear messages
+- Reference issue in commits: `fix: convert WebM to WAV (#4)`
+
+### 4. Testing Requirements
+
+**Before committing, run ALL relevant tests:**
+
+```bash
+# Unit tests (80% coverage required)
+pnpm test
+
+# Voice E2E test
+bun run scripts/test-voice.ts --url http://localhost:5001 --user admin --pass PASSWORD
+
+# Browser E2E test (for UI changes)
+bun run scripts/test-browser.ts --url http://localhost:5001 --user admin --pass PASSWORD
+
+# Full startup test
+bun run scripts/test-startup.ts
+```
+
+**For npm package changes:**
+```bash
+# Reinstall and verify
+bun remove -g opencode-manager
+bun install -g github:dzianisv/opencode-manager --force
+opencode-manager install-service
+opencode-manager status
+```
+
+### 5. Verification Protocol
+
+**CRITICAL: Follow the verification steps in "Verification Before Committing" section above.**
+
+Do NOT claim a feature works without:
+1. Killing all processes: `pnpm cleanup`
+2. Starting fresh: `pnpm start` or `opencode-manager install-service`
+3. Waiting for full startup (~60-90s)
+4. Testing the actual feature manually
+5. Running automated E2E tests
+
+### 6. Create Pull Request
+
+```bash
+git push -u origin feature/issue-NUMBER-short-description
+
+gh pr create --title "fix: Brief description (#NUMBER)" --body "$(cat <<'EOF'
+## Summary
+- What was changed and why
+
+## Testing Done
+- [ ] Unit tests pass: `pnpm test`
+- [ ] Voice E2E test pass: `bun run scripts/test-voice.ts`
+- [ ] Manual verification: [describe what you tested]
+
+## Issue
+Closes #NUMBER
+EOF
+)"
+```
+
+### 7. Review and Merge
+
+- Wait for CI to pass
+- Address review feedback
+- Squash and merge when approved
+- Delete feature branch after merge
+
+### Example Workflow
+
+```bash
+# 1. Create issue
+gh issue create --title "Talk Mode not recognizing speech"
+
+# 2. Create branch
+git checkout -b feature/issue-4-talk-mode-audio-fix
+
+# 3. Make changes
+vim scripts/whisper-server.py
+
+# 4. Test
+pnpm cleanup
+opencode-manager install-service
+sleep 60
+bun run scripts/test-voice.ts --url http://localhost:5001 --user admin --pass PASSWORD
+
+# 5. Commit
+git add scripts/whisper-server.py
+git commit -m "fix: convert WebM/Opus to WAV before transcription (#4)"
+
+# 6. Push and create PR
+git push -u origin feature/issue-4-talk-mode-audio-fix
+gh pr create --title "fix: Convert WebM to WAV for reliable STT (#4)"
+
+# 7. After merge
+git checkout main
+git pull
+git branch -d feature/issue-4-talk-mode-audio-fix
+```
+
 ## Architecture
 
 @docs/cloudVibeCoding.md
