@@ -153,6 +153,8 @@ async def transcribe(
     language: Optional[str] = Form(default=None),
     task: str = Form(default="transcribe")
 ):
+    if language in ("auto", ""):
+        language = None
     if not audio.filename:
         raise HTTPException(status_code=400, detail="No audio file provided")
     
@@ -231,6 +233,8 @@ async def transcribe_base64(request: dict):
     audio_data = request.get("audio")
     model_name = request.get("model", DEFAULT_MODEL)
     language = request.get("language")
+    if language in ("auto", ""):
+        language = None
     file_format = request.get("format", "webm")
     
     if not audio_data:
