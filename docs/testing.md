@@ -816,6 +816,51 @@ Before deployment, verify:
 - [ ] TTS works over tunnel
 - [ ] Browser E2E test passes
 - [ ] No console errors in browser DevTools
+- [ ] **Settings UI STT Test button works** (uses default settings)
+- [ ] **Settings UI TTS Test button works** (uses default settings)
+
+---
+
+## ⚠️ MANDATORY: Settings UI Verification
+
+**Automated tests are NOT sufficient.** They often use explicit parameters that differ from user defaults.
+
+After ANY change to STT, TTS, or voice features, you MUST test via the Settings UI:
+
+### Settings UI STT Test
+
+1. Open browser to http://localhost:5001
+2. Navigate to Settings → Voice → Speech-to-Text
+3. Click the **"Test"** button
+4. Speak into microphone OR verify the test audio plays and transcribes
+5. **Verify transcription appears** - if it fails, the feature is broken
+
+This test uses the **default settings** (e.g., `language: "auto"`) which may differ from test scripts that use explicit `language: "en"`.
+
+### Settings UI TTS Test
+
+1. Open browser to http://localhost:5001
+2. Navigate to Settings → Voice → Text-to-Speech
+3. Click the **"Test"** button
+4. **Verify audio plays** - if silent or error, the feature is broken
+
+### Why This Matters
+
+**Real bug example:** STT tests passed with `language: "en"` but failed for users because the default setting `language: "auto"` was being sent as an empty string to Whisper, causing `"'' is not a valid language code"` errors.
+
+The automated test used:
+```json
+{"audio": "...", "format": "wav", "language": "en"}
+```
+
+But real users with default settings sent:
+```json
+{"audio": "...", "format": "wav"}
+```
+
+Which used `sttConfig.language = "auto"` from settings, causing the bug.
+
+**Always test with default settings via the UI.**
 
 ---
 
@@ -913,6 +958,41 @@ curl http://localhost:5001/api/opencode/config | jq '{model, small_model}'
 # Should see EventSource connection to /event endpoint
 # When session goes idle, should see session.idle event
 ```
+
+### Bug #6: STT fails with default "auto" language setting
+
+**Issue:** When `language` setting is `"auto"` (the default), STT transcription failed with error `"'' is not a valid language code"`. This happened because:
+1. User settings store `language: "auto"`
+2. Backend passed `"auto"` to Whisper server
+3. Whisper server passed `"auto"` to faster-whisper which rejects it as invalid
+
+The automated tests passed because they used explicit `language: "en"`, masking the bug that affected all users with default settings.
+
+**Fix:** `scripts/whisper-server.py` - Convert `"auto"` and `""` to `None` before passing to Whisper, enabling auto-detection.
+
+**Test:** STT transcription WITHOUT explicit language parameter must work.
+
+**Manual verification:**
+```bash
+# Generate test audio
+say -v Samantha "Hello world" -o /tmp/test.aiff
+ffmpeg -y -i /tmp/test.aiff -ar 16000 -ac 1 /tmp/test.wav
+
+# Test WITHOUT specifying language (uses default "auto" setting)
+AUDIO=$(base64 -i /tmp/test.wav)
+curl -s -X POST http://localhost:5001/api/stt/transcribe \
+  -H "Content-Type: application/json" \
+  -d "{\"audio\": \"$AUDIO\", \"format\": \"wav\"}" | jq .
+# Must return {"text": "Hello world.", ...} NOT an error
+
+# CRITICAL: Also test via Settings UI
+# 1. Open http://localhost:5001
+# 2. Go to Settings → Voice → Speech-to-Text
+# 3. Click "Test" button
+# 4. Verify transcription works
+```
+
+**Lesson learned:** Always test with DEFAULT settings, not just explicit parameters. Automated tests that pass with `language: "en"` may hide bugs that affect users with `language: "auto"`.
 
 ---
 
