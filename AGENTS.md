@@ -4,6 +4,8 @@
 
 **NEVER commit code claiming a feature or fix works without actually testing it end-to-end.**
 
+**NEVER trust automated tests alone** - they may pass while real user workflows fail (e.g., tests using explicit parameters while users rely on default settings).
+
 Before committing any change that affects startup or core functionality:
 
 1. **Kill all processes and clean up:**
@@ -32,7 +34,15 @@ Before committing any change that affects startup or core functionality:
 
 4. **Test the actual feature** you changed (e.g., voice transcription, file creation, etc.)
 
+5. **MANDATORY: Test via Settings UI** (for voice/STT/TTS changes):
+   - Open browser to http://localhost:5001 (or tunnel URL)
+   - Go to Settings → Voice
+   - Click "Test" button for STT - verify transcription works
+   - Click "Test" button for TTS - verify audio plays
+   - These use DEFAULT settings (e.g., language="auto") which may differ from test scripts
+
 **DO NOT** trust that previous test runs are still valid after making changes.
+**DO NOT** claim "all tests pass" without testing the actual UI with default settings.
 
 ## ⚠️ CRITICAL: Never Kill OpenCode Processes
 
