@@ -1,6 +1,7 @@
 FROM node:20 AS base
 
 ARG TARGETARCH
+ARG INCLUDE_TTS=true
 
 RUN apt-get update && apt-get install -y \
     git \
@@ -48,6 +49,13 @@ RUN python3 -m venv /opt/whisper-venv && \
     uvicorn \
     python-multipart
 
+ENV WHISPER_VENV=/opt/whisper-venv
+
+WORKDIR /app
+
+# Full base with TTS (Chatterbox + Coqui)
+FROM base AS base-full
+
 # Chatterbox TTS - CPU-only PyTorch (smaller than CUDA version)
 RUN python3 -m venv /opt/chatterbox-venv && \
     /opt/chatterbox-venv/bin/pip install --no-cache-dir \
@@ -66,11 +74,8 @@ RUN python3 -m venv /opt/coqui-venv && \
     uvicorn \
     python-multipart
 
-ENV WHISPER_VENV=/opt/whisper-venv
 ENV CHATTERBOX_VENV=/opt/chatterbox-venv
 ENV COQUI_VENV=/opt/coqui-venv
-
-WORKDIR /app
 
 FROM base AS deps
 
@@ -92,7 +97,7 @@ COPY frontend/index.html frontend/vite.config.ts frontend/tsconfig*.json fronten
 
 RUN pnpm --filter frontend build
 
-FROM base AS runner
+FROM base-full AS runner
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
@@ -106,8 +111,8 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY --from=base /opt/whisper-venv /opt/whisper-venv
-COPY --from=base /opt/chatterbox-venv /opt/chatterbox-venv
-COPY --from=base /opt/coqui-venv /opt/coqui-venv
+COPY --from=base-full /opt/chatterbox-venv /opt/chatterbox-venv
+COPY --from=base-full /opt/coqui-venv /opt/coqui-venv
 COPY scripts/whisper-server.py ./scripts/whisper-server.py
 COPY scripts/chatterbox-server.py ./scripts/chatterbox-server.py
 COPY scripts/coqui-server.py ./scripts/coqui-server.py
@@ -116,6 +121,45 @@ COPY package.json pnpm-workspace.yaml ./
 ENV WHISPER_VENV=/opt/whisper-venv
 ENV CHATTERBOX_VENV=/opt/chatterbox-venv
 ENV COQUI_VENV=/opt/coqui-venv
+
+RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
+    ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
+
+COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+RUN mkdir -p /workspace /app/data && \
+    chown -R node:node /workspace /app/data
+
+EXPOSE 5003 5100 5101 5102 5103
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
+  CMD curl -f http://localhost:5003/api/health || exit 1
+
+USER node
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["bun", "backend/src/index.ts"]
+
+# Slim runner for E2E tests - STT only (no TTS)
+FROM base AS runner-slim
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=5003
+ENV OPENCODE_SERVER_PORT=5551
+ENV DATABASE_PATH=/app/data/opencode.db
+ENV WORKSPACE_PATH=/workspace
+
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder /app/shared ./shared
+COPY --from=builder /app/backend ./backend
+COPY --from=builder /app/frontend/dist ./frontend/dist
+COPY --from=base /opt/whisper-venv /opt/whisper-venv
+COPY scripts/whisper-server.py ./scripts/whisper-server.py
+COPY package.json pnpm-workspace.yaml ./
+
+ENV WHISPER_VENV=/opt/whisper-venv
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
     ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
