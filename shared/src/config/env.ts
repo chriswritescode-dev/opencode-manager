@@ -89,7 +89,6 @@ export const ENV = {
 
   AUTH: {
     SECRET: getEnvString('AUTH_SECRET', process.env.NODE_ENV === 'production' ? '' : generateDefaultSecret()),
-    TRUSTED_ORIGINS: getEnvString('AUTH_TRUSTED_ORIGINS', 'http://localhost:5173,http://localhost:5001'),
     ADMIN_EMAIL: process.env.ADMIN_EMAIL,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
     ADMIN_PASSWORD_RESET: getEnvBoolean('ADMIN_PASSWORD_RESET', false),
@@ -101,7 +100,7 @@ export const ENV = {
     DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
     PASSKEY_RP_ID: getEnvString('PASSKEY_RP_ID', 'localhost'),
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
-    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5173'),
+    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5001'),
   },
 } as const
 

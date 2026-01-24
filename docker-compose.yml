@@ -26,6 +26,19 @@ services:
       - SANDBOX_TTL_HOURS=24
       - CLEANUP_INTERVAL_MINUTES=60
       - DEBUG=false
+      - AUTH_SECRET=${AUTH_SECRET}
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_PASSWORD_RESET=${ADMIN_PASSWORD_RESET:-false}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - PASSKEY_RP_ID=${PASSKEY_RP_ID:-localhost}
+      - PASSKEY_RP_NAME=${PASSKEY_RP_NAME:-OpenCode Manager}
+      - PASSKEY_ORIGIN=${PASSKEY_ORIGIN:-http://localhost:5003}
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
