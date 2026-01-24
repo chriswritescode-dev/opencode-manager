@@ -1,5 +1,28 @@
 # OpenCode WebUI - Agent Guidelines
 
+## ⚠️ CRITICAL: Post-Deployment Testing Protocol
+
+**After ANY deployment or service reinstallation, you MUST follow the testing protocol in `docs/testing.md`.**
+
+At minimum, run:
+```bash
+# Quick verification
+curl -s http://localhost:5001/api/health | jq '.status'
+curl -s http://localhost:5001/api/stt/status | jq '.server.running'
+
+# Voice E2E tests (11 tests)
+bun run scripts/test-voice.ts --url http://localhost:5001 --user admin --pass PASSWORD --skip-talkmode
+
+# Browser E2E test (full pipeline)
+bun run scripts/test-browser.ts --url http://localhost:5001 --user admin --pass PASSWORD
+```
+
+See `docs/testing.md` for complete test procedures including:
+- Manual STT/TTS tests
+- Tunnel tests
+- Settings UI verification
+- Regression tests for known bugs
+
 ## ⚠️ CRITICAL: Verification Before Committing
 
 **NEVER commit code claiming a feature or fix works without actually testing it end-to-end.**
