@@ -55,6 +55,22 @@ Safe alternatives:
 - Use `pnpm cleanup` to kill only managed ports (5001, 5173, 5551, 5552, 5553, 5554)
 - Kill by port: `lsof -ti:5551 | xargs kill` (only kills process on that port)
 
+## ⚠️ CRITICAL: Never Kill Cloudflare Tunnel
+
+**NEVER run `pnpm cleanup` or kill cloudflared processes when user is connected remotely.**
+
+The user may be accessing this agent through a Cloudflare tunnel from a mobile device or remote location. Killing the tunnel will disconnect them immediately and they will lose access to the session.
+
+**Before running `pnpm cleanup`:**
+1. Ask the user if they are connected via tunnel
+2. If yes, do NOT run cleanup - it will disconnect them
+3. Only kill specific processes that don't include cloudflared
+
+**Safe alternatives when user is remote:**
+- Kill only specific backend processes: `kill <pid>` for the backend PID only
+- Restart individual services without touching the tunnel
+- Ask user to run cleanup themselves when ready
+
 ## Commands
 
 - `pnpm dev` - Start both backend (5001) and frontend (5173)
