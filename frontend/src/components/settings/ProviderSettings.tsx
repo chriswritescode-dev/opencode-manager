@@ -17,7 +17,7 @@ export function ProviderSettings() {
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false)
   const [oauthCallbackDialogOpen, setOauthCallbackDialogOpen] = useState(false)
   const [oauthResponse, setOauthResponse] = useState<OAuthAuthorizeResponse | null>(null)
-  const [connectedExpanded, setConnectedExpanded] = useState(true)
+  const [connectedExpanded, setConnectedExpanded] = useState(false)
   const [availableExpanded, setAvailableExpanded] = useState(false)
   const [availableSearch, setAvailableSearch] = useState('')
   const [apiKeyDialogOpen, setApiKeyDialogOpen] = useState(false)
@@ -173,7 +173,7 @@ export function ProviderSettings() {
 
             return (
               <Card key={provider.id} className="bg-card border-border">
-                <CardHeader className="p-4">
+                <CardHeader className="p-2">
                   <div className="flex flex-col gap-3">
                     <div className="flex items-start justify-between gap-2">
                       <CardTitle className="text-base">
@@ -357,39 +357,36 @@ export function ProviderSettings() {
                 />
               </div>
 
-              <div className="space-y-2 max-h-64 overflow-y-auto">
+              <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin pt-4 pb-1 pr-1 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
                 {filteredAvailableProviders.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-2">
                     {availableSearch ? 'No providers match your search.' : 'No available providers.'}
                   </p>
                 ) : (
-                  filteredAvailableProviders.map((provider) => {
+                  filteredAvailableProviders.map((provider, index) => {
                     const modelCount = Object.keys(provider.models || {}).length
                     return (
-                      <Card key={provider.id} className="bg-card border-border">
-                        <CardHeader className="p-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <CardTitle className="text-sm truncate">
-                                {provider.name || provider.id}
-                              </CardTitle>
-                              {modelCount > 0 && (
-                                <CardDescription className="text-xs">
-                                  {modelCount} model{modelCount !== 1 ? 's' : ''}
-                                </CardDescription>
-                              )}
-                            </div>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleAddApiKey(provider)}
-                            >
-                              <Key className="h-3.5 w-3.5 mr-1" />
-                              Add Key
-                            </Button>
-                          </div>
-                        </CardHeader>
-                      </Card>
+                      <div key={provider.id} className={`flex items-center justify-between gap-2 py-1.5 px-2 rounded-md hover:bg-accent/80 transition-colors ${index % 2 === 1 ? 'bg-accent/30' : ''}`}>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm truncate block">
+                            {provider.name || provider.id}
+                          </span>
+                          {modelCount > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              {modelCount} model{modelCount !== 1 ? 's' : ''}
+                            </span>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => handleAddApiKey(provider)}
+                          className="h-7 px-2"
+                        >
+                          <Key className="h-3.5 w-3.5 mr-1" />
+                          Add Key
+                        </Button>
+                      </div>
                     )
                   })
                 )}

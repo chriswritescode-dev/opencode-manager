@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Link, useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -10,23 +9,17 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Loader2, UserPlus, AlertCircle } from 'lucide-react'
-import type { AuthConfig } from '@/lib/auth-loaders'
 
-const registerSchema = z.object({
+const setupSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   email: z.string().email('Invalid email address'),
   password: z.string().min(8, 'Password must be at least 8 characters'),
-  confirmPassword: z.string(),
-}).refine((data) => data.password === data.confirmPassword, {
-  message: "Passwords don't match",
-  path: ['confirmPassword'],
 })
 
-type RegisterFormData = z.infer<typeof registerSchema>
+type SetupFormData = z.infer<typeof setupSchema>
 
-export function Register() {
+export function Setup() {
   const { signUpWithEmail } = useAuth()
-  const { config } = useLoaderData() as { config: AuthConfig }
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -35,11 +28,11 @@ export function Register() {
     register,
     handleSubmit,
     formState: { errors },
-  } = useForm<RegisterFormData>({
-    resolver: zodResolver(registerSchema),
+  } = useForm<SetupFormData>({
+    resolver: zodResolver(setupSchema),
   })
 
-  const onSubmit = async (data: RegisterFormData) => {
+  const onSubmit = async (data: SetupFormData) => {
     setError(null)
     setIsSubmitting(true)
     try {
@@ -61,11 +54,7 @@ export function Register() {
             alt="OpenCode" 
             className="h-8 w-auto"
           />
-          <p className="text-sm text-muted-foreground">
-            {config.isFirstUser
-              ? 'Create the first admin account'
-              : 'Create your account'}
-          </p>
+          <p className="text-sm text-muted-foreground">Create Admin Account</p>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6 space-y-4">
@@ -96,7 +85,7 @@ export function Register() {
               <Input
                 id="email"
                 type="email"
-                placeholder="you@example.com"
+                placeholder="admin@example.com"
                 className="bg-input border-border focus:border-primary"
                 {...register('email')}
                 aria-invalid={!!errors.email}
@@ -119,37 +108,16 @@ export function Register() {
                 <p className="text-sm text-destructive">{errors.password.message}</p>
               )}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="text-sm text-muted-foreground">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                type="password"
-                placeholder="Confirm your password"
-                className="bg-input border-border focus:border-primary"
-                {...register('confirmPassword')}
-                aria-invalid={!!errors.confirmPassword}
-              />
-              {errors.confirmPassword && (
-                <p className="text-sm text-destructive">{errors.confirmPassword.message}</p>
-              )}
-            </div>
             <Button type="submit" className="w-full" disabled={isSubmitting}>
               {isSubmitting ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
-              {config.isFirstUser ? 'Create Admin Account' : 'Create Account'}
+              Create Admin Account
             </Button>
           </form>
         </div>
-
-        <p className="text-center text-sm text-muted-foreground">
-          Already have an account?{' '}
-          <Link to="/login" className="text-primary hover:underline transition-colors">
-            Sign in
-          </Link>
-        </p>
       </div>
     </div>
   )

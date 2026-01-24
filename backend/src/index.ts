@@ -16,7 +16,7 @@ import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTitleRoutes } from './routes/title'
 import { createSSERoutes } from './routes/sse'
-import { createAuthRoutes, createAuthInfoRoutes } from './routes/auth'
+import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { sseAggregator } from './services/sse-aggregator'
@@ -213,6 +213,13 @@ async function ensureDefaultAgentsMdExists(): Promise<void> {
 }
 
 try {
+  if (ENV.SERVER.NODE_ENV === 'production' && !ENV.AUTH.SECRET) {
+    logger.error('AUTH_SECRET is required in production mode')
+    logger.error('Generate one with: openssl rand -base64 32')
+    logger.error('Set it as environment variable: AUTH_SECRET=your-secret')
+    process.exit(1)
+  }
+
   await ensureDirectoryExists(getWorkspacePath())
   await ensureDirectoryExists(getReposPath())
   await ensureDirectoryExists(getConfigPath())
@@ -236,6 +243,8 @@ try {
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
+
+  await syncAdminFromEnv(auth, db)
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }

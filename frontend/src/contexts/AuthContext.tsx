@@ -8,6 +8,7 @@ interface AuthConfig {
   enabledProviders: string[]
   registrationEnabled: boolean
   isFirstUser: boolean
+  adminConfigured: boolean
 }
 
 interface AuthContextValue {
@@ -51,6 +52,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           enabledProviders: ['credentials'],
           registrationEnabled: true,
           isFirstUser: true,
+          adminConfigured: false,
         })
       }
     }

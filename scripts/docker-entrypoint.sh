@@ -59,4 +59,21 @@ fi
 
 echo "🚀 Starting OpenCode Manager Backend..."
 
+if [ -z "$AUTH_SECRET" ]; then
+  echo "❌ AUTH_SECRET is required but not set"
+  echo ""
+  echo "Please set AUTH_SECRET environment variable with a secure random string."
+  echo "Generate one with: openssl rand -base64 32"
+  echo ""
+  echo "Example in docker-compose.yml:"
+  echo "  environment:"
+  echo "    - AUTH_SECRET=your-secure-random-secret-here"
+  echo ""
+  echo "Example with Docker run:"
+  echo "  docker run -e AUTH_SECRET=\$(openssl rand -base64 32) ..."
+  echo ""
+  exit 1
+fi
+
 exec "$@"
+

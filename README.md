@@ -48,6 +48,14 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 - **Server Templates** - Pre-built templates for common MCP servers
 - **Enable/Disable Servers** - Toggle servers on/off with auto-restart
 
+### Authentication
+- **Single-User Mode** - Designed for personal/single-user deployments
+- **First-Run Setup** - Guided admin account creation on first launch
+- **Passkey Support** - WebAuthn/passkey authentication for passwordless login
+- **OAuth Providers** - Optional GitHub, Google, Discord login (requires configuration)
+- **Environment-Based Admin** - Pre-configure admin credentials via environment variables
+- **Password Reset** - Reset password via environment variable flag
+
 ### Settings & Customization
 - **Theme Selection** - Dark, Light, or System theme
 - **Keyboard Shortcuts** - Customizable keyboard shortcuts
@@ -100,10 +108,6 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 <td></td>
 </tr>
 </table>
-
-## Coming Soon
-
--  **Authentication** - User authentication and session management
 
 See the [Roadmap](ROADMAP.md) for planned features and future development.
 
@@ -191,6 +195,96 @@ OpenCode Manager creates a default `AGENTS.md` file in the workspace config dire
 - Via file: Edit `/workspace/.config/opencode/AGENTS.md` directly
 
 This file is merged with any repository-specific `AGENTS.md` files, with repository instructions taking precedence for their respective codebases.
+
+### Authentication Setup
+
+OpenCode Manager uses a single-user authentication system. On first launch, you'll be prompted to create an admin account.
+
+#### AUTH_SECRET (Required for Production)
+
+The `AUTH_SECRET` environment variable is required for production deployments for session encryption and security. Generate a secure random secret:
+
+```bash
+# Generate a secure random secret
+openssl rand -base64 32
+```
+
+Then add it to your environment configuration:
+
+```bash
+# In docker-compose.yml or .env
+AUTH_SECRET=your-secure-random-secret-here
+```
+
+**Important:** Never commit the AUTH_SECRET to version control. Use different secrets for development and production environments.
+
+#### First-Run Setup (Interactive)
+
+1. Start the application
+2. Navigate to the web interface
+3. You'll be redirected to the Setup page
+4. Create your admin account with name, email, and password
+5. Optionally add a passkey for passwordless login in Settings
+
+#### Pre-Configured Admin (Environment Variables)
+
+For automated deployments, you can pre-configure the admin account:
+
+```bash
+# In docker-compose.yml or .env
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=your-secure-password
+```
+
+When these are set:
+- The admin user is created automatically on first startup
+- Self-registration is disabled (single-user mode)
+- Users must log in with the configured credentials
+
+#### Password Reset
+
+If you forget your password, reset it via environment variables:
+
+```bash
+# Set the new password and enable reset
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=new-secure-password
+ADMIN_PASSWORD_RESET=true
+```
+
+1. Set `ADMIN_PASSWORD_RESET=true` along with the new password
+2. Restart the application
+3. Log in with the new password
+4. **Important:** Remove `ADMIN_PASSWORD_RESET=true` from your environment after resetting
+
+#### OAuth Providers (Optional)
+
+To enable social login, configure OAuth credentials:
+
+```bash
+# GitHub OAuth
+GITHUB_CLIENT_ID=your-client-id
+GITHUB_CLIENT_SECRET=your-client-secret
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+
+# Discord OAuth
+DISCORD_CLIENT_ID=your-client-id
+DISCORD_CLIENT_SECRET=your-client-secret
+```
+
+#### Passkey Configuration
+
+For passkey/WebAuthn support, configure your domain:
+
+```bash
+# Production example
+PASSKEY_RP_ID=yourdomain.com
+PASSKEY_RP_NAME=OpenCode Manager
+PASSKEY_ORIGIN=https://yourdomain.com
+```
 
 ### Option 2: Local Development (Contributors)
 

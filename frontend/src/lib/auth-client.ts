@@ -19,6 +19,7 @@ export const {
   signOut,
   useSession,
   getSession,
+  changePassword,
 } = authClient
 
 export const passkey = authClient.passkey

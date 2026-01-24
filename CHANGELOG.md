@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Features
+- Add single-user authentication system with first-run admin setup
+- Add dedicated Setup page for initial admin account creation
+- Add environment variable support for pre-configured admin (`ADMIN_EMAIL`, `ADMIN_PASSWORD`)
+- Add password reset via `ADMIN_PASSWORD_RESET=true` environment flag
+- Add `adminConfigured` flag to auth config API for frontend routing
+- Login page now redirects to Setup when no users exist and admin is not pre-configured
+- Registration is automatically disabled when admin credentials are configured via environment
+
+### Changed
+- Auth config endpoint now returns `adminConfigured` boolean indicating env-based admin setup
+
 ## [0.7.4] - 2026-01-24
 
 ### Features

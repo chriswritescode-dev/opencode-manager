@@ -69,7 +69,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
           <Tabs defaultValue="account" className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
-              <TabsList className="grid w-full grid-cols-6 bg-card border border-border p-1">
+              <TabsList className="grid w-full grid-cols-6 bg-card p-1">
                 <TabsTrigger value="account" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   Account
                 </TabsTrigger>

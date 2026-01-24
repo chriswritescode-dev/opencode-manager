@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Loader2, Github, KeyRound, Mail, AlertCircle } from 'lucide-react'
+import type { AuthConfig } from '@/lib/auth-loaders'
 
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
@@ -19,7 +20,8 @@ const loginSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>
 
 export function Login() {
-  const { signInWithEmail, signInWithProvider, signInWithPasskey, config, isLoading: authLoading } = useAuth()
+  const { signInWithEmail, signInWithProvider, signInWithPasskey } = useAuth()
+  const { config } = useLoaderData() as { config: AuthConfig }
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -72,17 +74,9 @@ export function Login() {
     }
   }
 
-  const hasOAuth = config?.enabledProviders.some(p => ['github', 'google', 'discord'].includes(p))
-  const hasPasskey = config?.enabledProviders.includes('passkey')
-  const hasCredentials = config?.enabledProviders.includes('credentials')
-
-  if (authLoading) {
-    return (
-      <div className="h-dvh flex items-center justify-center bg-gradient-to-br from-background via-background to-background">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    )
-  }
+  const hasOAuth = config.enabledProviders.some(p => ['github', 'google', 'discord'].includes(p))
+  const hasPasskey = config.enabledProviders.includes('passkey')
+  const hasCredentials = config.enabledProviders.includes('credentials')
 
   return (
     <div className="h-dvh flex flex-col items-center justify-center bg-gradient-to-br from-background via-background to-background p-4">
@@ -122,7 +116,7 @@ export function Login() {
 
           {hasOAuth && (
             <div className="space-y-2">
-              {config?.enabledProviders.includes('github') && (
+              {config.enabledProviders.includes('github') && (
                 <Button
                   variant="outline"
                   className="w-full border-border hover:bg-accent transition-all duration-200"
@@ -137,7 +131,7 @@ export function Login() {
                   Continue with GitHub
                 </Button>
               )}
-              {config?.enabledProviders.includes('google') && (
+              {config.enabledProviders.includes('google') && (
                 <Button
                   variant="outline"
                   className="w-full border-border hover:bg-accent transition-all duration-200"
@@ -169,7 +163,7 @@ export function Login() {
                   Continue with Google
                 </Button>
               )}
-              {config?.enabledProviders.includes('discord') && (
+              {config.enabledProviders.includes('discord') && (
                 <Button
                   variant="outline"
                   className="w-full border-border hover:bg-accent transition-all duration-200"
@@ -245,7 +239,7 @@ export function Login() {
           )}
         </div>
 
-        {config?.registrationEnabled && (
+        {config.registrationEnabled && (
           <p className="text-center text-sm text-muted-foreground">
             Don't have an account?{' '}
             <Link to="/register" className="text-primary hover:underline transition-colors">
