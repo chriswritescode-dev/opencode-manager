@@ -211,7 +211,7 @@ The `install-service` command installs OpenCode Manager as a user-level service 
 
 **Configuration Files:**
 
-All configuration is stored in `~/.lib/run/opencode-manager/`:
+All configuration is stored in `~/.local/run/opencode-manager/`:
 
 | File | Description |
 |------|-------------|
@@ -467,6 +467,75 @@ pnpm start:no-tunnel
 | `pnpm start:client` | Connect to existing opencode instance with tunnel |
 | `pnpm start:no-tunnel` | Start without tunnel (local only) |
 | `bun scripts/start-native.ts --help` | Show all available options |
+| `pnpm tunnel:start` | Start persistent Cloudflare tunnel (survives backend restarts) |
+| `pnpm tunnel:stop` | Stop the persistent tunnel |
+| `pnpm tunnel:status` | Check tunnel status and get URL |
+| `pnpm cleanup` | Kill orphaned processes on managed ports (does NOT kill tunnel) |
+
+### How Local Services Work
+
+When running OpenCode Manager locally, several services work together:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Your Browser/Mobile Device                   │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              Cloudflare Tunnel (optional, persistent)            │
+│              https://xxx.trycloudflare.com                       │
+│              Managed by: pnpm tunnel:start/stop                  │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Backend Server (port 5001)                    │
+│                    Bun + Hono REST API                           │
+│                                                                  │
+│  • /api/health      - Health check                               │
+│  • /api/repos       - Repository management                      │
+│  • /api/settings    - User preferences                           │
+│  • /api/stt/*       - Speech-to-text (proxies to Whisper)        │
+│  • /api/tts/*       - Text-to-speech                             │
+│  • /opencode/*      - Proxies to OpenCode server                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+┌───────────────────┐ ┌───────────────┐ ┌───────────────────────┐
+│  OpenCode Server  │ │ Whisper STT   │ │  SQLite Database      │
+│  (port 5551)      │ │ (port 5552)   │ │  ~/.local/run/        │
+│                   │ │               │ │  opencode-manager/    │
+│  AI agent runtime │ │ Speech-to-    │ │  data.db              │
+│  Session mgmt     │ │ text server   │ │                       │
+│  Tool execution   │ │ (auto-start)  │ │  Stores settings,     │
+│                   │ │               │ │  auth, preferences    │
+└───────────────────┘ └───────────────┘ └───────────────────────┘
+```
+
+**Service Responsibilities:**
+
+| Service | Port | Description |
+|---------|------|-------------|
+| **Backend** | 5001 | Main API server - handles web requests, proxies to OpenCode, manages settings |
+| **OpenCode** | 5551 | AI agent runtime - executes tools, manages sessions, interfaces with AI providers |
+| **Whisper STT** | 5552 | Speech-to-text server - transcribes voice input (auto-starts when needed) |
+| **Tunnel** | - | Persistent Cloudflare tunnel for remote access (runs independently) |
+
+**Data Storage:**
+
+All persistent data is stored in `~/.local/run/opencode-manager/`:
+
+| File | Description |
+|------|-------------|
+| `data.db` | SQLite database (settings, preferences, cached data) |
+| `auth.json` | Basic auth credentials |
+| `endpoints.json` | Active endpoints (local URL, tunnel URL) |
+| `tunnel.json` | Tunnel state (PID, URL, port) |
+| `tunnel.pid` | Tunnel process ID |
+| `stdout.log` | Service stdout (macOS launchd only) |
+| `stderr.log` | Service stderr (macOS launchd only) |
 
 **Client Mode:**
 
@@ -502,6 +571,31 @@ Select server [1]:
 ```
 
 This is useful when you already have `opencode` running in a terminal and want the web UI to connect to it without spawning a separate server.
+
+**Persistent Tunnel (Recommended for Remote Development):**
+
+The Cloudflare tunnel can run as a persistent background process that survives backend restarts:
+
+```bash
+# Start tunnel once (persists until explicitly stopped)
+pnpm tunnel:start
+
+# Check tunnel status and get URL
+pnpm tunnel:status
+
+# Now you can restart backend freely without losing tunnel connection
+pnpm dev:backend  # Ctrl+C and restart as needed
+
+# Stop tunnel when done
+pnpm tunnel:stop
+```
+
+The tunnel state is stored in `~/.local/run/opencode-manager/tunnel.json`.
+
+Benefits:
+- Restart backend without disconnecting mobile/remote users
+- Same tunnel URL persists across backend restarts
+- `pnpm cleanup` does NOT kill the tunnel
 
 **Without Tunnel (Local Only):**
 

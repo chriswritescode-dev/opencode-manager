@@ -11,7 +11,7 @@ const DEFAULT_PORT = 5001
 const DEFAULT_OPENCODE_PORT = 5551
 const MANAGED_PORTS = [5001, 5002, 5003, 5173, 5174, 5175, 5176, 5552, 5553, 5554]
 
-const CONFIG_DIR = path.join(os.homedir(), '.lib', 'run', 'opencode-manager')
+const CONFIG_DIR = path.join(os.homedir(), '.local', 'run', 'opencode-manager')
 const ENDPOINTS_FILE = path.join(CONFIG_DIR, 'endpoints.json')
 const AUTH_FILE = path.join(CONFIG_DIR, 'auth.json')
 

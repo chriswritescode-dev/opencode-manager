@@ -38,7 +38,7 @@ const resolveWorkspacePath = (): string => {
 const workspaceBasePath = resolveWorkspacePath()
 
 const getDefaultDatabasePath = (): string => {
-  const configDir = path.join(os.homedir(), '.lib', 'run', 'opencode-manager')
+  const configDir = path.join(os.homedir(), '.local', 'run', 'opencode-manager')
   return path.join(configDir, 'opencode.db')
 }
 
