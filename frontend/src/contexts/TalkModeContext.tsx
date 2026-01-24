@@ -45,6 +45,8 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   const talkModeConfig = preferences?.talkMode
   const sttConfig = preferences?.stt
   const isEnabled = !!(talkModeConfig?.enabled && sttConfig?.enabled)
+  const isEnabledRef = useRef(isEnabled)
+  isEnabledRef.current = isEnabled
 
   const silenceTimeoutMs = talkModeConfig?.silenceThresholdMs ?? 1500
 
@@ -195,7 +197,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
   })
 
   const start = useCallback(async (newSessionID: string, opcodeUrl: string, directory?: string) => {
-    if (!isEnabled) {
+    if (!isEnabledRef.current) {
       setError('Talk Mode is not enabled. Enable it in Settings.')
       return
     }
@@ -224,7 +226,7 @@ export function TalkModeProvider({ children }: TalkModeProviderProps) {
       updateState('error')
       isActiveRef.current = false
     }
-  }, [isEnabled, streamingVAD, updateState])
+  }, [streamingVAD, updateState])
 
   const stop = useCallback(() => {
     isActiveRef.current = false
