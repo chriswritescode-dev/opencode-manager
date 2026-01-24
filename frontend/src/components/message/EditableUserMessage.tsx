@@ -3,6 +3,7 @@ import { Send, X, Pencil, Loader2 } from 'lucide-react'
 import { useRefreshMessage } from '@/hooks/useRemoveMessage'
 import { useUIState } from '@/stores/uiStateStore'
 import { useMobile } from '@/hooks/useMobile'
+import { useSessionAgent } from '@/hooks/useSessionAgent'
 
 interface EditableUserMessageProps {
   opcodeUrl: string
@@ -12,7 +13,6 @@ interface EditableUserMessageProps {
   assistantMessageId: string
   onCancel: () => void
   model?: string
-  agent?: string
 }
 
 export const EditableUserMessage = memo(function EditableUserMessage({
@@ -22,13 +22,15 @@ export const EditableUserMessage = memo(function EditableUserMessage({
   content,
   assistantMessageId,
   onCancel,
-  model,
-  agent
+  model
 }: EditableUserMessageProps) {
   const [editedContent, setEditedContent] = useState(content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const isMobile = useMobile()
   const refreshMessage = useRefreshMessage({ opcodeUrl, sessionId, directory })
   const setIsEditingMessage = useUIState((state) => state.setIsEditingMessage)
+  const sessionAgent = useSessionAgent(opcodeUrl, sessionId, directory)
+  const currentMode = sessionAgent.agent
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -60,7 +62,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
       assistantMessageID: assistantMessageId,
       userMessageContent: editedContent.trim(),
       model,
-      agent
+      agent: currentMode
     }, {
       onSuccess: () => {
         onCancel()
@@ -97,7 +99,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
           Press <kbd className="px-1 py-0.5 rounded bg-muted text-xs">Cmd+Enter</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-muted text-xs">Esc</kbd> to cancel
         </span>
         
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
           <button
             onClick={onCancel}
             disabled={refreshMessage.isPending}

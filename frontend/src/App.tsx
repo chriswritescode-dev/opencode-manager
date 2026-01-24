@@ -74,6 +74,7 @@ function RouterContent() {
         expand={false}
         richColors
         closeButton
+        duration={2500}
       />
     </>
   )

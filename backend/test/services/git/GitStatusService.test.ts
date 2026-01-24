@@ -81,9 +81,8 @@ describe('GitStatusService', () => {
 
       const result = await service.getStatus(1, database)
 
-      expect(result.files).toHaveLength(2)
+      expect(result.files).toHaveLength(1)
       expect(result.files[0]).toEqual({ path: 'file.ts', status: 'modified', staged: true })
-      expect(result.files[1]).toEqual({ path: 'file.ts', status: 'modified', staged: false })
       expect(result.hasChanges).toBe(true)
     })
 
@@ -199,9 +198,8 @@ describe('GitStatusService', () => {
 
       const result = await service.getStatus(1, database)
 
-      expect(result.files).toHaveLength(5)
+      expect(result.files).toHaveLength(4)
       expect(result.files).toContainEqual({ path: 'file1.ts', status: 'modified', staged: true })
-      expect(result.files).toContainEqual({ path: 'file1.ts', status: 'modified', staged: false })
       expect(result.files).toContainEqual({ path: 'file2.ts', status: 'added', staged: true })
       expect(result.files).toContainEqual({ path: 'file3.ts', status: 'untracked', staged: false })
       expect(result.files).toContainEqual({ path: 'file4.ts', status: 'deleted', staged: true })

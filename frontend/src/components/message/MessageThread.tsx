@@ -1,6 +1,6 @@
 import { memo, useMemo, useState, useCallback, useEffect } from 'react'
+import { Pencil } from 'lucide-react'
 import { MessagePart } from './MessagePart'
-import { MessageActionButtons } from './MessageActionButtons'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { SessionTodoDisplay } from './SessionTodoDisplay'
@@ -29,7 +29,6 @@ interface MessageThreadProps {
   onChildSessionClick?: (sessionId: string) => void
   onUndoMessage?: (restoredPrompt: string) => void
   model?: string
-  agent?: string
 }
 
 const isMessageStreaming = (msg: MessageWithParts): boolean => {
@@ -70,8 +69,7 @@ export const MessageThread = memo(function MessageThread({
   onFileClick, 
   onChildSessionClick,
   onUndoMessage,
-  model,
-  agent
+  model
 }: MessageThreadProps) {
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null)
   const [editingForAssistantId, setEditingForAssistantId] = useState<string | null>(null)
@@ -80,11 +78,6 @@ export const MessageThread = memo(function MessageThread({
   const pendingAssistantId = useMemo(() => {
     if (!messages) return undefined
     return findLastMessageByRole(messages, 'assistant', isMessageStreaming)
-  }, [messages])
-
-  const lastAssistantId = useMemo(() => {
-    if (!messages) return undefined
-    return findLastMessageByRole(messages, 'assistant')
   }, [messages])
 
   const lastUserMessageId = useMemo(() => {
@@ -162,7 +155,7 @@ const state = latestTodoPart.state
 
         const nextAssistantMessage = messages.slice(index + 1).find(m => m.info.role === 'assistant')
         const isUserBeforeAssistant = msg.info.role === 'user' && nextAssistantMessage
-        const canEditUserMessage = isUserBeforeAssistant && nextAssistantMessage?.info.id === lastAssistantId && !isSessionBusy
+        const canEditUserMessage = isLastUserMessage && isUserBeforeAssistant && !isSessionBusy
         const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
 
         const isEditingThisMessage = editingUserMessageId === msg.info.id
@@ -196,6 +189,15 @@ const state = latestTodoPart.state
                       {new Date(msg.info.time.created).toLocaleTimeString()}
                     </span>
                   )}
+                  {canEditUserMessage && nextAssistantMessage && (
+                    <button
+                      onClick={() => handleStartEditUserMessage(msg.info.id, nextAssistantMessage.info.id)}
+                      className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                      title="Edit message"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                   {isQueued && (
                     <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
                       QUEUED
@@ -203,16 +205,7 @@ const state = latestTodoPart.state
                   )}
                 </div>
                 
-                {msg.info.role === 'assistant' && !streaming && !isSessionBusy && !isSessionInRetry(sessionStatus) && (
-                  <MessageActionButtons
-                    opcodeUrl={opcodeUrl}
-                    sessionId={sessionID}
-                    directory={directory}
-                    message={msg}
-                  />
-                )}
-                
-                {canUndoUserMessage && (
+                {msg.info.role === 'user' && canUndoUserMessage && (
                   <UserMessageActionButtons
                     opcodeUrl={opcodeUrl}
                     sessionId={sessionID}
@@ -234,19 +227,18 @@ const state = latestTodoPart.state
                     assistantMessageId={editingForAssistantId}
                     onCancel={handleCancelEdit}
                     model={model}
-                    agent={agent}
                   />
                 ) : msg.info.role === 'user' && canEditUserMessage && nextAssistantMessage ? (
                   <ClickableUserMessage
                     content={messageTextContent}
                     onClick={() => handleStartEditUserMessage(msg.info.id, nextAssistantMessage.info.id)}
-                    isEditable={true}
+                    isEditable={false}
                   />
                 ) : (
                   msg.parts.map((part, partIndex) => (
                     <div key={`${msg.info.id}-${part.id}-${partIndex}`}>
-                      <MessagePart 
-                        part={part} 
+                      <MessagePart
+                        part={part}
                         role={msg.info.role}
                         allParts={msg.parts}
                         partIndex={partIndex}

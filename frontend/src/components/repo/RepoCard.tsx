@@ -105,7 +105,7 @@ export function RepoCard({
           </div>
 
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <div className="flex flex-1 items-center gap-3">
+            <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
               {isCloning ? (
                 <span className="flex items-center gap-1.5">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
@@ -113,33 +113,31 @@ export function RepoCard({
                 </span>
               ) : (
                 <>
-                  <span className="flex items-center gap-1">
-                    <GitBranch className="w-3.5 h-3.5" />
-                    {branchToDisplay || "main"}
+                  <span className="flex items-center gap-1 shrink-0">
+                    <GitBranch className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate max-w-[80px]">{branchToDisplay || "main"}</span>
                   </span>
                   {isDirty && (
-                    <span className="flex items-center gap-1.5 text-orange-600 dark:text-orange-400">
-                      <AlertCircle className="w-3.5 h-3.5" />
-                      <span className="text-xs">
-                        {unstagedCount > 0 && `${unstagedCount} unstaged`}
-                        {unstagedCount > 0 && stagedCount > 0 && ", "}
-                        {stagedCount > 0 && `${stagedCount} staged`}
+                    <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400 shrink-0">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span className="text-xs whitespace-nowrap">
+                        {unstagedCount > 0 && unstagedCount}
+                        {unstagedCount > 0 && stagedCount > 0 && "/"}
+                        {stagedCount > 0 && `${stagedCount}s`}
                       </span>
                     </span>
                   )}
                   {(ahead > 0 || behind > 0) && (
-                    <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
-                      <span className="text-xs">
-                        {ahead > 0 && `${ahead} ahead`}
-                        {ahead > 0 && behind > 0 && ", "}
-                        {behind > 0 && `${behind} behind`}
+                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 shrink-0">
+                      <span className="text-xs whitespace-nowrap">
+                        {ahead > 0 && `↑${ahead}`}
+                        {behind > 0 && `↓${behind}`}
                       </span>
                     </span>
                   )}
                   {repo.isLocal && (
-                    <span className="flex items-center gap-1">
-                      <FolderOpen className="w-3.5 h-3.5" />
-                      Local
+                    <span className="flex items-center gap-1 shrink-0">
+                      <FolderOpen className="w-3.5 h-3.5 shrink-0" />
                     </span>
                   )}
                 </>

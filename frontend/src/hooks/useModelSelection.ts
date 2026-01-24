@@ -14,13 +14,11 @@ export function useModelSelection(
   directory?: string
 ): UseModelSelectionResult {
   const { data: config } = useConfig(opcodeUrl, directory)
-  const { model, recentModels, setModel, initializeFromConfig, getModelString } = useModelStore()
+  const { model, recentModels, setModel, syncFromConfig, getModelString } = useModelStore()
 
   useEffect(() => {
-    if (config?.model) {
-      initializeFromConfig(config.model)
-    }
-  }, [config?.model, initializeFromConfig])
+    syncFromConfig(config?.model)
+  }, [config?.model, syncFromConfig])
 
   return {
     model,

@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -66,8 +66,6 @@ interface AgentDialogProps {
 }
 
 export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: AgentDialogProps) {
-  const parsedModel = parseModelString(editingAgent?.agent.model)
-  
   const { data: providers = [] } = useQuery({
     queryKey: ['providers-with-models'],
     queryFn: () => getProvidersWithModels(),
@@ -89,27 +87,38 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
     }))
   }, [providers])
 
+  const getDefaultValues = (agent?: { name: string; agent: Agent } | null): AgentFormValues => {
+    const parsed = parseModelString(agent?.agent.model)
+    return {
+      name: agent?.name || '',
+      description: agent?.agent.description || '',
+      prompt: agent?.agent.prompt || '',
+      mode: agent?.agent.mode || 'subagent',
+      temperature: agent?.agent.temperature ?? 0.7,
+      topP: agent?.agent.topP ?? agent?.agent.top_p ?? 1,
+      modelId: parsed.modelId,
+      providerId: parsed.providerId,
+      write: agent?.agent.tools?.write ?? true,
+      edit: agent?.agent.tools?.edit ?? true,
+      bash: agent?.agent.tools?.bash ?? true,
+      webfetch: agent?.agent.tools?.webfetch ?? true,
+      editPermission: agent?.agent.permission?.edit ?? 'allow',
+      bashPermission: typeof agent?.agent.permission?.bash === 'string' ? agent.agent.permission.bash : 'allow',
+      webfetchPermission: agent?.agent.permission?.webfetch ?? 'allow',
+      disable: agent?.agent.disable ?? false
+    }
+  }
+
   const form = useForm<AgentFormValues>({
     resolver: zodResolver(agentFormSchema),
-    defaultValues: {
-      name: editingAgent?.name || '',
-      description: editingAgent?.agent.description || '',
-      prompt: editingAgent?.agent.prompt || '',
-      mode: editingAgent?.agent.mode || 'subagent',
-      temperature: editingAgent?.agent.temperature ?? 0.7,
-      topP: editingAgent?.agent.topP ?? editingAgent?.agent.top_p ?? 1,
-      modelId: parsedModel.modelId,
-      providerId: parsedModel.providerId,
-      write: editingAgent?.agent.tools?.write ?? true,
-      edit: editingAgent?.agent.tools?.edit ?? true,
-      bash: editingAgent?.agent.tools?.bash ?? true,
-      webfetch: editingAgent?.agent.tools?.webfetch ?? true,
-      editPermission: editingAgent?.agent.permission?.edit ?? 'allow',
-      bashPermission: typeof editingAgent?.agent.permission?.bash === 'string' ? editingAgent.agent.permission.bash : 'allow',
-      webfetchPermission: editingAgent?.agent.permission?.webfetch ?? 'allow',
-      disable: editingAgent?.agent.disable ?? false
-    }
+    defaultValues: getDefaultValues(editingAgent)
   })
+
+  useEffect(() => {
+    if (open) {
+      form.reset(getDefaultValues(editingAgent))
+    }
+  }, [open, editingAgent, form])
 
   const selectedProviderId = form.watch('providerId')
 

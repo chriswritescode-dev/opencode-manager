@@ -33,8 +33,8 @@ export function GitFlatFileList({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<GitFileStatusType>>(new Set())
 
   const filteredFiles = useMemo(() => {
-    return files.filter(f => f.staged === staged)
-  }, [files, staged])
+    return files
+  }, [files])
 
   const groupedFiles = useMemo(() => {
     const groups: GroupedFiles[] = []

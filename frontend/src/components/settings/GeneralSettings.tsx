@@ -41,25 +41,6 @@ export function GeneralSettings() {
           </p>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="mode">Mode</Label>
-          <Select
-            value={preferences?.mode || 'build'}
-            onValueChange={(value) => updateSettings({ mode: value as 'plan' | 'build' })}
-          >
-            <SelectTrigger id="mode">
-              <SelectValue placeholder="Select a mode" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="plan">Plan</SelectItem>
-              <SelectItem value="build">Build</SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-sm text-muted-foreground">
-            Plan mode: Read-only. Build mode: File changes enabled
-          </p>
-        </div>
-
         <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
           <div className="space-y-0.5">
             <Label htmlFor="autoScroll" className="text-base">Auto-scroll</Label>

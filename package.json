@@ -1,7 +1,7 @@
 {
   "name": "opencode-manager",
-  "version": "0.7.0",
-  "private": true,
+  "version": "0.7.4",
+  "private": false,
   "type": "module",
   "packageManager": "pnpm@9.15.0",
 "scripts": {

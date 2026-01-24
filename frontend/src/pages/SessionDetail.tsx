@@ -205,8 +205,10 @@ export function SessionDetail() {
     fork: handleFork,
     toggleSidebar: () => setFileBrowserOpen(prev => !prev),
     toggleMode: () => {
-      const newMode = preferences?.mode === "plan" ? "build" : "plan";
-      updateSettings({ mode: newMode });
+      const modeButton = document.querySelector(
+        "[data-toggle-mode]",
+      ) as HTMLButtonElement;
+      modeButton?.click();
     },
     submitPrompt: () => {
       const submitButton = document.querySelector(

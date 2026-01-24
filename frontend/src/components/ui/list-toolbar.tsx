@@ -1,6 +1,6 @@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Trash2, Search } from "lucide-react";
+import { Trash2, Search, GripVertical, Check } from "lucide-react";
 
 interface ListToolbarProps {
   searchQuery: string;
@@ -12,6 +12,9 @@ interface ListToolbarProps {
   onToggleSelectAll: () => void;
   onDelete: () => void;
   onDeleteAll: () => void;
+  reorderMode?: boolean;
+  onToggleReorderMode?: () => void;
+  showReorderToggle?: boolean;
 }
 
 export function ListToolbar({
@@ -24,6 +27,9 @@ export function ListToolbar({
   onToggleSelectAll,
   onDelete,
   onDeleteAll,
+  reorderMode = false,
+  onToggleReorderMode,
+  showReorderToggle = false,
 }: ListToolbarProps) {
   const hasItems = totalCount > 0;
   const hasSelection = selectedCount > 0;
@@ -48,6 +54,20 @@ export function ListToolbar({
           className="pl-10"
         />
       </div>
+      {showReorderToggle && onToggleReorderMode && (
+        <Button
+          onClick={onToggleReorderMode}
+          variant={reorderMode ? "default" : "outline"}
+          size="icon"
+          className="md:hidden shrink-0"
+        >
+          {reorderMode ? (
+            <Check className="w-4 h-4" />
+          ) : (
+            <GripVertical className="w-4 h-4" />
+          )}
+        </Button>
+      )}
       {hasItems && (
         <Button
           onClick={onToggleSelectAll}

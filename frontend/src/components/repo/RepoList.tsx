@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
+import { DndContext, closestCenter, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
 import { listRepos, deleteRepo, updateRepoOrder } from "@/api/repos"
@@ -12,6 +12,16 @@ import type { Repo } from "@/api/types"
 import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
 import { RepoCardSkeleton } from "./RepoCardSkeleton"
+import { useMobile } from "@/hooks/useMobile"
+
+interface RepoCardWrapperProps {
+  repo: Repo
+  onDelete: (id: number) => void
+  isDeleting: boolean
+  isSelected: boolean
+  onSelect: (id: number, selected: boolean) => void
+  gitStatus?: GitStatusResponse
+}
 
 function SortableRepoCard({
   repo,
@@ -20,15 +30,8 @@ function SortableRepoCard({
   isSelected,
   onSelect,
   gitStatus,
-}: {
-  repo: Repo
-  onDelete: (id: number) => void
-  isDeleting: boolean
-  isSelected: boolean
-  onSelect: (id: number, selected: boolean) => void
-  gitStatus?: GitStatusResponse
-}) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id })
+}: RepoCardWrapperProps) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id })
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -38,8 +41,13 @@ function SortableRepoCard({
 
   return (
     <div ref={setNodeRef} style={style}>
-      <div {...attributes} className="relative">
-        <div {...listeners} className="absolute left-0 top-1/2 -translate-y-1/2 z-10 cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-accent/80">
+      <div className="relative">
+        <div
+          ref={setActivatorNodeRef}
+          {...listeners}
+          {...attributes}
+          className="absolute left-0 top-1/2 -translate-y-1/2 z-10 cursor-grab active:cursor-grabbing touch-none p-1 rounded hover:bg-accent/80"
+        >
           <GripVertical className="w-4 h-4 text-muted-foreground" />
         </div>
         <div className="pl-8">
@@ -57,12 +65,36 @@ function SortableRepoCard({
   )
 }
 
+function StaticRepoCard({
+  repo,
+  onDelete,
+  isDeleting,
+  isSelected,
+  onSelect,
+  gitStatus,
+}: RepoCardWrapperProps) {
+  return (
+    <RepoCard
+      repo={repo}
+      onDelete={onDelete}
+      isDeleting={isDeleting}
+      isSelected={isSelected}
+      onSelect={onSelect}
+      gitStatus={gitStatus}
+    />
+  )
+}
+
 export function RepoList() {
   const queryClient = useQueryClient()
+  const isMobile = useMobile()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [repoToDelete, setRepoToDelete] = useState<number | null>(null)
   const [selectedRepos, setSelectedRepos] = useState<Set<number>>(new Set())
   const [searchQuery, setSearchQuery] = useState("")
+  const [reorderMode, setReorderMode] = useState(false)
+  
+  const isDragEnabled = !isMobile || reorderMode
 
   const {
     data: repos,
@@ -127,15 +159,15 @@ export function RepoList() {
   })
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    useSensor(MouseSensor, {
       activationConstraint: {
         distance: 5,
       },
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 250,
-        tolerance: 5,
+        delay: 200,
+        tolerance: 8,
       },
     }),
     useSensor(KeyboardSensor, {
@@ -157,6 +189,7 @@ export function RepoList() {
       const newOrder = arrayMove(repos, oldIndex, newIndex).map((repo) => repo.id)
       updateOrderMutation.mutate(newOrder)
     }
+
   }
 
   if (isLoading && !repos) {
@@ -169,7 +202,7 @@ export function RepoList() {
           <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
               {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="pl-8">
+                <div key={i} className="md:pl-8">
                   <RepoCardSkeleton />
                 </div>
               ))}
@@ -277,6 +310,9 @@ export function RepoList() {
             onToggleSelectAll={handleSelectAll}
             onDelete={handleBatchDelete}
             onDeleteAll={handleDeleteAll}
+            reorderMode={reorderMode}
+            onToggleReorderMode={() => setReorderMode((m) => !m)}
+            showReorderToggle={isMobile}
           />
         </div>
 
@@ -289,14 +325,14 @@ export function RepoList() {
                   No repositories found matching "{searchQuery}"
                 </p>
               </div>
-            ) : (
+            ) : isDragEnabled ? (
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
                 onDragEnd={handleDragEnd}
               >
                 <SortableContext items={filteredRepos.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full  md:pb-0">
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
                     {filteredRepos.map((repo) => (
                       <SortableRepoCard
                         key={repo.id}
@@ -316,6 +352,25 @@ export function RepoList() {
                   </div>
                 </SortableContext>
               </DndContext>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
+                {filteredRepos.map((repo) => (
+                  <StaticRepoCard
+                    key={repo.id}
+                    repo={repo}
+                    onDelete={(id) => {
+                      setRepoToDelete(id)
+                      setDeleteDialogOpen(true)
+                    }}
+                    isDeleting={
+                      deleteMutation.isPending && repoToDelete === repo.id
+                    }
+                    isSelected={selectedRepos.has(repo.id)}
+                    onSelect={handleSelectRepo}
+                    gitStatus={gitStatuses?.get(repo.id)}
+                  />
+                ))}
+              </div>
             )}
           </div>
         </div>

@@ -180,6 +180,9 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const validated = UpdateOpenCodeConfigSchema.parse(body)
       
+      const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
+      const existingAgents = existingConfig?.content?.agent
+      
       const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
@@ -190,9 +193,17 @@ export function createSettingsRoutes(db: Database) {
         await writeFileContent(configPath, config.rawContent)
         logger.info(`Wrote default config to: ${configPath}`)
         
-        const patchResult = await patchOpenCodeConfig(config.content)
-        if (!patchResult.success) {
-          return c.json({ error: 'Config saved but failed to apply', details: patchResult.error }, 500)
+        const newAgents = config.content?.agent
+        const agentsChanged = JSON.stringify(existingAgents) !== JSON.stringify(newAgents)
+        
+        if (agentsChanged) {
+          logger.info('Agent configuration changed, restarting OpenCode server')
+          await opencodeServerManager.restart()
+        } else {
+          const patchResult = await patchOpenCodeConfig(config.content)
+          if (!patchResult.success) {
+            return c.json({ error: 'Config saved but failed to apply', details: patchResult.error }, 500)
+          }
         }
       }
       
@@ -415,6 +426,92 @@ export function createSettingsRoutes(db: Database) {
     }
   })
 
+  app.get('/opencode-versions', async (c) => {
+    try {
+      logger.info('Fetching available OpenCode versions from GitHub')
+      
+      const response = await fetch('https://api.github.com/repos/sst/opencode/releases?per_page=20', {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'User-Agent': 'opencode-manager'
+        }
+      })
+      
+      if (!response.ok) {
+        throw new Error(`GitHub API returned ${response.status}`)
+      }
+      
+      const releases = await response.json() as Array<{
+        tag_name: string
+        name: string
+        published_at: string
+        prerelease: boolean
+      }>
+      
+      const versions = releases
+        .filter(r => !r.prerelease)
+        .map(r => ({
+          version: r.tag_name.replace(/^v/, ''),
+          tag: r.tag_name,
+          name: r.name,
+          publishedAt: r.published_at
+        }))
+      
+      const currentVersion = opencodeServerManager.getVersion()
+      
+      return c.json({
+        versions,
+        currentVersion
+      })
+    } catch (error) {
+      logger.error('Failed to fetch OpenCode versions:', error)
+      return c.json({
+        error: 'Failed to fetch versions',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.post('/opencode-install-version', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { version } = z.object({ version: z.string().min(1) }).parse(body)
+      
+      logger.info(`Installing OpenCode version: ${version}`)
+      
+      const oldVersion = opencodeServerManager.getVersion()
+      logger.info(`Current OpenCode version: ${oldVersion}`)
+      
+      const versionArg = version.startsWith('v') ? version : `v${version}`
+      logger.info(`Running opencode upgrade ${versionArg}...`)
+      
+      const upgradeOutput = execSync(`opencode upgrade ${versionArg} 2>&1`, { encoding: 'utf8' })
+      logger.info(`Upgrade output: ${upgradeOutput}`)
+      
+      await new Promise(r => setTimeout(r, 2000))
+      
+      const newVersion = await opencodeServerManager.fetchVersion()
+      logger.info(`New OpenCode version: ${newVersion}`)
+      
+      opencodeServerManager.clearStartupError()
+      await opencodeServerManager.restart()
+      logger.info('OpenCode server restarted after version change')
+      
+      return c.json({
+        success: true,
+        message: `OpenCode ${oldVersion ? `changed from v${oldVersion} to` : 'installed as'} v${newVersion}`,
+        oldVersion,
+        newVersion
+      })
+    } catch (error) {
+      logger.error('Failed to install OpenCode version:', error)
+      return c.json({
+        error: 'Failed to install OpenCode version',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
   // Custom Commands routes
   app.get('/custom-commands', async (c) => {
     try {
@@ -540,8 +637,8 @@ export function createSettingsRoutes(db: Database) {
       await writeFileContent(agentsMdPath, content)
       logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
       
-      await opencodeServerManager.reloadConfig()
-      logger.info('Reloaded OpenCode configuration after AGENTS.md update')
+      await opencodeServerManager.restart()
+      logger.info('Restarted OpenCode server after AGENTS.md update')
       
       return c.json({ success: true })
     } catch (error) {

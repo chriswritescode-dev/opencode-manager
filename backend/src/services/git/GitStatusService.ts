@@ -61,8 +61,8 @@ export class GitStatusService {
   }
 
   private parsePorcelainOutput(output: string): GitFileStatus[] {
-    const files: GitFileStatus[] = []
-    const lines = output.trim().split('\n').filter(line => line.trim())
+    const fileMap = new Map<string, GitFileStatus>()
+    const lines = output.split('\n').filter(line => line.length > 0)
 
     for (const line of lines) {
       if (line.length < 3) continue
@@ -78,34 +78,41 @@ export class GitStatusService {
         filePath = filePath.substring(arrowIndex + 4)
       }
 
+      const existing = fileMap.get(filePath)
+
       if (stagedStatus !== ' ' && stagedStatus !== '?') {
-        files.push({
+        const fileStatus: GitFileStatus = {
           path: filePath,
           status: this.parseStatusCode(stagedStatus),
           staged: true,
           ...(oldPath && { oldPath })
-        })
+        }
+        fileMap.set(filePath, fileStatus)
+        continue
       }
 
-      if (unstagedStatus !== ' ' && unstagedStatus !== '?') {
-        files.push({
+      if (unstagedStatus !== ' ' && unstagedStatus !== '?' && !existing) {
+        const fileStatus: GitFileStatus = {
           path: filePath,
           status: this.parseStatusCode(unstagedStatus),
           staged: false,
           ...(oldPath && { oldPath })
-        })
+        }
+        fileMap.set(filePath, fileStatus)
+        continue
       }
 
-      if (stagedStatus === '?' || unstagedStatus === '?') {
-        files.push({
+      if ((stagedStatus === '?' || unstagedStatus === '?') && !existing) {
+        const fileStatus: GitFileStatus = {
           path: filePath,
           status: 'untracked',
           staged: false
-        })
+        }
+        fileMap.set(filePath, fileStatus)
       }
     }
 
-    return files
+    return Array.from(fileMap.values())
   }
 
   private parseStatusCode(code: string): 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'copied' {

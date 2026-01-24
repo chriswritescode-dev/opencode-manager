@@ -121,6 +121,29 @@ export const settingsApi = {
     return data
   },
 
+  getOpenCodeVersions: async (): Promise<{
+    versions: Array<{
+      version: string
+      tag: string
+      name: string
+      publishedAt: string
+    }>
+    currentVersion: string | null
+  }> => {
+    const { data } = await axios.get(`${API_BASE_URL}/api/settings/opencode-versions`)
+    return data
+  },
+
+  installOpenCodeVersion: async (version: string): Promise<{
+    success: boolean
+    message: string
+    oldVersion?: string
+    newVersion?: string
+  }> => {
+    const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-install-version`, { version })
+    return data
+  },
+
   upgradeOpenCode: async (): Promise<{ success: boolean; message: string; oldVersion?: string; newVersion?: string; upgraded: boolean }> => {
     const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-upgrade`)
     return data

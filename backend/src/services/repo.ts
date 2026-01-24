@@ -607,9 +607,10 @@ function normalizeRepoUrl(url: string): { url: string; name: string } {
   const sshMatch = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/)
   if (sshMatch) {
     const [, host, pathPart] = sshMatch
-    const repoName = pathPart?.split('/').pop() || `repo-${Date.now()}`
+    const path = pathPart ?? ''
+    const repoName = path.split('/').pop() || `repo-${Date.now()}`
     return {
-      url: `https://${host}/${pathPart?.replace(/\.git$/, '') ?? ''}`,
+      url: `https://${host}/${path.replace(/\.git$/, '')}`,
       name: repoName
     }
   }

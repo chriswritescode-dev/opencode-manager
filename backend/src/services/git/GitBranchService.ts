@@ -31,6 +31,7 @@ export class GitBranchService {
       const currentStdout = await executeCommand(['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { env, silent: true })
       currentBranch = currentStdout.trim()
     } catch {
+      void null
     }
 
     const stdout = await executeCommand(['git', '-C', fullPath, 'branch', '-vv', '-a'], { env, silent: true })
@@ -75,6 +76,7 @@ export class GitBranchService {
           branch.ahead = status.ahead
           branch.behind = status.behind
         } catch {
+          void null
         }
       }
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw, FileText, ArrowUpCircle } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -12,6 +12,7 @@ import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
+import { VersionSelectDialog } from './VersionSelectDialog'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
@@ -62,6 +63,7 @@ export function OpenCodeConfigManager() {
   })
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
+  const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
   
   const agentsMdRef = useRef<HTMLButtonElement>(null)
@@ -126,21 +128,6 @@ export function OpenCodeConfigManager() {
   const getRestartErrorMessage = (error: unknown): string => {
     return getApiErrorMessage(error, 'Failed to restart OpenCode server')
   }
-
-  const rollbackMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.rollbackOpenCodeConfig()
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-      showToast.success(data.message, { id: 'rollback-config' })
-      fetchConfigs()
-    },
-    onError: () => {
-      showToast.error('Failed to rollback to previous config', { id: 'rollback-config' })
-    },
-  })
 
   const fetchConfigs = async () => {
     try {
@@ -385,18 +372,10 @@ export function OpenCodeConfigManager() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    showToast.loading('Rolling back to previous config...', { id: 'rollback-config' })
-                    rollbackMutation.mutate()
-                  }}
-                  disabled={rollbackMutation.isPending}
+                  onClick={() => setIsVersionDialogOpen(true)}
                 >
-                  {rollbackMutation.isPending ? (
-                    <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
-                  ) : (
-                    <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  )}
-                  <span className="text-xs sm:text-sm">Rollback</span>
+                  <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  <span className="text-xs sm:text-sm">Versions</span>
                 </Button>
                 <Button 
                   size="sm"
@@ -415,6 +394,11 @@ export function OpenCodeConfigManager() {
         onOpenChange={setIsCreateDialogOpen}
         onCreate={createConfig}
         isUpdating={isUpdating}
+      />
+
+      <VersionSelectDialog
+        open={isVersionDialogOpen}
+        onOpenChange={setIsVersionDialogOpen}
       />
 
       {configs.length === 0 ? (

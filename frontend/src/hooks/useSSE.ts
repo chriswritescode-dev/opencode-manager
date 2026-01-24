@@ -292,11 +292,14 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         if (!('error' in event.properties)) break
         if ('sessionID' in event.properties && event.properties.sessionID === currentSessionId) break
         
-        const parsed = parseOpenCodeError(event.properties.error)
+        const error = event.properties.error
+        if (error?.name === 'MessageAbortedError') break
+        
+        const parsed = parseOpenCodeError(error)
         if (parsed) {
           showToast.error(parsed.title, {
             description: parsed.message,
-            duration: 6000,
+            duration: 2500,
           })
         }
         break

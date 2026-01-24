@@ -96,7 +96,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
                   <>
                     {stagedFiles.length > 0 && (
                       <GitFlatFileList
-                        files={status.files}
+                        files={stagedFiles}
                         staged={true}
                         onSelect={onFileSelect}
                         onUnstage={handleUnstage}
@@ -106,7 +106,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
 
                     {unstagedFiles.length > 0 && (
                       <GitFlatFileList
-                        files={status.files}
+                        files={unstagedFiles}
                         staged={false}
                         onSelect={onFileSelect}
                         onStage={handleStage}
@@ -179,7 +179,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
             <>
               {stagedFiles.length > 0 && (
                 <GitFlatFileList
-                  files={status.files}
+                  files={stagedFiles}
                   staged={true}
                   onSelect={onFileSelect}
                   onUnstage={handleUnstage}
@@ -189,7 +189,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
 
               {unstagedFiles.length > 0 && (
                 <GitFlatFileList
-                  files={status.files}
+                  files={unstagedFiles}
                   staged={false}
                   onSelect={onFileSelect}
                   onStage={handleStage}
