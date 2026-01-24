@@ -10,6 +10,7 @@ import type {
 import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
+import { useSessionStatus } from "../stores/sessionStatusStore";
 
 const titleGeneratingSessionsState = new Set<string>();
 const titleGeneratingListeners = new Set<() => void>();
@@ -209,6 +210,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
   const hasInitializedRef = useRef<Set<string>>(new Set());
+  const setSessionStatus = useSessionStatus((state) => state.setStatus);
 
   const generateSessionTitle = async (sessionID: string, userPromptText: string) => {
     if (!client || hasInitializedRef.current.has(sessionID)) return;
@@ -264,6 +266,8 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       variant?: string;
     }) => {
       if (!client) throw new Error("No client available");
+
+      setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
 
@@ -326,6 +330,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     },
     onError: (error, variables) => {
       const { sessionID } = variables;
+      setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageListResponse>(
         ["opencode", "messages", opcodeUrl, sessionID, directory],
         (old) => old?.filter((msg) => !msg.info.id.startsWith("optimistic_")),
@@ -483,6 +488,7 @@ export const useAbortSession = (
 export const useSendShell = (opcodeUrl: string | null | undefined, directory?: string) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
+  const setSessionStatus = useSessionStatus((state) => state.setStatus);
 
   return useMutation({
     mutationFn: async ({
@@ -495,6 +501,8 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       agent?: string;
     }) => {
       if (!client) throw new Error("No client available");
+
+      setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
 
@@ -517,6 +525,7 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
     },
     onError: (_, variables) => {
       const { sessionID } = variables;
+      setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageListResponse>(
         ["opencode", "messages", opcodeUrl, sessionID, directory],
         (old) => old?.filter((msg) => !msg.info.id.startsWith("optimistic_")),

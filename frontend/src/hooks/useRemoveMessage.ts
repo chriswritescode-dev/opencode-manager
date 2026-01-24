@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
 import { showToast } from '@/lib/toast'
 import type { MessageWithParts, MessageListResponse } from '@/api/types'
+import { useSessionStatus } from '@/stores/sessionStatusStore'
 
 interface UseRemoveMessageOptions {
   opcodeUrl: string | null
@@ -68,6 +69,7 @@ interface UseRefreshMessageOptions {
 export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefreshMessageOptions) {
   const queryClient = useQueryClient()
   const removeMessage = useRemoveMessage({ opcodeUrl, sessionId, directory })
+  const setSessionStatus = useSessionStatus((state) => state.setStatus)
 
   return useMutation({
     mutationFn: async ({ 
@@ -82,6 +84,8 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
       agent?: string
     }) => {
       if (!opcodeUrl) throw new Error('OpenCode URL not available')
+      
+      setSessionStatus(sessionId, { type: 'busy' })
       
       await removeMessage.mutateAsync({ messageID: assistantMessageID })
       
@@ -142,8 +146,9 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
         queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]
       })
     },
-    onError: (error, variables) => {
+    onError: (_, variables) => {
       void variables
+      setSessionStatus(sessionId, { type: 'idle' })
       queryClient.setQueryData<MessageListResponse>(
         ['opencode', 'messages', opcodeUrl, sessionId, directory],
         (old) => {
@@ -155,7 +160,6 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
           return messages
         }
       )
-      console.error('Failed to refresh message:', error)
       showToast.error('Failed to refresh message')
     }
   })
