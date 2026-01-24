@@ -24,6 +24,7 @@ import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSwipeBack } from "@/hooks/useMobile";
 import { useTTS } from "@/hooks/useTTS";
+import { useAutoReadMessages } from "@/hooks/useAutoReadMessages";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
@@ -106,6 +107,12 @@ export function SessionDetail() {
   const { modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isPlaying, stop } = useTTS();
+
+  useAutoReadMessages({
+    sessionId,
+    messages,
+    enabled: true,
+  });
 
   useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),

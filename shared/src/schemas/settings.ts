@@ -60,6 +60,7 @@ export const TTSConfigSchema = z.object({
   lastModelsFetch: z.number().optional(),
   chatterboxExaggeration: z.number().min(0).max(1).optional(),
   chatterboxCfgWeight: z.number().min(0).max(1).optional(),
+  autoReadNewMessages: z.boolean().optional(),
 });
 
 export const STTConfigSchema = z.object({
@@ -104,6 +105,7 @@ export type TTSConfig = {
   lastModelsFetch?: number;
   chatterboxExaggeration?: number;
   chatterboxCfgWeight?: number;
+  autoReadNewMessages?: boolean;
 };
 
 export type STTConfig = {
@@ -182,6 +184,7 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   lastModelsFetch: 0,
   chatterboxExaggeration: 0.5,
   chatterboxCfgWeight: 0.5,
+  autoReadNewMessages: false,
 };
 
 export const DEFAULT_STT_CONFIG: STTConfig = {

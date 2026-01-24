@@ -79,13 +79,41 @@ The user may be accessing this agent through a Cloudflare tunnel from a mobile d
 - `pnpm start` - Native start with Cloudflare tunnel (spawns opencode serve)
 - `pnpm start:client` - Connect to existing opencode instance with tunnel
 - `pnpm start:no-tunnel` - Native start without tunnel
-- `pnpm cleanup` - Kill orphaned processes on managed ports
+- `pnpm tunnel:start` - Start persistent Cloudflare tunnel (survives backend restarts)
+- `pnpm tunnel:stop` - Stop the persistent tunnel
+- `pnpm tunnel:status` - Check tunnel status and URL
+- `pnpm cleanup` - Kill orphaned processes on managed ports (does NOT kill tunnel)
 - `pnpm build` - Build both backend and frontend
 - `pnpm test` - Run backend tests: `cd backend && bun test`
 - `cd backend && bun test <filename>` - Run single test file
 - `cd backend && vitest --ui` - Test UI with coverage
 - `cd backend && vitest --coverage` - Coverage report (80% threshold)
 - `cd frontend && npm run lint` - Frontend linting
+
+## Persistent Tunnel (Recommended for Remote Development)
+
+The Cloudflare tunnel now runs as a **persistent background process** that survives backend/frontend restarts:
+
+```bash
+# Start tunnel once (persists until explicitly stopped)
+pnpm tunnel:start
+
+# Check tunnel status and get URL
+pnpm tunnel:status
+
+# Now you can restart backend freely without losing tunnel connection
+pnpm dev:backend  # Ctrl+C and restart as needed
+
+# Stop tunnel when done
+pnpm tunnel:stop
+```
+
+The tunnel state is stored in `~/.local/run/opencode-manager/tunnel.json`.
+
+**Benefits:**
+- Restart backend without disconnecting mobile/remote users
+- Same tunnel URL persists across backend restarts  
+- `pnpm cleanup` does NOT kill the tunnel
 
 ## Native Local Development (No Docker)
 

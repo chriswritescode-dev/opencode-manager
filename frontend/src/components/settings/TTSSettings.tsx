@@ -39,6 +39,7 @@ const ttsFormSchema = z.object({
   speed: z.number().min(0.25).max(4.0),
   chatterboxExaggeration: z.number().min(0).max(1).optional(),
   chatterboxCfgWeight: z.number().min(0).max(1).optional(),
+  autoReadNewMessages: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   if (!data.enabled) return
   
@@ -122,6 +123,7 @@ export function TTSSettings() {
       ...DEFAULT_TTS_CONFIG,
       chatterboxExaggeration: 0.5,
       chatterboxCfgWeight: 0.5,
+      autoReadNewMessages: false,
     },
   })
   
@@ -229,6 +231,7 @@ export function TTSSettings() {
   const watchSpeed = form.watch('speed')
   const watchChatterboxExaggeration = form.watch('chatterboxExaggeration')
   const watchChatterboxCfgWeight = form.watch('chatterboxCfgWeight')
+  const watchAutoReadNewMessages = form.watch('autoReadNewMessages')
   
   const hasWebSpeechSupport = isWebSpeechSupported()
   
@@ -298,6 +301,7 @@ export function TTSSettings() {
         speed: preferences.tts.speed ?? DEFAULT_TTS_CONFIG.speed,
         chatterboxExaggeration: preferences.tts.chatterboxExaggeration ?? 0.5,
         chatterboxCfgWeight: preferences.tts.chatterboxCfgWeight ?? 0.5,
+        autoReadNewMessages: preferences.tts.autoReadNewMessages ?? false,
       })
       lastSavedDataRef.current = preferences.tts as unknown as TTSFormValues
       setSaveStatus('idle')
@@ -345,7 +349,7 @@ export function TTSSettings() {
         clearTimeout(saveTimeoutRef.current)
       }
     }
-  }, [watchEnabled, watchProvider, watchApiKey, watchEndpoint, watchVoice, watchModel, watchSpeed, watchChatterboxExaggeration, watchChatterboxCfgWeight, isValid, isDirty, getValues, updateSettings])
+  }, [watchEnabled, watchProvider, watchApiKey, watchEndpoint, watchVoice, watchModel, watchSpeed, watchChatterboxExaggeration, watchChatterboxCfgWeight, watchAutoReadNewMessages, isValid, isDirty, getValues, updateSettings])
   
   const handleTest = () => {
     const formData = getValues()
@@ -408,6 +412,27 @@ export function TTSSettings() {
 
           {watchEnabled && (
             <>
+              <FormField
+                control={form.control}
+                name="autoReadNewMessages"
+                render={({ field }) => (
+                  <FormItem className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-base">Auto-Read New Messages</FormLabel>
+                      <FormDescription>
+                        Automatically read assistant responses aloud, even in background
+                      </FormDescription>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value ?? false}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
               <div className="grid grid-cols-4 gap-3">
                 <button
                   type="button"

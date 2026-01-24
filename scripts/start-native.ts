@@ -1,7 +1,11 @@
 #!/usr/bin/env bun
-import { spawn, execSync } from 'child_process'
+import { spawn, execSync, spawnSync } from 'child_process'
 import { createInterface } from 'readline'
+import { existsSync, readFileSync } from 'fs'
 import path from 'path'
+import os from 'os'
+
+const TUNNEL_STATE_FILE = path.join(os.homedir(), '.local', 'run', 'opencode-manager', 'tunnel.json')
 
 interface OpenCodeInstance {
   pid: number
@@ -270,44 +274,29 @@ async function promptUserSelection(instances: OpenCodeInstance[]): Promise<OpenC
   })
 }
 
-async function startCloudflaredTunnel(localPort: number): Promise<{ process: ReturnType<typeof spawn>, url: string | null }> {
-  console.log('\n🌐 Starting Cloudflare tunnel...')
+async function startCloudflaredTunnel(localPort: number): Promise<{ url: string | null }> {
+  console.log('\n🌐 Checking Cloudflare tunnel...')
 
-  const tunnelProcess = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${localPort}`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
+  const tunnelScript = path.join(import.meta.dir, 'tunnel.ts')
+  
+  const result = spawnSync('bun', [tunnelScript, 'start', '--port', localPort.toString()], {
+    cwd: path.resolve(import.meta.dir, '..'),
+    stdio: 'inherit',
   })
 
-  let tunnelUrl: string | null = null
-
-  const urlPromise = new Promise<string | null>((resolve) => {
-    const timeout = setTimeout(() => resolve(null), 30000)
-
-    const handleOutput = (data: Buffer) => {
-      const output = data.toString()
-      const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
-      if (urlMatch && !tunnelUrl) {
-        tunnelUrl = urlMatch[0]
-        clearTimeout(timeout)
-        resolve(tunnelUrl)
-      }
-    }
-
-    tunnelProcess.stdout?.on('data', handleOutput)
-    tunnelProcess.stderr?.on('data', handleOutput)
-  })
-
-  tunnelProcess.on('error', (err) => {
-    console.error('\n❌ Failed to start cloudflared:', err.message)
-    console.log('Install cloudflared: brew install cloudflared')
-  })
-
-  const url = await urlPromise
-
-  if (url) {
-    console.log(`✓ Tunnel URL: ${url}\n`)
+  if (result.status !== 0) {
+    console.error('Failed to start tunnel')
+    return { url: null }
   }
 
-  return { process: tunnelProcess, url }
+  try {
+    if (existsSync(TUNNEL_STATE_FILE)) {
+      const state = JSON.parse(readFileSync(TUNNEL_STATE_FILE, 'utf8'))
+      return { url: state.url }
+    }
+  } catch {}
+
+  return { url: null }
 }
 
 async function startBackend(port: number, opencodePort?: number): Promise<ReturnType<typeof spawn>> {
@@ -430,18 +419,17 @@ async function main() {
   }
   console.log('✓ Backend is ready!')
 
-  let tunnelProcess: ReturnType<typeof spawn> | null = null
   let tunnelUrl: string | null = null
   if (args.tunnel) {
     const tunnel = await startCloudflaredTunnel(args.port)
-    tunnelProcess = tunnel.process
     tunnelUrl = tunnel.url
-    processes.push(tunnel.process)
 
     if (tunnel.url) {
       console.log('\n═══════════════════════════════════════')
       console.log(`🌍 Public URL: ${tunnel.url}`)
       console.log('═══════════════════════════════════════\n')
+      console.log('💡 Tunnel runs independently - restart backend without losing tunnel!')
+      console.log('   Stop tunnel: bun scripts/tunnel.ts stop')
     }
   }
 
