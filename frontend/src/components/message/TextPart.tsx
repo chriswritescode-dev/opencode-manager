@@ -4,15 +4,17 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
 import mermaid from 'mermaid'
-import { Copy, Check, Maximize2, X, AlertCircle } from 'lucide-react'
+import { Copy, Check, Maximize2, X, AlertCircle, Volume2, Square, Loader2 } from 'lucide-react'
 import type { components } from '@/api/opencode-types'
 import { useTheme } from '@/hooks/useTheme'
+import { useTTS } from '@/hooks/useTTS'
 import 'highlight.js/styles/github-dark.css'
 
 type TextPart = components['schemas']['TextPart']
 
 interface TextPartProps {
   part: TextPart
+  showTTSButton?: boolean
 }
 
 interface MermaidBlockProps {
@@ -224,10 +226,22 @@ function isMermaidBlockComplete(text: string): boolean {
   return false
 }
 
-export function TextPart({ part }: TextPartProps) {
+export function TextPart({ part, showTTSButton = false }: TextPartProps) {
+  const { speak, stop, isEnabled, isPlaying, isLoading, originalText } = useTTS()
   const mermaidComplete = React.useMemo(() => {
     return part.text ? isMermaidBlockComplete(part.text) : false
   }, [part.text])
+
+  const textContent = part.text || ''
+  const isThisPlaying = (isPlaying || isLoading) && originalText === textContent
+
+  const handleTTSClick = () => {
+    if (isThisPlaying) {
+      stop()
+    } else {
+      speak(textContent)
+    }
+  }
 
   if (!part.text || part.text.trim() === '') {
     return (
@@ -238,8 +252,9 @@ export function TextPart({ part }: TextPartProps) {
   }
 
   return (
-    <div className="prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
-      <ReactMarkdown
+    <div className="relative group">
+      <div className="prose prose-invert prose-enhanced max-w-none text-foreground overflow-hidden break-words leading-snug">
+        <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         rehypePlugins={[rehypeHighlight, rehypeRaw]}
         components={{
@@ -302,6 +317,27 @@ export function TextPart({ part }: TextPartProps) {
       >
         {part.text}
       </ReactMarkdown>
+      </div>
+      {showTTSButton && isEnabled && textContent.trim() && (
+        <button
+          onClick={handleTTSClick}
+          className={`absolute top-0 right-0 p-1.5 rounded opacity-0 group-hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity ${
+            isThisPlaying 
+              ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' 
+              : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'
+          }`}
+          title={isThisPlaying ? "Stop playback" : "Read aloud"}
+          disabled={isLoading && originalText !== textContent}
+        >
+          {isLoading && isThisPlaying ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : isThisPlaying ? (
+            <Square className="w-4 h-4" />
+          ) : (
+            <Volume2 className="w-4 h-4" />
+          )}
+        </button>
+      )}
     </div>
   )
 }
