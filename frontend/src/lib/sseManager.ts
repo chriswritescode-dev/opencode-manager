@@ -162,7 +162,7 @@ class SSEManager {
     if (this.eventSource) return
 
     const url = this.buildUrl()
-    this.eventSource = new EventSource(url)
+    this.eventSource = new EventSource(url, { withCredentials: true })
 
     this.eventSource.onopen = () => {
       this.isConnected = true
