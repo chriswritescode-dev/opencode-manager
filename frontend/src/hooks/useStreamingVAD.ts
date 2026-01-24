@@ -156,6 +156,7 @@ export function useStreamingVAD(options: UseStreamingVADOptions = {}): UseStream
       const message = err instanceof Error ? err.message : 'Failed to access microphone'
       setError(message)
       console.error('[StreamingVAD] Start error:', err)
+      throw err
     }
   }, [isListening, chunkIntervalMs, processChunk])
 
