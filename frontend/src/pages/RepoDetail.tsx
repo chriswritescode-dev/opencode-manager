@@ -133,6 +133,7 @@ export function RepoDetail() {
             opcodeUrl={opcodeUrl}
             directory={repoDirectory}
             onSelectSession={handleSelectSession}
+            repoId={repoId}
           />
         )}
       </div>

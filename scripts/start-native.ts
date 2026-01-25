@@ -274,7 +274,7 @@ async function promptUserSelection(instances: OpenCodeInstance[]): Promise<OpenC
   })
 }
 
-async function startCloudflaredTunnel(localPort: number): Promise<{ url: string | null }> {
+async function startCloudflaredTunnel(localPort: number): Promise<{ url: string | null, urlWithAuth: string | null }> {
   console.log('\n🌐 Checking Cloudflare tunnel...')
 
   const tunnelScript = path.join(import.meta.dir, 'tunnel.ts')
@@ -286,17 +286,17 @@ async function startCloudflaredTunnel(localPort: number): Promise<{ url: string 
 
   if (result.status !== 0) {
     console.error('Failed to start tunnel')
-    return { url: null }
+    return { url: null, urlWithAuth: null }
   }
 
   try {
     if (existsSync(TUNNEL_STATE_FILE)) {
       const state = JSON.parse(readFileSync(TUNNEL_STATE_FILE, 'utf8'))
-      return { url: state.url }
+      return { url: state.url, urlWithAuth: state.urlWithAuth || null }
     }
   } catch {}
 
-  return { url: null }
+  return { url: null, urlWithAuth: null }
 }
 
 async function startBackend(port: number, opencodePort?: number): Promise<ReturnType<typeof spawn>> {
@@ -420,13 +420,18 @@ async function main() {
   console.log('✓ Backend is ready!')
 
   let tunnelUrl: string | null = null
+  let tunnelUrlWithAuth: string | null = null
   if (args.tunnel) {
     const tunnel = await startCloudflaredTunnel(args.port)
     tunnelUrl = tunnel.url
+    tunnelUrlWithAuth = tunnel.urlWithAuth
 
     if (tunnel.url) {
       console.log('\n═══════════════════════════════════════')
       console.log(`🌍 Public URL: ${tunnel.url}`)
+      if (tunnel.urlWithAuth) {
+        console.log(`🔐 With auth:  ${tunnel.urlWithAuth}`)
+      }
       console.log('═══════════════════════════════════════\n')
       console.log('💡 Tunnel runs independently - restart backend without losing tunnel!')
       console.log('   Stop tunnel: bun scripts/tunnel.ts stop')

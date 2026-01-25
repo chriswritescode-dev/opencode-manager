@@ -206,3 +206,39 @@ export async function downloadRepo(id: number, repoName: string): Promise<void> 
   document.body.removeChild(a)
   window.URL.revokeObjectURL(url)
 }
+
+export interface SessionSummariesResponse {
+  summaries: Record<string, string | null>
+  sessionCount: number
+}
+
+export async function getSessionSummaries(repoId: number): Promise<SessionSummariesResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/sessions/summaries`, {
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to get session summaries')
+  }
+
+  return response.json()
+}
+
+export interface SummarizeSessionResponse {
+  sessionId: string
+  summary: string
+  cached: boolean
+}
+
+export async function summarizeSession(repoId: number, sessionId: string): Promise<SummarizeSessionResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/sessions/${sessionId}/summarize`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to summarize session')
+  }
+
+  return response.json()
+}

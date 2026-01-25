@@ -11,8 +11,41 @@ const TUNNEL_PID_FILE = path.join(TUNNEL_STATE_DIR, 'tunnel.pid')
 interface TunnelState {
   pid: number
   url: string
+  urlWithAuth: string | null
   port: number
   startedAt: number
+}
+
+interface AuthConfig {
+  username: string
+  password: string
+}
+
+const AUTH_FILE = path.join(TUNNEL_STATE_DIR, 'auth.json')
+
+function readAuthConfig(): AuthConfig | null {
+  try {
+    if (!existsSync(AUTH_FILE)) return null
+    const data = JSON.parse(readFileSync(AUTH_FILE, 'utf8'))
+    if (data.username && data.password) {
+      return data as AuthConfig
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function buildUrlWithAuth(baseUrl: string, auth: AuthConfig | null): string | null {
+  if (!auth) return null
+  try {
+    const url = new URL(baseUrl)
+    url.username = auth.username
+    url.password = auth.password
+    return url.toString().replace(/\/$/, '')
+  } catch {
+    return null
+  }
 }
 
 function parseArgs(): { action: 'start' | 'stop' | 'status' | 'url'; port: number } {
@@ -141,9 +174,13 @@ async function startTunnel(port: number): Promise<TunnelState | null> {
     return null
   }
 
+  const auth = readAuthConfig()
+  const urlWithAuth = buildUrlWithAuth(url, auth)
+
   const state: TunnelState = {
     pid: tunnelProcess.pid!,
     url,
+    urlWithAuth,
     port,
     startedAt: Date.now(),
   }
@@ -152,6 +189,9 @@ async function startTunnel(port: number): Promise<TunnelState | null> {
 
   console.log(`\nTunnel started successfully!`)
   console.log(`URL: ${url}`)
+  if (urlWithAuth) {
+    console.log(`URL (with auth): ${urlWithAuth}`)
+  }
   console.log(`PID: ${state.pid}`)
   console.log(`\nThe tunnel will persist until stopped with: bun scripts/tunnel.ts stop`)
 
@@ -198,6 +238,9 @@ function showStatus(): void {
 
   console.log('Tunnel Status: RUNNING')
   console.log(`URL: ${state.url}`)
+  if (state.urlWithAuth) {
+    console.log(`URL (with auth): ${state.urlWithAuth}`)
+  }
   console.log(`Port: ${state.port}`)
   console.log(`PID: ${state.pid}`)
   console.log(`Uptime: ${hours}h ${minutes}m ${seconds}s`)
