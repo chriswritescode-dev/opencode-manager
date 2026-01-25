@@ -74,6 +74,7 @@ We regularly sync our fork with upstream sst/opencode to incorporate new feature
 - **Mermaid Diagram Support** - Visual diagram rendering in chat messages
 - **Session Management** - Create, search, delete, and bulk delete sessions
 - **Real-time Streaming** - Live message streaming with SSE
+- **CLI Session Sharing** - Sessions created in terminal `opencode` CLI are visible in Web UI
 
 ### AI Model & Provider Configuration
 - **Model Selection** - Browse and select from available AI models with filtering
@@ -571,6 +572,37 @@ Select server [1]:
 ```
 
 This is useful when you already have `opencode` running in a terminal and want the web UI to connect to it without spawning a separate server.
+
+### Session Sharing Between CLI and Web UI
+
+OpenCode Manager shares sessions with the `opencode` CLI. Sessions you create in your terminal are visible in the web UI, and vice versa.
+
+**How it works:**
+
+Both the CLI and Web UI store sessions in `~/.local/share/opencode/`. When you:
+
+1. **Create a session in CLI** (`opencode` in terminal) → Visible in Web UI immediately
+2. **Create a session in Web UI** → Visible in CLI with `/sessions` command
+3. **Continue a session** → Changes sync automatically between both interfaces
+
+**Requirements:**
+
+- Both must use the same OpenCode data directory (`~/.local/share/opencode/`)
+- When running as a service, OpenCode Manager uses the system default location
+- The `--client` mode connects to your existing terminal sessions
+
+**Verification:**
+
+```bash
+# Check sessions visible to CLI
+opencode
+/sessions
+
+# Check sessions visible to Web UI
+curl -s -u admin:PASSWORD http://localhost:5001/api/opencode/session | jq 'length'
+
+# Both should show the same count
+```
 
 **Persistent Tunnel (Recommended for Remote Development):**
 
