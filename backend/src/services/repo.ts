@@ -743,6 +743,42 @@ export async function cleanupOrphanedDirectories(database: Database): Promise<vo
   }
 }
 
+export async function cleanupStaleRepoEntries(database: Database): Promise<{ removed: number }> {
+  let removed = 0
+  const fs = await import('fs/promises')
+  
+  try {
+    const allRepos = db.listRepos(database)
+    logger.info(`Checking ${allRepos.length} repos for stale entries`)
+    
+    for (const repo of allRepos) {
+      const repoPath = repo.fullPath
+      
+      try {
+        const stat = await fs.stat(repoPath).catch(() => null)
+        const exists = stat?.isDirectory() ?? false
+        
+        if (!exists) {
+          logger.info(`Removing stale repo entry (path does not exist): ${repoPath}`)
+          db.deleteRepo(database, repo.id)
+          removed++
+        }
+      } catch (error) {
+        logger.warn(`Error checking repo path ${repoPath}:`, error)
+      }
+    }
+    
+    if (removed > 0) {
+      logger.info(`Cleaned up ${removed} stale repo entries`)
+    }
+    
+    return { removed }
+  } catch (error) {
+    logger.warn('Failed to cleanup stale repo entries:', error)
+    return { removed }
+  }
+}
+
 async function checkWorktreeExists(baseRepoPath: string, worktreePath: string): Promise<boolean> {
   try {
     const worktreeList = await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'list', '--porcelain'])
