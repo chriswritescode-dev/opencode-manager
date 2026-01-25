@@ -585,6 +585,21 @@ git pull
 git branch -d feature/issue-4-talk-mode-audio-fix
 ```
 
+## Agent Skills
+
+This project includes skills following the [Agent Skills](https://agentskills.io) open standard in `./skills/`:
+
+| Skill | Description |
+|-------|-------------|
+| `verify-readiness` | Health check and verification playbook for ensuring services are operational |
+| `deploy-azure` | Azure VM deployment with Caddy auth and Cloudflare tunnel |
+| `test-voice-ci` | Voice/Talk Mode testing in CI environments without audio hardware |
+
+Use these skills for common workflows:
+- After deployment, use `verify-readiness` to check all services
+- For cloud deployment, use `deploy-azure` for step-by-step instructions
+- For CI/CD voice testing, use `test-voice-ci` for fake audio capture setup
+
 ## Architecture
 
 @docs/cloudVibeCoding.md
