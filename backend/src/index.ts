@@ -22,7 +22,7 @@ import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
-import { cleanupOrphanedDirectories, registerExternalDirectory, syncProjectsFromOpenCode } from './services/repo'
+import { cleanupOrphanedDirectories, cleanupStaleRepoEntries, registerExternalDirectory, syncProjectsFromOpenCode } from './services/repo'
 import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
 import { chatterboxServerManager } from './services/chatterbox'
@@ -251,6 +251,10 @@ try {
 
   await cleanupOrphanedDirectories(db)
   logger.info('Orphaned directory cleanup completed')
+
+  logger.info('Checking for stale repo entries...')
+  const staleCleanupResult = await cleanupStaleRepoEntries(db)
+  logger.info(`Stale repo cleanup result: ${staleCleanupResult.removed} removed`)
 
   await cleanupExpiredCache()
 
