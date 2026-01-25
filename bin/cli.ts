@@ -220,7 +220,7 @@ async function startOpenCodeServer(port: number): Promise<boolean> {
   return false
 }
 
-async function startCloudflaredTunnel(localPort: number): Promise<{ process: ReturnType<typeof spawn>, url: string | null }> {
+async function startCloudflaredTunnel(localPort: number, auth: AuthConfig): Promise<{ process: ReturnType<typeof spawn>, url: string | null, urlWithAuth: string | null }> {
   console.log('\n🌐 Starting Cloudflare tunnel...')
 
   const tunnelProcess = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${localPort}`], {
@@ -253,11 +253,25 @@ async function startCloudflaredTunnel(localPort: number): Promise<{ process: Ret
 
   const url = await urlPromise
 
-  if (url) {
-    console.log(`✓ Tunnel URL: ${url}\n`)
+  let urlWithAuth: string | null = null
+  if (url && auth.username && auth.password) {
+    try {
+      const parsedUrl = new URL(url)
+      parsedUrl.username = auth.username
+      parsedUrl.password = auth.password
+      urlWithAuth = parsedUrl.toString().replace(/\/$/, '')
+    } catch {}
   }
 
-  return { process: tunnelProcess, url }
+  if (url) {
+    console.log(`✓ Tunnel URL: ${url}`)
+    if (urlWithAuth) {
+      console.log(`✓ With auth:  ${urlWithAuth}`)
+    }
+    console.log()
+  }
+
+  return { process: tunnelProcess, url, urlWithAuth }
 }
 
 async function startBackend(port: number, auth: AuthConfig, opencodePort?: number): Promise<ReturnType<typeof spawn>> {
@@ -337,24 +351,31 @@ async function commandStart(args: string[]): Promise<void> {
 
   const localUrl = `http://localhost:${port}`
   let tunnelUrl: string | undefined
+  let tunnelUrlWithAuth: string | undefined
 
   if (hasTunnel) {
-    const tunnel = await startCloudflaredTunnel(port)
+    const tunnel = await startCloudflaredTunnel(port, auth)
     processes.push(tunnel.process)
     tunnelUrl = tunnel.url || undefined
+    tunnelUrlWithAuth = tunnel.urlWithAuth || undefined
 
     if (tunnel.url) {
       console.log('\n═══════════════════════════════════════')
       console.log(`🌍 Public URL: ${tunnel.url}`)
+      if (tunnel.urlWithAuth) {
+        console.log(`🔐 With auth:  ${tunnel.urlWithAuth}`)
+      }
       console.log('═══════════════════════════════════════\n')
     }
   }
 
-  updateEndpoints(localUrl, tunnelUrl)
+  updateEndpoints(localUrl, tunnelUrlWithAuth || tunnelUrl)
 
   console.log('\n📍 Endpoints:')
   console.log(`   Local: ${localUrl}`)
-  if (tunnelUrl) {
+  if (tunnelUrlWithAuth) {
+    console.log(`   Tunnel: ${tunnelUrlWithAuth}`)
+  } else if (tunnelUrl) {
     console.log(`   Tunnel: ${tunnelUrl}`)
   }
   if (!noAuth) {
@@ -500,7 +521,15 @@ ${startArgs.map(a => `    <string>${a}</string>`).join('\n')}
     <key>AUTH_USERNAME</key>
     <string>${auth.username}</string>
     <key>AUTH_PASSWORD</key>
-    <string>${auth.password}</string>
+    <string>${auth.password}</string>${process.env.GEMINI_API_KEY ? `
+    <key>GEMINI_API_KEY</key>
+    <string>${process.env.GEMINI_API_KEY}</string>` : ''}${process.env.OPENAI_API_KEY ? `
+    <key>OPENAI_API_KEY</key>
+    <string>${process.env.OPENAI_API_KEY}</string>` : ''}${process.env.ANTHROPIC_API_KEY ? `
+    <key>ANTHROPIC_API_KEY</key>
+    <string>${process.env.ANTHROPIC_API_KEY}</string>` : ''}${process.env.XAI_API_KEY ? `
+    <key>XAI_API_KEY</key>
+    <string>${process.env.XAI_API_KEY}</string>` : ''}
   </dict>
 </dict>
 </plist>`

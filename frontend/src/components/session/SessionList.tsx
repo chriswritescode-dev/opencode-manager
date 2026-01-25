@@ -1,12 +1,13 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useSessions, useDeleteSession } from "@/hooks/useOpenCode";
+import { useSessionSummaries, useSummarizeSession } from "@/hooks/useSessionSummaries";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
-import { Trash2, Clock, Search, MoreVertical } from "lucide-react";
+import { Trash2, Clock, Search, MoreVertical, Sparkles, Loader2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface SessionListProps {
@@ -14,6 +15,7 @@ interface SessionListProps {
   directory?: string;
   activeSessionID?: string;
   onSelectSession: (sessionID: string) => void;
+  repoId?: number;
 }
 
 export const SessionList = ({
@@ -21,9 +23,13 @@ export const SessionList = ({
   directory,
   activeSessionID,
   onSelectSession,
+  repoId,
 }: SessionListProps) => {
   const { data: sessions, isLoading } = useSessions(opcodeUrl, directory);
   const deleteSession = useDeleteSession(opcodeUrl, directory);
+  const { data: summariesData } = useSessionSummaries(repoId);
+  const summarizeMutation = useSummarizeSession(repoId);
+  const [summarizingIds, setSummarizingIds] = useState<Set<string>>(new Set());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<
     string | string[] | null
@@ -51,6 +57,32 @@ export const SessionList = ({
 
     return filtered.sort((a, b) => b.time.updated - a.time.updated);
   }, [sessions, searchQuery, directory]);
+
+  useEffect(() => {
+    if (!repoId || !filteredSessions.length || !summariesData) return;
+    
+    const sessionsToSummarize = filteredSessions
+      .slice(0, 10)
+      .filter(session => {
+        const summary = summariesData.summaries[session.id];
+        return summary === null && !summarizingIds.has(session.id);
+      });
+    
+    if (sessionsToSummarize.length === 0) return;
+    
+    const nextSession = sessionsToSummarize[0];
+    setSummarizingIds(prev => new Set([...prev, nextSession.id]));
+    
+    summarizeMutation.mutate(nextSession.id, {
+      onSettled: () => {
+        setSummarizingIds(prev => {
+          const next = new Set(prev);
+          next.delete(nextSession.id);
+          return next;
+        });
+      },
+    });
+  }, [filteredSessions, summariesData, repoId, summarizingIds, summarizeMutation]);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
@@ -196,7 +228,11 @@ export const SessionList = ({
               No sessions found
             </div>
           ) : (
-            filteredSessions.map((session) => (
+            filteredSessions.map((session) => {
+              const summary = summariesData?.summaries[session.id];
+              const isSummarizing = summarizingIds.has(session.id);
+              
+              return (
               <Card
                 key={session.id}
                 className={`p-3 cursor-pointer transition-all ${
@@ -224,6 +260,21 @@ export const SessionList = ({
                       <h3 className="text-sm font-medium text-foreground truncate">
                         {session.title || "Untitled Session"}
                       </h3>
+                      {(summary || isSummarizing) && (
+                        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
+                          {isSummarizing ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span className="italic">Summarizing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-3 h-3 text-amber-500" />
+                              <span className="truncate">{summary}</span>
+                            </>
+                          )}
+                        </div>
+                      )}
                       <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -242,7 +293,7 @@ export const SessionList = ({
                   </button>
                 </div>
               </Card>
-            ))
+            )})
           )}
         </div>
       </div>

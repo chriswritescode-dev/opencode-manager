@@ -10,6 +10,7 @@ import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { logger } from '../utils/logger'
 import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
+import { summarizeSession, getCachedSummary } from '../services/summarization'
 import path from 'path'
 
 export function createRepoRoutes(database: Database) {
@@ -340,6 +341,88 @@ export function createRepoRoutes(database: Database) {
       })
     } catch (error: any) {
       logger.error('Failed to sync projects from OpenCode:', error)
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.get('/:id/sessions/summaries', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = db.getRepoById(database, id)
+      
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const opencodePort = opencodeServerManager.getPort()
+      const directory = repo.fullPath
+
+      const sessionsRes = await fetch(
+        `http://127.0.0.1:${opencodePort}/session?directory=${encodeURIComponent(directory)}`
+      )
+      
+      if (!sessionsRes.ok) {
+        return c.json({ error: 'Failed to fetch sessions' }, 500)
+      }
+
+      const sessions = await sessionsRes.json()
+      
+      const summaries: Record<string, string | null> = {}
+      
+      for (const session of sessions.slice(0, 20)) {
+        const cached = getCachedSummary(session.id)
+        if (cached) {
+          summaries[session.id] = cached
+        } else {
+          summaries[session.id] = null
+        }
+      }
+
+      return c.json({ summaries, sessionCount: sessions.length })
+    } catch (error: any) {
+      logger.error('Failed to get session summaries:', error)
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.post('/:id/sessions/:sessionId/summarize', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const sessionId = c.req.param('sessionId')
+      const repo = db.getRepoById(database, id)
+      
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const opencodePort = opencodeServerManager.getPort()
+      const directory = repo.fullPath
+
+      const sessionRes = await fetch(
+        `http://127.0.0.1:${opencodePort}/session/${sessionId}?directory=${encodeURIComponent(directory)}`
+      )
+      
+      if (!sessionRes.ok) {
+        return c.json({ error: 'Session not found' }, 404)
+      }
+      
+      const session = await sessionRes.json()
+
+      const messagesRes = await fetch(
+        `http://127.0.0.1:${opencodePort}/session/${sessionId}/message?directory=${encodeURIComponent(directory)}`
+      )
+      
+      const messages = messagesRes.ok ? await messagesRes.json() : []
+
+      const summary = await summarizeSession(sessionId, session.title || '', messages)
+
+      return c.json({ 
+        sessionId, 
+        summary: summary || session.title || 'No summary available',
+        cached: getCachedSummary(sessionId) !== null
+      })
+    } catch (error: any) {
+      logger.error('Failed to summarize session:', error)
       return c.json({ error: error.message }, 500)
     }
   })
