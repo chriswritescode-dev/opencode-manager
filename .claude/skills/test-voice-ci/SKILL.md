@@ -1,13 +1,17 @@
-# Voice Testing in CI Skill
+---
+name: test-voice-ci
+description: Test voice/Talk Mode in CI environments without audio hardware. Use when setting up CI pipelines, debugging voice tests, or testing STT/TTS functionality.
+metadata:
+  author: opencode-manager
+  version: "1.0"
+compatibility: Requires Chrome/Chromium, ffmpeg, and either macOS say command or Linux espeak
+---
 
-Guide for testing voice/Talk Mode in CI environments without audio hardware.
+Test voice/Talk Mode in CI environments without audio hardware.
 
 ## The Problem
 
-CI runners don't have:
-- Physical microphones
-- Audio output devices
-- ALSA loopback kernel module (`snd-aloop`)
+CI runners don't have physical microphones, audio devices, or ALSA loopback (`snd-aloop`).
 
 Voice testing needs to simulate:
 ```
@@ -16,38 +20,34 @@ Microphone -> getUserMedia() -> MediaRecorder -> STT API -> Whisper -> Transcrip
 
 ## Solution: Chrome Fake Audio Capture
 
-Chrome/Chromium can inject a WAV file as microphone input:
+Chrome can inject a WAV file as microphone input:
 
 ```typescript
 browser = await puppeteer.launch({
   args: [
-    '--use-fake-ui-for-media-stream',      // Auto-accept media permissions
-    '--use-fake-device-for-media-stream',  // Use fake devices
-    `--use-file-for-fake-audio-capture=${wavPath}`,  // Inject audio file
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+    `--use-file-for-fake-audio-capture=${wavPath}`,
   ]
 })
 ```
 
-When `navigator.mediaDevices.getUserMedia({ audio: true })` is called, Chrome provides audio from the WAV file.
-
 ## Audio Requirements
 
-WAV file must be 16kHz mono PCM (Whisper's expected format).
+WAV file must be 16kHz mono PCM.
 
-### Generate on macOS
+### macOS
 
 ```bash
 say -o test.aiff "What is two plus two"
 ffmpeg -y -i test.aiff -ar 16000 -ac 1 test.wav
 ```
 
-### Generate on Linux CI
+### Linux CI
 
 ```bash
-# Using espeak
 espeak "What is two plus two" --stdout | ffmpeg -y -i - -ar 16000 -ac 1 test.wav
 
-# Using pico2wave (better quality)
 pico2wave -w test.wav "What is two plus two"
 ffmpeg -y -i test.wav -ar 16000 -ac 1 test_16k.wav
 ```
@@ -56,32 +56,22 @@ ffmpeg -y -i test.wav -ar 16000 -ac 1 test_16k.wav
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/test-voice.ts` | API-level tests (STT/TTS endpoints, talk mode flow) |
-| `scripts/test-browser.ts` | Full browser E2E with fake audio capture |
+| `scripts/test-voice.ts` | API-level tests (STT/TTS endpoints) |
+| `scripts/test-browser.ts` | Full browser E2E with fake audio |
 
-### Run API Tests
+### API Tests
 
 ```bash
-# Local
 bun run scripts/test-voice.ts
-
-# Remote with auth
 bun run scripts/test-voice.ts --url https://your-url.com --user admin --pass secret
-
-# Skip slow talk mode test
 bun run scripts/test-voice.ts --skip-talkmode
 ```
 
-### Run Browser E2E
+### Browser E2E
 
 ```bash
-# Headless
 bun run scripts/test-browser.ts --url http://localhost:5001
-
-# Visible browser for debugging
 bun run scripts/test-browser.ts --url http://localhost:5001 --no-headless
-
-# Use Web Audio API injection (alternative)
 bun run scripts/test-browser.ts --web-audio
 ```
 
@@ -117,17 +107,17 @@ voice-e2e:
 
 ## What This Tests
 
-1. **Audio Capture**: MediaRecorder captures audio from getUserMedia
-2. **Format Handling**: Audio encoding (webm/opus)
-3. **STT Integration**: Backend forwards audio to Whisper
-4. **Whisper Transcription**: Model loads and transcribes
-5. **End-to-End Flow**: Full Talk Mode pipeline
+1. Audio Capture - MediaRecorder from getUserMedia
+2. Format Handling - Audio encoding (webm/opus)
+3. STT Integration - Backend to Whisper
+4. Whisper Transcription - Model loading and accuracy
+5. End-to-End Flow - Full Talk Mode pipeline
 
 ## What This Does NOT Test
 
 - Real microphone hardware
 - Browser permissions UI
-- VAD with live ambient noise
+- VAD with ambient noise
 - Real network latency
 
 ## Debugging
@@ -142,17 +132,15 @@ curl http://localhost:5001/api/stt/status
 ### Test STT Directly
 
 ```bash
-# Generate audio
 say -o test.aiff "hello world"
 ffmpeg -y -i test.aiff -ar 16000 -ac 1 test.wav
 
-# Send to API
 curl -X POST http://localhost:5001/api/stt/transcribe \
   -H "Content-Type: application/json" \
   -d "{\"audio\": \"$(base64 -i test.wav)\", \"format\": \"wav\"}"
 ```
 
-### Verify Audio Chunks in Browser
+### Check Audio Chunks
 
 Add logging to TalkModeContext:
 
@@ -167,43 +155,34 @@ mediaRecorder.ondataavailable = (event) => {
 ```
                 CI Environment
 +--------------------------------------------------+
-|                                                  |
 |  test.wav -----> Chrome (fake audio capture)     |
 |                       |                          |
-|                       v                          |
 |              getUserMedia() -> MediaRecorder     |
 |                       |                          |
-|                       v                          |
 |              POST /api/stt/transcribe            |
 |                       |                          |
-|                       v                          |
 |              Whisper Server (Python)             |
 |                       |                          |
-|                       v                          |
 |              { "text": "What is 2 plus 2" }      |
-|                                                  |
 +--------------------------------------------------+
 ```
 
 ## Alternatives Considered (Rejected)
 
-| Approach | Reason Rejected |
-|----------|-----------------|
-| snd-aloop kernel module | Not available on GitHub Actions |
-| PulseAudio virtual sink | Complex setup, flaky in CI |
-| Mock at JavaScript level | Bypasses real audio pipeline |
+| Approach | Reason |
+|----------|--------|
+| snd-aloop kernel module | Not on GitHub Actions |
+| PulseAudio virtual sink | Complex, flaky |
+| Mock at JavaScript | Bypasses real pipeline |
 
-## Fallback: injectTranscript API
+## Fallback: injectTranscript
 
-For testing OpenCode integration without audio pipeline:
+For testing OpenCode integration without audio:
 
 ```typescript
-// Skip audio, inject transcription directly
 await page.evaluate(() => {
   window.dispatchEvent(new CustomEvent('injectTranscript', { 
     detail: { text: 'What is 2 plus 2' } 
   }))
 })
 ```
-
-Tests OpenCode integration but skips audio capture/STT.
