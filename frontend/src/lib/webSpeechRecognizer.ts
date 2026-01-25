@@ -81,7 +81,8 @@ export class WebSpeechRecognizer {
   private onStartCallbacks: (() => void)[] = [];
   private finalTranscript = '';
   private silenceTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly silenceTimeout = 3000;
+  private readonly silenceTimeout = 5000;
+  private hasReceivedResult = false;
 
   constructor() {
     if (typeof window === 'undefined') return;
@@ -101,6 +102,7 @@ export class WebSpeechRecognizer {
       };
 
       this.recognition.onresult = (event: SpeechRecognitionEvent) => {
+        this.hasReceivedResult = true;
         this.resetSilenceTimer();
 
         let interimTranscript = '';
@@ -171,7 +173,7 @@ export class WebSpeechRecognizer {
   private resetSilenceTimer(): void {
     this.clearSilenceTimer();
     this.silenceTimer = setTimeout(() => {
-      if (this.isListening) {
+      if (this.isListening && this.hasReceivedResult) {
         this.stop();
       }
     }, this.silenceTimeout);
@@ -207,6 +209,7 @@ export class WebSpeechRecognizer {
       }
 
       this.finalTranscript = '';
+      this.hasReceivedResult = false;
       this.state = 'listening';
 
       if (options.language) {
@@ -240,7 +243,6 @@ export class WebSpeechRecognizer {
 
       try {
         this.recognition.start();
-        this.resetSilenceTimer();
       } catch (error) {
         this.state = 'error';
         reject(error || new Error('Failed to start recognition'));
