@@ -80,9 +80,6 @@ export class WebSpeechRecognizer {
   private onEndCallbacks: (() => void)[] = [];
   private onStartCallbacks: (() => void)[] = [];
   private finalTranscript = '';
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly silenceTimeout = 5000;
-  private hasReceivedResult = false;
 
   constructor() {
     if (typeof window === 'undefined') return;
@@ -102,9 +99,6 @@ export class WebSpeechRecognizer {
       };
 
       this.recognition.onresult = (event: SpeechRecognitionEvent) => {
-        this.hasReceivedResult = true;
-        this.resetSilenceTimer();
-
         let interimTranscript = '';
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -132,7 +126,6 @@ export class WebSpeechRecognizer {
       this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
         this.state = 'error';
         this.isListening = false;
-        this.clearSilenceTimer();
 
         let errorMsg = event.error || 'Unknown error';
 
@@ -159,7 +152,6 @@ export class WebSpeechRecognizer {
 
       this.recognition.onend = () => {
         this.isListening = false;
-        this.clearSilenceTimer();
 
         if (this.state !== 'error') {
           this.state = 'idle';
@@ -167,22 +159,6 @@ export class WebSpeechRecognizer {
 
         this.onEndCallbacks.forEach((cb) => cb());
       };
-    }
-  }
-
-  private resetSilenceTimer(): void {
-    this.clearSilenceTimer();
-    this.silenceTimer = setTimeout(() => {
-      if (this.isListening && this.hasReceivedResult) {
-        this.stop();
-      }
-    }, this.silenceTimeout);
-  }
-
-  private clearSilenceTimer(): void {
-    if (this.silenceTimer) {
-      clearTimeout(this.silenceTimer);
-      this.silenceTimer = null;
     }
   }
 
@@ -209,7 +185,6 @@ export class WebSpeechRecognizer {
       }
 
       this.finalTranscript = '';
-      this.hasReceivedResult = false;
       this.state = 'listening';
 
       if (options.language) {
@@ -253,14 +228,12 @@ export class WebSpeechRecognizer {
   stop(): void {
     if (this.recognition && this.isListening) {
       this.recognition.stop();
-      this.clearSilenceTimer();
     }
   }
 
   abort(): void {
     if (this.recognition && this.isListening) {
       this.recognition.abort();
-      this.clearSilenceTimer();
       this.state = 'idle';
       this.finalTranscript = '';
     }
