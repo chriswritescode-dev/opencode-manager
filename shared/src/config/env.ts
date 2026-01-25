@@ -94,7 +94,6 @@ export const ENV = {
     ADMIN_EMAIL: process.env.ADMIN_EMAIL,
     ADMIN_PASSWORD: process.env.ADMIN_PASSWORD,
     ADMIN_PASSWORD_RESET: getEnvBoolean('ADMIN_PASSWORD_RESET', false),
-    SECURE_COOKIES: getEnvBoolean('AUTH_SECURE_COOKIES', process.env.NODE_ENV === 'production'),
     GITHUB_CLIENT_ID: process.env.GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET: process.env.GITHUB_CLIENT_SECRET,
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
