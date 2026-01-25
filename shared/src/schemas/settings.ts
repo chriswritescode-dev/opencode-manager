@@ -20,6 +20,15 @@ export const TTSConfigSchema = z.object({
   lastModelsFetch: z.number().optional(),
 });
 
+export const STTConfigSchema = z.object({
+  enabled: z.boolean(),
+  provider: z.enum(['external', 'builtin']).default('builtin'),
+  endpoint: z.string(),
+  apiKey: z.string(),
+  language: z.string().default('en-US'),
+  continuous: z.boolean().default(false),
+});
+
 export const CustomAgentSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -38,6 +47,15 @@ export type TTSConfig = {
   availableModels?: string[];
   lastVoicesFetch?: number;
   lastModelsFetch?: number;
+};
+
+export type STTConfig = {
+  enabled: boolean;
+  provider: 'external' | 'builtin';
+  endpoint: string;
+  apiKey: string;
+  language: string;
+  continuous: boolean;
 };
 
 const isBrowser = typeof navigator !== 'undefined';
@@ -101,6 +119,7 @@ export const UserPreferencesSchema = z.object({
   gitCredentials: z.array(GitCredentialSchema).optional(),
   gitIdentity: GitIdentitySchema.optional(),
   tts: TTSConfigSchema.optional(),
+  stt: STTConfigSchema.optional(),
   lastKnownGoodConfig: z.string().optional(),
   repoOrder: z.array(z.number()).optional(),
 });
@@ -119,6 +138,15 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
   lastModelsFetch: 0,
 };
 
+export const DEFAULT_STT_CONFIG: STTConfig = {
+  enabled: false,
+  provider: 'builtin',
+  endpoint: "",
+  apiKey: "",
+  language: 'en-US',
+  continuous: false,
+};
+
 export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
   mode: "build" as const,
@@ -134,6 +162,7 @@ export const DEFAULT_USER_PREFERENCES = {
   gitCredentials: [] as GitCredential[],
   gitIdentity: DEFAULT_GIT_IDENTITY,
   tts: DEFAULT_TTS_CONFIG,
+  stt: DEFAULT_STT_CONFIG,
 };
 
 export const SettingsResponseSchema = z.object({
