@@ -53,6 +53,7 @@ export interface UserPreferences {
   gitCredentials?: GitCredential[]
   gitIdentity?: GitIdentity
   tts?: TTSConfig
+  stt?: STTConfig
   repoOrder?: number[]
 }
 

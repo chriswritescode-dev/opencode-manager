@@ -129,6 +129,11 @@ export function useSTT() {
     setState('idle')
   }
 
+  const clear = () => {
+    setTranscript('')
+    setInterimTranscript('')
+  }
+
   return {
     isRecording,
     isProcessing,
@@ -143,5 +148,6 @@ export function useSTT() {
     stopRecording,
     abortRecording,
     reset,
+    clear,
   }
 }

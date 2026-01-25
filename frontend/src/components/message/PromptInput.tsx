@@ -100,6 +100,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     isSupported: sttSupported,
     isEnabled: sttEnabled,
     interimTranscript,
+    clear: clearSTT,
   } = useSTT()
   
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -198,6 +199,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       setSelectedAgent(null)
+      clearSTT()
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
       }
@@ -214,6 +216,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       })
       setPrompt('')
       setIsBashMode(false)
+      clearSTT()
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
       }
@@ -230,6 +233,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       if (command) {
         executeCommand(command, commandArgs?.trim() || '')
         setPrompt('')
+        clearSTT()
         if (textareaRef.current) {
           textareaRef.current.style.height = 'auto'
         }
@@ -252,6 +256,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     revokeBlobUrls(imageAttachments)
     setImageAttachments([])
     setSelectedAgent(null)
+    clearSTT()
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
