@@ -121,6 +121,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       setSelectedAgent(null)
+      clearSTT()
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
         textareaRef.current.focus()
@@ -129,7 +130,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     triggerFileUpload: () => {
       fileInputRef.current?.click()
     }
-  }), [imageAttachments])
+  }), [imageAttachments, clearSTT])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
@@ -382,11 +383,13 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       const trimmedTranscript = interimTranscript.trim()
       if (trimmedTranscript) {
         setPrompt(trimmedTranscript)
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto'
-          textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-          textareaRef.current.focus()
-        }
+        setTimeout(() => {
+          if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto'
+            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+            textareaRef.current.focus()
+          }
+        }, 0)
       }
     }
   }, [isRecording, interimTranscript, prompt])
@@ -647,6 +650,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       setPrompt('')
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
+      clearSTT()
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto'
       }
