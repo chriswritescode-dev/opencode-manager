@@ -22,22 +22,24 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
     token: '',
     username: '',
   })
+  const [tokenEdited, setTokenEdited] = useState(false)
 
   const maskToken = (token: string) => {
     if (!token) return ''
     if (token.length <= 8) return '•'.repeat(token.length)
-    return token.slice(0, 8) + '...'
+    return token.slice(0, 4) + '•'.repeat(Math.min(token.length - 4, 12)) + '...'
   }
 
   useEffect(() => {
     if (open) {
+      setTokenEdited(false)
       if (credential) {
         setFormData({
           ...credential,
-          token: maskToken(credential.token)
+          token: ''
         })
       } else {
-        setFormData({ name: '', host: '', token: '', username: '' })
+        setFormData({ name: '', host: 'https://github.com', token: '', username: '' })
       }
     }
   }, [open, credential])
@@ -46,13 +48,20 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
     event?.preventDefault()
     event?.stopPropagation()
     
-    if (!formData.name.trim() || !formData.host.trim() || !formData.token.trim()) {
+    const isEditing = !!credential
+    const tokenRequired = isEditing ? tokenEdited : true
+    
+    if (!formData.name.trim() || !formData.host.trim() || (tokenRequired && !formData.token.trim())) {
       showToast.error('Please fill in all required fields')
       return
     }
 
     try {
-      await onSave(formData)
+      const dataToSave: GitCredential = {
+        ...formData,
+        token: (isEditing && !tokenEdited) ? credential.token : formData.token
+      }
+      await onSave(dataToSave)
       setFormData({ name: '', host: '', token: '', username: '' })
       onOpenChange(false)
     } catch {
@@ -91,15 +100,25 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="cred-token">Access Token *</Label>
+            <Label htmlFor="cred-token">
+              Access Token {credential && !tokenEdited ? '(unchanged)' : '*'}
+            </Label>
             <Input
               id="cred-token"
               type="password"
-              placeholder="Personal access token"
+              placeholder={credential ? maskToken(credential.token) : 'Personal access token'}
               value={formData.token}
-              onChange={(e) => setFormData({ ...formData, token: e.target.value })}
+              onChange={(e) => {
+                setTokenEdited(true)
+                setFormData({ ...formData, token: e.target.value })
+              }}
               disabled={isSaving}
             />
+            {credential && !tokenEdited && (
+              <p className="text-xs text-muted-foreground">
+                Leave empty to keep existing token
+              </p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -124,7 +143,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
             </Button>
             <Button
               type="submit"
-              disabled={isSaving || !formData.name.trim() || !formData.host.trim() || !formData.token.trim()}
+              disabled={isSaving || !formData.name.trim() || !formData.host.trim() || (!credential && !formData.token.trim())}
             >
               {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {credential ? 'Update' : 'Add'}

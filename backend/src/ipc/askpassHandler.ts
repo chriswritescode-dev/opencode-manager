@@ -88,34 +88,50 @@ export class AskpassHandler implements IPCHandler {
     return ''
   }
 
+  private normalizeHostname(host: string): string {
+    let normalized = host.toLowerCase().trim()
+    normalized = normalized.replace(/\/+$/, '')
+    
+    if (!normalized.includes('://')) {
+      normalized = 'https://' + normalized
+    }
+    
+    try {
+      const parsed = new URL(normalized)
+      return parsed.hostname
+    } catch {
+      const stripped = normalized.replace(/^https?:\/\//, '')
+      return stripped.split('/')[0] || stripped
+    }
+  }
+
   private async getCredentialsForHost(hostname: string): Promise<Credentials | null> {
-    logger.info(`Looking up credentials for host: ${hostname}`)
+    const normalizedRequest = this.normalizeHostname(hostname)
+    logger.info(`Looking up credentials for host: ${hostname} (normalized: ${normalizedRequest})`)
+    
     const settingsService = new SettingsService(this.database)
     const settings = settingsService.getSettings('default')
     const gitCredentials: GitCredential[] = settings.preferences.gitCredentials || []
     logger.info(`Found ${gitCredentials.length} configured git credentials`)
 
     for (const cred of gitCredentials) {
-      try {
-        const parsed = new URL(cred.host)
-        if (parsed.hostname.toLowerCase() === hostname.toLowerCase()) {
-          logger.info(`Found matching credential for ${hostname}`)
-          return {
-            username: cred.username || this.getDefaultUsername(cred.host),
-            password: cred.token,
-          }
-        }
-      } catch {
-        if (cred.host.toLowerCase().includes(hostname.toLowerCase())) {
-          logger.info(`Found matching credential (fuzzy match) for ${hostname}`)
-          return {
-            username: cred.username || 'oauth2',
-            password: cred.token,
-          }
+      const normalizedCred = this.normalizeHostname(cred.host)
+      logger.debug(`Comparing: request='${normalizedRequest}' vs stored='${normalizedCred}' (raw: ${cred.host})`)
+      
+      if (normalizedCred === normalizedRequest) {
+        logger.info(`Found matching credential '${cred.name}' for ${hostname}`)
+        return {
+          username: cred.username || this.getDefaultUsername(cred.host),
+          password: cred.token,
         }
       }
     }
-    logger.warn(`No credentials found for host: ${hostname}`)
+    
+    if (gitCredentials.length > 0) {
+      logger.warn(`No credentials found for host: ${hostname}. Configured hosts: ${gitCredentials.map(c => c.host).join(', ')}`)
+    } else {
+      logger.warn(`No credentials found for host: ${hostname}. No git credentials configured.`)
+    }
     return null
   }
 
