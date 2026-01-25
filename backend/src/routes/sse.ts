@@ -8,6 +8,10 @@ export function createSSERoutes() {
   const app = new Hono()
 
   app.get('/stream', async (c) => {
+    c.header('Cache-Control', 'no-cache, no-transform')
+    c.header('Connection', 'keep-alive')
+    c.header('Content-Encoding', 'Identity')
+
     const directoriesParam = c.req.query('directories')
     const directories = directoriesParam ? directoriesParam.split(',').filter(Boolean) : []
 
