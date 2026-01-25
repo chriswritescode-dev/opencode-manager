@@ -245,10 +245,11 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     
     browser = await puppeteer.launch({
       headless: config.headless,
+      protocolTimeout: 240000,
       args: launchArgs
     })
 
-    const page = await browser.newPage()
+    let page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 800 })
     
     if (config.username && config.password) {
@@ -303,6 +304,14 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     success('Page loaded (DOM ready)')
 
+    const pageContent = await page.evaluate(() => document.body?.textContent?.slice(0, 500) || '')
+    log(`Page content: ${pageContent.slice(0, 200)}`, 1)
+    
+    if (pageContent.includes('Unauthorized')) {
+      fail('Page returned Unauthorized - auth headers may not be working')
+      return false
+    }
+
     await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
     success('App rendered')
 
@@ -333,45 +342,93 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     const repoPath = repos[0].fullPath
     success(`Found repo: ${repos[0].repoUrl} (id: ${repoId})`)
 
-    info('Getting or creating session...')
+    info('Creating new session (always create fresh to avoid stale sessions)...')
     let sessionId: string | null = null
 
-    const sessions = await page.evaluate(async (directory: string) => {
+    const createResult = await page.evaluate(async (directory: string) => {
       try {
-        const response = await fetch(`/api/opencode/session?directory=${encodeURIComponent(directory)}`)
-        if (!response.ok) return []
-        return await response.json()
-      } catch { return [] }
-    }, repoPath)
-
-    if (Array.isArray(sessions) && sessions.length > 0) {
-      sessionId = sessions[0].id
-      success(`Using existing session: ${sessionId}`)
-    } else {
-      const createResult = await page.evaluate(async (directory: string) => {
         const response = await fetch('/api/opencode/session', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'x-opencode-dir': directory },
           body: JSON.stringify({})
         })
-        return response.ok ? await response.json() : null
-      }, repoPath)
-
-      if (!createResult) {
-        fail('Failed to create session')
-        return false
+        if (!response.ok) {
+          const errText = await response.text()
+          return { error: `${response.status}: ${errText}` }
+        }
+        return await response.json()
+      } catch (e) {
+        return { error: String(e) }
       }
-      sessionId = createResult.id
-      success(`Created new session: ${sessionId}`)
-    }
+    }, repoPath)
 
-    await page.goto(`${config.baseUrl}/repos/${repoId}/sessions/${sessionId}`, { 
-      waitUntil: 'domcontentloaded', 
-      timeout: 30000 
+    if (!createResult || createResult.error) {
+      fail(`Failed to create session: ${createResult?.error || 'unknown error'}`)
+      return false
+    }
+    sessionId = createResult.id
+    success(`Created new session: ${sessionId}`)
+
+    info('Navigating to session page (using new page to avoid SSE blocking)...')
+    const sessionUrl = `${config.baseUrl}/repos/${repoId}/sessions/${sessionId}`
+    await page.close()
+    page = await browser.newPage()
+    await page.setViewport({ width: 1280, height: 800 })
+    if (config.username && config.password) {
+      await page.setExtraHTTPHeaders({
+        'Authorization': `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
+      })
+    }
+    page.on('console', msg => {
+      const text = msg.text()
+      if (text.includes('TalkMode') || text.includes('STT') || text.includes('transcri') ||
+          text.includes('Error') || text.includes('error') || text.includes('speech') ||
+          text.includes('[Test]')) {
+        log(`[Browser] ${text}`, 1)
+      }
     })
+    page.on('response', async response => {
+      const url = response.url()
+      if (url.includes('/api/stt/transcribe')) {
+        const status = response.status()
+        try {
+          const body = await response.text()
+          sttRequests.push({ url, status, body })
+          log(`[STT Response] ${status}: ${body.slice(0, 200)}`, 1)
+          
+          if (status === 200) {
+            const data = JSON.parse(body)
+            if (data.text) {
+              transcriptionResult = data.text
+              success(`STT transcription: "${data.text}"`)
+            }
+          }
+        } catch {
+          sttRequests.push({ url, status })
+        }
+      }
+    })
+    
+    await page.setRequestInterception(true)
+    const encodedRepoPath = encodeURIComponent(repoPath)
+    page.on('request', request => {
+      const url = request.url()
+      if (url.includes('/api/opencode/event') && !url.includes(encodedRepoPath)) {
+        log(`[Blocked SSE] ${url.slice(-50)}`, 2)
+        request.abort()
+      } else {
+        request.continue()
+      }
+    })
+    
+    if (config.useWebAudioInjection) {
+      await injectAudioViaWebAPI(page, audioPath)
+    }
+    await page.goto(sessionUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     success('Navigated to session page')
 
-    await new Promise(resolve => setTimeout(resolve, 3000))
+    await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
+    await new Promise(resolve => setTimeout(resolve, 2000))
 
     info('Verifying STT server is running...')
     const sttStatus = await page.evaluate(async () => {
