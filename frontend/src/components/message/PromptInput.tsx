@@ -883,6 +883,21 @@ return (
           >
             <Upload className="w-5 h-5" />
           </button>
+          {sttEnabled && sttSupported && (
+            <button
+              type="button"
+              onClick={handleVoiceToggle}
+              disabled={disabled}
+              className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center ${
+                isRecording
+                  ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
+                  : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
+              }`}
+              title={isRecording ? 'Stop recording' : 'Voice input'}
+            >
+              {isRecording ? <SquareFill className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+          )}
           {isMobile && !prompt.trim() && imageAttachments.length === 0 && sttEnabled && sttSupported && !hasPendingPermissionForSession ? (
             <button
               onClick={handleVoiceToggle}
