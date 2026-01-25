@@ -7,6 +7,7 @@ import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
 import { createGitEnvForRepoUrl, createNoPromptGitEnv, createGitHubGitEnv } from '../utils/git-auth'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import { opencodeServerManager } from './opencode-single-server'
 import path from 'path'
 
 export class GitAuthenticationError extends Error {
@@ -895,5 +896,42 @@ async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, 
         logger.warn(`Worktree creation failed (attempt ${attempt}/${maxRetries}): ${errorMessage}, retrying...`)
       }
     }
+  }
+}
+
+export async function syncProjectsFromOpenCode(database: Database): Promise<{ added: number; skipped: number }> {
+  let added = 0
+  let skipped = 0
+
+  try {
+    const projects = await opencodeServerManager.fetchProjectsFromAPI()
+    
+    if (projects.length === 0) {
+      logger.info('No projects found from OpenCode API')
+      return { added, skipped }
+    }
+
+    logger.info(`Found ${projects.length} projects from OpenCode, syncing...`)
+
+    for (const project of projects) {
+      try {
+        const repo = await registerExternalDirectory(database, project.path)
+        if (repo) {
+          added++
+          logger.info(`Synced project: ${project.path}`)
+        } else {
+          skipped++
+        }
+      } catch (error) {
+        logger.warn(`Failed to sync project ${project.path}:`, error)
+        skipped++
+      }
+    }
+
+    logger.info(`Project sync complete: ${added} added, ${skipped} skipped`)
+    return { added, skipped }
+  } catch (error) {
+    logger.error('Failed to sync projects from OpenCode:', error)
+    return { added, skipped }
   }
 }
