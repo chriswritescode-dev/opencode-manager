@@ -302,7 +302,7 @@ export function STTSettings() {
                 <button
                   type="button"
                   onClick={handleTest}
-                  disabled={!canTest || isRecording}
+                  disabled={!canTest && !isRecording}
                   className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center gap-2 ${
                     !canTest
                       ? 'bg-muted text-muted-foreground cursor-not-allowed'
