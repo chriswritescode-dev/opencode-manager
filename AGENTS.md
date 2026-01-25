@@ -179,6 +179,37 @@ When using `--client`, the script:
 
 This is useful when you already have `opencode` running in a terminal and want the web UI to connect to it.
 
+## NPM Package Installation Test
+
+Test the npm package installation flow end-to-end:
+
+```bash
+# Run the comprehensive npm installation E2E test
+bun run scripts/test-npm-install.ts
+
+# Quick test (skip slow start and service tests)
+bun run scripts/test-npm-install.ts --skip-start --skip-service
+```
+
+This test:
+1. Uninstalls any existing opencode-manager installation
+2. Installs from GitHub: `bun install -g github:dzianisv/opencode-manager`
+3. Verifies binary is in PATH and help command works
+4. Verifies `backend/dist/` and `frontend/dist/` exist (postinstall extraction)
+5. Verifies whisper-server.py script exists
+6. Tests `opencode-manager start` command (starts backend and verifies health)
+7. Tests `opencode-manager install-service` and `uninstall-service`
+
+Tests performed:
+- Binary exists in PATH
+- Help command works
+- Version output
+- Backend dist exists
+- Frontend dist exists  
+- Whisper server script exists
+- Start command works (health check)
+- Service install/uninstall (macOS/Linux)
+
 ## Voice E2E Tests
 
 Test STT (Speech-to-Text), TTS (Text-to-Speech), and Talk Mode functionality:
@@ -508,7 +539,10 @@ bun run scripts/test-startup.ts
 
 **For npm package changes:**
 ```bash
-# Reinstall and verify
+# Run the comprehensive npm installation E2E test
+bun run scripts/test-npm-install.ts
+
+# Or manually reinstall and verify
 bun remove -g opencode-manager
 bun install -g github:dzianisv/opencode-manager --force
 opencode-manager install-service
