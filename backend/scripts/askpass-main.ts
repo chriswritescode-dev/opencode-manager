@@ -33,13 +33,8 @@ function main(argv: string[]): void {
 
   const ipcHandlePath = process.env['VSCODE_GIT_IPC_HANDLE']
 
-  console.error(`[askpass-main] pid=${process.pid}, output=${output}, askpassType=${askpassType}, ipcHandlePath=${ipcHandlePath}, argv=${argv.join(', ')}`)
-
-  if (process.env['VSCODE_GIT_FETCH_SILENT']) {
-    console.error('[askpass-main] Silent fetch mode, returning empty')
-    fs.writeFileSync(output, '\n')
-    return process.exit(0)
-  }
+  const isSilent = !!process.env['VSCODE_GIT_FETCH_SILENT']
+  console.error(`[askpass-main] pid=${process.pid}, output=${output}, askpassType=${askpassType}, ipcHandlePath=${ipcHandlePath}, silent=${isSilent}, argv=${argv.join(', ')}`)
 
   if (!ipcHandlePath) {
     console.error('[askpass-main] No IPC handle, returning empty')
