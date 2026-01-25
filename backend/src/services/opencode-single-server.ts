@@ -5,6 +5,8 @@ import { createGitHubGitEnv, createNoPromptGitEnv } from '../utils/git-auth'
 import { SettingsService } from './settings'
 import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
+import { openCodeDiscoveryService, type OpenCodeInstance } from './opencode-discovery'
+import { opencodeSdkClient } from './opencode-sdk-client'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
@@ -12,6 +14,9 @@ const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 const CLIENT_MODE = process.env.OPENCODE_CLIENT_MODE === 'true'
+const HEALTH_CHECK_INTERVAL = 5000
+const MAX_RECONNECT_DELAY = 30000
+const BASE_RECONNECT_DELAY = 1000
 
 function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.split('.').map(Number)
@@ -35,6 +40,10 @@ class OpenCodeServerManager {
   private version: string | null = null
   private lastStartupError: string | null = null
   private connectedDirectory: string | null = null
+  private healthCheckInterval: NodeJS.Timeout | null = null
+  private reconnectAttempts: number = 0
+  private activePort: number = OPENCODE_SERVER_PORT
+  private isReconnecting: boolean = false
 
   private constructor() {}
 
@@ -56,19 +65,42 @@ class OpenCodeServerManager {
     }
 
     if (CLIENT_MODE) {
-      logger.info(`Client mode: connecting to existing OpenCode server on port ${OPENCODE_SERVER_PORT}`)
-      const healthy = await this.waitForHealth(10000)
-      if (healthy) {
+      logger.info(`Client mode: discovering OpenCode instances...`)
+      
+      const instance = await this.discoverAndConnect()
+      if (instance) {
         this.isHealthy = true
-        await this.fetchVersion()
-        await this.fetchConnectedDirectory()
-        logger.info(`Connected to OpenCode server v${this.version || 'unknown'}`)
+        this.activePort = instance.port
+        this.version = instance.version
+        this.connectedDirectory = instance.directory
+        this.reconnectAttempts = 0
+        opencodeSdkClient.configure(this.activePort)
+        logger.info(`Connected to OpenCode server v${this.version || 'unknown'} on port ${this.activePort}`)
         if (this.connectedDirectory) {
           logger.info(`OpenCode server directory: ${this.connectedDirectory}`)
         }
+        this.startHealthMonitor()
         return
       }
-      throw new Error(`Failed to connect to OpenCode server on port ${OPENCODE_SERVER_PORT}`)
+      
+      const configuredHealthy = await this.waitForHealth(10000)
+      if (configuredHealthy) {
+        this.isHealthy = true
+        this.activePort = OPENCODE_SERVER_PORT
+        opencodeSdkClient.configure(this.activePort)
+        await this.fetchVersion()
+        await this.fetchConnectedDirectory()
+        logger.info(`Connected to OpenCode server v${this.version || 'unknown'} on port ${this.activePort}`)
+        if (this.connectedDirectory) {
+          logger.info(`OpenCode server directory: ${this.connectedDirectory}`)
+        }
+        this.startHealthMonitor()
+        return
+      }
+      
+      logger.warn(`No OpenCode servers found. Will keep monitoring for instances...`)
+      this.startHealthMonitor()
+      return
     }
 
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
@@ -174,10 +206,12 @@ class OpenCodeServerManager {
       throw new Error('OpenCode server failed to become healthy')
     }
 
-    this.isHealthy = true
-    logger.info('OpenCode server is healthy')
+      this.isHealthy = true
+      this.activePort = OPENCODE_SERVER_PORT
+      opencodeSdkClient.configure(this.activePort)
+      logger.info('OpenCode server is healthy')
 
-    await this.fetchVersion()
+      await this.fetchVersion()
     if (this.version) {
       logger.info(`OpenCode version: ${this.version}`)
       if (!this.isVersionSupported()) {
@@ -188,6 +222,8 @@ class OpenCodeServerManager {
   }
 
   async stop(): Promise<void> {
+    this.stopHealthMonitor()
+    
     if (CLIENT_MODE) {
       logger.info('Client mode: not stopping external OpenCode server')
       this.isHealthy = false
@@ -328,6 +364,275 @@ class OpenCodeServerManager {
       const pids = execSync(`lsof -ti:${port}`).toString().trim().split('\n')
       return pids.filter(Boolean).map(pid => ({ pid: parseInt(pid) }))
     } catch {
+      return []
+    }
+  }
+
+  private async discoverAndConnect(): Promise<OpenCodeInstance | null> {
+    const instances = await openCodeDiscoveryService.discoverInstances()
+    if (instances.length === 0) {
+      return null
+    }
+
+    logger.info(`Found ${instances.length} OpenCode instance(s)`)
+    for (const instance of instances) {
+      logger.info(`  - Port ${instance.port}: ${instance.directory || 'unknown dir'} (${instance.sessions.length} sessions)`)
+    }
+
+    return instances[0] || null
+  }
+
+  private startHealthMonitor(): void {
+    if (this.healthCheckInterval) {
+      return
+    }
+
+    logger.info('Starting OpenCode health monitor')
+    this.healthCheckInterval = setInterval(async () => {
+      await this.performHealthCheck()
+    }, HEALTH_CHECK_INTERVAL)
+  }
+
+  private stopHealthMonitor(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+      this.healthCheckInterval = null
+    }
+  }
+
+  private async performHealthCheck(): Promise<void> {
+    if (this.isReconnecting) {
+      return
+    }
+
+    const healthy = await this.checkHealthOnPort(this.activePort)
+    
+    if (healthy && !this.isHealthy) {
+      logger.info(`OpenCode server on port ${this.activePort} is now healthy`)
+      this.isHealthy = true
+      this.reconnectAttempts = 0
+      this.lastStartupError = null
+      await this.fetchVersionFromPort(this.activePort)
+      await this.fetchConnectedDirectoryFromPort(this.activePort)
+    } else if (!healthy && this.isHealthy) {
+      logger.warn(`OpenCode server on port ${this.activePort} became unhealthy`)
+      this.isHealthy = false
+      this.scheduleReconnect()
+    } else if (!healthy && !this.isHealthy) {
+      await this.tryDiscoverNewInstance()
+    }
+  }
+
+  private async scheduleReconnect(): Promise<void> {
+    if (this.isReconnecting) {
+      return
+    }
+
+    this.isReconnecting = true
+    this.reconnectAttempts++
+    
+    const delay = Math.min(
+      BASE_RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts - 1),
+      MAX_RECONNECT_DELAY
+    )
+    
+    logger.info(`Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`)
+    
+    setTimeout(async () => {
+      await this.attemptReconnect()
+      this.isReconnecting = false
+    }, delay)
+  }
+
+  private async attemptReconnect(): Promise<void> {
+    const healthy = await this.checkHealthOnPort(this.activePort)
+    if (healthy) {
+      logger.info(`Reconnected to OpenCode server on port ${this.activePort}`)
+      this.isHealthy = true
+      this.reconnectAttempts = 0
+      this.lastStartupError = null
+      return
+    }
+
+    const instance = await this.discoverAndConnect()
+    if (instance) {
+      logger.info(`Found new OpenCode instance on port ${instance.port}`)
+      this.activePort = instance.port
+      this.version = instance.version
+      this.connectedDirectory = instance.directory
+      this.isHealthy = true
+      this.reconnectAttempts = 0
+      this.lastStartupError = null
+      opencodeSdkClient.configure(this.activePort)
+      return
+    }
+
+    this.lastStartupError = `Failed to reconnect after ${this.reconnectAttempts} attempts`
+    logger.warn(this.lastStartupError)
+  }
+
+  private async tryDiscoverNewInstance(): Promise<void> {
+    const instance = await this.discoverAndConnect()
+    if (instance) {
+      logger.info(`Discovered new OpenCode instance on port ${instance.port}`)
+      this.activePort = instance.port
+      this.version = instance.version
+      this.connectedDirectory = instance.directory
+      this.isHealthy = true
+      this.reconnectAttempts = 0
+      this.lastStartupError = null
+      opencodeSdkClient.configure(this.activePort)
+    }
+  }
+
+  private async checkHealthOnPort(port: number): Promise<boolean> {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/doc`, {
+        signal: AbortSignal.timeout(3000)
+      })
+      return response.ok
+    } catch {
+      return false
+    }
+  }
+
+  private async fetchVersionFromPort(port: number): Promise<string | null> {
+    if (opencodeSdkClient.isConfigured() && port === this.activePort) {
+      try {
+        const version = await opencodeSdkClient.getVersion()
+        if (version) {
+          this.version = version
+          return this.version
+        }
+      } catch (error) {
+        logger.debug('SDK getVersion failed, falling back to direct API:', error)
+      }
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/global/health`, {
+        signal: AbortSignal.timeout(3000)
+      })
+      if (response.ok) {
+        const health = await response.json() as { version?: string }
+        if (health.version) {
+          this.version = health.version
+          return this.version
+        }
+      }
+    } catch (error) {
+      logger.debug(`Failed to get version from port ${port}:`, error)
+    }
+    return await this.fetchVersion()
+  }
+
+  private async fetchConnectedDirectoryFromPort(port: number): Promise<string | null> {
+    try {
+      const projectResponse = await fetch(`http://127.0.0.1:${port}/project/current`, {
+        signal: AbortSignal.timeout(3000)
+      })
+      if (projectResponse.ok) {
+        const project = await projectResponse.json() as { path?: string }
+        if (project.path) {
+          this.connectedDirectory = project.path
+          return this.connectedDirectory
+        }
+      }
+    } catch {
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/session`, {
+        signal: AbortSignal.timeout(5000)
+      })
+      if (response.ok) {
+        const sessions = await response.json() as Array<{ directory?: string }>
+        if (sessions.length > 0 && sessions[0]?.directory) {
+          this.connectedDirectory = sessions[0].directory
+          return this.connectedDirectory
+        }
+      }
+    } catch (error) {
+      logger.warn('Failed to get OpenCode server directory:', error)
+    }
+    return null
+  }
+
+  getDiscoveredInstances(): OpenCodeInstance[] {
+    return openCodeDiscoveryService.getInstances()
+  }
+
+  async getAllProjects(): Promise<Array<{ path: string; name: string }>> {
+    return openCodeDiscoveryService.getAllProjects()
+  }
+
+  getActivePort(): number {
+    return this.activePort
+  }
+
+  async fetchProjectsFromAPI(): Promise<Array<{ path: string; name: string; sandboxes?: string[] }>> {
+    if (!this.isHealthy) {
+      return []
+    }
+
+    if (opencodeSdkClient.isConfigured()) {
+      try {
+        const projects = await opencodeSdkClient.listProjects()
+        return projects.map(p => ({
+          path: p.path,
+          name: p.name
+        }))
+      } catch (error) {
+        logger.warn('SDK client failed, falling back to direct API call:', error)
+      }
+    }
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${this.activePort}/project`, {
+        signal: AbortSignal.timeout(5000)
+      })
+      if (!response.ok) {
+        return []
+      }
+
+      const projects = await response.json() as Array<{
+        id: string
+        worktree: string
+        vcs?: string
+        sandboxes?: string[]
+      }>
+
+      const result: Array<{ path: string; name: string; sandboxes?: string[] }> = []
+      for (const project of projects) {
+        if (project.id === 'global' || !project.worktree || project.worktree === '/') {
+          continue
+        }
+
+        if (project.worktree.startsWith('/private/tmp/') || project.worktree.startsWith('/tmp/')) {
+          continue
+        }
+
+        result.push({
+          path: project.worktree,
+          name: project.worktree.split('/').pop() || project.worktree,
+          sandboxes: project.sandboxes
+        })
+
+        if (project.sandboxes && project.sandboxes.length > 0) {
+          for (const sandbox of project.sandboxes) {
+            if (!sandbox.startsWith('/private/tmp/') && !sandbox.startsWith('/tmp/')) {
+              result.push({
+                path: sandbox,
+                name: sandbox.split('/').pop() || sandbox
+              })
+            }
+          }
+        }
+      }
+
+      return result
+    } catch (error) {
+      logger.warn('Failed to fetch projects from OpenCode API:', error)
       return []
     }
   }

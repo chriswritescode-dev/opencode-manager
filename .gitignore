@@ -24,3 +24,7 @@ temp/
 .test/screenshots/*.png
 .test/ocr-results/*.json
 .test/reports/*.md
+
+# Session artifacts (TTS cache, reflections)
+.tts/
+.reflection/

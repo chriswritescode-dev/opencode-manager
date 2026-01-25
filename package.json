@@ -66,6 +66,7 @@
     "tesseract.js": "^7.0.0"
   },
   "dependencies": {
+    "@opencode-ai/sdk": "^1.1.36",
     "class-variance-authority": "^0.7.1",
     "dotenv": "^17.2.3",
     "node-pty": "^1.1.0",

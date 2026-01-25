@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import * as repoService from '../services/repo'
-import { GitAuthenticationError } from '../services/repo'
+import { GitAuthenticationError, syncProjectsFromOpenCode } from '../services/repo'
 import * as gitOperations from '../services/git-operations'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
@@ -326,6 +326,20 @@ export function createRepoRoutes(database: Database) {
       })
     } catch (error: any) {
       logger.error('Failed to create repo archive:', error)
+      return c.json({ error: error.message }, 500)
+    }
+  })
+
+  app.post('/sync', async (c) => {
+    try {
+      const result = await syncProjectsFromOpenCode(database)
+      return c.json({
+        success: true,
+        added: result.added,
+        skipped: result.skipped
+      })
+    } catch (error: any) {
+      logger.error('Failed to sync projects from OpenCode:', error)
       return c.json({ error: error.message }, 500)
     }
   })

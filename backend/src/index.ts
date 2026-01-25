@@ -22,7 +22,7 @@ import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
-import { cleanupOrphanedDirectories, registerExternalDirectory } from './services/repo'
+import { cleanupOrphanedDirectories, registerExternalDirectory, syncProjectsFromOpenCode } from './services/repo'
 import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
 import { chatterboxServerManager } from './services/chatterbox'
@@ -271,6 +271,13 @@ try {
       logger.info(`Client mode: registering connected directory as workspace: ${connectedDir}`)
       await registerExternalDirectory(db, connectedDir)
     }
+  }
+
+  try {
+    const syncResult = await syncProjectsFromOpenCode(db)
+    logger.info(`Synced ${syncResult.added} projects from OpenCode (${syncResult.skipped} skipped)`)
+  } catch (error) {
+    logger.warn('Failed to sync projects from OpenCode:', error)
   }
 
   try {
