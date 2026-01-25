@@ -8,9 +8,9 @@ export function createSSERoutes() {
   const app = new Hono()
 
   app.get('/stream', async (c) => {
-    c.header('Cache-Control', 'no-cache, no-transform')
+    c.header('Cache-Control', 'no-cache, no-store, no-transform')
     c.header('Connection', 'keep-alive')
-    c.header('Content-Encoding', 'Identity')
+    c.header('X-Accel-Buffering', 'no')
 
     const directoriesParam = c.req.query('directories')
     const directories = directoriesParam ? directoriesParam.split(',').filter(Boolean) : []
@@ -75,6 +75,39 @@ export function createSSERoutes() {
       clients: sseAggregator.getClientCount(),
       directories: sseAggregator.getActiveDirectories(),
       activeSessions: sseAggregator.getActiveSessions()
+    })
+  })
+
+  app.get('/test-stream', async (c) => {
+    c.header('Content-Type', 'text/event-stream')
+    c.header('Cache-Control', 'no-cache, no-store, no-transform')
+    c.header('Connection', 'keep-alive')
+    c.header('X-Accel-Buffering', 'no')
+
+    return streamSSE(c, async (stream) => {
+      await stream.writeSSE({
+        event: 'test',
+        data: JSON.stringify({ message: 'SSE working', timestamp: Date.now() })
+      })
+
+      let count = 0
+      const interval = setInterval(async () => {
+        count++
+        try {
+          await stream.writeSSE({
+            event: 'ping',
+            data: JSON.stringify({ count, timestamp: Date.now() })
+          })
+        } catch {
+          clearInterval(interval)
+        }
+      }, 1000)
+
+      stream.onAbort(() => {
+        clearInterval(interval)
+      })
+
+      await new Promise(() => {})
     })
   })
 
