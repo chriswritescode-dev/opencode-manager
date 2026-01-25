@@ -1,7 +1,6 @@
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useGitStatus, getApiErrorMessage } from '@/api/git'
-import { listBranches, switchBranch } from '@/api/repos'
+
 import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
 import { CommitsTab } from './CommitsTab'
@@ -9,7 +8,6 @@ import { BranchesTab } from './BranchesTab'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import {
   Loader2,
@@ -22,8 +20,6 @@ import {
   RefreshCw,
   ArrowDownFromLine,
   X,
-  ChevronDown,
-  Check,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
@@ -34,6 +30,9 @@ interface SourceControlPanelProps {
   isOpen: boolean
   onClose: () => void
   currentBranch: string
+  repoUrl?: string | null
+  isRepoWorktree?: boolean
+  repoName?: string
 }
 
 type Tab = 'changes' | 'commits' | 'branches'
@@ -43,32 +42,15 @@ export function SourceControlPanel({
   isOpen,
   onClose,
   currentBranch,
+  repoUrl,
+  isRepoWorktree,
+  repoName,
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
   const [selectedFile, setSelectedFile] = useState<{path: string, staged: boolean} | undefined>()
   const { data: status } = useGitStatus(repoId)
-  const { data: branches } = useQuery({
-    queryKey: ['branches', repoId],
-    queryFn: () => listBranches(repoId),
-    staleTime: 30000,
-  })
   const git = useGit(repoId)
-  const queryClient = useQueryClient()
   const isMobile = useMobile()
-
-  const switchBranchMutation = useMutation({
-    mutationFn: (branch: string) => switchBranch(repoId, branch),
-    onSuccess: (updatedRepo) => {
-      queryClient.setQueryData(['repo', repoId], updatedRepo)
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
-      queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
-    },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
-  })
-
   const handleGitAction = async (action: () => Promise<unknown>) => {
     try {
       await action()
@@ -91,29 +73,10 @@ export function SourceControlPanel({
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 hover:bg-accent rounded px-1 py-0.5 transition-colors">
-                <GitBranch className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-medium">{currentBranch}</span>
-                <ChevronDown className="w-3 h-3 text-muted-foreground" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-48">
-              {branches?.branches?.filter(b => b.type === 'local')?.map((branch) => (
-                <DropdownMenuItem
-                  key={branch.name}
-                  onClick={() => branch.name !== currentBranch && switchBranchMutation.mutate(branch.name)}
-                  disabled={branch.name === currentBranch || switchBranchMutation.isPending}
-                  className="flex items-center gap-2"
-                >
-                  <GitBranch className="w-4 h-4" />
-                  <span className="flex-1 truncate">{branch.name}</span>
-                  {branch.name === currentBranch && <Check className={`w-4 h-4 ${GIT_UI_COLORS.current}`} />}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div className="flex items-center gap-2">
+            <GitBranch className="w-4 h-4 text-muted-foreground" />
+            <span className="text-sm font-medium">{currentBranch}</span>
+          </div>
           {status && (status.ahead > 0 || status.behind > 0) && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
               {status.ahead > 0 && (
@@ -218,7 +181,7 @@ export function SourceControlPanel({
             <CommitsTab repoId={repoId} />
           )}
           {activeTab === 'branches' && (
-            <BranchesTab repoId={repoId} currentBranch={currentBranch} />
+            <BranchesTab repoId={repoId} currentBranch={currentBranch} repoUrl={repoUrl} isRepoWorktree={isRepoWorktree} />
           )}
         </div>
 
@@ -260,7 +223,7 @@ export function SourceControlPanel({
         )}>
           <DialogTitle className="flex items-center gap-2">
             <GitBranch className="w-5 h-5" />
-            Source Control
+            {isMobile && repoName ? repoName : 'Source Control'}
           </DialogTitle>
           {isMobile && (
             <Button

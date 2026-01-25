@@ -251,6 +251,7 @@ export function RepoDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={currentBranch}
+        repoName={repoName}
       />
 
 {repo && (

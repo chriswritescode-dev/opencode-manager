@@ -149,6 +149,7 @@ interface GitBranch {
   upstream?: string
   ahead?: number
   behind?: number
+  isWorktree?: boolean
 }
 
 export async function listBranches(id: number): Promise<{ branches: GitBranch[], status: { ahead: number, behind: number } }> {

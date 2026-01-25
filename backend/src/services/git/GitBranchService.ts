@@ -12,6 +12,7 @@ interface GitBranch {
   upstream?: string
   ahead?: number
   behind?: number
+  isWorktree?: boolean
 }
 
 export class GitBranchService {
@@ -45,19 +46,22 @@ export class GitBranchService {
       if (!trimmed) continue
 
       const isCurrent = trimmed.startsWith('*')
-      const namePart = trimmed.replace(/^\*?\s*/, '')
+      const isWorktree = trimmed.startsWith('+')
+      const namePart = trimmed.replace(/^[*+]?\s*/, '')
 
       const firstSpace = namePart.indexOf(' ')
       const firstBracket = namePart.indexOf('[')
       const cutIndex = firstSpace === -1 ? (firstBracket === -1 ? namePart.length : firstBracket) : (firstBracket === -1 ? firstSpace : Math.min(firstSpace, firstBracket))
-      const branchName = namePart.slice(0, cutIndex)
+      const branchName = namePart.slice(0, cutIndex).trim()
 
-      if (!branchName) continue
+      if (!branchName || branchName === '+' || branchName === '->' || branchName.includes('->')) continue
+      if (/^[0-9a-f]{6,40}$/.test(branchName)) continue
 
       const branch: GitBranch = {
         name: branchName,
         type: branchName.startsWith('remotes/') ? 'remote' : 'local',
-        current: isCurrent && (branchName === currentBranch || branchName === `remotes/${currentBranch}`)
+        current: isCurrent && (branchName === currentBranch || branchName === `remotes/${currentBranch}`),
+        isWorktree
       }
 
       if (seenNames.has(branch.name)) continue

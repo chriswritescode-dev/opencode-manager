@@ -1,14 +1,13 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+
 import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Trash2, Download, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { downloadRepo } from "@/api/repos";
 import { showToast } from "@/lib/toast";
 import type { GitStatusResponse } from "@/types/git";
-
-import { BranchSwitcher } from "./BranchSwitcher";
+import { SourceControlPanel } from "@/components/source-control/SourceControlPanel";
 
 interface RepoCardProps {
   repo: {
@@ -38,6 +37,7 @@ export function RepoCard({
 }: RepoCardProps) {
   const navigate = useNavigate();
   const [isDownloading, setIsDownloading] = useState(false);
+  const [showSourceControl, setShowSourceControl] = useState(false);
   
   const repoName = repo.repoUrl 
     ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
@@ -53,7 +53,7 @@ export function RepoCard({
   const unstagedCount = gitStatus?.files.filter((f) => !f.staged).length || 0;
 
   const handleCardClick = () => {
-    if (isReady) {
+    if (isReady && !showSourceControl) {
       navigate(`/repos/${repo.id}`);
     }
   };
@@ -96,11 +96,7 @@ export function RepoCard({
               {isReady && (
                 <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-orange-500' : 'bg-green-500'}`} />
               )}
-              {repo.isWorktree && (
-                <Badge variant="secondary" className="text-xs px-1.5 py-0 shrink-0">
-                  worktree
-                </Badge>
-              )}
+
             </div>
           </div>
 
@@ -113,7 +109,7 @@ export function RepoCard({
                 </span>
               ) : (
                 <>
-                  <span className="flex items-center gap-1 shrink-0">
+                  <span className={`flex items-center gap-1 shrink-0 ${repo.isWorktree ? 'text-purple-400' : ''}`}>
                     <GitBranch className="w-3.5 h-3.5 shrink-0" />
                     <span className="truncate max-w-[80px]">{branchToDisplay || "main"}</span>
                   </span>
@@ -145,14 +141,16 @@ export function RepoCard({
             </div>
 
             <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-              <BranchSwitcher
-                repoId={repo.id}
-                currentBranch={branchToDisplay || ""}
-                isWorktree={repo.isWorktree}
-                repoUrl={repo.repoUrl}
-                iconOnly={true}
-                className="h-8 w-8"
-              />
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={(e) => handleActionClick(e, () => setShowSourceControl(true))}
+                disabled={!isReady}
+                className="h-8 w-8 p-0"
+                title="Source Control"
+              >
+                <GitBranch className="w-4 h-4" />
+              </Button>
 
               <Button
                 size="sm"
@@ -195,6 +193,16 @@ export function RepoCard({
           </div>
         </div>
       </div>
+
+      <SourceControlPanel
+        repoId={repo.id}
+        isOpen={showSourceControl}
+        onClose={() => setShowSourceControl(false)}
+        currentBranch={branchToDisplay || ""}
+        repoUrl={repo.repoUrl}
+        isRepoWorktree={repo.isWorktree}
+        repoName={repoName}
+      />
     </div>
   );
 }
