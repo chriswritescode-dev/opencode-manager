@@ -101,14 +101,20 @@ export function createSettingsRoutes(db: Database) {
       const identityChanged = validated.preferences.gitIdentity !== undefined &&
         JSON.stringify(currentSettings.preferences.gitIdentity || {}) !== JSON.stringify(validated.preferences.gitIdentity)
       
+      let reloadError: string | undefined
       if (credentialsChanged || identityChanged) {
         const changeType = [credentialsChanged && 'credentials', identityChanged && 'identity'].filter(Boolean).join(' and ')
         logger.info(`Git ${changeType} changed, reloading OpenCode configuration`)
-        await opencodeServerManager.reloadConfig()
-        serverRestarted = true
+        try {
+          await opencodeServerManager.reloadConfig()
+          serverRestarted = true
+        } catch (error) {
+          logger.warn('Failed to reload OpenCode config after git settings change:', error)
+          reloadError = error instanceof Error ? error.message : 'Unknown error'
+        }
       }
 
-      return c.json({ ...settings, serverRestarted })
+      return c.json({ ...settings, serverRestarted, reloadError })
     } catch (error) {
       logger.error('Failed to update settings:', error)
       if (error instanceof z.ZodError) {

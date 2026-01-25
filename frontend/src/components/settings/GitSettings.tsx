@@ -75,9 +75,13 @@ export function GitSettings() {
     setIsSaving(true)
     try {
       showToast.loading('Saving git configuration...', { id: 'git-config' })
-      await updateSettingsAsync({ gitCredentials, gitIdentity })
+      const result = await updateSettingsAsync({ gitCredentials, gitIdentity })
       setHasChanges(false)
-      showToast.success('Git configuration saved', { id: 'git-config' })
+      if (result.reloadError) {
+        showToast.success('Git configuration saved (server reload pending)', { id: 'git-config' })
+      } else {
+        showToast.success('Git configuration saved', { id: 'git-config' })
+      }
     } catch {
       showToast.error('Failed to save git configuration', { id: 'git-config' })
     } finally {

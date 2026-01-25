@@ -58,6 +58,7 @@ export interface SettingsResponse {
   preferences: UserPreferences
   updatedAt: number
   serverRestarted?: boolean
+  reloadError?: string
 }
 
 export interface UpdateSettingsRequest {
