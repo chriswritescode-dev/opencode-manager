@@ -504,6 +504,41 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     }
     success(`STT server is running (model: ${sttStatus.server?.model || 'unknown'})`)
 
+    info('Enabling STT and Talk Mode via settings API...')
+    const settingsUpdated = await page.evaluate(async () => {
+      try {
+        const response = await fetch('/api/settings', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            preferences: {
+              stt: { enabled: true, model: 'base', autoSubmit: false },
+              talkMode: { 
+                enabled: true, 
+                silenceThresholdMs: 800, 
+                minSpeechMs: 400,
+                autoInterrupt: true 
+              }
+            }
+          })
+        })
+        return response.ok
+      } catch (e) {
+        return false
+      }
+    })
+    
+    if (settingsUpdated) {
+      success('STT and Talk Mode enabled')
+      info('Reloading page to apply settings...')
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      success('Page reloaded with new settings')
+    } else {
+      fail('Failed to enable STT/Talk Mode settings')
+    }
+
     info('Looking for Continuous Voice Input button...')
     
     let voiceButton: { found: boolean; selector?: string; title: string | null } = { found: false, title: null }
