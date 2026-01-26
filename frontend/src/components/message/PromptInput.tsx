@@ -15,7 +15,7 @@ import { ChevronDown, Square, Upload, X } from 'lucide-react'
 import { CommandSuggestions } from '@/components/command/CommandSuggestions'
 import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
 import { VoiceButton } from './VoiceButton'
-import { TalkModeButton } from './TalkModeButton'
+import { ContinuousVoiceButton } from './ContinuousVoiceButton'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 
@@ -725,10 +725,30 @@ return (
             disabled={disabled}
             className="hidden md:block"
           />
-          <TalkModeButton
-            sessionID={sessionID}
-            opcodeUrl={opcodeUrl}
-            directory={directory}
+          <ContinuousVoiceButton
+            onTranscriptUpdate={(text) => {
+              setPrompt(text)
+              if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto'
+                textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+              }
+            }}
+            onAutoSubmit={(text) => {
+              const parts = parsePromptToParts(text, attachedFiles, imageAttachments)
+              sendPrompt.mutate({
+                sessionID,
+                parts,
+                model: currentModel,
+                agent: selectedAgent || currentMode
+              })
+              setPrompt('')
+              setAttachedFiles(new Map())
+              setImageAttachments([])
+              setSelectedAgent(null)
+              if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto'
+              }
+            }}
             disabled={disabled}
             className="hidden md:block"
           />
