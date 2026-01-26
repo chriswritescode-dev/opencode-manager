@@ -11,6 +11,7 @@ import { GitAuthService } from './services/git-auth'
 import { createSettingsRoutes } from './routes/settings'
 import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
+import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
@@ -269,6 +270,7 @@ protectedApi.route('/files', createFileRoutes())
 protectedApi.route('/providers', createProvidersRoutes())
 protectedApi.route('/oauth', createOAuthRoutes())
 protectedApi.route('/tts', createTTSRoutes(db))
+protectedApi.route('/stt', createSTTRoutes(db))
 protectedApi.route('/generate-title', createTitleRoutes())
 protectedApi.route('/sse', createSSERoutes())
 
