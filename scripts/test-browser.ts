@@ -556,16 +556,28 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     if (transcriptionResult) {
       success(`Transcribed: "${transcriptionResult}"`)
       
+      info('Stopping voice input before submitting...')
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        for (const btn of buttons) {
+          const title = btn.getAttribute('title')?.toLowerCase() || ''
+          if (title.includes('stop voice') || title.includes('stop continuous')) {
+            (btn as HTMLButtonElement).click()
+            return
+          }
+        }
+      })
+      await new Promise(resolve => setTimeout(resolve, 500))
+      
       if (!config.sttOnly) {
         info('Submitting transcribed message to OpenCode...')
       
       const submitted = await page.evaluate(async (text: string, sid: string, repoDir: string) => {
         try {
-          const response = await fetch(`/api/opencode/session/${sid}/message`, {
+          const response = await fetch(`/api/opencode/session/${sid}/message?directory=${encodeURIComponent(repoDir)}`, {
             method: 'POST',
             headers: { 
-              'Content-Type': 'application/json',
-              'x-opencode-dir': repoDir
+              'Content-Type': 'application/json'
             },
             body: JSON.stringify({
               parts: [{ type: 'text', text: text }]
@@ -597,9 +609,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       while (Date.now() - responseStartTime < responseMaxWait) {
         const messages = await page.evaluate(async (sid: string, dir: string) => {
           try {
-            const res = await fetch(`/api/opencode/session/${sid}/message`, {
-              headers: { 'x-opencode-dir': dir }
-            })
+            const res = await fetch(`/api/opencode/session/${sid}/message?directory=${encodeURIComponent(dir)}`)
             if (!res.ok) return []
             return res.json()
           } catch { return [] }
@@ -652,19 +662,19 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
       }
-    }
-
-    info('Stopping voice input...')
-    await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button'))
-      for (const btn of buttons) {
-        const title = btn.getAttribute('title')?.toLowerCase() || ''
-        if (title.includes('stop voice') || title.includes('stop continuous')) {
-          (btn as HTMLButtonElement).click()
-          return
+    } else {
+      info('Stopping voice input (no transcription)...')
+      await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        for (const btn of buttons) {
+          const title = btn.getAttribute('title')?.toLowerCase() || ''
+          if (title.includes('stop voice') || title.includes('stop continuous')) {
+            (btn as HTMLButtonElement).click()
+            return
+          }
         }
-      }
-    })
+      })
+    }
 
     console.log('\n' + '='.repeat(60))
     console.log('Test Results')
