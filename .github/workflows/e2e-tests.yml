@@ -298,7 +298,7 @@ jobs:
         if: always()
         with:
           name: browser-e2e-recording
-          path: ${{ github.workspace }}/.test/BrowserE2E-*/
+          path: .test/
           retention-days: 7
           if-no-files-found: ignore
 
