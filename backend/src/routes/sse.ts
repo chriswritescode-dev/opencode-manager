@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { streamSSE } from 'hono/streaming'
+import { stream } from 'hono/streaming'
 import { sseAggregator } from '../services/sse-aggregator'
 import { SSESubscribeSchema } from '@opencode-manager/shared/schemas'
 import { logger } from '../utils/logger'
@@ -8,33 +8,35 @@ export function createSSERoutes() {
   const app = new Hono()
 
   app.get('/stream', async (c) => {
+    const directoriesParam = c.req.query('directories')
+    const directories = directoriesParam ? directoriesParam.split(',').filter(Boolean) : []
+    const clientId = `client_${Date.now()}_${Math.random().toString(36).slice(2)}`
+
+    c.header('Content-Type', 'text/event-stream')
     c.header('Cache-Control', 'no-cache, no-store, no-transform')
     c.header('Connection', 'keep-alive')
     c.header('X-Accel-Buffering', 'no')
 
-    const directoriesParam = c.req.query('directories')
-    const directories = directoriesParam ? directoriesParam.split(',').filter(Boolean) : []
-
-    return streamSSE(c, async (stream) => {
-      const clientId = `client_${Date.now()}_${Math.random().toString(36).slice(2)}`
+    return stream(c, async (writer) => {
+      const writeSSE = (event: string, data: string) => {
+        const lines = []
+        if (event) lines.push(`event: ${event}`)
+        lines.push(`data: ${data}`)
+        lines.push('')
+        lines.push('')
+        writer.write(new TextEncoder().encode(lines.join('\n')))
+      }
 
       const cleanup = sseAggregator.addClient(
         clientId,
         (event, data) => {
-          stream.writeSSE({ event, data })
+          writeSSE(event, data)
         },
         directories
       )
 
-      stream.onAbort(() => {
-        cleanup()
-      })
-
       try {
-        await stream.writeSSE({
-          event: 'connected',
-          data: JSON.stringify({ clientId, directories, ...sseAggregator.getConnectionStatus() })
-        })
+        writeSSE('connected', JSON.stringify({ clientId, directories, ...sseAggregator.getConnectionStatus() }))
       } catch (err) {
         logger.error(`Failed to send SSE connected event for ${clientId}:`, err)
       }
@@ -79,33 +81,27 @@ export function createSSERoutes() {
   })
 
   app.get('/test-stream', async (c) => {
-    c.header('Content-Type', 'text/event-stream')
-    c.header('Cache-Control', 'no-cache, no-store, no-transform')
-    c.header('Connection', 'keep-alive')
-    c.header('X-Accel-Buffering', 'no')
+    return stream(c, async (writer) => {
+      const writeSSE = (event: string, data: string) => {
+        const lines = []
+        if (event) lines.push(`event: ${event}`)
+        lines.push(`data: ${data}`)
+        lines.push('')
+        lines.push('')
+        writer.write(new TextEncoder().encode(lines.join('\n')))
+      }
 
-    return streamSSE(c, async (stream) => {
-      await stream.writeSSE({
-        event: 'test',
-        data: JSON.stringify({ message: 'SSE working', timestamp: Date.now() })
-      })
+      writeSSE('test', JSON.stringify({ message: 'SSE working', timestamp: Date.now() }))
 
       let count = 0
       const interval = setInterval(async () => {
         count++
         try {
-          await stream.writeSSE({
-            event: 'ping',
-            data: JSON.stringify({ count, timestamp: Date.now() })
-          })
+          writeSSE('ping', JSON.stringify({ count, timestamp: Date.now() }))
         } catch {
           clearInterval(interval)
         }
       }, 1000)
-
-      stream.onAbort(() => {
-        clearInterval(interval)
-      })
 
       await new Promise(() => {})
     })
