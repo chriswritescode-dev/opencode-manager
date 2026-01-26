@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { getWebSpeechRecognizer, isWebRecognitionSupported, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState } from '@/lib/webSpeechRecognizer'
+import { AudioRecorder, isAudioRecordingSupported } from '@/lib/audioRecorder'
+import { sttApi } from '@/api/stt'
 import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
 
-export function useSTT() {
-  const { preferences } = useSettings()
+export function useSTT(userId = 'default') {
+  const { preferences } = useSettings(userId)
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [isError, setIsError] = useState(false)
@@ -14,13 +16,24 @@ export function useSTT() {
   const [state, setState] = useState<RecognitionState>('idle')
 
   const recognizer = useRef(getWebSpeechRecognizer())
+  const audioRecorder = useRef<AudioRecorder | null>(null)
   const hasShownPermissionError = useRef(false)
+  const abortControllerRef = useRef<AbortController | null>(null)
 
   const isEnabled = preferences?.stt?.enabled ?? false
   const config = preferences?.stt ?? DEFAULT_STT_CONFIG
+  const isExternalProvider = config.provider === 'external'
+
+  const isSupported = isExternalProvider 
+    ? isAudioRecordingSupported() 
+    : isWebRecognitionSupported()
 
   useEffect(() => {
-    if (!isEnabled || !isWebRecognitionSupported()) {
+    if (!isEnabled || isExternalProvider) {
+      return
+    }
+
+    if (!isWebRecognitionSupported()) {
       return
     }
 
@@ -67,10 +80,98 @@ export function useSTT() {
     return () => {
       rec.clearCallbacks()
     }
-  }, [isEnabled])
+  }, [isEnabled, isExternalProvider])
 
-  const startRecording = async () => {
-    if (!isWebRecognitionSupported()) {
+  useEffect(() => {
+    if (!isEnabled || !isExternalProvider) {
+      return
+    }
+
+    if (!isAudioRecordingSupported()) {
+      return
+    }
+
+    if (!audioRecorder.current) {
+      audioRecorder.current = new AudioRecorder()
+    }
+
+    const recorder = audioRecorder.current
+
+    recorder.setOnStateChange((recState) => {
+      if (recState === 'recording') {
+        setIsRecording(true)
+        setState('listening')
+        setInterimTranscript('Recording...')
+      } else if (recState === 'stopped') {
+        setIsRecording(false)
+      } else if (recState === 'error') {
+        setIsRecording(false)
+        setIsProcessing(false)
+        setState('idle')
+      } else if (recState === 'idle') {
+        setState('idle')
+      }
+    })
+
+    recorder.setOnError((errorMessage) => {
+      setIsProcessing(false)
+      setIsRecording(false)
+      setIsError(true)
+      setError(errorMessage)
+
+      setTimeout(() => {
+        setIsError(false)
+        setError(null)
+      }, 3000)
+    })
+
+    recorder.setOnDataAvailable(async (blob) => {
+      setInterimTranscript('Processing...')
+      setIsProcessing(true)
+      
+      try {
+        abortControllerRef.current = new AbortController()
+        const result = await sttApi.transcribe(
+          blob,
+          userId || 'default',
+          abortControllerRef.current.signal
+        )
+        
+        setTranscript((prev) => {
+          const prevTrimmed = prev.trim()
+          const newText = result.text.trim()
+          return prevTrimmed ? `${prevTrimmed} ${newText}` : newText
+        })
+        setInterimTranscript('')
+      } catch (err) {
+        if (err instanceof Error && err.name === 'CanceledError') {
+          return
+        }
+        
+        setIsError(true)
+        const errorMessage = err instanceof Error ? err.message : 'Transcription failed'
+        setError(errorMessage)
+        
+        setTimeout(() => {
+          setIsError(false)
+          setError(null)
+        }, 3000)
+      } finally {
+        setIsProcessing(false)
+        setState('idle')
+        abortControllerRef.current = null
+      }
+    })
+
+    return () => {
+      if (audioRecorder.current) {
+        audioRecorder.current.abort()
+      }
+    }
+  }, [isEnabled, isExternalProvider, userId])
+
+  const startRecording = useCallback(async () => {
+    if (!isSupported) {
       setError('Speech recognition is not supported in this browser')
       setIsError(true)
       return
@@ -88,38 +189,69 @@ export function useSTT() {
     setError(null)
     hasShownPermissionError.current = false
 
-    const options: SpeechRecognitionOptions = {
-      language: config.language,
-      continuous: config.continuous,
-      interimResults: true,
-      maxAlternatives: 1,
-    }
+    if (isExternalProvider) {
+      if (!audioRecorder.current) {
+        audioRecorder.current = new AudioRecorder()
+      }
+      
+      try {
+        setIsProcessing(true)
+        await audioRecorder.current.start()
+        setIsProcessing(false)
+      } catch (err) {
+        setIsProcessing(false)
+        setIsError(true)
+        setError(err instanceof Error ? err.message : 'Failed to start recording')
+      }
+    } else {
+      const options: SpeechRecognitionOptions = {
+        language: config.language,
+        continuous: config.continuous,
+        interimResults: true,
+        maxAlternatives: 1,
+      }
 
-    try {
+      try {
+        setIsProcessing(true)
+        await recognizer.current.start(options)
+      } catch (err) {
+        setIsProcessing(false)
+        setIsError(true)
+        setError(err instanceof Error ? err.message : 'Failed to start recording')
+      }
+    }
+  }, [isSupported, isEnabled, isExternalProvider, config.language, config.continuous])
+
+  const stopRecording = useCallback(() => {
+    if (isExternalProvider && audioRecorder.current) {
+      audioRecorder.current.stop()
       setIsProcessing(true)
-      await recognizer.current.start(options)
-    } catch (err) {
-      setIsProcessing(false)
-      setIsError(true)
-      setError(err instanceof Error ? err.message : 'Failed to start recording')
+    } else {
+      recognizer.current.stop()
+      setIsProcessing(true)
     }
-  }
+  }, [isExternalProvider])
 
-  const stopRecording = () => {
-    recognizer.current.stop()
-    setIsProcessing(true)
-  }
-
-  const abortRecording = () => {
-    recognizer.current.abort()
+  const abortRecording = useCallback(() => {
+    if (isExternalProvider && audioRecorder.current) {
+      audioRecorder.current.abort()
+    } else {
+      recognizer.current.abort()
+    }
+    
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    
     setTranscript('')
     setInterimTranscript('')
     setIsRecording(false)
     setIsProcessing(false)
     setState('idle')
-  }
+  }, [isExternalProvider])
 
-  const reset = () => {
+  const reset = useCallback(() => {
     setTranscript('')
     setInterimTranscript('')
     setIsError(false)
@@ -127,12 +259,12 @@ export function useSTT() {
     setIsRecording(false)
     setIsProcessing(false)
     setState('idle')
-  }
+  }, [])
 
-  const clear = () => {
+  const clear = useCallback(() => {
     setTranscript('')
     setInterimTranscript('')
-  }
+  }, [])
 
   return {
     isRecording,
@@ -142,8 +274,9 @@ export function useSTT() {
     transcript,
     interimTranscript,
     state,
-    isSupported: isWebRecognitionSupported(),
+    isSupported,
     isEnabled,
+    isExternalProvider,
     startRecording,
     stopRecording,
     abortRecording,

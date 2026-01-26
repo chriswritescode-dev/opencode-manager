@@ -25,8 +25,11 @@ export const STTConfigSchema = z.object({
   provider: z.enum(['external', 'builtin']).default('builtin'),
   endpoint: z.string(),
   apiKey: z.string(),
+  model: z.string(),
   language: z.string().default('en-US'),
   continuous: z.boolean().default(false),
+  availableModels: z.array(z.string()).optional(),
+  lastModelsFetch: z.number().optional(),
 });
 
 export const CustomAgentSchema = z.object({
@@ -54,8 +57,11 @@ export type STTConfig = {
   provider: 'external' | 'builtin';
   endpoint: string;
   apiKey: string;
+  model: string;
   language: string;
   continuous: boolean;
+  availableModels?: string[];
+  lastModelsFetch?: number;
 };
 
 const isBrowser = typeof navigator !== 'undefined';
@@ -141,10 +147,13 @@ export const DEFAULT_TTS_CONFIG: TTSConfig = {
 export const DEFAULT_STT_CONFIG: STTConfig = {
   enabled: false,
   provider: 'builtin',
-  endpoint: "",
+  endpoint: "https://api.openai.com",
   apiKey: "",
+  model: '',
   language: 'en-US',
   continuous: false,
+  availableModels: [],
+  lastModelsFetch: 0,
 };
 
 export const DEFAULT_USER_PREFERENCES = {
