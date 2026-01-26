@@ -28,3 +28,4 @@ temp/
 # Session artifacts (TTS cache, reflections)
 .tts/
 .reflection/
+.test/
