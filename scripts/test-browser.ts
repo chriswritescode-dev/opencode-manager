@@ -352,6 +352,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     
     if (pageContent.includes('Unauthorized')) {
       fail('Page returned Unauthorized - auth headers may not be working')
+      await takeScreenshot(page, 'unauthorized_error', config.screenshotsDir)
       return false
     }
 
@@ -379,6 +380,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
         return true
       }
       fail(`No repos available: ${repos.error || 'empty list'}`)
+      await takeScreenshot(page, 'no_repos_error', config.screenshotsDir)
       return false
     }
 
@@ -485,6 +487,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     
     if (!sttStatus.server?.running) {
       fail(`STT server not running: ${JSON.stringify(sttStatus)}`)
+      await takeScreenshot(page, 'stt_not_running', config.screenshotsDir)
       return false
     }
     success(`STT server is running (model: ${sttStatus.server?.model || 'unknown'})`)
@@ -511,6 +514,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       )
       log('Available buttons:', 1)
       buttons.forEach(b => log(JSON.stringify(b), 2))
+      await takeScreenshot(page, 'voice_button_not_found', config.screenshotsDir)
       return false
     }
     success(`Found Continuous Voice button: "${voiceButton.title}"`)
@@ -566,6 +570,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       }
       
       fail('Voice input not active after clicking button')
+      await takeScreenshot(page, 'voice_activation_failed', config.screenshotsDir)
       return false
     }
     success('Voice input is active and listening')
@@ -771,6 +776,30 @@ const isComplete = lastMsg.info?.time?.completed
     const responseCorrect = config.sttOnly ? true : responseCorrectAnswer
     const passed = !!transcribedCorrectly && !!responseCorrect
 
+    if (passed) {
+      console.log('\n' + '='.repeat(60))
+      if (config.sttOnly) {
+        success('STT-ONLY TEST PASSED')
+        console.log('  Real audio -> MediaRecorder -> STT -> Transcription')
+      } else {
+        success('FULL E2E TEST PASSED')
+        console.log('  Real audio -> MediaRecorder -> STT -> Transcription -> OpenCode -> Response')
+      }
+      console.log('='.repeat(60))
+    } else {
+      console.log('\n' + '='.repeat(60))
+      fail('TEST FAILED')
+      if (!transcribedCorrectly) console.log('  - Transcription failed or incorrect')
+      if (!config.sttOnly && !responseCorrect) console.log('  - OpenCode response missing or incorrect')
+      console.log('='.repeat(60))
+    }
+
+    return passed
+
+  } catch (error) {
+    fail(`Test error: ${error instanceof Error ? error.message : error}`)
+    return false
+  } finally {
     info('Creating GIF from screenshots...')
     const gifResult = await VideoRecorder.fromTestDirectory(config.outputDir, {
       fps: 0.5,
@@ -785,48 +814,6 @@ const isComplete = lastMsg.info?.time?.completed
       log(`GIF creation failed: ${gifResult.error}`, 1)
     }
 
-    if (passed) {
-      console.log('\n' + '='.repeat(60))
-      if (config.sttOnly) {
-        success('STT-ONLY TEST PASSED')
-        console.log('  Real audio -> MediaRecorder -> STT -> Transcription')
-      } else {
-        success('FULL E2E TEST PASSED')
-        console.log('  Real audio -> MediaRecorder -> STT -> Transcription -> OpenCode -> Response')
-      }
-      if (gifResult.success) {
-        console.log(`  GIF: ${gifResult.videoPath}`)
-      }
-      console.log('='.repeat(60))
-    } else {
-      console.log('\n' + '='.repeat(60))
-      fail('TEST FAILED')
-      if (!transcribedCorrectly) console.log('  - Transcription failed or incorrect')
-      if (!config.sttOnly && !responseCorrect) console.log('  - OpenCode response missing or incorrect')
-      if (gifResult.success) {
-        console.log(`  GIF: ${gifResult.videoPath}`)
-      }
-      console.log('='.repeat(60))
-    }
-
-    return passed
-
-  } catch (error) {
-    fail(`Test error: ${error instanceof Error ? error.message : error}`)
-    
-    info('Creating GIF from screenshots (on error)...')
-    const gifResult = await VideoRecorder.fromTestDirectory(config.outputDir, {
-      fps: 0.5,
-      width: 1280,
-      height: 800,
-      outputName: 'test-recording.gif'
-    })
-    if (gifResult.success) {
-      log(`GIF: ${gifResult.videoPath}`, 1)
-    }
-    
-    return false
-  } finally {
     if (browser) {
       await browser.close()
     }
