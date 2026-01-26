@@ -293,6 +293,15 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-e2e-recording
+          path: .test/BrowserE2E-*/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Container logs on failure
         if: failure()
         run: docker logs opencode-manager
