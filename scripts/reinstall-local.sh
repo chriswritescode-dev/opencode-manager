@@ -36,11 +36,20 @@ opencode-manager install-service
 
 echo ""
 echo "=== Waiting for service to be ready (max 90s) ==="
+
+AUTH_FILE="$HOME/.local/run/opencode-manager/auth.json"
+if [ -f "$AUTH_FILE" ]; then
+  AUTH_CREDS=$(jq -r '"\(.username):\(.password)"' "$AUTH_FILE")
+  CURL_AUTH="-u $AUTH_CREDS"
+else
+  CURL_AUTH=""
+fi
+
 for i in {1..30}; do
-  if curl -sf http://localhost:5001/api/health | grep -q '"status":"healthy"'; then
+  if curl -sf $CURL_AUTH http://localhost:5001/api/health | grep -q '"status":"healthy"'; then
     echo ""
     echo "=== Service is healthy! ==="
-    curl -s http://localhost:5001/api/health | jq .
+    curl -s $CURL_AUTH http://localhost:5001/api/health | jq .
     exit 0
   fi
   echo -n "."

@@ -151,8 +151,10 @@ export const questionEvents = {
   emit(question: QuestionRequest) {
     this.listeners.forEach((listener) => listener(question))
   },
-  subscribe(listener: (question: QuestionRequest) => void) {
+  subscribe(listener: (question: QuestionRequest) => void): () => void {
     this.listeners.add(listener)
-    return () => this.listeners.delete(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
   },
 }
