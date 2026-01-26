@@ -392,7 +392,7 @@ prevPendingCountRef.current = pendingCount
           } else if (eventType === 'question.asked') {
             console.log('[SSE] question.asked event:', props)
             if ('id' in props && 'sessionID' in props && 'questions' in props) {
-              questionEvents.emit(props)
+              questionEvents.emit({ ...props, directory: repo.directory })
             }
           }
         } catch (err) {
