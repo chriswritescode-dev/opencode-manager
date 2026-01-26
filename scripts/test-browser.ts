@@ -505,16 +505,26 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     success(`STT server is running (model: ${sttStatus.server?.model || 'unknown'})`)
 
     info('Looking for Continuous Voice Input button...')
-    const voiceButton = await page.evaluate(() => {
-      const buttons = Array.from(document.querySelectorAll('button'))
-      for (const btn of buttons) {
-        const title = btn.getAttribute('title')?.toLowerCase() || ''
-        if (title.includes('continuous voice')) {
-          return { found: true, selector: `button[title="${btn.getAttribute('title')}"]`, title: btn.getAttribute('title') }
+    
+    let voiceButton: { found: boolean; selector?: string; title: string | null } = { found: false, title: null }
+    const buttonWaitStart = Date.now()
+    const buttonWaitMax = 15000
+    
+    while (Date.now() - buttonWaitStart < buttonWaitMax) {
+      voiceButton = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button'))
+        for (const btn of buttons) {
+          const title = btn.getAttribute('title')?.toLowerCase() || ''
+          if (title.includes('continuous voice')) {
+            return { found: true, selector: `button[title="${btn.getAttribute('title')}"]`, title: btn.getAttribute('title') }
+          }
         }
-      }
-      return { found: false, title: null }
-    })
+        return { found: false, title: null }
+      })
+      
+      if (voiceButton.found) break
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
 
     if (!voiceButton.found) {
       fail('Continuous Voice Input button not found')
