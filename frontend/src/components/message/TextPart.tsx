@@ -321,7 +321,7 @@ export function TextPart({ part, showTTSButton = false }: TextPartProps) {
       {showTTSButton && isEnabled && textContent.trim() && (
         <button
           onClick={handleTTSClick}
-          className={`absolute top-0 right-0 p-1.5 rounded opacity-0 group-hover:opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity ${
+          className={`absolute top-0 right-0 p-1.5 rounded transition-opacity ${
             isThisPlaying 
               ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' 
               : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'

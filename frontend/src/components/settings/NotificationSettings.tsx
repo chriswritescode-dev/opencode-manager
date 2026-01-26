@@ -16,7 +16,7 @@ import { showToast } from '@/lib/toast'
 
 export function NotificationSettings() {
   const { preferences, updateSettings } = useSettings()
-  const { isSupported, permission, requestPermission } = useNotifications()
+  const { isSupported, permission, requestPermission, testNotification } = useNotifications()
   const [pushSubscribed, setPushSubscribed] = useState(false)
   const [isSubscribing, setIsSubscribing] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
@@ -226,6 +226,23 @@ export function NotificationSettings() {
                 checked={notificationConfig.sound}
                 onCheckedChange={(checked) => handleChange({ sound: checked })}
               />
+            </div>
+
+            <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+              <div className="space-y-0.5">
+                <Label className="text-base">Test Notification</Label>
+                <p className="text-sm text-muted-foreground">
+                  Send a test notification to verify everything works
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={testNotification}
+              >
+                <Bell className="h-4 w-4 mr-1" />
+                Test
+              </Button>
             </div>
           </>
         )}

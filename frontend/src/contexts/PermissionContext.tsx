@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useState, useCallback, useMemo, u
 import { OpenCodeClient } from '@/api/opencode'
 import { permissionEvents, usePermissionRequests } from '@/hooks/usePermissionRequests'
 import { notificationEvents } from '@/lib/notificationEvents'
+import { questionEvents } from './QuestionContext'
 import type { Permission, PermissionResponse, Repo } from '@/api/types'
 import { useQueryClient } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
@@ -387,6 +388,11 @@ prevPendingCountRef.current = pendingCount
                   repoId,
                 }),
               }).catch((err) => console.warn('[Push] Failed to send push notification:', err))
+            }
+          } else if (eventType === 'question.asked') {
+            console.log('[SSE] question.asked event:', props)
+            if ('id' in props && 'sessionID' in props && 'questions' in props) {
+              questionEvents.emit(props)
             }
           }
         } catch (err) {
