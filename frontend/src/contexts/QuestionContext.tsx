@@ -120,7 +120,9 @@ export function QuestionProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const unsubscribe = questionEvents.subscribe(addQuestion)
-    return unsubscribe
+    return () => {
+      unsubscribe()
+    }
   }, [addQuestion])
 
   const value: QuestionContextValue = useMemo(
