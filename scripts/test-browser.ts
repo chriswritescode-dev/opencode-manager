@@ -2,9 +2,10 @@
 
 import puppeteer, { Browser, Page } from 'puppeteer'
 import { spawn, execSync } from 'child_process'
-import { existsSync, unlinkSync, readFileSync } from 'fs'
+import { existsSync, unlinkSync, readFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
+import { VideoRecorder } from './lib/video-recorder'
 
 interface TestConfig {
   baseUrl: string
@@ -15,6 +16,8 @@ interface TestConfig {
   timeout: number
   useWebAudioInjection: boolean
   sttOnly: boolean
+  outputDir: string
+  screenshotsDir: string
 }
 
 interface TestResult {
@@ -25,15 +28,27 @@ interface TestResult {
   error?: string
 }
 
+function createTestOutputDir(): { outputDir: string; screenshotsDir: string } {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  const outputDir = join(process.cwd(), '.test', `BrowserE2E-${timestamp}`)
+  const screenshotsDir = join(outputDir, 'screenshots')
+  mkdirSync(screenshotsDir, { recursive: true })
+  return { outputDir, screenshotsDir }
+}
+
+const testDirs = createTestOutputDir()
+
 const DEFAULT_CONFIG: TestConfig = {
   baseUrl: process.env.OPENCODE_URL || 'http://localhost:5001',
   username: process.env.OPENCODE_USER || '',
   password: process.env.OPENCODE_PASS || '',
-  testPhrase: 'Write a simple python hello world app and test it',
+  testPhrase: 'What is two plus two? Reply with just the number.',
   headless: process.env.CI === 'true',
   timeout: 180000,
   useWebAudioInjection: false,
   sttOnly: false,
+  outputDir: testDirs.outputDir,
+  screenshotsDir: testDirs.screenshotsDir,
 }
 
 function log(message: string, indent = 0) {
@@ -52,6 +67,16 @@ function fail(message: string) {
 
 function info(message: string) {
   log(`INFO ${message}`)
+}
+
+let screenshotCounter = 0
+
+async function takeScreenshot(page: Page, name: string, screenshotsDir: string): Promise<void> {
+  screenshotCounter++
+  const filename = `${String(screenshotCounter).padStart(2, '0')}_${name.replace(/\s+/g, '_')}.png`
+  const filepath = join(screenshotsDir, filename)
+  await page.screenshot({ path: filepath, fullPage: false })
+  log(`Screenshot: ${filename}`, 1)
 }
 
 function execCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -252,9 +277,16 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       launchArgs.push(`--use-file-for-fake-audio-capture=${audioPath}`)
     }
     
+    const executablePath = process.platform === 'darwin' 
+      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      : process.platform === 'win32'
+        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+        : '/usr/bin/google-chrome'
+
     browser = await puppeteer.launch({
       headless: config.headless,
       protocolTimeout: 240000,
+      executablePath,
       args: launchArgs
     })
 
@@ -313,6 +345,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     info('Loading page...')
     await page.goto(config.baseUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     success('Page loaded (DOM ready)')
+    await takeScreenshot(page, 'page_loaded', config.screenshotsDir)
 
     const pageContent = await page.evaluate(() => document.body?.textContent?.slice(0, 500) || '')
     log(`Page content: ${pageContent.slice(0, 200)}`, 1)
@@ -324,6 +357,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
     await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
     success('App rendered')
+    await takeScreenshot(page, 'app_rendered', config.screenshotsDir)
 
     info('Checking repos...')
     const repos = await page.evaluate(async () => {
@@ -438,6 +472,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     }
     await page.goto(sessionUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
     success('Navigated to session page')
+    await takeScreenshot(page, 'session_page', config.screenshotsDir)
 
     await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
     await new Promise(resolve => setTimeout(resolve, 2000))
@@ -479,6 +514,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       return false
     }
     success(`Found Continuous Voice button: "${voiceButton.title}"`)
+    await takeScreenshot(page, 'voice_button_found', config.screenshotsDir)
 
     info('Starting continuous voice input...')
     
@@ -533,6 +569,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       return false
     }
     success('Voice input is active and listening')
+    await takeScreenshot(page, 'voice_active', config.screenshotsDir)
 
     info('Audio is being captured...')
     info('Waiting for STT transcription...')
@@ -555,6 +592,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
     if (transcriptionResult) {
       success(`Transcribed: "${transcriptionResult}"`)
+      await takeScreenshot(page, 'transcription_received', config.screenshotsDir)
       
       info('Stopping voice input before submitting...')
       await page.evaluate(() => {
@@ -597,6 +635,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       
       if (submitted.success) {
         success(`Message submitted via ${submitted.method}`)
+        await takeScreenshot(page, 'message_submitted', config.screenshotsDir)
       } else {
         fail(`Failed to submit message: ${submitted.error || 'unknown error'}`)
       }
@@ -645,11 +684,12 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
                 agentResponse = currentResponse
               }
               
-              const isComplete = lastMsg.info?.time?.completed
-              if (isComplete) {
-                success('OpenCode response complete')
-                break
-              }
+const isComplete = lastMsg.info?.time?.completed
+                if (isComplete) {
+                  success('OpenCode response complete')
+                  await takeScreenshot(page, 'response_complete', config.screenshotsDir)
+                  break
+                }
             }
           }
         }
@@ -681,9 +721,9 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     console.log('='.repeat(60))
 
     const transcribedCorrectly = transcriptionResult && (
-      transcriptionResult.toLowerCase().includes('python') ||
-      transcriptionResult.toLowerCase().includes('hello') ||
-      transcriptionResult.toLowerCase().includes('write')
+      transcriptionResult.toLowerCase().includes('two') ||
+      transcriptionResult.toLowerCase().includes('2') ||
+      transcriptionResult.toLowerCase().includes('plus')
     )
 
     if (transcriptionResult) {
@@ -710,39 +750,40 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       }
     }
 
-    let responseHasCode = false
-    let responseHasOutput = false
+    let responseCorrectAnswer = false
 
     if (agentResponse) {
       success(`OpenCode responded (${agentResponse.length} chars)`)
       log(`Response preview: "${agentResponse.slice(0, 200)}..."`, 1)
       
-      responseHasCode = agentResponse.includes('print') || 
-                        agentResponse.includes('hello') ||
-                        agentResponse.includes('.py') ||
-                        agentResponse.includes('python')
+      responseCorrectAnswer = agentResponse.includes('4') || 
+                              agentResponse.toLowerCase().includes('four')
       
-      responseHasOutput = agentResponse.toLowerCase().includes('hello world') ||
-                          agentResponse.includes('Hello World') ||
-                          agentResponse.includes('Hello, World')
-      
-      if (responseHasCode) {
-        success('Response contains Python code!')
+      if (responseCorrectAnswer) {
+        success('Response contains correct answer (4)!')
       } else {
-        fail('Response does not contain expected Python code')
-      }
-      
-      if (responseHasOutput) {
-        success('Response shows "Hello World" output!')
-      } else {
-        log('Note: "Hello World" output not detected in response', 1)
+        fail('Response does not contain expected answer')
       }
     } else if (transcriptionResult && !config.sttOnly) {
       fail('No response from OpenCode')
     }
 
-    const responseCorrect = config.sttOnly ? true : responseHasCode
+    const responseCorrect = config.sttOnly ? true : responseCorrectAnswer
     const passed = !!transcribedCorrectly && !!responseCorrect
+
+    info('Creating GIF from screenshots...')
+    const gifResult = await VideoRecorder.fromTestDirectory(config.outputDir, {
+      fps: 0.5,
+      width: 1280,
+      height: 800,
+      outputName: 'test-recording.gif'
+    })
+
+    if (gifResult.success) {
+      success(`GIF created: ${gifResult.videoPath} (${gifResult.sizeMB} MB)`)
+    } else {
+      log(`GIF creation failed: ${gifResult.error}`, 1)
+    }
 
     if (passed) {
       console.log('\n' + '='.repeat(60))
@@ -753,12 +794,18 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
         success('FULL E2E TEST PASSED')
         console.log('  Real audio -> MediaRecorder -> STT -> Transcription -> OpenCode -> Response')
       }
+      if (gifResult.success) {
+        console.log(`  GIF: ${gifResult.videoPath}`)
+      }
       console.log('='.repeat(60))
     } else {
       console.log('\n' + '='.repeat(60))
       fail('TEST FAILED')
       if (!transcribedCorrectly) console.log('  - Transcription failed or incorrect')
       if (!config.sttOnly && !responseCorrect) console.log('  - OpenCode response missing or incorrect')
+      if (gifResult.success) {
+        console.log(`  GIF: ${gifResult.videoPath}`)
+      }
       console.log('='.repeat(60))
     }
 
@@ -766,6 +813,18 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
   } catch (error) {
     fail(`Test error: ${error instanceof Error ? error.message : error}`)
+    
+    info('Creating GIF from screenshots (on error)...')
+    const gifResult = await VideoRecorder.fromTestDirectory(config.outputDir, {
+      fps: 0.5,
+      width: 1280,
+      height: 800,
+      outputName: 'test-recording.gif'
+    })
+    if (gifResult.success) {
+      log(`GIF: ${gifResult.videoPath}`, 1)
+    }
+    
     return false
   } finally {
     if (browser) {
@@ -824,7 +883,7 @@ Options:
   --url <url>       Base URL (default: http://localhost:5001)
   --user <username> Username for basic auth
   --pass <password> Password for basic auth
-  --text <phrase>   Test phrase to speak (default: "Write a simple python hello world app and test it")
+  --text <phrase>   Test phrase to speak (default: "What is two plus two? Reply with just the number.")
   --no-headless     Run browser in visible mode for debugging
   --web-audio       Use Web Audio API injection instead of Chrome fake audio capture
   --stt-only        Only test STT pipeline, skip OpenCode response validation (for CI without API keys)
