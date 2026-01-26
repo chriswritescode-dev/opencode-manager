@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
+import { z } from 'zod/v3'
 import { useSettings } from '@/hooks/useSettings'
 import { useSTT } from '@/hooks/useSTT'
 import { useSTTModels, useSTTStatus } from '@/hooks/useSTTDiscovery'
