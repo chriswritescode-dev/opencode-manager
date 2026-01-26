@@ -94,6 +94,25 @@ The user may be accessing this agent through a Cloudflare tunnel from a mobile d
 - Restart individual services without touching the tunnel
 - Ask user to run cleanup themselves when ready
 
+## ⚠️ CRITICAL: Never Run E2E Tests That Spawn Services When User Is Connected
+
+**NEVER run `test-npm-install.ts`, `test-startup.ts`, or similar tests that spawn `opencode-manager start` while the user is connected remotely.**
+
+These tests:
+- Spawn new service instances on different ports
+- May interfere with the running tunnel or service
+- Can cause the tunnel to drop, disconnecting the user
+
+**Before running E2E tests:**
+1. Ask the user if they are connected via tunnel
+2. If yes, do NOT run tests that spawn services
+3. Only run safe tests like unit tests (`pnpm test`) or static analysis
+
+**Safe tests when user is remote:**
+- `pnpm test` - Unit tests (no service spawning)
+- `bun run scripts/test-npm-install.ts --skip-start --skip-service` - Only tests installation, not runtime
+- Code linting and type checking
+
 ## Commands
 
 - `pnpm dev` - Start both backend (5001) and frontend (5173)
