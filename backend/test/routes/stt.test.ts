@@ -226,6 +226,34 @@ describe('STT Routes', () => {
       expect(json.error).toBe('STT API key is not configured')
     })
 
+    it('should reject when endpoint is missing', async () => {
+      mockGetSettings.mockReturnValue({
+        preferences: {
+          stt: {
+            enabled: true,
+            provider: 'external',
+            apiKey: 'test-key',
+            endpoint: '',
+            model: 'whisper-1',
+          },
+        },
+      })
+
+      const audioBlob = new Blob(['fake audio'], { type: 'audio/webm' })
+      const formData = new FormData()
+      formData.append('audio', audioBlob, 'test.webm')
+
+      const req = new Request('http://localhost/transcribe?userId=test', {
+        method: 'POST',
+        body: formData,
+      })
+      const res = await sttApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(400)
+      expect(json.error).toBe('STT endpoint is not configured')
+    })
+
     it('should reject when no audio file provided', async () => {
       const formData = new FormData()
 

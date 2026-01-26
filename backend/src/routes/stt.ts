@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import { z } from 'zod'
 import { Database } from 'bun:sqlite'
 import { createHash } from 'crypto'
 import { mkdir, readFile, writeFile, stat, unlink } from 'fs/promises'
@@ -147,6 +146,10 @@ export function createSTTRoutes(db: Database) {
         return c.json({ error: 'STT API key is not configured' }, 400)
       }
 
+      if (!sttConfig.endpoint) {
+        return c.json({ error: 'STT endpoint is not configured' }, 400)
+      }
+
       const formData = await c.req.formData()
       const audioFile = formData.get('audio')
 
@@ -222,9 +225,6 @@ export function createSTTRoutes(db: Database) {
         return new Response(null, { status: 499 })
       }
       logger.error('STT transcription failed:', error)
-      if (error instanceof z.ZodError) {
-        return c.json({ error: 'Invalid request', details: error.issues }, 400)
-      }
       return c.json({ error: 'STT transcription failed' }, 500)
     }
   })

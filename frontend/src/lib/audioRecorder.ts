@@ -33,6 +33,7 @@ export class AudioRecorder {
   private stream: MediaStream | null = null
   private state: AudioRecorderState = 'idle'
   private options: AudioRecorderOptions
+  private isAborted: boolean = false
 
   private onStateChange?: (state: AudioRecorderState) => void
   private onError?: (error: string) => void
@@ -82,6 +83,7 @@ export class AudioRecorder {
 
     try {
       this.audioChunks = []
+      this.isAborted = false
       
       this.stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -104,10 +106,12 @@ export class AudioRecorder {
       }
 
       this.mediaRecorder.onstop = () => {
-        const mimeType = this.mediaRecorder?.mimeType || 'audio/webm'
-        const audioBlob = new Blob(this.audioChunks, { type: mimeType })
-        this.onDataAvailable?.(audioBlob)
-        this.setState('stopped')
+        if (!this.isAborted) {
+          const mimeType = this.mediaRecorder?.mimeType || 'audio/webm'
+          const audioBlob = new Blob(this.audioChunks, { type: mimeType })
+          this.onDataAvailable?.(audioBlob)
+          this.setState('stopped')
+        }
         this.cleanup()
       }
 
@@ -145,12 +149,12 @@ export class AudioRecorder {
   }
 
   abort(): void {
+    this.isAborted = true
+    this.audioChunks = []
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop()
     }
-    this.audioChunks = []
     this.setState('idle')
-    this.cleanup()
   }
 
   private cleanup(): void {
