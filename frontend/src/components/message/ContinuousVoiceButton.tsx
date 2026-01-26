@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Mic, MicOff, Loader2 } from 'lucide-react'
+import { Mic, MicOff, Loader2, Volume2 } from 'lucide-react'
 import { useStreamingVAD } from '@/hooks/useStreamingVAD'
 import { useSettings } from '@/hooks/useSettings'
+import { useTTS } from '@/hooks/useTTS'
 import { cn } from '@/lib/utils'
 
 interface ContinuousVoiceButtonProps {
@@ -18,9 +19,12 @@ export function ContinuousVoiceButton({
   className 
 }: ContinuousVoiceButtonProps) {
   const { preferences } = useSettings()
+  const { isPlaying: isTTSPlaying } = useTTS()
   const [isActive, setIsActive] = useState(false)
   const [showError, setShowError] = useState(false)
+  const [pausedForTTS, setPausedForTTS] = useState(false)
   const lastTranscriptRef = useRef('')
+  const wasPlayingRef = useRef(false)
 
   const talkModeConfig = preferences?.talkMode
   const sttConfig = preferences?.stt
@@ -87,6 +91,24 @@ export function ContinuousVoiceButton({
     }
   }, [])
 
+  useEffect(() => {
+    if (!isActive) return
+    
+    if (isTTSPlaying && !wasPlayingRef.current) {
+      streamingVAD.stop()
+      setPausedForTTS(true)
+      wasPlayingRef.current = true
+    } else if (!isTTSPlaying && wasPlayingRef.current) {
+      wasPlayingRef.current = false
+      if (pausedForTTS) {
+        setPausedForTTS(false)
+        setTimeout(() => {
+          streamingVAD.start().catch(() => {})
+        }, 300)
+      }
+    }
+  }, [isTTSPlaying, isActive, pausedForTTS, streamingVAD])
+
   if (!isEnabled) {
     return null
   }
@@ -117,10 +139,17 @@ export function ContinuousVoiceButton({
         )}
       </button>
 
-      {isActive && (
+      {isActive && !pausedForTTS && (
         <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 flex items-center gap-2 px-3 py-1 rounded-full bg-green-500 text-white text-xs font-medium whitespace-nowrap shadow-lg">
           <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
           <span>Listening...</span>
+        </div>
+      )}
+
+      {isActive && pausedForTTS && (
+        <div className="absolute -top-10 left-1/2 transform -translate-x-1/2 flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500 text-white text-xs font-medium whitespace-nowrap shadow-lg">
+          <Volume2 className="w-3 h-3 animate-pulse" />
+          <span>Speaking...</span>
         </div>
       )}
 
