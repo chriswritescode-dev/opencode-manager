@@ -89,7 +89,7 @@ export function ContinuousVoiceButton({
         streamingVAD.stop()
       }
     }
-  }, [])
+  }, [isActive, streamingVAD])
 
   useEffect(() => {
     if (!isActive) return
