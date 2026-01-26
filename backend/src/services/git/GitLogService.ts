@@ -35,7 +35,7 @@ export class GitLogService {
         `--all`,
         `-n`,
         String(limit),
-        '--format=%H|%an|%ae|%ai|%s'
+        '--format=%H|%an|%ae|%at|%s'
       ]
       const logEnv = this.gitAuthService.getGitEnvironment(true)
       const output = await executeCommand(logArgs, { env: logEnv })
@@ -47,22 +47,17 @@ export class GitLogService {
         if (!line.trim()) continue
 
         const parts = line.split('|')
-        const [hash, authorName, authorEmail, date, ...messageParts] = parts
+        const [hash, authorName, authorEmail, timestamp, ...messageParts] = parts
         const message = messageParts.join('|')
 
-        if (hash && date) {
-          const parsedDate = new Date(date)
-          if (!isNaN(parsedDate.getTime())) {
-            commits.push({
-              hash,
-              authorName: authorName || '',
-              authorEmail: authorEmail || '',
-              date,
-              message: message || ''
-            })
-          } else {
-            logger.warn(`Skipping commit ${hash.substring(0, 7)}: invalid date format "${date}"`)
-          }
+        if (hash) {
+          commits.push({
+            hash,
+            authorName: authorName || '',
+            authorEmail: authorEmail || '',
+            date: timestamp || '',
+            message: message || ''
+          })
         }
       }
 
@@ -104,7 +99,7 @@ export class GitLogService {
         '-C',
         repoPath,
         'log',
-        '--format=%H|%an|%ae|%ai|%s',
+        '--format=%H|%an|%ae|%at|%s',
         hash,
         '-1'
       ]
@@ -117,7 +112,7 @@ export class GitLogService {
       }
 
       const parts = output.trim().split('|')
-      const [commitHash, authorName, authorEmail, date, ...messageParts] = parts
+      const [commitHash, authorName, authorEmail, timestamp, ...messageParts] = parts
       const message = messageParts.join('|')
 
       if (!commitHash) {
@@ -128,7 +123,7 @@ export class GitLogService {
         hash: commitHash,
         authorName: authorName || '',
         authorEmail: authorEmail || '',
-        date: date || '',
+        date: timestamp || '',
         message: message || ''
       }
     } catch (error: unknown) {
