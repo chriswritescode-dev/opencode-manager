@@ -15,15 +15,12 @@ opencode-manager uninstall-service 2>/dev/null || true
 echo "[2/6] Removing global installation..."
 bun remove -g opencode-manager 2>/dev/null || true
 
-echo "[3/6] Building backend..."
-cd "$REPO_DIR/backend"
-bun install
-bun run build
+echo "[3/6] Installing dependencies..."
+cd "$REPO_DIR"
+pnpm install
 
-echo "[4/6] Building frontend..."
-cd "$REPO_DIR/frontend"
-npm install
-npm run build
+echo "[4/6] Building backend and frontend..."
+pnpm build
 
 echo "[5/6] Installing globally from local repo..."
 cd "$REPO_DIR"
