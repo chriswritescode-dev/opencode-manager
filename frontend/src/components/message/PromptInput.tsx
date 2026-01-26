@@ -97,6 +97,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     isRecording,
     startRecording,
     stopRecording,
+    abortRecording,
     isSupported: sttSupported,
     isEnabled: sttEnabled,
     interimTranscript,
@@ -110,11 +111,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   useImperativeHandle(ref, () => ({
     setPromptValue: (value: string) => {
       setPrompt(value)
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-        textareaRef.current.focus()
-      }
+      textareaRef.current?.focus()
     },
     clearPrompt: () => {
       setPrompt('')
@@ -122,16 +119,17 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       setSelectedAgent(null)
-      clearSTT()
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-        textareaRef.current.focus()
+      if (isRecording) {
+        abortRecording()
+      } else {
+        clearSTT()
       }
+      textareaRef.current?.focus()
     },
     triggerFileUpload: () => {
       fileInputRef.current?.click()
     }
-  }), [imageAttachments, clearSTT])
+  }), [imageAttachments, clearSTT, isRecording, abortRecording])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
@@ -202,9 +200,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       setImageAttachments([])
       setSelectedAgent(null)
       clearSTT()
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
       return
     }
 
@@ -219,9 +214,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       setPrompt('')
       setIsBashMode(false)
       clearSTT()
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
       return
     }
 
@@ -236,9 +228,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
         executeCommand(command, commandArgs?.trim() || '')
         setPrompt('')
         clearSTT()
-        if (textareaRef.current) {
-          textareaRef.current.style.height = 'auto'
-        }
         return
       }
     }
@@ -259,9 +248,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     setImageAttachments([])
     setSelectedAgent(null)
     clearSTT()
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-    }
   }
 
   const handleStop = () => {
@@ -286,8 +272,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
         if (textareaRef.current) {
           textareaRef.current.focus()
           textareaRef.current.setSelectionRange(cleanedTemplate.length, cleanedTemplate.length)
-          textareaRef.current.style.height = 'auto'
-          textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
         }
       }, 0)
     } else {
@@ -385,13 +369,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
       const trimmedTranscript = textToUse.trim()
       if (trimmedTranscript && (prompt === '' || prompt === 'Processing...' || prompt === 'Recording...')) {
         setPrompt(trimmedTranscript)
-        setTimeout(() => {
-          if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto'
-            textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-            textareaRef.current.focus()
-          }
-        }, 0)
+        textareaRef.current?.focus()
       }
     }
   }, [isRecording, interimTranscript, transcript, prompt])
@@ -653,9 +631,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
       revokeBlobUrls(imageAttachments)
       setImageAttachments([])
       clearSTT()
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
     } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 't') {
       e.preventDefault()
       if (hasVariants) {
@@ -678,11 +653,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
     
     setPrompt(value)
-    
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
-    }
 
     if (isBashMode) {
       return
@@ -790,7 +760,7 @@ return (
         disabled={disabled}
         onFocus={() => setIsFocused(true)}
         onBlur={() => setIsFocused(false)}
-        className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg ${
+        className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
             ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10'
             : isDragging ? 'border-blue-500/50 border-dashed bg-blue-500/5' : ''
