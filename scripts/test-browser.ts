@@ -530,11 +530,11 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     
     if (settingsUpdated) {
       success('STT and Talk Mode enabled')
-      info('Reloading page to apply settings...')
-      await page.reload({ waitUntil: 'domcontentloaded' })
+      info('Navigating back to session page to apply settings...')
+      await page.goto(sessionUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
       await page.waitForFunction(() => document.querySelector('button') !== null, { timeout: 30000 })
-      await new Promise(resolve => setTimeout(resolve, 1000))
-      success('Page reloaded with new settings')
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      success('Session page loaded with new settings')
     } else {
       fail('Failed to enable STT/Talk Mode settings')
     }
