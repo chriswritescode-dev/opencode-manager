@@ -277,16 +277,28 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       launchArgs.push(`--use-file-for-fake-audio-capture=${audioPath}`)
     }
     
-    const executablePath = process.platform === 'darwin' 
-      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
-      : process.platform === 'win32'
-        ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-        : '/usr/bin/google-chrome'
+    let executablePath: string | undefined
+    if (process.platform === 'darwin') {
+      const macPath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      if (existsSync(macPath)) executablePath = macPath
+    } else if (process.platform === 'win32') {
+      const winPath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+      if (existsSync(winPath)) executablePath = winPath
+    } else {
+      const linuxPaths = ['/usr/bin/google-chrome', '/usr/bin/chromium-browser', '/usr/bin/chromium']
+      executablePath = linuxPaths.find(p => existsSync(p))
+    }
+    
+    if (executablePath) {
+      info(`Using Chrome at: ${executablePath}`)
+    } else {
+      info('Using Puppeteer bundled Chrome')
+    }
 
     browser = await puppeteer.launch({
       headless: config.headless,
       protocolTimeout: 240000,
-      executablePath,
+      ...(executablePath && { executablePath }),
       args: launchArgs
     })
 
