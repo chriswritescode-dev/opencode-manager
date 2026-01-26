@@ -37,11 +37,12 @@ type STTFormValues = z.infer<typeof sttFormSchema>
 
 export function STTSettings() {
   const { preferences, updateSettings } = useSettings()
-  const { startRecording, stopRecording, isRecording, interimTranscript, error: sttError } = useSTT()
+  const { startRecording, abortRecording, isRecording, interimTranscript, error: sttError } = useSTT()
 
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [isTesting, setIsTesting] = useState(false)
   const [testTranscript, setTestTranscript] = useState('')
+  const [testResult, setTestResult] = useState<'idle' | 'success' | 'failed'>('idle')
 
   const isWebSpeechAvailable = isWebRecognitionSupported()
 
@@ -61,23 +62,31 @@ export function STTSettings() {
 
   const handleTest = async () => {
     if (isTesting) {
-      stopRecording()
+      abortRecording()
       setIsTesting(false)
+      if (testTranscript) {
+        setTestResult('success')
+      }
       return
     }
 
     setTestTranscript('')
+    setTestResult('idle')
     setIsTesting(true)
     await startRecording()
   }
 
   useEffect(() => {
     if (isTesting && !isRecording && testTranscript) {
+      setTestResult('success')
       setTimeout(() => {
         setIsTesting(false)
       }, 1000)
+    } else if (isTesting && !isRecording && !testTranscript && sttError) {
+      setTestResult('failed')
+      setIsTesting(false)
     }
-  }, [isTesting, isRecording, testTranscript])
+  }, [isTesting, isRecording, testTranscript, sttError])
 
   useEffect(() => {
     if (isTesting) {
@@ -282,12 +291,12 @@ export function STTSettings() {
               )}
 
               <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
-                <div className="space-y-0.5">
+                <div className="space-y-0.5 flex-1 mr-4">
                   <div className="text-base font-medium">Test STT</div>
                   <p className="text-sm text-muted-foreground">
                     Verify your speech recognition is working
                   </p>
-                  {isTesting && testTranscript && (
+                  {isTesting && (
                     <div className="mt-2 p-2 bg-muted rounded max-h-24 overflow-y-auto">
                       <p className="text-sm">{testTranscript || 'Listening...'}</p>
                       {isRecording && (
@@ -296,6 +305,23 @@ export function STTSettings() {
                           <span className="text-xs text-muted-foreground">Recording...</span>
                         </div>
                       )}
+                    </div>
+                  )}
+                  {!isTesting && testResult === 'success' && testTranscript && (
+                    <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded max-h-24 overflow-y-auto">
+                      <div className="flex items-center gap-1 mb-1">
+                        <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
+                        <span className="text-xs font-medium text-green-700 dark:text-green-300">Test successful</span>
+                      </div>
+                      <p className="text-sm text-green-800 dark:text-green-200">{testTranscript}</p>
+                    </div>
+                  )}
+                  {!isTesting && testResult === 'failed' && (
+                    <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
+                      <div className="flex items-center gap-1">
+                        <XCircle className="h-3 w-3 text-red-600 dark:text-red-400" />
+                        <span className="text-xs font-medium text-red-700 dark:text-red-300">Test failed - no speech detected</span>
+                      </div>
                     </div>
                   )}
                 </div>

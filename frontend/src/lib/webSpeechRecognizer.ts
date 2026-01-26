@@ -226,15 +226,25 @@ export class WebSpeechRecognizer {
   }
 
   stop(): void {
-    if (this.recognition && this.isListening) {
-      this.recognition.stop();
+    if (this.recognition) {
+      try {
+        this.recognition.stop();
+      } catch {
+        this.isListening = false;
+        this.state = 'idle';
+      }
     }
   }
 
   abort(): void {
-    if (this.recognition && this.isListening) {
-      this.recognition.abort();
+    if (this.recognition) {
+      try {
+        this.recognition.abort();
+      } catch {
+        // Ignore abort errors
+      }
       this.state = 'idle';
+      this.isListening = false;
       this.finalTranscript = '';
     }
   }
