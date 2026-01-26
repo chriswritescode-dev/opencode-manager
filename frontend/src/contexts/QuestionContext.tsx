@@ -18,6 +18,7 @@ interface QuestionInfo {
 interface QuestionRequest {
   id: string
   sessionID: string
+  directory?: string
   questions: QuestionInfo[]
   tool?: {
     messageID: string
@@ -67,7 +68,8 @@ export function QuestionProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Question not found')
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/opencode/question/${requestId}/reply?directory=${encodeURIComponent(question.sessionID)}`, {
+    const directory = question.directory || question.sessionID
+    const response = await fetch(`${API_BASE_URL}/api/opencode/question/${requestId}/reply?directory=${encodeURIComponent(directory)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ answers }),
@@ -87,7 +89,8 @@ export function QuestionProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Question not found')
     }
 
-    const response = await fetch(`${API_BASE_URL}/api/opencode/question/${requestId}/reject?directory=${encodeURIComponent(question.sessionID)}`, {
+    const directory = question.directory || question.sessionID
+    const response = await fetch(`${API_BASE_URL}/api/opencode/question/${requestId}/reject?directory=${encodeURIComponent(directory)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     })
