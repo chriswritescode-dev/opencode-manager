@@ -188,18 +188,22 @@ async function injectAudioViaWebAPI(page: Page, audioPath: string): Promise<bool
   }
 }
 
-async function waitForTalkModeState(page: Page, targetState: string, timeoutMs = 30000): Promise<boolean> {
+async function waitForVoiceButtonActive(page: Page, timeoutMs = 30000): Promise<boolean> {
   const startTime = Date.now()
   
   while (Date.now() - startTime < timeoutMs) {
-    const state = await page.evaluate(() => {
-      const testApi = (window as Window & typeof globalThis & { 
-        __TALK_MODE_TEST__?: { getState: () => { state: string } } 
-      }).__TALK_MODE_TEST__
-      return testApi?.getState()?.state
+    const isActive = await page.evaluate(() => {
+      const buttons = Array.from(document.querySelectorAll('button'))
+      for (const btn of buttons) {
+        const title = btn.getAttribute('title')?.toLowerCase() || ''
+        if (title === 'stop voice input') {
+          return true
+        }
+      }
+      return false
     })
     
-    if (state === targetState) {
+    if (isActive) {
       return true
     }
     
@@ -211,7 +215,7 @@ async function waitForTalkModeState(page: Page, targetState: string, timeoutMs =
 
 async function runBrowserTest(config: TestConfig): Promise<boolean> {
   console.log('\n' + '='.repeat(60))
-  console.log('Browser E2E Test - Full Talk Mode Pipeline')
+  console.log('Browser E2E Test - Voice Input Pipeline')
   console.log('='.repeat(60))
   console.log(`URL: ${config.baseUrl}`)
   console.log(`Test Phrase: "${config.testPhrase}"`)
@@ -269,7 +273,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
     page.on('console', msg => {
       const text = msg.text()
-      if (text.includes('TalkMode') || text.includes('STT') || text.includes('transcri') ||
+      if (text.includes('Voice') || text.includes('STT') || text.includes('transcri') ||
           text.includes('Error') || text.includes('error') || text.includes('speech') ||
           text.includes('[Test]')) {
         log(`[Browser] ${text}`, 1)
@@ -389,7 +393,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     }
     page.on('console', msg => {
       const text = msg.text()
-      if (text.includes('TalkMode') || text.includes('STT') || text.includes('transcri') ||
+      if (text.includes('Voice') || text.includes('STT') || text.includes('transcri') ||
           text.includes('Error') || text.includes('error') || text.includes('speech') ||
           text.includes('[Test]')) {
         log(`[Browser] ${text}`, 1)
@@ -450,20 +454,20 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     }
     success(`STT server is running (model: ${sttStatus.server?.model || 'unknown'})`)
 
-    info('Looking for Talk Mode button...')
-    const talkModeButton = await page.evaluate(() => {
+    info('Looking for Continuous Voice Input button...')
+    const voiceButton = await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('button'))
       for (const btn of buttons) {
         const title = btn.getAttribute('title')?.toLowerCase() || ''
-        if (title.includes('talk mode') || title.includes('talk-mode')) {
-          return { found: true, selector: `button[title="${btn.getAttribute('title')}"]` }
+        if (title.includes('continuous voice')) {
+          return { found: true, selector: `button[title="${btn.getAttribute('title')}"]`, title: btn.getAttribute('title') }
         }
       }
-      return { found: false }
+      return { found: false, title: null }
     })
 
-    if (!talkModeButton.found) {
-      fail('Talk Mode button not found')
+    if (!voiceButton.found) {
+      fail('Continuous Voice Input button not found')
       const buttons = await page.evaluate(() => 
         Array.from(document.querySelectorAll('button')).slice(0, 10).map(b => ({
           title: b.getAttribute('title'),
@@ -474,50 +478,61 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       buttons.forEach(b => log(JSON.stringify(b), 2))
       return false
     }
-    success('Found Talk Mode button')
+    success(`Found Continuous Voice button: "${voiceButton.title}"`)
 
-    info('Starting Talk Mode...')
-    await page.click(talkModeButton.selector!)
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    info('Starting continuous voice input...')
+    
+    await page.evaluate(() => {
+      (window as Window & { __consoleErrors?: string[] }).__consoleErrors = []
+      const origError = console.error
+      console.error = (...args: unknown[]) => {
+        (window as Window & { __consoleErrors?: string[] }).__consoleErrors?.push(args.map(String).join(' '))
+        origError.apply(console, args)
+      }
+    })
+    
+    await page.click(voiceButton.selector!)
+    await new Promise(resolve => setTimeout(resolve, 2000))
 
-    const testApiReady = await page.evaluate(() => {
-      return new Promise<boolean>((resolve) => {
-        let attempts = 0
-        const check = () => {
-          const testApi = (window as Window & typeof globalThis & { 
-            __TALK_MODE_TEST__?: { getState: () => unknown } 
-          }).__TALK_MODE_TEST__
-          if (testApi && typeof testApi.getState === 'function') {
-            resolve(true)
-          } else if (attempts++ < 20) {
-            setTimeout(check, 200)
-          } else {
-            resolve(false)
+    info('Waiting for voice input to become active...')
+    const isListening = await waitForVoiceButtonActive(page, 10000)
+    if (!isListening) {
+      const buttonsAfterClick = await page.evaluate(() => 
+        Array.from(document.querySelectorAll('button')).map(b => ({
+          title: b.getAttribute('title'),
+          text: b.textContent?.slice(0, 30),
+          className: b.className.slice(0, 50)
+        }))
+      )
+      log('Buttons after click:', 1)
+      buttonsAfterClick.filter(b => b.title?.toLowerCase().includes('voice')).forEach(b => log(JSON.stringify(b), 2))
+      
+      const errorTooltip = await page.evaluate(() => {
+        const divs = Array.from(document.querySelectorAll('div'))
+        for (const div of divs) {
+          if (div.textContent?.includes('Failed') || div.textContent?.includes('error') || 
+              div.textContent?.includes('Error') || div.className.includes('bg-red')) {
+            return div.textContent?.slice(0, 200)
           }
         }
-        check()
+        return null
       })
-    })
-
-    if (!testApiReady) {
-      fail('Talk Mode test API not available')
+      if (errorTooltip) {
+        log(`Error tooltip: ${errorTooltip}`, 1)
+      }
+      
+      const consoleErrors = await page.evaluate(() => {
+        return (window as Window & { __consoleErrors?: string[] }).__consoleErrors || []
+      })
+      if (consoleErrors.length > 0) {
+        log('Console errors:', 1)
+        consoleErrors.forEach(e => log(e, 2))
+      }
+      
+      fail('Voice input not active after clicking button')
       return false
     }
-    success('Talk Mode activated')
-
-    info('Waiting for Talk Mode to enter listening state...')
-    const isListening = await waitForTalkModeState(page, 'listening', 10000)
-    if (!isListening) {
-      const state = await page.evaluate(() => {
-        const testApi = (window as Window & typeof globalThis & { 
-          __TALK_MODE_TEST__?: { getState: () => { state: string } } 
-        }).__TALK_MODE_TEST__
-        return testApi?.getState()
-      })
-      fail(`Talk Mode not in listening state: ${JSON.stringify(state)}`)
-      return false
-    }
-    success('Talk Mode is listening for audio')
+    success('Voice input is active and listening')
 
     info('Audio is being captured...')
     info('Waiting for STT transcription...')
@@ -639,12 +654,12 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       }
     }
 
-    info('Stopping Talk Mode...')
+    info('Stopping voice input...')
     await page.evaluate(() => {
       const buttons = Array.from(document.querySelectorAll('button'))
       for (const btn of buttons) {
         const title = btn.getAttribute('title')?.toLowerCase() || ''
-        if (title.includes('talk') || title.includes('exit') || title.includes('stop')) {
+        if (title.includes('stop voice') || title.includes('stop continuous')) {
           (btn as HTMLButtonElement).click()
           return
         }
