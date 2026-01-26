@@ -2,6 +2,16 @@
 
 Mobile-first web interface for OpenCode AI agents. Manage, control, and code with OpenCode from any device - your phone, tablet, or desktop. Features Git integration, file management, and real-time chat in a responsive PWA. Deploy with Docker for instant setup. View diffs, edit files and much more.
 
+## Demo
+
+### Talk Mode (Voice-to-Code)
+
+<p align="center">
+  <img src="docs/assets/talk-mode-demo.gif" alt="Talk Mode Demo - Voice-to-Code workflow" width="600" />
+</p>
+
+*Voice-powered coding: Speak your request, get AI-generated code. The demo shows the Talk Mode E2E test - voice input is transcribed via Whisper STT, sent to OpenCode AI, and the response streams back in real-time.*
+
 ## Why We Use a Fork of OpenCode
 
 This project builds OpenCode from [VibeTechnologies/opencode](https://github.com/VibeTechnologies/opencode), a fork of the official [sst/opencode](https://github.com/sst/opencode) repository. We maintain this fork to include critical fixes that haven't yet been merged upstream.
