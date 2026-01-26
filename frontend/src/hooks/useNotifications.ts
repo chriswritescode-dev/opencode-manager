@@ -20,11 +20,11 @@ export function useNotifications() {
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
-    if (typeof window !== 'undefined' && notificationConfig?.sound) {
+    if (typeof window !== 'undefined') {
       audioRef.current = new Audio(NOTIFICATION_SOUND_URL)
       audioRef.current.volume = 0.5
     }
-  }, [notificationConfig?.sound])
+  }, [])
 
   const getPermission = useCallback((): NotificationPermission => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -77,16 +77,7 @@ export function useNotifications() {
     (options: NotificationOptions) => {
       if (!notificationConfig?.enabled) return
 
-      const isPageHidden = typeof document !== 'undefined' && document.hidden
-      const isPageBlurred = typeof document !== 'undefined' && !document.hasFocus()
-
-      if (!isPageHidden && !isPageBlurred) {
-        showToast.info(options.title, {
-          description: options.body,
-          action: options.onClick ? { label: 'View', onClick: options.onClick } : undefined,
-        })
-        return
-      }
+      playSound()
 
       if (getPermission() !== 'granted') {
         showToast.info(options.title, {
@@ -111,8 +102,6 @@ export function useNotifications() {
             notification.close()
           }
         }
-
-        playSound()
       } catch (error) {
         console.error('Failed to send notification:', error)
         showToast.info(options.title, {
@@ -156,6 +145,29 @@ export function useNotifications() {
     [notificationConfig?.enabled, notificationConfig?.permissionRequests, sendNotification]
   )
 
+  const testNotification = useCallback(() => {
+    playSound()
+
+    if (getPermission() !== 'granted') {
+      showToast.info('Test Notification', {
+        description: 'This is a test notification. Grant permission for system notifications.',
+      })
+      return
+    }
+
+    try {
+      new Notification('Test Notification', {
+        body: 'Notifications and sound are working correctly!',
+        icon: '/favicon.svg',
+      })
+    } catch (error) {
+      console.error('Failed to send test notification:', error)
+      showToast.info('Test Notification', {
+        description: 'This is a test notification (system notification failed)',
+      })
+    }
+  }, [getPermission, playSound])
+
   return {
     isSupported: typeof window !== 'undefined' && 'Notification' in window,
     permission: getPermission(),
@@ -165,5 +177,6 @@ export function useNotifications() {
     sendNotification,
     notifySessionComplete,
     notifyPermissionRequest,
+    testNotification,
   }
 }

@@ -4,7 +4,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
 import { usePermissionContext } from '@/contexts/PermissionContext'
 import { detectFileReferences } from '@/lib/fileReferences'
-import { ExternalLink, Loader2 } from 'lucide-react'
+import { ExternalLink, Loader2, HelpCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import { TodoListDisplay } from './TodoListDisplay'
 import { getToolSpecificRender } from './FileToolRender'
@@ -83,6 +83,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
   const pendingPermission = getPermissionForCallID(part.callID, part.sessionID)
   const isWaitingPermission = part.state.status === 'running' && !!pendingPermission
+  const isQuestionTool = part.tool === 'question'
 
   useEffect(() => {
     if (part.tool === 'bash' && expanded && outputRef.current) {
@@ -225,6 +226,71 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     }
 
     return null
+  }
+
+  if (isQuestionTool) {
+    const input = part.state.input as { questions?: Array<{ question: string; header: string; options?: Array<{ label: string; description?: string }> }> } | undefined
+    const questions = input?.questions || []
+
+    if (part.state.status === 'running') {
+      return (
+        <div className="my-2 border border-blue-500/50 rounded-lg overflow-hidden shadow-sm shadow-blue-500/10">
+          <div className="px-4 py-2 bg-blue-500/10 flex items-center gap-2">
+            <HelpCircle className="w-4 h-4 text-blue-500" />
+            <span className="font-medium text-foreground">Question awaiting your answer</span>
+            <span className="text-xs text-blue-500 ml-auto">Click the dialog to respond</span>
+          </div>
+          <div className="p-4 bg-card space-y-3">
+            {questions.map((q, idx) => (
+              <div key={idx} className="space-y-2">
+                <div className="text-sm text-muted-foreground">{q.header}</div>
+                <div className="text-foreground">{q.question}</div>
+                {q.options && q.options.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {q.options.map((opt, optIdx) => (
+                      <span key={optIdx} className="px-2 py-1 text-xs bg-muted rounded border border-border">
+                        {opt.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    if (part.state.status === 'completed') {
+      const output = part.state.output
+      return (
+        <div className="my-2 border border-green-500/30 rounded-lg overflow-hidden">
+          <div className="px-4 py-2 bg-green-500/10 flex items-center gap-2">
+            <span className="text-green-500">✓</span>
+            <span className="font-medium text-foreground">Question answered</span>
+          </div>
+          {output && (
+            <div className="p-3 bg-card text-sm">
+              <pre className="text-muted-foreground whitespace-pre-wrap">{output}</pre>
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    if (part.state.status === 'error') {
+      return (
+        <div className="my-2 border border-red-500/30 rounded-lg overflow-hidden">
+          <div className="px-4 py-2 bg-red-500/10 flex items-center gap-2">
+            <span className="text-red-500">✗</span>
+            <span className="font-medium text-foreground">Question rejected</span>
+          </div>
+          <div className="p-3 bg-card text-sm text-red-400">
+            {part.state.error || 'Question was skipped or rejected'}
+          </div>
+        </div>
+      )
+    }
   }
 
   const toolSpecificRender = getToolSpecificRender(part, onFileClick)
