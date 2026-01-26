@@ -50,14 +50,19 @@ export class GitLogService {
         const [hash, authorName, authorEmail, date, ...messageParts] = parts
         const message = messageParts.join('|')
 
-        if (hash) {
-          commits.push({
-            hash,
-            authorName: authorName || '',
-            authorEmail: authorEmail || '',
-            date: date || '',
-            message: message || ''
-          })
+        if (hash && date) {
+          const parsedDate = new Date(date)
+          if (!isNaN(parsedDate.getTime())) {
+            commits.push({
+              hash,
+              authorName: authorName || '',
+              authorEmail: authorEmail || '',
+              date,
+              message: message || ''
+            })
+          } else {
+            logger.warn(`Skipping commit ${hash.substring(0, 7)}: invalid date format "${date}"`)
+          }
         }
       }
 

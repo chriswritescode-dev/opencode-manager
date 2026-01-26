@@ -204,6 +204,48 @@ describe('GitLogService', () => {
 
       await expect(service.getLog(1, database, 10)).rejects.toThrow('Failed to get git log')
     })
+
+    it('skips commits with invalid date format', async () => {
+      const mockRepo = {
+        id: 1,
+        localPath: 'test-repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock
+        .mockResolvedValueOnce(
+          'abc123|John Doe|john@example.com|2024-01-01 12:00:00 +0000|Valid commit\n' +
+          'def456|Jane Smith|jane@example.com|invalid-date|Invalid date\n' +
+          'ghi789|Bob Wilson|bob@example.com||Missing date\n'
+        )
+        .mockResolvedValueOnce('')
+
+      const result = await service.getLog(1, database, 10)
+
+      expect(result).toHaveLength(1)
+      expect(result[0]).toEqual({
+        hash: 'abc123',
+        authorName: 'John Doe',
+        authorEmail: 'john@example.com',
+        date: '2024-01-01 12:00:00 +0000',
+        message: 'Valid commit',
+        unpushed: false,
+      })
+    })
+
+    it('handles malformed git output with insufficient fields', async () => {
+      const mockRepo = {
+        id: 1,
+        localPath: 'test-repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock
+        .mockResolvedValueOnce('abc123|John Doe|john@example.com')
+        .mockResolvedValueOnce('')
+
+      const result = await service.getLog(1, database, 10)
+
+      expect(result).toEqual([])
+    })
   })
 
   describe('getCommit', () => {
