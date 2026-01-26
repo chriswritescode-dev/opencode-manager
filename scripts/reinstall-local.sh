@@ -50,6 +50,27 @@ for i in {1..30}; do
     echo ""
     echo "=== Service is healthy! ==="
     curl -s $CURL_AUTH http://localhost:5001/api/health | jq .
+    
+    # Wait a bit for tunnel to establish and print endpoints
+    echo ""
+    echo "=== Waiting for tunnel (max 30s) ==="
+    ENDPOINTS_FILE="$HOME/.local/run/opencode-manager/endpoints.json"
+    for j in {1..10}; do
+      if [ -f "$ENDPOINTS_FILE" ] && jq -e '.endpoints[] | select(.type == "tunnel")' "$ENDPOINTS_FILE" > /dev/null 2>&1; then
+        echo ""
+        echo "=== Endpoints ==="
+        TUNNEL_URL=$(jq -r '.endpoints[] | select(.type == "tunnel") | .url' "$ENDPOINTS_FILE" | tail -1)
+        LOCAL_URL=$(jq -r '.endpoints[] | select(.type == "local") | .url' "$ENDPOINTS_FILE" | tail -1)
+        echo "Local:  $LOCAL_URL"
+        echo "Tunnel: $TUNNEL_URL"
+        exit 0
+      fi
+      echo -n "."
+      sleep 3
+    done
+    
+    echo ""
+    echo "=== Tunnel not available yet, check with: opencode-manager status ==="
     exit 0
   fi
   echo -n "."
