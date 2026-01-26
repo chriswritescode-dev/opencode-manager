@@ -4,10 +4,9 @@ import { OpenCodeClient } from '@/api/opencode'
 import { permissionEvents, usePermissionRequests } from '@/hooks/usePermissionRequests'
 import { notificationEvents } from '@/lib/notificationEvents'
 import type { Permission, PermissionResponse, Repo } from '@/api/types'
-import { useQueryClient, useQuery } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
-import { listRepos } from '@/api/repos'
-import { OPENCODE_API_ENDPOINT, API_BASE_URL } from '@/config'
+import { API_BASE_URL } from '@/config'
 
 
 type SessionInfo = {
@@ -146,12 +145,9 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
   const eventSourceRefs = useRef<Map<string, EventSource>>(new Map())
   const prevPendingCountRef = useRef(0)
 
-  const { data: allRepos } = useQuery({
-    queryKey: ['repos'],
-    queryFn: listRepos,
-    staleTime: 30000,
-    refetchInterval: 60000,
-  })
+  // NOTE: We no longer fetch allRepos here.
+  // Creating SSE connections for ALL repos exhausts Chrome's connection pool (limit: 6).
+  // We only need SSE for repos with active sessions (from activeReposFromCache).
 
   const activeRepos = useMemo(() => {
     const repoMap = new Map<string, ActiveRepo>()
@@ -161,23 +157,8 @@ export function PermissionProvider({ children }: { children: React.ReactNode }) 
       repoMap.set(key, repo)
     })
     
-    if (allRepos) {
-      allRepos.forEach((repo: Repo) => {
-        if (repo.fullPath) {
-          const key = `${OPENCODE_API_ENDPOINT}|${repo.fullPath}`
-          if (!repoMap.has(key)) {
-            repoMap.set(key, {
-              url: OPENCODE_API_ENDPOINT,
-              directory: repo.fullPath,
-              sessions: [],
-            })
-          }
-        }
-      })
-    }
-    
     return Array.from(repoMap.values())
-  }, [activeReposFromCache, allRepos])
+  }, [activeReposFromCache])
 
   const {
     currentPermission,
