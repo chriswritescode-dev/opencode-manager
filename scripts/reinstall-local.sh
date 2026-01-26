@@ -24,7 +24,12 @@ pnpm build
 
 echo "[5/6] Installing globally from local repo..."
 cd "$REPO_DIR"
-bun install -g .
+# Use npm pack to create tarball, then install from it (avoids bun workspace issues)
+npm pack --quiet
+TARBALL="$REPO_DIR/$(ls -t opencode-manager-*.tgz | head -1)"
+echo "Installing from $TARBALL..."
+bun install -g "$TARBALL"
+rm -f "$TARBALL"
 
 echo "[6/6] Installing and starting service..."
 opencode-manager install-service
