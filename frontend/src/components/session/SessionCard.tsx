@@ -58,7 +58,7 @@ export const SessionCard = ({
             <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <Clock className="w-3 h-3" />
-                {formatDistanceToNow(new Date(session.time.updated * 1000), {
+                {formatDistanceToNow(new Date(session.time.updated), {
                   addSuffix: true,
                 })}
               </span>
