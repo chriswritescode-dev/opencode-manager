@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { getWebSpeechRecognizer, isWebRecognitionSupported, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState } from '@/lib/webSpeechRecognizer'
-import { AudioRecorder, isAudioRecordingSupported } from '@/lib/audioRecorder'
+import { AudioRecorder } from '@/lib/audioRecorder'
 import { sttApi } from '@/api/stt'
 import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
 
@@ -19,13 +19,18 @@ export function useSTT(userId = 'default') {
   const audioRecorder = useRef<AudioRecorder | null>(null)
   const hasShownPermissionError = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const userIdRef = useRef(userId)
+  
+  useEffect(() => {
+    userIdRef.current = userId
+  }, [userId])
 
   const isEnabled = preferences?.stt?.enabled ?? false
   const config = preferences?.stt ?? DEFAULT_STT_CONFIG
   const isExternalProvider = config.provider === 'external'
 
   const isSupported = isExternalProvider 
-    ? isAudioRecordingSupported() 
+    ? true
     : isWebRecognitionSupported()
 
   useEffect(() => {
@@ -82,21 +87,7 @@ export function useSTT(userId = 'default') {
     }
   }, [isEnabled, isExternalProvider])
 
-  useEffect(() => {
-    if (!isEnabled || !isExternalProvider) {
-      return
-    }
-
-    if (!isAudioRecordingSupported()) {
-      return
-    }
-
-    if (!audioRecorder.current) {
-      audioRecorder.current = new AudioRecorder()
-    }
-
-    const recorder = audioRecorder.current
-
+  const setupAudioRecorder = useCallback((recorder: AudioRecorder) => {
     recorder.setOnStateChange((recState) => {
       if (recState === 'recording') {
         setIsRecording(true)
@@ -133,7 +124,7 @@ export function useSTT(userId = 'default') {
         abortControllerRef.current = new AbortController()
         const result = await sttApi.transcribe(
           blob,
-          userId || 'default',
+          userIdRef.current || 'default',
           abortControllerRef.current.signal
         )
         
@@ -162,13 +153,25 @@ export function useSTT(userId = 'default') {
         abortControllerRef.current = null
       }
     })
+  }, [])
+
+  useEffect(() => {
+    if (!isEnabled || !isExternalProvider) {
+      return
+    }
+
+    if (!audioRecorder.current) {
+      audioRecorder.current = new AudioRecorder()
+    }
+
+    setupAudioRecorder(audioRecorder.current)
 
     return () => {
       if (audioRecorder.current) {
         audioRecorder.current.abort()
       }
     }
-  }, [isEnabled, isExternalProvider, userId])
+  }, [isEnabled, isExternalProvider, setupAudioRecorder])
 
   const startRecording = useCallback(async () => {
     if (!isSupported) {
@@ -192,6 +195,7 @@ export function useSTT(userId = 'default') {
     if (isExternalProvider) {
       if (!audioRecorder.current) {
         audioRecorder.current = new AudioRecorder()
+        setupAudioRecorder(audioRecorder.current)
       }
       
       try {
@@ -220,7 +224,7 @@ export function useSTT(userId = 'default') {
         setError(err instanceof Error ? err.message : 'Failed to start recording')
       }
     }
-  }, [isSupported, isEnabled, isExternalProvider, config.language, config.continuous])
+  }, [isSupported, isEnabled, isExternalProvider, config.language, config.continuous, setupAudioRecorder])
 
   const stopRecording = useCallback(() => {
     if (isExternalProvider && audioRecorder.current) {

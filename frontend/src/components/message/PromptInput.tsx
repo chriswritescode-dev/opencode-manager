@@ -100,6 +100,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     isSupported: sttSupported,
     isEnabled: sttEnabled,
     interimTranscript,
+    transcript,
     clear: clearSTT,
   } = useSTT()
   
@@ -379,9 +380,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   }
 
   useEffect(() => {
-    if (!isRecording && interimTranscript && !prompt) {
-      const trimmedTranscript = interimTranscript.trim()
-      if (trimmedTranscript) {
+    const textToUse = transcript || interimTranscript
+    if (!isRecording && textToUse && textToUse !== 'Processing...' && textToUse !== 'Recording...') {
+      const trimmedTranscript = textToUse.trim()
+      if (trimmedTranscript && (prompt === '' || prompt === 'Processing...' || prompt === 'Recording...')) {
         setPrompt(trimmedTranscript)
         setTimeout(() => {
           if (textareaRef.current) {
@@ -392,7 +394,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
         }, 0)
       }
     }
-  }, [isRecording, interimTranscript, prompt])
+  }, [isRecording, interimTranscript, transcript, prompt])
 
   const addImageAttachment = (file: File) => {
     const generateId = () => {

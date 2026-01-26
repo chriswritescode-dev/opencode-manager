@@ -5,7 +5,6 @@ import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useSTT } from '@/hooks/useSTT'
 import { isWebRecognitionSupported, getAvailableLanguages } from '@/lib/webSpeechRecognizer'
-import { isAudioRecordingSupported } from '@/lib/audioRecorder'
 import { sttApi } from '@/api/stt'
 import { Mic, Loader2, XCircle, CheckCircle2, RefreshCw, Eye, EyeOff } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
@@ -58,7 +57,6 @@ export function STTSettings() {
   const [isLoadingModels, setIsLoadingModels] = useState(false)
 
   const isWebSpeechAvailable = isWebRecognitionSupported()
-  const isMediaRecorderAvailable = isAudioRecordingSupported()
 
   const form = useForm<STTFormValues>({
     resolver: zodResolver(sttFormSchema),
@@ -114,10 +112,10 @@ export function STTSettings() {
         stopRecording()
       } else {
         abortRecording()
-      }
-      setIsTesting(false)
-      if (testTranscript) {
-        setTestResult('success')
+        setIsTesting(false)
+        if (testTranscript) {
+          setTestResult('success')
+        }
       }
       return
     }
@@ -144,7 +142,7 @@ export function STTSettings() {
   }, [isTesting, isRecording, isProcessing, transcript, sttError])
 
   useEffect(() => {
-    if (isTesting && interimTranscript) {
+    if (isTesting && interimTranscript && interimTranscript !== 'Processing...' && interimTranscript !== 'Recording...') {
       setTestTranscript(interimTranscript)
     }
   }, [isTesting, interimTranscript])
@@ -183,7 +181,7 @@ export function STTSettings() {
   }, [watchEnabled, watchProvider, watchLanguage, watchContinuous, watchEndpoint, watchApiKey, watchModel, isDirty, isValid, getValues, updateSettings])
 
   const canTestBuiltin = watchEnabled && watchProvider === 'builtin' && isWebSpeechAvailable
-  const canTestExternal = watchEnabled && watchProvider === 'external' && isMediaRecorderAvailable && watchEndpoint && watchApiKey
+  const canTestExternal = watchEnabled && watchProvider === 'external' && watchEndpoint && watchApiKey
   const canTest = canTestBuiltin || canTestExternal
 
   return (
@@ -229,17 +227,7 @@ export function STTSettings() {
             )}
           />
 
-          {!isWebSpeechAvailable && !isMediaRecorderAvailable && (
-            <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4">
-              <div className="text-sm text-amber-800 dark:text-amber-200 flex items-start gap-2">
-                <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
-                <div>
-                  <strong>Browser Not Supported</strong>: Your browser doesn't support speech recognition. 
-                  Please use a modern browser like Chrome, Safari, Edge, or Firefox.
-                </div>
-              </div>
-            </div>
-          )}
+
 
           {watchEnabled && (
             <>
@@ -255,7 +243,7 @@ export function STTSettings() {
                         onChange={field.onChange}
                         options={[
                           ...(isWebSpeechAvailable ? [{ value: 'builtin', label: 'Built-in Browser' }] : []),
-                          ...(isMediaRecorderAvailable ? [{ value: 'external', label: 'External API (OpenAI Whisper)' }] : []),
+                          { value: 'external', label: 'External API (OpenAI Whisper)' },
                         ]}
                         placeholder="Select provider..."
                         allowCustomValue={false}
