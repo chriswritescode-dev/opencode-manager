@@ -237,6 +237,11 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
       '--autoplay-policy=no-user-gesture-required',
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-gpu',
+      '--disable-extensions',
+      '--disable-background-networking',
+      '--disable-default-apps',
     ]
     
     if (!config.useWebAudioInjection) {
@@ -251,6 +256,7 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
 
     let page = await browser.newPage()
     await page.setViewport({ width: 1280, height: 800 })
+    page.setDefaultTimeout(60000)
     
     if (config.username && config.password) {
       await page.setExtraHTTPHeaders({
@@ -342,32 +348,34 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
     const repoPath = repos[0].fullPath
     success(`Found repo: ${repos[0].repoUrl} (id: ${repoId})`)
 
-    info('Creating new session (always create fresh to avoid stale sessions)...')
+    info('Creating new session via Node.js fetch (bypassing browser connection pool)...')
     let sessionId: string | null = null
 
-    const createResult = await page.evaluate(async (directory: string) => {
-      try {
-        const response = await fetch('/api/opencode/session', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-opencode-dir': directory },
-          body: JSON.stringify({})
-        })
-        if (!response.ok) {
-          const errText = await response.text()
-          return { error: `${response.status}: ${errText}` }
-        }
-        return await response.json()
-      } catch (e) {
-        return { error: String(e) }
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (config.username && config.password) {
+        headers['Authorization'] = `Basic ${Buffer.from(`${config.username}:${config.password}`).toString('base64')}`
       }
-    }, repoPath)
-
-    if (!createResult || createResult.error) {
-      fail(`Failed to create session: ${createResult?.error || 'unknown error'}`)
+      const sessionResponse = await fetch(
+        `${config.baseUrl}/api/opencode/session?directory=${encodeURIComponent(repoPath)}`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({})
+        }
+      )
+      if (!sessionResponse.ok) {
+        const errText = await sessionResponse.text()
+        fail(`Failed to create session: ${sessionResponse.status}: ${errText}`)
+        return false
+      }
+      const sessionData = await sessionResponse.json() as { id: string }
+      sessionId = sessionData.id
+      success(`Created new session: ${sessionId}`)
+    } catch (e) {
+      fail(`Failed to create session: ${e}`)
       return false
     }
-    sessionId = createResult.id
-    success(`Created new session: ${sessionId}`)
 
     info('Navigating to session page (using new page to avoid SSE blocking)...')
     const sessionUrl = `${config.baseUrl}/repos/${repoId}/sessions/${sessionId}`
