@@ -293,6 +293,14 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
+      - name: List test artifacts
+        if: always()
+        run: |
+          echo "Current directory: $(pwd)"
+          echo "Listing .test directory:"
+          ls -la .test/ || echo ".test directory not found"
+          find .test -type f 2>/dev/null || echo "No files found"
+
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         if: always()
