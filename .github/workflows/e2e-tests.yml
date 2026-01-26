@@ -250,10 +250,10 @@ jobs:
 
       - name: Create test repository in container
         run: |
-          # Create a test git repo inside the container
+          # Create a test git repo inside the container (use /tmp which is writable)
           docker exec opencode-manager bash -c '
-            mkdir -p /workspaces/test-project
-            cd /workspaces/test-project
+            mkdir -p /tmp/test-project
+            cd /tmp/test-project
             git init
             git config user.email "test@example.com"
             git config user.name "Test User"
@@ -265,7 +265,7 @@ jobs:
           # Register the test repo with the backend
           curl -sf -X POST http://localhost:5003/api/repos \
             -H "Content-Type: application/json" \
-            -d '{"localPath": "/workspaces/test-project"}' | jq .
+            -d '{"localPath": "/tmp/test-project"}' | jq .
           
           # Verify repo was registered
           REPOS=$(curl -sf http://localhost:5003/api/repos)
