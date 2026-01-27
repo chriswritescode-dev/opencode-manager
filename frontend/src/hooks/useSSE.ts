@@ -126,9 +126,10 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           setSessionStatus(sessionID, isComplete ? { type: 'idle' } : { type: 'busy' })
         }
         
-        const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
+        const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
+        const currentData = queryClient.getQueryData<MessageListResponse>(messagesQueryKey)
         if (!currentData) {
-          queryClient.setQueryData(['opencode', 'messages', opcodeUrl, sessionID, directory], [{ info, parts: [] }])
+          queryClient.invalidateQueries({ queryKey: messagesQueryKey })
           return
         }
         
@@ -138,7 +139,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           const filteredData = info.role === 'user' 
             ? currentData.filter(msg => !msg.info.id.startsWith('optimistic_'))
             : currentData
-          queryClient.setQueryData(['opencode', 'messages', opcodeUrl, sessionID, directory], [...filteredData, { info, parts: [] }])
+          queryClient.setQueryData(messagesQueryKey, [...filteredData, { info, parts: [] }])
           return
         }
         
@@ -150,7 +151,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           }
         })
         
-        queryClient.setQueryData(['opencode', 'messages', opcodeUrl, sessionID, directory], updated)
+        queryClient.setQueryData(messagesQueryKey, updated)
         break
       }
 
