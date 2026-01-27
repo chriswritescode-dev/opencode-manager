@@ -8,10 +8,18 @@ import { Plus, FolderOpen, Bell, BellOff, BellRing, Clock, Command } from "lucid
 import { useNotifications } from "@/hooks/useNotifications";
 import { RecentSessions } from "@/components/session/RecentSessions";
 import { useSessionSwitcherStore } from "@/stores/sessionSwitcherStore";
+import { subscribePushNotifications, isPushSubscribed } from "@/api/push";
+import { showToast } from "@/lib/toast";
+import { useEffect } from "react";
 
 function NotificationButton() {
   const { isSupported, permission, isEnabled, requestPermission } = useNotifications();
   const [isRequesting, setIsRequesting] = useState(false);
+  const [isPushEnabled, setIsPushEnabled] = useState(false);
+
+  useEffect(() => {
+    isPushSubscribed().then(setIsPushEnabled);
+  }, []);
 
   if (!isSupported) {
     return null;
@@ -20,15 +28,24 @@ function NotificationButton() {
   const handleClick = async () => {
     setIsRequesting(true);
     try {
-      await requestPermission();
+      const granted = await requestPermission();
+      if (granted) {
+        const subscription = await subscribePushNotifications();
+        if (subscription) {
+          setIsPushEnabled(true);
+          showToast.success("Background notifications enabled! You'll receive alerts even when the app is closed.");
+        } else {
+          showToast.error("Failed to enable background notifications");
+        }
+      }
     } finally {
       setIsRequesting(false);
     }
   };
 
-  if (permission === 'granted' && isEnabled) {
+  if ((permission === 'granted' && isEnabled) || isPushEnabled) {
     return (
-      <Button variant="ghost" size="icon" disabled title="Notifications enabled">
+      <Button variant="ghost" size="icon" disabled title="Background notifications enabled">
         <BellRing className="w-4 h-4 text-green-500" />
       </Button>
     );
