@@ -1,13 +1,13 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useSessions, useDeleteSession } from "@/hooks/useOpenCode";
-import { useSessionSummaries, useSummarizeSession } from "@/hooks/useSessionSummaries";
+import { useFirstMessage } from "@/hooks/useFirstMessage";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
-import { Trash2, Clock, Search, MoreVertical, Sparkles, Loader2 } from "lucide-react";
+import { Trash2, Clock, Search, MoreVertical, Hash } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface SessionListProps {
@@ -18,18 +18,95 @@ interface SessionListProps {
   repoId?: number;
 }
 
+function getShortSessionId(id: string): string {
+  if (id.startsWith('ses_')) {
+    return id.slice(4, 12)
+  }
+  return id.slice(0, 8)
+}
+
+interface SessionItemProps {
+  session: {
+    id: string
+    title?: string
+    time: { created: number; updated: number }
+  }
+  directory?: string
+  isSelected: boolean
+  isActive: boolean
+  onSelect: () => void
+  onToggle: (checked: boolean) => void
+  onDelete: (e: React.MouseEvent<HTMLButtonElement>) => void
+}
+
+function SessionItem({ session, directory, isSelected, isActive, onSelect, onToggle, onDelete }: SessionItemProps) {
+  const { data: firstMessage } = useFirstMessage(session.id, directory)
+  
+  return (
+    <Card
+      className={`p-3 cursor-pointer transition-all ${
+        isSelected
+          ? "border-blue-500 shadow-lg shadow-blue-900/30 dark:shadow-blue-900/30 bg-accent"
+          : isActive
+            ? "bg-accent border-border"
+            : "bg-card border-border hover:bg-accent hover:border-border"
+      } hover:shadow-lg`}
+      onClick={onSelect}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2 flex-1 min-w-0">
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onToggle(checked === true)}
+            onClick={(e) => e.stopPropagation()}
+            className="w-5 h-5 flex-shrink-0 mt-0.5"
+          />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="flex items-center gap-1 text-xs text-muted-foreground font-mono">
+                <Hash className="w-3 h-3" />
+                {getShortSessionId(session.id)}
+              </span>
+            </div>
+            {firstMessage && (
+              <p className="text-sm mt-1 line-clamp-2 text-foreground">
+                {firstMessage}
+              </p>
+            )}
+            {!firstMessage && session.title && session.title !== 'Untitled Session' && !session.title.startsWith('New session -') && (
+              <p className="text-sm mt-1 line-clamp-1 text-muted-foreground italic">
+                {session.title}
+              </p>
+            )}
+            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {formatDistanceToNow(new Date(session.time.updated), {
+                  addSuffix: true,
+                })}
+              </span>
+            </div>
+          </div>
+        </div>
+        <button
+          className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
+          onClick={onDelete}
+        >
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </Card>
+  )
+}
+
 export const SessionList = ({
   opcodeUrl,
   directory,
   activeSessionID,
   onSelectSession,
-  repoId,
 }: SessionListProps) => {
   const { data: sessions, isLoading } = useSessions(opcodeUrl, directory);
   const deleteSession = useDeleteSession(opcodeUrl, directory);
-  const { data: summariesData } = useSessionSummaries(repoId);
-  const summarizeMutation = useSummarizeSession(repoId);
-  const [summarizingIds, setSummarizingIds] = useState<Set<string>>(new Set());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<
     string | string[] | null
@@ -57,32 +134,6 @@ export const SessionList = ({
 
     return filtered.sort((a, b) => b.time.updated - a.time.updated);
   }, [sessions, searchQuery, directory]);
-
-  useEffect(() => {
-    if (!repoId || !filteredSessions.length || !summariesData) return;
-    
-    const sessionsToSummarize = filteredSessions
-      .slice(0, 10)
-      .filter(session => {
-        const summary = summariesData.summaries[session.id];
-        return summary === null && !summarizingIds.has(session.id);
-      });
-    
-    if (sessionsToSummarize.length === 0) return;
-    
-    const nextSession = sessionsToSummarize[0];
-    setSummarizingIds(prev => new Set([...prev, nextSession.id]));
-    
-    summarizeMutation.mutate(nextSession.id, {
-      onSettled: () => {
-        setSummarizingIds(prev => {
-          const next = new Set(prev);
-          next.delete(nextSession.id);
-          return next;
-        });
-      },
-    });
-  }, [filteredSessions, summariesData, repoId, summarizingIds, summarizeMutation]);
 
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
@@ -228,72 +279,18 @@ export const SessionList = ({
               No sessions found
             </div>
           ) : (
-            filteredSessions.map((session) => {
-              const summary = summariesData?.summaries[session.id];
-              const isSummarizing = summarizingIds.has(session.id);
-              
-              return (
-              <Card
+            filteredSessions.map((session) => (
+              <SessionItem
                 key={session.id}
-                className={`p-3 cursor-pointer transition-all ${
-                  selectedSessions.has(session.id)
-                    ? "border-blue-500 shadow-lg shadow-blue-900/30 dark:shadow-blue-900/30 bg-accent"
-                    : activeSessionID === session.id
-                      ? "bg-accent border-border"
-                      : "bg-card border-border hover:bg-accent hover:border-border"
-                } hover:shadow-lg`}
-                onClick={() => onSelectSession(session.id)}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2 flex-1 min-w-0">
-                    <Checkbox
-                      checked={selectedSessions.has(session.id)}
-                      onCheckedChange={(checked) => {
-                        toggleSessionSelection(session.id, checked === true);
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                      }}
-                      className="w-5 h-5 flex-shrink-0 mt-0.5"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <h3 className="text-sm font-medium text-foreground truncate">
-                        {session.title || "Untitled Session"}
-                      </h3>
-                      {(summary || isSummarizing) && (
-                        <div className="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                          {isSummarizing ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span className="italic">Summarizing...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Sparkles className="w-3 h-3 text-amber-500" />
-                              <span className="truncate">{summary}</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-                      <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3" />
-                          {formatDistanceToNow(new Date(session.time.updated), {
-                            addSuffix: true,
-                          })}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <button
-                    className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
-                    onClick={(e) => handleDelete(session.id, e)}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
-              </Card>
-            )})
+                session={session}
+                directory={directory}
+                isSelected={selectedSessions.has(session.id)}
+                isActive={activeSessionID === session.id}
+                onSelect={() => onSelectSession(session.id)}
+                onToggle={(checked) => toggleSessionSelection(session.id, checked)}
+                onDelete={(e) => handleDelete(session.id, e)}
+              />
+            ))
           )}
         </div>
       </div>

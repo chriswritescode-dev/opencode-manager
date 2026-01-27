@@ -18,6 +18,7 @@ import { QuestionDialog } from './components/question/QuestionDialog'
 import { usePermissionContext } from './contexts/PermissionContext'
 import { GlobalPermissionNotification } from './components/permissions/GlobalPermissionNotification'
 import { NotificationProvider } from './components/providers/NotificationProvider'
+import { SessionSwitcher } from './components/session/SessionSwitcher'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -41,6 +42,7 @@ return (
         <Route path="/repos/:id/terminal" element={<TerminalPage />} />
       </Routes>
       <GlobalPermissionNotification />
+      <SessionSwitcher />
       <SettingsDialog open={isOpen} onOpenChange={close} />
       <Toaster
         position="bottom-right"
