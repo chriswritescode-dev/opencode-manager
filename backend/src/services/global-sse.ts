@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite'
+import { EventSource } from 'eventsource'
 import * as db from '../db/queries'
 import { opencodeServerManager } from './opencode-single-server'
 import { sendSessionCompleteNotification, sendPermissionRequestNotification } from './push'
@@ -9,9 +10,7 @@ interface SSEEvent {
   properties: Record<string, unknown>
 }
 
-type EventSourceType = typeof globalThis.EventSource
-
-let globalEventSources: Map<string, InstanceType<EventSourceType>> = new Map()
+let globalEventSources: Map<string, EventSource> = new Map()
 let database: Database | null = null
 let isRunning = false
 
@@ -77,8 +76,7 @@ function connectToRepo(directory: string): void {
 
   logger.info(`[GlobalSSE] Connecting to ${directory}`)
 
-  const EventSourceClass = globalThis.EventSource
-  const es = new EventSourceClass(url)
+  const es = new EventSource(url)
   globalEventSources.set(directory, es)
 
   es.onopen = () => {
