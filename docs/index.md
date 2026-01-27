@@ -48,7 +48,7 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 - [pnpm](https://pnpm.io) - Package manager
 - [Bun](https://bun.sh) - Backend runtime
 - [OpenCode TUI](https://opencode.ai) - `npm i -g @opencode/tui`
-- Node.js 18+
+- [Node.js 22+](https://nodejs.org/en/about/previous-releases)
 
 ## Next Steps
 
