@@ -61,6 +61,7 @@ On first launch, you'll be prompted to create an admin account. That's it!
 - **Plan/Build Modes** - Toggle between read-only and file-change modes
 - **Mermaid Diagrams** - Visual diagram rendering in chat
 - **Text-to-Speech** - Listen to AI responses with browser or OpenAI-compatible TTS
+- **Speech-to-Text** - Dictate messages using browser speech recognition or OpenAI-compatible STT
 
 ### AI Configuration
 - **Model Selection** - Browse and filter available AI models
