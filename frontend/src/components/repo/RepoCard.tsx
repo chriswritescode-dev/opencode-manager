@@ -8,6 +8,7 @@ import { downloadRepo } from "@/api/repos";
 import { showToast } from "@/lib/toast";
 import type { GitStatusResponse } from "@/types/git";
 import { SourceControlPanel } from "@/components/source-control/SourceControlPanel";
+import { DownloadDialog } from "@/components/ui/download-dialog";
 
 interface RepoCardProps {
   repo: {
@@ -36,7 +37,7 @@ export function RepoCard({
   gitStatus,
 }: RepoCardProps) {
   const navigate = useNavigate();
-  const [isDownloading, setIsDownloading] = useState(false);
+  const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [showSourceControl, setShowSourceControl] = useState(false);
   
   const repoName = repo.repoUrl 
@@ -61,6 +62,15 @@ export function RepoCard({
   const handleActionClick = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
     action();
+  };
+
+  const handleDownload = async () => {
+    try {
+      await downloadRepo(repo.id, repoName);
+      showToast.success("Download complete");
+    } catch (error: unknown) {
+      showToast.error(error instanceof Error ? error.message : "Download failed");
+    }
   };
 
   return (
@@ -155,25 +165,11 @@ export function RepoCard({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={(e) => handleActionClick(e, async () => {
-                  setIsDownloading(true);
-                  try {
-                    await downloadRepo(repo.id, repoName);
-                    showToast.success("Download complete");
-                  } catch (error: unknown) {
-                    showToast.error(error instanceof Error ? error.message : "Download failed");
-                  } finally {
-                    setIsDownloading(false);
-                  }
-                })}
-                disabled={!isReady || isDownloading}
+                onClick={(e) => handleActionClick(e, () => setShowDownloadDialog(true))}
+                disabled={!isReady}
                 className="h-8 w-8 p-0"
               >
-                {isDownloading ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Download className="w-4 h-4" />
-                )}
+                <Download className="w-4 h-4" />
               </Button>
 
               <Button
@@ -202,6 +198,14 @@ export function RepoCard({
         repoUrl={repo.repoUrl}
         isRepoWorktree={repo.isWorktree}
         repoName={repoName}
+      />
+      <DownloadDialog
+        open={showDownloadDialog}
+        onOpenChange={setShowDownloadDialog}
+        onDownload={handleDownload}
+        title="Download Repository"
+        description="This will create a ZIP archive of the entire repository."
+        itemName={repoName}
       />
     </div>
   );

@@ -1,11 +1,51 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import * as fileService from '../services/files'
+import * as archiveService from '../services/archive'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 
 export function createFileRoutes() {
   const app = new Hono()
+
+  app.get('/*/download-zip', async (c) => {
+    try {
+      const userPath = c.req.path.replace(/^\/api\/files\/(.*)\/download-zip$/, '$1')
+
+      if (!userPath) {
+        return c.json({ error: 'No path provided' }, 400)
+      }
+
+      logger.info(`Starting ZIP archive creation for ${userPath}`)
+
+      const archivePath = await archiveService.createDirectoryArchive(userPath)
+      const archiveSize = await archiveService.getArchiveSize(archivePath)
+      const archiveStream = archiveService.getArchiveStream(archivePath)
+      const dirName = userPath.split('/').pop() || 'download'
+
+      logger.info(`ZIP archive created: ${archivePath} (${archiveSize} bytes)`)
+
+      archiveStream.on('end', () => {
+        archiveService.deleteArchive(archivePath)
+      })
+
+      archiveStream.on('error', () => {
+        archiveService.deleteArchive(archivePath)
+      })
+
+      return new Response(archiveStream as unknown as ReadableStream, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/zip',
+          'Content-Disposition': `attachment; filename="${dirName}.zip"`,
+          'Content-Length': archiveSize.toString(),
+        },
+      })
+    } catch (error: unknown) {
+      logger.error('Failed to create directory archive:', error)
+      return c.json({ error: getErrorMessage(error) || 'Failed to create archive' }, getStatusCode(error) as ContentfulStatusCode)
+    }
+  })
 
   app.get('/*', async (c) => {
     try {

@@ -237,6 +237,7 @@ export function RepoDetail() {
         onClose={() => setFileBrowserOpen(false)}
         basePath={repo.localPath}
         repoName={displayName}
+        repoId={repoId}
       />
 
       <RepoMcpDialog

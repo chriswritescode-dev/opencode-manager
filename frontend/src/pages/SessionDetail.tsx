@@ -521,6 +521,7 @@ export function SessionDetail() {
         onClose={handleFileBrowserClose}
         basePath={repo.localPath}
         repoName={repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}
+        repoId={repoId}
         initialSelectedFile={selectedFilePath}
       />
 

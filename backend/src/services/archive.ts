@@ -153,6 +153,44 @@ export async function createRepoArchive(repoPath: string): Promise<string> {
   })
 }
 
+export async function createDirectoryArchive(directoryPath: string, archiveName?: string): Promise<string> {
+  const dirName = archiveName || path.basename(directoryPath)
+  const tempFile = path.join(os.tmpdir(), `${dirName}-${Date.now()}.zip`)
+
+  logger.info(`Creating archive for directory ${directoryPath} at ${tempFile}`)
+
+  const allPaths = await collectFiles(directoryPath)
+
+  const filteredPaths = await filterIgnoredPaths(directoryPath, allPaths)
+
+  const output = createWriteStream(tempFile)
+  const archive = archiver('zip', { zlib: { level: 5 } })
+
+  return new Promise((resolve, reject) => {
+    output.on('close', () => {
+      logger.info(`Archive created: ${tempFile} (${archive.pointer()} bytes)`)
+      resolve(tempFile)
+    })
+
+    archive.on('error', (err) => {
+      logger.error('Archive error:', err)
+      reject(err)
+    })
+
+    archive.pipe(output)
+
+    for (const relativePath of filteredPaths) {
+      if (relativePath.endsWith('/')) continue
+
+      const fullPath = path.join(directoryPath, relativePath)
+      const archivePath = path.join(dirName, relativePath)
+      archive.file(fullPath, { name: archivePath })
+    }
+
+    archive.finalize()
+  })
+}
+
 export async function deleteArchive(filePath: string): Promise<void> {
   try {
     await unlink(filePath)
