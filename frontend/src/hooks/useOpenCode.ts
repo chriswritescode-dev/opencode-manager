@@ -328,15 +328,26 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         requestData.variant = variant;
       }
 
-      await client.sendPrompt(sessionID, requestData);
+      const response = await client.sendPrompt(sessionID, requestData);
 
-      return { optimisticUserID, userPromptText };
+      return { optimisticUserID, userPromptText, response };
     },
     onError: (error, variables) => {
       const { sessionID } = variables;
+      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      
+      const axiosError = error as { code?: string; response?: unknown };
+      const isNetworkError = axiosError.code === 'ECONNABORTED' || 
+                            axiosError.code === 'ERR_NETWORK' ||
+                            !axiosError.response;
+      
+      if (isNetworkError) {
+        return;
+      }
+      
       setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageListResponse>(
-        ["opencode", "messages", opcodeUrl, sessionID, directory],
+        messagesQueryKey,
         (old) => old?.filter((msg) => !msg.info.id.startsWith("optimistic_")),
       );
       
@@ -348,15 +359,27 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     },
     onSuccess: async (data, variables) => {
       const { sessionID } = variables;
-      const { optimisticUserID, userPromptText } = data;
+      const { optimisticUserID, userPromptText, response } = data;
+      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
 
       queryClient.setQueryData<MessageListResponse>(
-        ["opencode", "messages", opcodeUrl, sessionID, directory],
+        messagesQueryKey,
         (old) => {
           if (!old) return old;
-          return old.filter((msg) => msg.info.id !== optimisticUserID);
+          const withoutOptimistic = old.filter((msg) => msg.info.id !== optimisticUserID);
+          
+          const existingIdx = withoutOptimistic.findIndex(m => m.info.id === response.info.id);
+          if (existingIdx >= 0) {
+            const updated = [...withoutOptimistic];
+            updated[existingIdx] = { info: response.info, parts: response.parts };
+            return updated;
+          }
+          
+          return [...withoutOptimistic, { info: response.info, parts: response.parts }];
         },
       );
+
+      setSessionStatus(sessionID, { type: "idle" });
 
       queryClient.invalidateQueries({
         queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],

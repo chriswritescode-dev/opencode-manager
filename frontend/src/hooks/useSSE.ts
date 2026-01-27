@@ -214,7 +214,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         
         setSessionStatus(sessionID, { type: 'idle' })
         
-        const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
+        const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
+        const currentData = queryClient.getQueryData<MessageListResponse>(messagesQueryKey)
         if (!currentData) break
         
         const now = Date.now()
@@ -253,7 +254,9 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           }
         })
         
-        queryClient.setQueryData(['opencode', 'messages', opcodeUrl, sessionID, directory], updated)
+        queryClient.setQueryData(messagesQueryKey, updated)
+        
+        queryClient.invalidateQueries({ queryKey: messagesQueryKey })
         break
       }
 

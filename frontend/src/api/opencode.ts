@@ -12,6 +12,9 @@ type CommandRequest = NonNullable<paths['/session/{sessionID}/command']['post'][
 type ShellRequest = NonNullable<paths['/session/{sessionID}/shell']['post']['requestBody']>['content']['application/json']
 type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
 type QuestionListResponse = paths['/question']['get']['responses']['200']['content']['application/json']
+type SendPromptResponse = paths['/session/{sessionID}/message']['post']['responses']['200']['content']['application/json']
+
+export type { SendPromptResponse }
 
 export class OpenCodeClient {
   private client: AxiosInstance
@@ -78,8 +81,13 @@ export class OpenCodeClient {
     return response.data
   }
 
-  async sendPrompt(sessionID: string, data: SendPromptRequest): Promise<void> {
-    await this.client.post(`/session/${sessionID}/prompt_async`, data)
+  async sendPrompt(sessionID: string, data: SendPromptRequest): Promise<SendPromptResponse> {
+    const response = await this.client.post<SendPromptResponse>(
+      `/session/${sessionID}/message`,
+      data,
+      { timeout: 0 }
+    )
+    return response.data
   }
 
   async summarizeSession(sessionID: string, providerID: string, modelID: string) {
