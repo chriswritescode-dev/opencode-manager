@@ -80,14 +80,39 @@ Safe alternatives:
 
 ## ⚠️ CRITICAL: Never Kill Cloudflare Tunnel
 
-**NEVER run `pnpm cleanup` or kill cloudflared processes when user is connected remotely.**
+**ASSUME THE USER IS ALWAYS CONNECTED VIA TUNNEL. NEVER TOUCH CLOUDFLARED.**
 
-The user may be accessing this agent through a Cloudflare tunnel from a mobile device or remote location. Killing the tunnel will disconnect them immediately and they will lose access to the session.
+**FORBIDDEN COMMANDS - NEVER RUN THESE:**
+```bash
+# NEVER run any of these:
+pkill -f cloudflared
+kill $(pgrep cloudflared)
+pnpm cleanup  # This may kill tunnel
+pnpm start    # This restarts tunnel with new URL
+pnpm tunnel:stop
+pnpm tunnel:start
+killall cloudflared
+sudo kill <cloudflared-pid>
+```
 
-**Before running `pnpm cleanup`:**
-1. Ask the user if they are connected via tunnel
-2. If yes, do NOT run cleanup - it will disconnect them
-3. Only kill specific processes that don't include cloudflared
+**WHY:** The user accesses this agent through a Cloudflare tunnel from mobile/remote. Killing or restarting cloudflared disconnects them IMMEDIATELY with no way to reconnect (the URL changes).
+
+**SAFE COMMANDS when user is remote:**
+```bash
+# These are SAFE:
+curl ...                           # Read-only API calls
+bun run scripts/test-voice.ts      # Tests against running service
+bun run scripts/test-browser.ts    # Browser tests on localhost
+pnpm build                         # Build only, no service restart
+pnpm test                          # Unit tests only
+git ...                            # Version control
+opencode-manager status            # Read-only status check
+```
+
+**IF YOU NEED TO RESTART SERVICES:**
+1. Ask the user FIRST
+2. Wait for explicit confirmation
+3. Only then proceed
 
 **Safe alternatives when user is remote:**
 - Kill only specific backend processes: `kill <pid>` for the backend PID only
