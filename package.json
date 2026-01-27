@@ -14,6 +14,7 @@
     "shared/src/",
     "scripts/whisper-server.py",
     "scripts/chatterbox-server.py",
+    "scripts/coqui-server.py",
     "backend-dist.tar.gz",
     "frontend-dist.tar.gz"
   ],

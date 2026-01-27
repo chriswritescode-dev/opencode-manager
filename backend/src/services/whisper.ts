@@ -1,7 +1,12 @@
 import { spawn, ChildProcess } from 'child_process'
+import fs from 'fs'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const WHISPER_PORT = parseInt(process.env.WHISPER_PORT || '5552')
 const WHISPER_HOST = process.env.WHISPER_HOST || '127.0.0.1'
@@ -84,7 +89,24 @@ class WhisperServerManager {
   }
 
   private async doStart(): Promise<void> {
-    const scriptPath = path.join(process.cwd(), 'scripts', 'whisper-server.py')
+    const possiblePaths = [
+      path.resolve(__dirname, '..', '..', 'scripts', 'whisper-server.py'),
+      path.resolve(__dirname, '..', '..', '..', 'scripts', 'whisper-server.py'),
+      path.join(process.cwd(), 'scripts', 'whisper-server.py')
+    ]
+    
+    let scriptPath: string | null = null
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        scriptPath = p
+        break
+      }
+    }
+
+    if (!scriptPath) {
+      throw new Error(`Whisper server script not found. Searched: ${possiblePaths.join(', ')}`)
+    }
+
     const modelsDir = path.join(getWorkspacePath(), 'cache', 'whisper-models')
 
     logger.info(`Starting Whisper server on ${WHISPER_HOST}:${WHISPER_PORT}`)

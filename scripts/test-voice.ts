@@ -543,6 +543,97 @@ class VoiceTest {
     })
   }
 
+  async testCoquiTTSServerStart(): Promise<TestResult> {
+    return this.runTest('Coqui TTS Server Start', async () => {
+      const statusBefore = await this.fetch('/api/tts/coqui/status')
+      const statusBeforeData = await statusBefore.json()
+      
+      if (statusBeforeData.running) {
+        return { passed: true, details: `Server already running (model: ${statusBeforeData.model})` }
+      }
+
+      const startResponse = await this.fetch('/api/tts/coqui/start', { method: 'POST' })
+      
+      if (startResponse.status !== 200) {
+        const errorData = await startResponse.json()
+        return { 
+          passed: false, 
+          details: `Failed to start: ${errorData.error || startResponse.status} - ${errorData.details || ''}` 
+        }
+      }
+
+      const startData = await startResponse.json()
+      
+      const statusAfter = await this.fetch('/api/tts/coqui/status')
+      const statusAfterData = await statusAfter.json()
+
+      return {
+        passed: statusAfterData.running === true,
+        details: `Running: ${statusAfterData.running}, Model: ${statusAfterData.model}, Device: ${statusAfterData.device}`
+      }
+    })
+  }
+
+  async testCoquiTTSSynthesis(): Promise<TestResult> {
+    return this.runTest('Coqui TTS Synthesis', async () => {
+      const statusResponse = await this.fetch('/api/tts/coqui/status')
+      const statusData = await statusResponse.json()
+      
+      if (!statusData.running) {
+        return { passed: false, details: 'Coqui TTS server not running' }
+      }
+
+      const response = await this.fetch('/api/tts/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: 'Hello, this is a test of Coqui TTS.' })
+      })
+
+      if (response.status === 200) {
+        const contentType = response.headers.get('content-type')
+        const isAudio = contentType?.includes('audio') || contentType?.includes('octet-stream')
+        const buffer = await response.arrayBuffer()
+        return {
+          passed: isAudio && buffer.byteLength > 1000,
+          details: `Audio size: ${buffer.byteLength} bytes, Type: ${contentType}`
+        }
+      }
+
+      const data = await response.json()
+      return { passed: false, details: `Error: ${data.error || response.status}` }
+    })
+  }
+
+  async testWhisperServerRestart(): Promise<TestResult> {
+    return this.runTest('Whisper STT Server Health', async () => {
+      const statusResponse = await this.fetch('/api/stt/status')
+      const statusData = await statusResponse.json()
+      
+      if (!statusData.server?.running) {
+        return { 
+          passed: false, 
+          details: `Server not running. Error: ${statusData.server?.error || 'unknown'}` 
+        }
+      }
+
+      const healthUrl = `http://${statusData.server.host || '127.0.0.1'}:${statusData.server.port}/health`
+      try {
+        const healthResponse = await fetch(healthUrl, { signal: AbortSignal.timeout(5000) })
+        const healthData = await healthResponse.json()
+        
+        return {
+          passed: healthData.status === 'ready' || healthData.status === 'healthy',
+          details: `Status: ${healthData.status}, Model: ${healthData.model}, Device: ${healthData.device || 'cpu'}`
+        }
+      } catch (error) {
+        return { 
+          passed: false, 
+          details: `Cannot reach Whisper server at ${healthUrl}: ${error instanceof Error ? error.message : String(error)}` 
+        }
+      }
+    })
+  }
+
   async testOpenCodeModelAvailable(): Promise<TestResult> {
     return this.runTest('OpenCode Model Configured', async () => {
       const response = await this.fetchOpenCode('/config')
@@ -602,6 +693,8 @@ class VoiceTest {
     await this.testAuthEnforced()
     await this.testOpenCodeProxyDynamic()
     await this.testSettings()
+    
+    await this.testWhisperServerRestart()
     await this.testSTTStatus()
     await this.testSTTModels()
     
@@ -615,6 +708,10 @@ class VoiceTest {
     await this.testSTTTranscription()
     await this.testSTTErrorHandling()
     await this.testSTTEmptyInput()
+    
+    await this.testCoquiTTSServerStart()
+    await this.testCoquiTTSSynthesis()
+    
     await this.testTTSVoices()
     await this.testTTSSynthesis()
     
