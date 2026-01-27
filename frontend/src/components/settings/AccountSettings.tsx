@@ -78,7 +78,7 @@ export function AccountSettings() {
 
   const changePasswordMutation = useMutation({
     mutationFn: async ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) => {
-      const response = await changePassword({ currentPassword, newPassword })
+      const response = await changePassword({ currentPassword, newPassword, revokeOtherSessions: true })
       if (response.error) {
         throw new Error(response.error.message || 'Failed to change password')
       }

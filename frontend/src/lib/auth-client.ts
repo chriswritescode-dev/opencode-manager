@@ -5,7 +5,7 @@ const getBaseUrl = () => {
   if (typeof window !== 'undefined') {
     return `${window.location.origin}/api/auth`
   }
-  return 'http://localhost:5001/api/auth'
+  return 'http://localhost:5003/api/auth'
 }
 
 export const authClient = createAuthClient({

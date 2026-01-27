@@ -1,0 +1,76 @@
+site_name: OpenCode Manager
+site_url: https://chriswritescode-dev.github.io/opencode-manager
+repo_url: https://github.com/chriswritescode-dev/opencode-manager
+repo_name: opencode-manager
+
+theme:
+  name: material
+  palette:
+    - scheme: slate
+      primary: blue grey
+      accent: cyan
+      toggle:
+        icon: material/brightness-7
+        name: Switch to light mode
+    - scheme: default
+      primary: blue grey
+      accent: cyan
+      toggle:
+        icon: material/brightness-4
+        name: Switch to dark mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.instant
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quick Start: getting-started/quickstart.md
+    - First Run Setup: getting-started/first-run.md
+  - Features:
+    - Overview: features/overview.md
+    - Repository & Git: features/git.md
+    - File Browser: features/files.md
+    - Chat & Sessions: features/chat.md
+    - AI Configuration: features/ai-config.md
+    - MCP Servers: features/mcp.md
+    - Text-to-Speech: features/tts.md
+    - Mobile & PWA: features/mobile.md
+  - Configuration:
+    - Environment Variables: configuration/environment.md
+    - Authentication: configuration/authentication.md
+    - OAuth Providers: configuration/oauth.md
+    - Docker: configuration/docker.md
+  - Development:
+    - Local Setup: development/setup.md
+    - Contributing: development/contributing.md
+  - Troubleshooting: troubleshooting.md
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - admonition
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - attr_list
+
+extra_css:
+  - stylesheets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/chriswritescode-dev/opencode-manager

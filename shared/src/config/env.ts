@@ -102,7 +102,7 @@ export const ENV = {
     DISCORD_CLIENT_SECRET: process.env.DISCORD_CLIENT_SECRET,
     PASSKEY_RP_ID: getEnvString('PASSKEY_RP_ID', 'localhost'),
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
-    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5001'),
+    PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5003'),
   },
 } as const
 
