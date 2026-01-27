@@ -19,6 +19,7 @@
     "@opencode-manager/shared": "workspace:*",
     "archiver": "^7.0.1",
     "dotenv": "^17.2.3",
+    "eventsource": "^4.1.0",
     "hono": "^4.10.1",
     "node-pty": "^1.1.0",
     "socket.io": "^4.8.3",

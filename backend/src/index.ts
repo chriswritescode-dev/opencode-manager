@@ -8,6 +8,7 @@ import os from 'os'
 import path from 'path'
 import { initializeDatabase } from './db/schema'
 import { createRepoRoutes } from './routes/repos'
+import { createSessionRoutes } from './routes/sessions'
 import { createSettingsRoutes } from './routes/settings'
 import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts'
@@ -26,6 +27,7 @@ import { cleanupOrphanedDirectories, cleanupStaleRepoEntries, registerExternalDi
 import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
 import { chatterboxServerManager } from './services/chatterbox'
+import { startGlobalSSEListener, stopGlobalSSEListener } from './services/global-sse'
 import { 
   getWorkspacePath, 
   getReposPath, 
@@ -285,6 +287,13 @@ try {
   }
 
   try {
+    startGlobalSSEListener(db)
+    logger.info('Global SSE listener started for push notifications')
+  } catch (error) {
+    logger.warn('Failed to start global SSE listener:', error)
+  }
+
+  try {
     await whisperServerManager.start()
     logger.info(`Whisper STT server running on port ${whisperServerManager.getPort()}`)
   } catch (error) {
@@ -303,6 +312,7 @@ try {
 }
 
 app.route('/api/repos', createRepoRoutes(db))
+app.route('/api/sessions', createSessionRoutes(db))
 app.route('/api/settings', createSettingsRoutes(db))
 app.route('/api/health', createHealthRoutes(db))
 app.route('/api/files', createFileRoutes(db))
@@ -423,6 +433,8 @@ const shutdown = async (signal: string) => {
   
   logger.info(`${signal} received, shutting down gracefully...`)
   try {
+    stopGlobalSSEListener()
+    logger.info('Global SSE listener stopped')
     terminalService.destroyAllSessions()
     logger.info('Terminal sessions destroyed')
     await whisperServerManager.stop()
