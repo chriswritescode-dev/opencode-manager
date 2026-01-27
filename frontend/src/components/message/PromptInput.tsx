@@ -92,9 +92,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [localMode, setLocalMode] = useState<string | null>(null)
   const [isFocused, setIsFocused] = useState(false)
+  const [isTogglingRecording, setIsTogglingRecording] = useState(false)
+  const lastAddedTranscriptRef = useRef('')
 
   const {
     isRecording,
+    isProcessing,
     startRecording,
     stopRecording,
     abortRecording,
@@ -104,7 +107,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     transcript,
     clear: clearSTT,
   } = useSTT()
-  
+
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
@@ -356,9 +359,14 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     if (isRecording) {
       stopRecording()
     } else {
-      await startRecording()
-      if (textareaRef.current) {
-        textareaRef.current.blur()
+      setIsTogglingRecording(true)
+      try {
+        await startRecording()
+        if (textareaRef.current) {
+          textareaRef.current.blur()
+        }
+      } catch {
+        setIsTogglingRecording(false)
       }
     }
   }
@@ -367,12 +375,29 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     const textToUse = transcript || interimTranscript
     if (!isRecording && textToUse && textToUse !== 'Processing...' && textToUse !== 'Recording...') {
       const trimmedTranscript = textToUse.trim()
-      if (trimmedTranscript && (prompt === '' || prompt === 'Processing...' || prompt === 'Recording...')) {
-        setPrompt(trimmedTranscript)
+      if (trimmedTranscript && trimmedTranscript !== lastAddedTranscriptRef.current) {
+        if (prompt === '' || prompt === 'Processing...' || prompt === 'Recording...') {
+          setPrompt(trimmedTranscript)
+        } else {
+          setPrompt(prev => `${prev} ${trimmedTranscript}`)
+        }
+        lastAddedTranscriptRef.current = trimmedTranscript
         textareaRef.current?.focus()
       }
     }
   }, [isRecording, interimTranscript, transcript, prompt])
+
+  useEffect(() => {
+    if (isRecording && isTogglingRecording) {
+      setIsTogglingRecording(false)
+    }
+  }, [isRecording, isTogglingRecording])
+
+  useEffect(() => {
+    if (isTogglingRecording) {
+      lastAddedTranscriptRef.current = ''
+    }
+  }, [isTogglingRecording])
 
   const addImageAttachment = (file: File) => {
     const generateId = () => {
@@ -859,7 +884,7 @@ return (
             <button
               type="button"
               onClick={handleVoiceToggle}
-              disabled={disabled}
+              disabled={disabled || isProcessing}
               className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center ${
                 isRecording
                   ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
@@ -867,21 +892,37 @@ return (
               }`}
               title={isRecording ? 'Stop recording' : 'Voice input'}
             >
-              {isRecording ? <SquareFill className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              {isTogglingRecording && !isRecording ? (
+                <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+              ) : isProcessing && !isRecording ? (
+                <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+              ) : isRecording ? (
+                <SquareFill className="w-5 h-5" />
+              ) : (
+                <Mic className="w-5 h-5" />
+              )}
             </button>
           )}
           {isMobile && !prompt.trim() && imageAttachments.length === 0 && sttEnabled && sttSupported && !hasPendingPermissionForSession ? (
             <button
               onClick={handleVoiceToggle}
-              disabled={disabled}
+              disabled={disabled || isProcessing}
               className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[52px] ${
-                isRecording
+                isRecording || isTogglingRecording || (isProcessing && !isRecording)
                   ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
                   : 'bg-primary hover:bg-primary/90 text-primary-foreground border border-white/30'
               }`}
               title={isRecording ? 'Stop recording' : 'Voice input'}
             >
-              {isRecording ? <SquareFill className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              {isTogglingRecording && !isRecording ? (
+                <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : isProcessing && !isRecording ? (
+                <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+              ) : isRecording ? (
+                <SquareFill className="w-5 h-5" />
+              ) : (
+                <Mic className="w-5 h-5" />
+              )}
             </button>
           ) : (
             <button

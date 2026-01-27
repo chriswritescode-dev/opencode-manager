@@ -78,6 +78,7 @@ export function useSTT(userId = 'default') {
 
     rec.onStart(() => {
       setIsRecording(true)
+      setIsProcessing(false)
       setState('listening')
       setInterimTranscript('')
     })
@@ -91,6 +92,7 @@ export function useSTT(userId = 'default') {
     recorder.setOnStateChange((recState) => {
       if (recState === 'recording') {
         setIsRecording(true)
+        setIsProcessing(false)
         setState('listening')
         setInterimTranscript('Recording...')
       } else if (recState === 'stopped') {
