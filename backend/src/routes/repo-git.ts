@@ -19,7 +19,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
   const gitFetchPullService = new GitFetchPullService(gitAuthService)
   const gitBranchService = new GitBranchService(gitAuthService)
   const gitCommitService = new GitCommitService(gitAuthService)
-  const gitPushService = new GitPushService(gitAuthService)
+  const gitPushService = new GitPushService(gitAuthService, gitBranchService)
   const gitLogService = new GitLogService(gitAuthService, gitDiffService)
   const gitStatusService = new GitStatusService(gitAuthService)
 
