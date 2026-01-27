@@ -267,6 +267,8 @@ function getMimeType(filePath: string): AllowedMimeType {
     '.svg': 'image/svg+xml',
     '.pdf': 'application/pdf',
     '.zip': 'application/zip',
+    '.md': 'text/markdown',
+    '.mdx': 'text/markdown',
   }
   
   return mimeTypes[ext] || 'text/plain'

@@ -13,6 +13,7 @@ interface VirtualizedTextViewProps {
   className?: string
   initialLineNumber?: number
   lineWrap?: boolean
+  onContentLoaded?: (content: string) => void
 }
 
 export interface VirtualizedTextViewHandle {
@@ -141,6 +142,7 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
   className = '',
   initialLineNumber,
   lineWrap = false,
+  onContentLoaded,
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollTopRef = useRef(0)
@@ -191,6 +193,12 @@ export const VirtualizedTextView = forwardRef<VirtualizedTextViewHandle, Virtual
   useEffect(() => {
     onSaveStateChange?.(hasUnsavedChanges)
   }, [hasUnsavedChanges, onSaveStateChange])
+  
+  useEffect(() => {
+    if (isFullyLoaded && fullContent && onContentLoaded) {
+      onContentLoaded(fullContent)
+    }
+  }, [isFullyLoaded, fullContent, onContentLoaded])
   
   useEffect(() => {
     loadedBufferRef.current = { start: 0, end: 0 }

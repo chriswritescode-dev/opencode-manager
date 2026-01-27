@@ -76,6 +76,7 @@ export function FilePreviewDialog({ isOpen, onClose, filePath, repoBasePath, onF
             </div>
           ) : file ? (
             <FilePreview 
+              key={file.path}
               file={file} 
               hideHeader={false}
               isMobileModal={true}

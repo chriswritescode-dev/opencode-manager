@@ -56,6 +56,7 @@ export const MobileFilePreviewModal = memo(function MobileFilePreviewModal({
       <FullscreenSheet style={{ ...GPU_ACCELERATED_STYLE, ...swipeStyles }}>
         <div className={`h-full overflow-hidden bg-background pt-safe ${showFilePreviewHeader ? "" : "pb-8"}`}>
           <FilePreview
+            key={localFile.path}
             file={localFile}
             hideHeader={!showFilePreviewHeader}
             isMobileModal={showFilePreviewHeader}

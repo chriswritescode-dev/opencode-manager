@@ -534,7 +534,7 @@ useEffect(() => {
           {!isMobile && (
             <div className="flex-1 overflow-y-auto min-h-0 h-full">
               {selectedFile && !selectedFile.isDirectory ? (
-                <FilePreview file={selectedFile} />
+                <FilePreview key={selectedFile.path} file={selectedFile} />
               ) : (
                 <div className="flex items-center justify-center h-full text-muted-foreground">
                   Select a file to preview
@@ -633,7 +633,7 @@ useEffect(() => {
           {!isMobile && (
             <div className="flex-1 overflow-y-auto min-h-0 ">
               {selectedFile && !selectedFile.isDirectory ? (
-                <FilePreview file={selectedFile} />
+                <FilePreview key={selectedFile.path} file={selectedFile} />
               ) : (
                 <div className="flex items-center justify-center h-64 text-muted-foreground">
                   Select a file to preview

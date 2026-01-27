@@ -64,6 +64,7 @@ export const ALLOWED_MIME_TYPES = [
   'image/svg+xml',
   'application/pdf',
   'application/zip',
+  'text/markdown',
 ] as const
 
 export const GIT_PROVIDERS = {

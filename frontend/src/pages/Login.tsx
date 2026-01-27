@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLoaderData } from 'react-router-dom'
+import { useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -87,7 +87,6 @@ export function Login() {
             alt="OpenCode" 
             className="h-8 w-auto"
           />
-          <p className="text-sm text-muted-foreground">Sign in to continue</p>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6 space-y-4">
@@ -204,7 +203,7 @@ export function Login() {
                 <Input
                   id="email"
                   type="email"
-                  placeholder="you@example.com"
+                  placeholder=""
                   className="bg-input border-border focus:border-primary"
                   {...register('email')}
                   aria-invalid={!!errors.email}
@@ -218,7 +217,7 @@ export function Login() {
                 <Input
                   id="password"
                   type="password"
-                  placeholder="Enter your password"
+                  placeholder=""
                   className="bg-input border-border focus:border-primary"
                   {...register('password')}
                   aria-invalid={!!errors.password}
@@ -239,14 +238,7 @@ export function Login() {
           )}
         </div>
 
-        {config.registrationEnabled && (
-          <p className="text-center text-sm text-muted-foreground">
-            Don't have an account?{' '}
-            <Link to="/register" className="text-primary hover:underline transition-colors">
-              Sign up
-            </Link>
-          </p>
-        )}
+        
       </div>
     </div>
   )

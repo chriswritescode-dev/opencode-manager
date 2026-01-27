@@ -22,7 +22,7 @@ interface FilePreviewProps {
 }
 
 export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
-  const isMarkdownFile = file.name.endsWith('.md') || file.name.endsWith('.mdx') || file.mimeType === 'text/markdown'
+  const isMarkdownFile = file.name.toLowerCase().endsWith('.md') || file.name.toLowerCase().endsWith('.mdx') || file.mimeType === 'text/markdown'
   
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview')
   const [editContent, setEditContent] = useState('')
@@ -33,6 +33,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [markdownPreview, setMarkdownPreview] = useState(isMarkdownFile)
   const [isLoadingAllContent, setIsLoadingAllContent] = useState(false)
   const [fullContentLoaded, setFullContentLoaded] = useState(false)
+  const [fullContent, setFullContent] = useState<string | null>(null)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   
@@ -41,18 +42,25 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   
   useEffect(() => {
     setFullContentLoaded(false)
-  }, [file.path])
+    setMarkdownPreview(isMarkdownFile)
+    setFullContent(null)
+  }, [file.path, isMarkdownFile])
   
   useEffect(() => {
     if (shouldVirtualize && isMarkdownFile && markdownPreview && !isMarkdownTooLarge && !fullContentLoaded) {
       const loadContent = async () => {
         if (!virtualizedRef.current) return
         setIsLoadingAllContent(true)
-        await virtualizedRef.current.loadAll()
-        setFullContentLoaded(true)
-        setIsLoadingAllContent(false)
+        try {
+          await virtualizedRef.current.loadAll()
+          setFullContentLoaded(true)
+        } catch {
+          setFullContentLoaded(false)
+        } finally {
+          setIsLoadingAllContent(false)
+        }
       }
-      const timer = setTimeout(loadContent, 50)
+      const timer = setTimeout(loadContent, 0)
       return () => clearTimeout(timer)
     }
   }, [shouldVirtualize, isMarkdownFile, markdownPreview, isMarkdownTooLarge, fullContentLoaded])
@@ -191,7 +199,6 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
 
     if (shouldVirtualize && isTextFile) {
       const showMarkdownPreview = isMarkdownFile && markdownPreview && viewMode !== 'edit'
-      const fullContent = virtualizedRef.current?.getFullContent()
       
       return (
         <>
@@ -203,6 +210,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               editable={viewMode === 'edit'}
               onSaveStateChange={handleVirtualizedSaveStateChange}
               onSave={handleVirtualizedSave}
+              onContentLoaded={setFullContent}
               className="h-full"
               initialLineNumber={initialLineNumber}
               lineWrap={lineWrap}
