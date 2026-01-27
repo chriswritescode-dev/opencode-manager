@@ -599,10 +599,17 @@ async function runBrowserTest(config: TestConfig): Promise<boolean> {
             return { found: true, selector: `button[title="${btn.getAttribute('title')}"]`, title: btn.getAttribute('title') }
           }
         }
+        // Prefer continuous voice button
+        for (const btn of buttons) {
+          const title = btn.getAttribute('title')?.toLowerCase() || ''
+          if (title.includes('continuous voice')) {
+            return { found: true, selector: `button[title="${btn.getAttribute('title')}"]`, title: btn.getAttribute('title') }
+          }
+        }
         // Fallback to other voice buttons
         for (const btn of buttons) {
           const title = btn.getAttribute('title')?.toLowerCase() || ''
-          if (title.includes('voice input') || title.includes('continuous voice')) {
+          if (title.includes('voice input')) {
             return { found: true, selector: `button[title="${btn.getAttribute('title')}"]`, title: btn.getAttribute('title') }
           }
         }
