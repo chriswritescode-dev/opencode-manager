@@ -12,6 +12,9 @@ echo "[1/6] Stopping service..."
 opencode-manager stop 2>/dev/null || true
 opencode-manager uninstall-service 2>/dev/null || true
 
+# Clean up stale endpoints
+rm -f "$HOME/.local/run/opencode-manager/endpoints.json"
+
 echo "[2/6] Removing global installation..."
 bun remove -g opencode-manager 2>/dev/null || true
 
@@ -24,6 +27,11 @@ pnpm build
 
 echo "[5/6] Installing globally from local repo..."
 cd "$REPO_DIR"
+# Update the dist tarballs with fresh builds
+# Tarballs should contain backend/dist and frontend/dist paths
+tar -czf backend-dist.tar.gz backend/dist
+tar -czf frontend-dist.tar.gz frontend/dist
+
 # Use npm pack to create tarball, then install from it (avoids bun workspace issues)
 npm pack --quiet
 TARBALL="$REPO_DIR/$(ls -t opencode-manager-*.tgz | head -1)"
