@@ -62,7 +62,7 @@ For contributors who want to develop locally instead of using Docker.
 - [pnpm](https://pnpm.io/installation) - Package manager (required for workspaces)
 - [Bun](https://bun.sh) - Backend runtime
 - [OpenCode TUI](https://opencode.ai) - `npm install -g @opencode/tui`
-- Node.js 18+
+- [Node.js 22+](https://nodejs.org/en/about/previous-releases)
 
 ### Setup
 
