@@ -3,6 +3,10 @@ import fs from 'fs'
 import os from 'os'
 import { logger } from '../utils/logger'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const COQUI_PORT = parseInt(process.env.COQUI_PORT || '5554')
 const COQUI_HOST = process.env.COQUI_HOST || '127.0.0.1'
@@ -149,7 +153,23 @@ class CoquiServerManager {
   }
 
   private async doStart(): Promise<void> {
-    const scriptPath = path.join(process.cwd(), 'scripts', 'coqui-server.py')
+    const possiblePaths = [
+      path.resolve(__dirname, '..', '..', 'scripts', 'coqui-server.py'),
+      path.resolve(__dirname, '..', '..', '..', 'scripts', 'coqui-server.py'),
+      path.join(process.cwd(), 'scripts', 'coqui-server.py')
+    ]
+    
+    let scriptPath: string | null = null
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        scriptPath = p
+        break
+      }
+    }
+
+    if (!scriptPath) {
+      throw new Error(`Coqui TTS server script not found. Searched: ${possiblePaths.join(', ')}`)
+    }
 
     let pythonBin = this.findPythonBin()
     

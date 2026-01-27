@@ -4,6 +4,10 @@ import os from 'os'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import path from 'path'
+import { fileURLToPath } from 'url'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 const CHATTERBOX_PORT = parseInt(process.env.CHATTERBOX_PORT || '5553')
 const CHATTERBOX_HOST = process.env.CHATTERBOX_HOST || '127.0.0.1'
@@ -155,7 +159,24 @@ class ChatterboxServerManager {
   }
 
   private async doStart(): Promise<void> {
-    const scriptPath = path.join(process.cwd(), 'scripts', 'chatterbox-server.py')
+    const possiblePaths = [
+      path.resolve(__dirname, '..', '..', 'scripts', 'chatterbox-server.py'),
+      path.resolve(__dirname, '..', '..', '..', 'scripts', 'chatterbox-server.py'),
+      path.join(process.cwd(), 'scripts', 'chatterbox-server.py')
+    ]
+    
+    let scriptPath: string | null = null
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        scriptPath = p
+        break
+      }
+    }
+
+    if (!scriptPath) {
+      throw new Error(`Chatterbox server script not found. Searched: ${possiblePaths.join(', ')}`)
+    }
+
     const voiceSamplesDir = path.join(getWorkspacePath(), 'cache', 'chatterbox-voices')
 
     let pythonBin = this.findPythonBin()
