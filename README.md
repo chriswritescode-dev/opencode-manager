@@ -181,11 +181,6 @@ For detailed guides and configuration reference, see the **[Documentation Site](
 - [Troubleshooting](https://chriswritescode-dev.github.io/opencode-manager/troubleshooting/) - Common issues and solutions
 - [Development](https://chriswritescode-dev.github.io/opencode-manager/development/setup/) - Contributing and local development
 
-## Roadmap
-
-See [ROADMAP.md](ROADMAP.md) for planned features including:
-- PWA & Push Notifications
-- Enhanced authentication options
 
 ## License
 
