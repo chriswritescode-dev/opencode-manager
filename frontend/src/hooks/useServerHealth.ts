@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { settingsApi } from '@/api/settings'
+import { API_BASE_URL } from '@/config'
 import { useMutation } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -13,11 +14,13 @@ interface HealthResponse {
   opencodeVersion: string | null
   opencodeMinVersion: string
   opencodeVersionSupported: boolean
+  opencodeManagerVersion: string | null
   error?: string
 }
 
 async function fetchHealth(): Promise<HealthResponse> {
-  const response = await fetch('/api/health')
+  const apiBaseUrl = API_BASE_URL.replace(/\/$/, '')
+  const response = await fetch(`${apiBaseUrl}/api/health`)
   if (!response.ok) {
     throw new Error('Health check failed')
   }
