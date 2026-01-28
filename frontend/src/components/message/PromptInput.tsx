@@ -146,7 +146,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
     onShowModelsDialog,
     onShowHelpDialog,
     onToggleDetails,
-    onExportSession
+    onExportSession,
+    currentAgent: localMode || undefined
   })
   
   const { files: searchResults } = useFileSearch(

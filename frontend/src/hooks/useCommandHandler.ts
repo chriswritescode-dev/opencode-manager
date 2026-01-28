@@ -18,6 +18,7 @@ interface CommandHandlerProps {
   onShowHelpDialog?: () => void
   onToggleDetails?: () => boolean
   onExportSession?: () => void
+  currentAgent?: string
 }
 
 export function useCommandHandler({
@@ -28,11 +29,12 @@ export function useCommandHandler({
   onShowModelsDialog,
   onShowHelpDialog,
   onToggleDetails,
-  onExportSession
+  onExportSession,
+  currentAgent
 }: CommandHandlerProps) {
   const navigate = useNavigate()
   const createSession = useCreateSession(opcodeUrl, directory)
-  const { model } = useModelSelection(opcodeUrl, directory)
+  const { model, modelString } = useModelSelection(opcodeUrl, directory)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const [loading, setLoading] = useState(false)
 
@@ -58,7 +60,9 @@ export function useCommandHandler({
         case 'themes':
           await client.sendCommand(sessionID, {
             command: command.name,
-            arguments: args
+            arguments: args,
+            agent: currentAgent,
+            model: modelString || undefined
           })
           break
           
@@ -128,14 +132,18 @@ export function useCommandHandler({
         case 'init':
           await client.sendCommand(sessionID, {
             command: command.name,
-            arguments: args
+            arguments: args,
+            agent: currentAgent,
+            model: modelString || undefined
           })
           break
-          
+
         default:
           await client.sendCommand(sessionID, {
             command: command.name,
-            arguments: args
+            arguments: args,
+            agent: currentAgent,
+            model: modelString || undefined
           })
       }
     } catch (error) {
@@ -145,7 +153,7 @@ export function useCommandHandler({
     } finally {
       setLoading(false)
     }
-  }, [sessionID, opcodeUrl, directory, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, createSession, navigate, model, setSessionStatus])
+  }, [sessionID, opcodeUrl, directory, onShowSessionsDialog, onShowModelsDialog, onShowHelpDialog, onToggleDetails, onExportSession, createSession, navigate, model, modelString, currentAgent, setSessionStatus])
 
   return {
     executeCommand,
