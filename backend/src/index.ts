@@ -51,12 +51,34 @@ app.use('/*', cors({
   allowHeaders: ['Content-Type', 'Authorization', 'x-forwarded-proto', 'x-forwarded-host'],
 }))
 
-const { AUTH_USERNAME, AUTH_PASSWORD } = ENV.SERVER
-if (AUTH_USERNAME && AUTH_PASSWORD) {
-  logger.info(`Basic authentication enabled for user: ${AUTH_USERNAME}`)
+function getBasicAuthCredentials(): { username: string; password: string } | null {
+  const { AUTH_USERNAME, AUTH_PASSWORD } = ENV.SERVER
+  if (AUTH_USERNAME && AUTH_PASSWORD) {
+    return { username: AUTH_USERNAME, password: AUTH_PASSWORD }
+  }
+  
+  const authFilePath = path.join(os.homedir(), '.local', 'run', 'opencode-manager', 'auth.json')
+  try {
+    const fs = require('fs')
+    if (fs.existsSync(authFilePath)) {
+      const data = JSON.parse(fs.readFileSync(authFilePath, 'utf8'))
+      if (data.username && data.password) {
+        return { username: data.username, password: data.password }
+      }
+    }
+  } catch {
+    // Ignore errors reading auth file
+  }
+  
+  return null
+}
+
+const authCredentials = getBasicAuthCredentials()
+if (authCredentials) {
+  logger.info(`Basic authentication enabled for user: ${authCredentials.username}`)
   app.use('/*', basicAuth({
-    username: AUTH_USERNAME,
-    password: AUTH_PASSWORD,
+    username: authCredentials.username,
+    password: authCredentials.password,
   }))
 }
 
