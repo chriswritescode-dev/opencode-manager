@@ -19,8 +19,10 @@ import { createOAuthRoutes } from './routes/oauth'
 import { createTerminalRoutes, registerTerminalSocketIO } from './routes/terminal'
 import { createPushRoutes } from './routes/push'
 import { createTaskRoutes } from './routes/tasks'
+import { createTelegramRoutes } from './routes/telegram'
 import { terminalService } from './services/terminal'
 import { schedulerService } from './services/scheduler'
+import { telegramService } from './services/telegram'
 import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -332,6 +334,19 @@ try {
     logger.warn('Scheduler service failed to initialize:', error)
   }
 
+  try {
+    telegramService.setDatabase(db)
+    telegramService.seedAllowlistFromEnv()
+    
+    const telegramToken = process.env.TELEGRAM_BOT_TOKEN
+    if (telegramToken) {
+      await telegramService.start(telegramToken)
+      logger.info('Telegram bot started automatically (TELEGRAM_BOT_TOKEN detected)')
+    }
+  } catch (error) {
+    logger.warn('Telegram bot failed to start:', error)
+  }
+
   // Chatterbox auto-start disabled - use on-demand via API
   // try {
   //   await chatterboxServerManager.start()
@@ -355,6 +370,7 @@ app.route('/api/stt', createSTTRoutes(db))
 app.route('/api/terminal', createTerminalRoutes())
 app.route('/api/push', createPushRoutes(db))
 app.route('/api/tasks', createTaskRoutes(db))
+app.route('/api/telegram', createTelegramRoutes(db))
 
 app.all('/api/opencode/*', async (c) => {
   const request = c.req.raw
@@ -472,6 +488,8 @@ const shutdown = async (signal: string) => {
     logger.info('Terminal sessions destroyed')
     await schedulerService.shutdown()
     logger.info('Scheduler service stopped')
+    await telegramService.stop()
+    logger.info('Telegram bot stopped')
     await whisperServerManager.stop()
     logger.info('Whisper server stopped')
     await chatterboxServerManager.stop()
