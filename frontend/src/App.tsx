@@ -5,6 +5,7 @@ import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
 import { TerminalPage } from './pages/Terminal'
+import TasksPage from './pages/Tasks/TasksPage'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
@@ -37,6 +38,7 @@ return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Repos />} />
+        <Route path="/tasks" element={<TasksPage />} />
         <Route path="/repos/:id" element={<RepoDetail />} />
         <Route path="/repos/:id/sessions/:sessionId" element={<SessionDetail />} />
         <Route path="/repos/:id/terminal" element={<TerminalPage />} />

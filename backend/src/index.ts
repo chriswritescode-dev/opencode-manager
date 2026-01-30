@@ -18,7 +18,9 @@ import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTerminalRoutes, registerTerminalSocketIO } from './routes/terminal'
 import { createPushRoutes } from './routes/push'
+import { createTaskRoutes } from './routes/tasks'
 import { terminalService } from './services/terminal'
+import { schedulerService } from './services/scheduler'
 import { whisperServerManager } from './services/whisper'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -322,6 +324,14 @@ try {
     logger.warn('Whisper server failed to start (STT will be unavailable):', error)
   }
 
+  try {
+    schedulerService.setDatabase(db)
+    await schedulerService.initialize()
+    logger.info('Scheduler service initialized')
+  } catch (error) {
+    logger.warn('Scheduler service failed to initialize:', error)
+  }
+
   // Chatterbox auto-start disabled - use on-demand via API
   // try {
   //   await chatterboxServerManager.start()
@@ -344,6 +354,7 @@ app.route('/api/tts', createTTSRoutes(db))
 app.route('/api/stt', createSTTRoutes(db))
 app.route('/api/terminal', createTerminalRoutes())
 app.route('/api/push', createPushRoutes(db))
+app.route('/api/tasks', createTaskRoutes(db))
 
 app.all('/api/opencode/*', async (c) => {
   const request = c.req.raw
@@ -459,6 +470,8 @@ const shutdown = async (signal: string) => {
     logger.info('Global SSE listener stopped')
     terminalService.destroyAllSessions()
     logger.info('Terminal sessions destroyed')
+    await schedulerService.shutdown()
+    logger.info('Scheduler service stopped')
     await whisperServerManager.stop()
     logger.info('Whisper server stopped')
     await chatterboxServerManager.stop()

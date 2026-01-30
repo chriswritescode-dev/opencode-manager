@@ -98,6 +98,14 @@ We regularly sync our fork with upstream sst/opencode to incorporate new feature
 - **Server Templates** - Pre-built templates for common MCP servers
 - **Enable/Disable Servers** - Toggle servers on/off with auto-restart
 
+### Scheduled Tasks
+- **Cron Job Scheduling** - Schedule recurring tasks with full cron expression support
+- **Task Management** - Create, update, delete, pause/resume tasks from the UI
+- **Command Types** - Run OpenCode skills, send messages to OpenCode, or execute scripts
+- **Run Now** - Manually trigger any scheduled task immediately
+- **Status Tracking** - View last run time, next scheduled run, and task status
+- **Preset Schedules** - Quick options for common schedules (hourly, daily, weekly)
+
 ### Settings & Customization
 - **Theme Selection** - Dark, Light, or System theme
 - **Keyboard Shortcuts** - Customizable keyboard shortcuts
