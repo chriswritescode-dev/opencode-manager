@@ -104,6 +104,7 @@ CREATE TABLE telegram_allowlist (
 |------|-------|
 | test/services/telegram.test.ts | 26 |
 | test/routes/telegram.test.ts | 18 |
+| test/routes/stt.test.ts | 14 |
 | test/services/scheduler.test.ts | 35 |
 | test/routes/tasks.test.ts | 27 |
 | test/routes/tts.test.ts | 11 |
@@ -111,4 +112,29 @@ CREATE TABLE telegram_allowlist (
 | test/utils/helpers.test.ts | 13 |
 | test/services/terminal.test.ts | 6 |
 | test/services/repo-auth-env.test.ts | 1 |
-| **Total** | **147** |
+| **Total** | **161** |
+
+## Additional Work Done
+
+### Fix: GitGuardian False Positive (2026-01-30)
+- Commit: 70dbd60
+- Replaced example Telegram tokens with placeholders in docs/requirements.md and docs/telegram.md
+- Changed `123456789:ABCdefGHIjklMNOpqrsTUVwxyz` to `<your-bot-token-from-botfather>`
+
+### Added: STT Unit Tests (2026-01-30)
+- Commit: 1d9671c
+- Created backend/test/routes/stt.test.ts with 14 tests covering:
+  - GET /status endpoint
+  - GET /models endpoint
+  - POST /transcribe endpoint (success, errors, validation)
+
+## Remaining Test Gaps
+
+| Requirement | Unit Tests | E2E Tests | Status |
+|-------------|------------|-----------|--------|
+| 1. Cloudflare Tunnel | No | test-startup.ts | Partial |
+| 2. TTS | tts.test.ts (11) | test-voice.ts | Good |
+| 3. STT | stt.test.ts (14) | test-voice.ts | Good |
+| 4. Telegram | 44 tests | None | Good |
+| 5. Settings UI | None | None | **TODO** |
+| 6. Health Checks | None | test-voice.ts | Partial |
