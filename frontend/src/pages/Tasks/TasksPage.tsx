@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Plus, Play, Pause, Trash2, Zap } from 'lucide-react'
 import { CreateTaskDialog } from './CreateTaskDialog'
-import { useToast } from '@/components/ui/use-toast'
+import { showToast } from '@/lib/toast'
 import { formatDistanceToNow } from 'date-fns'
 
 interface Task {
@@ -32,7 +32,6 @@ export default function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [loading, setLoading] = useState(true)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const { toast } = useToast()
 
   const fetchTasks = async () => {
     try {
@@ -41,11 +40,7 @@ export default function TasksPage() {
       const data = await res.json()
       setTasks(data)
     } catch {
-      toast({
-        title: 'Error',
-        description: 'Failed to load tasks',
-        variant: 'destructive',
-      })
+      showToast.error('Failed to load tasks')
     } finally {
       setLoading(false)
     }
@@ -53,7 +48,6 @@ export default function TasksPage() {
 
   useEffect(() => {
     fetchTasks()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleDelete = async (id: number) => {
@@ -62,9 +56,9 @@ export default function TasksPage() {
       const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error('Failed to delete')
       setTasks(tasks.filter((t) => t.id !== id))
-      toast({ title: 'Task deleted' })
+      showToast.success('Task deleted')
     } catch {
-      toast({ title: 'Error', description: 'Failed to delete task', variant: 'destructive' })
+      showToast.error('Failed to delete task')
     }
   }
 
@@ -74,9 +68,9 @@ export default function TasksPage() {
       if (!res.ok) throw new Error('Failed to toggle')
       const updated = await res.json()
       setTasks(tasks.map((t) => (t.id === id ? updated : t)))
-      toast({ title: `Task ${updated.status === 'active' ? 'resumed' : 'paused'}` })
+      showToast.success(`Task ${updated.status === 'active' ? 'resumed' : 'paused'}`)
     } catch {
-      toast({ title: 'Error', description: 'Failed to toggle task', variant: 'destructive' })
+      showToast.error('Failed to toggle task')
     }
   }
 
@@ -84,11 +78,10 @@ export default function TasksPage() {
     try {
       const res = await fetch(`/api/tasks/${id}/run`, { method: 'POST' })
       if (!res.ok) throw new Error('Failed to run')
-      toast({ title: 'Task execution started' })
-      // Optionally refresh to see last run update, though it might take a moment
+      showToast.success('Task execution started')
       setTimeout(fetchTasks, 1000)
     } catch {
-      toast({ title: 'Error', description: 'Failed to run task', variant: 'destructive' })
+      showToast.error('Failed to run task')
     }
   }
 

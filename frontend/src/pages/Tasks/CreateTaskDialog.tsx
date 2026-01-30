@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { useToast } from '@/components/ui/use-toast'
+import { showToast } from '@/lib/toast'
 
 interface CreateTaskDialogProps {
   open: boolean
@@ -38,12 +38,8 @@ export function CreateTaskDialog({ open, onOpenChange, onSuccess }: CreateTaskDi
   const [scriptCommand, setScriptCommand] = useState('')
   const [availableSkills, setAvailableSkills] = useState<Skill[]>([])
   const [loading, setLoading] = useState(false)
-  const { toast } = useToast()
 
-  // Fetch available skills (assuming an endpoint exists, or we mock it for now)
   useEffect(() => {
-    // TODO: Implement /api/skills endpoint in backend or opencode-proxy
-    // For MVP, we'll just allow text input or hardcode common ones
     setAvailableSkills([
         { name: 'recruiter-response', description: 'Reply to recruiters' },
         { name: 'daily-summary', description: 'Summarize tasks' }
@@ -76,18 +72,14 @@ export function CreateTaskDialog({ open, onOpenChange, onSuccess }: CreateTaskDi
         throw new Error(err.error || 'Failed to create task')
       }
 
-      toast({ title: 'Task created successfully' })
+      showToast.success('Task created successfully')
       onSuccess()
       setName('')
       setSchedule('0 9 * * *')
       setSkillName('')
       setScriptCommand('')
     } catch (error) {
-      toast({
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Unknown error',
-        variant: 'destructive',
-      })
+      showToast.error(error instanceof Error ? error.message : 'Unknown error')
     } finally {
       setLoading(false)
     }
