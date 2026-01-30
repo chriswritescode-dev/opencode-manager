@@ -121,6 +121,28 @@ export function runMigrations(db: Database): void {
       logger.error('Failed to migrate local_path format:', error)
     }
     
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS scheduled_tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          schedule_type TEXT NOT NULL,
+          schedule_value TEXT NOT NULL,
+          command_type TEXT NOT NULL,
+          command_config TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          last_run_at INTEGER,
+          next_run_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.run('CREATE INDEX IF NOT EXISTS idx_scheduled_tasks_status ON scheduled_tasks(status)')
+      logger.info('Scheduled tasks table created/verified')
+    } catch (error) {
+      logger.debug('Scheduled tasks table might already exist:', error)
+    }
+    
     logger.info('Database migrations completed successfully')
   } catch (error) {
     logger.error('Failed to run database migrations:', error)
