@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import { Hono } from 'hono'
 
 vi.mock('bun:sqlite', () => ({
@@ -58,7 +58,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return running status when bot is active', async () => {
-      vi.mocked(telegramService.getStatus).mockReturnValueOnce({
+      (telegramService.getStatus as Mock).mockReturnValueOnce({
         running: true,
         activeSessions: 5,
         allowlistCount: 3,
@@ -113,7 +113,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return 500 on start failure', async () => {
-      vi.mocked(telegramService.start).mockRejectedValueOnce(new Error('Invalid token'))
+      (telegramService.start as Mock).mockRejectedValueOnce(new Error('Invalid token'))
       
       const res = await app.request('/api/telegram/start', {
         method: 'POST',
@@ -136,7 +136,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return 500 on stop failure', async () => {
-      vi.mocked(telegramService.stop).mockRejectedValueOnce(new Error('Stop failed'))
+      (telegramService.stop as Mock).mockRejectedValueOnce(new Error('Stop failed'))
       
       const res = await app.request('/api/telegram/stop', { method: 'POST' })
       
@@ -154,7 +154,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return sessions list', async () => {
-      vi.mocked(telegramService.getAllSessions).mockReturnValueOnce([
+      (telegramService.getAllSessions as Mock).mockReturnValueOnce([
         { id: 1, chat_id: '111', opencode_session_id: 'sess-1', created_at: Date.now(), updated_at: Date.now() }
       ])
       
@@ -175,7 +175,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return 404 if session not found', async () => {
-      vi.mocked(telegramService.deleteSession).mockReturnValueOnce(false)
+      (telegramService.deleteSession as Mock).mockReturnValueOnce(false)
       
       const res = await app.request('/api/telegram/sessions/99999', { method: 'DELETE' })
       
@@ -193,7 +193,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return allowlist entries', async () => {
-      vi.mocked(telegramService.getAllowlist).mockReturnValueOnce([
+      (telegramService.getAllowlist as Mock).mockReturnValueOnce([
         { id: 1, chat_id: '111', added_at: Date.now() },
         { id: 2, chat_id: '222', added_at: Date.now() }
       ])
@@ -237,7 +237,7 @@ describe('Telegram Routes', () => {
     })
 
     it('should return 404 if chat ID not found', async () => {
-      vi.mocked(telegramService.removeFromAllowlist).mockReturnValueOnce(false)
+      (telegramService.removeFromAllowlist as Mock).mockReturnValueOnce(false)
       
       const res = await app.request('/api/telegram/allowlist/99999', { method: 'DELETE' })
       

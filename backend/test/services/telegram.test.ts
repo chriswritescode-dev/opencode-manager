@@ -230,7 +230,7 @@ describe('TelegramService', () => {
     })
 
     it('should not throw if bot not started', async () => {
-      await expect(telegramService.stop()).resolves.not.toThrow()
+      await expect(telegramService.stop()).resolves.toBeUndefined()
     })
   })
 
