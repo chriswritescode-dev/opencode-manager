@@ -92,9 +92,11 @@ CREATE TABLE IF NOT EXISTS scheduled_tasks (
 
 - [x] Task 9: Test end-to-end
   - Created comprehensive test suites
-  - 144 tests all passing
+  - 103 tests all passing
 
-- [ ] Task 10: Update documentation
+- [x] Task 10: Update documentation
+  - Added Scheduled Tasks section to README.md
+  - Created docs/scheduled-tasks.md with full feature documentation
 
 ## Test Coverage (Updated 2025-01-30)
 
