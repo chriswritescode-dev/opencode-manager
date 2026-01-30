@@ -112,8 +112,24 @@ export function OpenCodeConfigManager() {
         showToast.success('OpenCode is already up to date', { id: 'upgrade-opencode' })
       }
     },
-    onError: () => {
-      showToast.error('Failed to upgrade OpenCode', { id: 'upgrade-opencode' })
+    onError: (error) => {
+      queryClient.invalidateQueries({ queryKey: ['health'] })
+      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      
+      const defaultMessage = 'Failed to upgrade OpenCode'
+      
+      if (error && typeof error === 'object' && 'response' in error) {
+        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
+        const data = response?.data
+        
+        if (data?.recovered) {
+          showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: 'upgrade-opencode' })
+        } else {
+          showToast.error(data?.recoveryMessage || defaultMessage, { id: 'upgrade-opencode' })
+        }
+      } else {
+        showToast.error(defaultMessage, { id: 'upgrade-opencode' })
+      }
     },
   })
 

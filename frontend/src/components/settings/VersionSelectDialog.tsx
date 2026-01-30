@@ -30,8 +30,22 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
       showToast.success(result.message)
       onOpenChange(false)
     },
-    onError: () => {
-      showToast.error('Failed to install version')
+    onError: (error) => {
+      queryClient.invalidateQueries({ queryKey: ['opencode-versions'] })
+      queryClient.invalidateQueries({ queryKey: ['server-health'] })
+      
+      if (error && typeof error === 'object' && 'response' in error) {
+        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
+        const data = response?.data
+        
+        if (data?.recovered) {
+          showToast.success(`Install failed but server recovered at v${data.newVersion}`)
+        } else {
+          showToast.error(data?.recoveryMessage || 'Failed to install version')
+        }
+      } else {
+        showToast.error('Failed to install version')
+      }
     },
   })
 

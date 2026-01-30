@@ -139,12 +139,22 @@ export const settingsApi = {
     message: string
     oldVersion?: string
     newVersion?: string
+    recovered?: boolean
+    recoveryMessage?: string
   }> => {
     const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-install-version`, { version })
     return data
   },
 
-  upgradeOpenCode: async (): Promise<{ success: boolean; message: string; oldVersion?: string; newVersion?: string; upgraded: boolean }> => {
+  upgradeOpenCode: async (): Promise<{
+    success: boolean
+    message: string
+    oldVersion?: string
+    newVersion?: string
+    upgraded: boolean
+    recovered?: boolean
+    recoveryMessage?: string
+  }> => {
     const { data } = await axios.post(`${API_BASE_URL}/api/settings/opencode-upgrade`)
     return data
   },

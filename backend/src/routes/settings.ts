@@ -12,7 +12,7 @@ import {
 } from '../types/settings'
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
-import { DEFAULT_AGENTS_MD } from '../index'
+import { DEFAULT_AGENTS_MD } from '../constants'
 
 function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.split('.').map(s => Number(s))
@@ -25,6 +25,22 @@ function compareVersions(v1: string, v2: string): number {
     if (p1 < p2) return -1
   }
   return 0
+}
+
+function execWithTimeout(command: string, timeoutMs: number): { output: string; timedOut: boolean } {
+  try {
+    const output = execSync(command, {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL'
+    })
+    return { output, timedOut: false }
+  } catch (error) {
+    if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === null) {
+      return { output: '', timedOut: true }
+    }
+    throw error
+  }
 }
 
 const UpdateSettingsSchema = z.object({
@@ -376,20 +392,20 @@ export function createSettingsRoutes(db: Database) {
   })
 
   app.post('/opencode-upgrade', async (c) => {
+    const oldVersion = opencodeServerManager.getVersion()
+    logger.info(`Current OpenCode version: ${oldVersion}`)
+
     try {
-      logger.info('OpenCode upgrade requested')
-
-      const oldVersion = opencodeServerManager.getVersion()
-      logger.info(`Current OpenCode version: ${oldVersion}`)
-
-      logger.info('Running opencode upgrade...')
-      const upgradeOutput = execSync('opencode upgrade 2>&1', { encoding: 'utf8' })
+      logger.info('Running opencode upgrade with 90s timeout...')
+      const { output: upgradeOutput, timedOut } = execWithTimeout('opencode upgrade 2>&1', 90000)
       logger.info(`Upgrade output: ${upgradeOutput}`)
 
-      await new Promise(r => setTimeout(r, 2000))
+      if (timedOut) {
+        logger.warn('OpenCode upgrade timed out after 90 seconds')
+        throw new Error('Upgrade command timed out after 90 seconds')
+      }
 
       const newVersion = opencodeServerManager.getVersion() || await opencodeServerManager.fetchVersion()
-
       logger.info(`New OpenCode version: ${newVersion}`)
 
       const upgraded = oldVersion && newVersion && compareVersions(newVersion, oldVersion) > 0
@@ -419,16 +435,58 @@ export function createSettingsRoutes(db: Database) {
           success: true,
           message: 'OpenCode is already up to date',
           oldVersion,
-          newVersion: oldVersion,
+          newVersion,
           upgraded: false
         })
       }
     } catch (error) {
       logger.error('Failed to upgrade OpenCode:', error)
-      return c.json({
-        error: 'Failed to upgrade OpenCode',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, 500)
+      logger.warn('Attempting to recover OpenCode server...')
+
+      let recovered = false
+      let recoveryMessage = ''
+
+      opencodeServerManager.clearStartupError()
+      try {
+        await opencodeServerManager.restart()
+        logger.warn('OpenCode server restarted after upgrade failure')
+        recovered = true
+        recoveryMessage = 'Server recovered'
+      } catch (recoveryError) {
+        logger.error('Failed to recover OpenCode server:', recoveryError)
+        recovered = false
+        recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
+      }
+
+      let currentVersion: string | null | undefined = oldVersion
+      try {
+        currentVersion = opencodeServerManager.getVersion() || oldVersion
+      } catch (versionError) {
+        logger.error('Failed to get version after recovery:', versionError)
+        currentVersion = oldVersion
+      }
+
+      return c.json(
+        recovered ? {
+          success: false,
+          error: 'Upgrade failed but server recovered',
+          details: error instanceof Error ? error.message : 'Unknown error',
+          oldVersion,
+          newVersion: currentVersion,
+          upgraded: false,
+          recovered: true,
+          recoveryMessage
+        } : {
+          error: 'Failed to upgrade OpenCode and could not recover',
+          details: error instanceof Error ? error.message : 'Unknown error',
+          oldVersion,
+          newVersion: currentVersion,
+          upgraded: false,
+          recovered: false,
+          recoveryMessage
+        },
+        recovered ? 400 : 500
+      )
     }
   })
 
@@ -479,30 +537,32 @@ export function createSettingsRoutes(db: Database) {
   })
 
   app.post('/opencode-install-version', async (c) => {
+    const oldVersion = opencodeServerManager.getVersion()
+    logger.info(`Current OpenCode version: ${oldVersion}`)
+
     try {
       const body = await c.req.json()
       const { version } = z.object({ version: z.string().min(1) }).parse(body)
-      
+
       logger.info(`Installing OpenCode version: ${version}`)
-      
-      const oldVersion = opencodeServerManager.getVersion()
-      logger.info(`Current OpenCode version: ${oldVersion}`)
-      
       const versionArg = version.startsWith('v') ? version : `v${version}`
-      logger.info(`Running opencode upgrade ${versionArg}...`)
-      
-      const upgradeOutput = execSync(`opencode upgrade ${versionArg} 2>&1`, { encoding: 'utf8' })
+      logger.info(`Running opencode upgrade ${versionArg} with 90s timeout...`)
+
+      const { output: upgradeOutput, timedOut } = execWithTimeout(`opencode upgrade ${versionArg} 2>&1`, 90000)
       logger.info(`Upgrade output: ${upgradeOutput}`)
-      
-      await new Promise(r => setTimeout(r, 2000))
-      
+
+      if (timedOut) {
+        logger.warn('OpenCode version install timed out after 90 seconds')
+        throw new Error('Version install command timed out after 90 seconds')
+      }
+
       const newVersion = await opencodeServerManager.fetchVersion()
       logger.info(`New OpenCode version: ${newVersion}`)
-      
+
       opencodeServerManager.clearStartupError()
       await opencodeServerManager.restart()
       logger.info('OpenCode server restarted after version change')
-      
+
       return c.json({
         success: true,
         message: `OpenCode ${oldVersion ? `changed from v${oldVersion} to` : 'installed as'} v${newVersion}`,
@@ -511,10 +571,44 @@ export function createSettingsRoutes(db: Database) {
       })
     } catch (error) {
       logger.error('Failed to install OpenCode version:', error)
-      return c.json({
-        error: 'Failed to install OpenCode version',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }, 500)
+      logger.warn('Attempting to recover OpenCode server...')
+
+      let recovered = false
+      let recoveryMessage = ''
+
+      opencodeServerManager.clearStartupError()
+      try {
+        await opencodeServerManager.restart()
+        logger.warn('OpenCode server restarted after install failure')
+        recovered = true
+        recoveryMessage = 'Server recovered'
+      } catch (recoveryError) {
+        logger.error('Failed to recover OpenCode server:', recoveryError)
+        recovered = false
+        recoveryMessage = recoveryError instanceof Error ? recoveryError.message : 'Unknown error'
+      }
+
+      const currentVersion = opencodeServerManager.getVersion() || oldVersion
+
+      return c.json(
+        recovered ? {
+          success: false,
+          error: 'Version install failed but server recovered',
+          details: error instanceof Error ? error.message : 'Unknown error',
+          oldVersion,
+          newVersion: currentVersion,
+          recovered: true,
+          recoveryMessage
+        } : {
+          error: 'Failed to install OpenCode version and could not recover',
+          details: error instanceof Error ? error.message : 'Unknown error',
+          oldVersion,
+          newVersion: currentVersion,
+          recovered: false,
+          recoveryMessage
+        },
+        recovered ? 400 : 500
+      )
     }
   })
 
