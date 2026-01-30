@@ -121,10 +121,10 @@ When `TELEGRAM_BOT_TOKEN` environment variable is provided, Telegram bot integra
 ### Configuration
 ```bash
 # Required - Bot token from @BotFather
-TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+TELEGRAM_BOT_TOKEN=<your-bot-token-from-botfather>
 
 # Optional - Comma-separated chat IDs for access control
-TELEGRAM_ALLOWLIST=123456789,987654321
+TELEGRAM_ALLOWLIST=<chat-id-1>,<chat-id-2>
 ```
 
 ### API Endpoints
