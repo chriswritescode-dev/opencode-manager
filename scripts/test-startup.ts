@@ -340,6 +340,183 @@ async function testTunnelMode(): Promise<void> {
   }
 }
 
+interface EndpointEntry {
+  type: 'local' | 'tunnel'
+  url: string
+  timestamp: string
+}
+
+interface EndpointsConfig {
+  endpoints: EndpointEntry[]
+}
+
+async function testEndpointsFile(): Promise<void> {
+  console.log('\n📋 Test: Endpoints File (regression test for tunnel URL persistence)\n')
+
+  const fs = await import('fs')
+  const os = await import('os')
+  const endpointsPath = path.join(os.homedir(), '.local', 'run', 'opencode-manager', 'endpoints.json')
+  const authPath = path.join(os.homedir(), '.local', 'run', 'opencode-manager', 'auth.json')
+
+  await runTest('Endpoints file exists', async () => {
+    if (!fs.existsSync(endpointsPath)) {
+      throw new Error(`Endpoints file not found at ${endpointsPath}`)
+    }
+  })
+
+  let config: EndpointsConfig | null = null
+
+  await runTest('Endpoints file has valid JSON structure', async () => {
+    const content = fs.readFileSync(endpointsPath, 'utf8')
+    config = JSON.parse(content) as EndpointsConfig
+    
+    if (!config.endpoints || !Array.isArray(config.endpoints)) {
+      throw new Error('endpoints.json missing "endpoints" array')
+    }
+  })
+
+  await runTest('Endpoints file contains local endpoint', async () => {
+    if (!config) throw new Error('Config not loaded')
+    
+    const localEndpoint = config.endpoints.find(e => e.type === 'local')
+    if (!localEndpoint) {
+      throw new Error('No local endpoint found')
+    }
+    if (!localEndpoint.url.startsWith('http://localhost:')) {
+      throw new Error(`Invalid local URL: ${localEndpoint.url}`)
+    }
+    if (!localEndpoint.timestamp) {
+      throw new Error('Local endpoint missing timestamp')
+    }
+  })
+
+  await runTest('Endpoints file contains tunnel endpoint', async () => {
+    if (!config) throw new Error('Config not loaded')
+    
+    const tunnelEndpoint = config.endpoints.find(e => e.type === 'tunnel')
+    if (!tunnelEndpoint) {
+      throw new Error('No tunnel endpoint found - this was the bug we fixed!')
+    }
+    if (!tunnelEndpoint.url.includes('.trycloudflare.com')) {
+      throw new Error(`Invalid tunnel URL: ${tunnelEndpoint.url}`)
+    }
+    if (!tunnelEndpoint.timestamp) {
+      throw new Error('Tunnel endpoint missing timestamp')
+    }
+  })
+
+  await runTest('Tunnel endpoint timestamp is recent (within 24h)', async () => {
+    if (!config) throw new Error('Config not loaded')
+    
+    const tunnelEndpoint = config.endpoints.find(e => e.type === 'tunnel')
+    if (!tunnelEndpoint) throw new Error('No tunnel endpoint')
+    
+    const timestamp = new Date(tunnelEndpoint.timestamp)
+    const now = new Date()
+    const hoursDiff = (now.getTime() - timestamp.getTime()) / (1000 * 60 * 60)
+    
+    if (hoursDiff > 24) {
+      throw new Error(`Tunnel timestamp is ${hoursDiff.toFixed(1)} hours old - endpoints may not be updating properly`)
+    }
+  })
+
+  let authConfig: { username?: string; password?: string } | null = null
+  
+  await runTest('Auth file exists and has credentials', async () => {
+    if (!fs.existsSync(authPath)) {
+      throw new Error(`Auth file not found at ${authPath}`)
+    }
+    const content = fs.readFileSync(authPath, 'utf8')
+    authConfig = JSON.parse(content)
+    
+    if (!authConfig?.username || !authConfig?.password) {
+      throw new Error('Auth file missing username or password')
+    }
+  })
+
+  await runTest('Tunnel URL is accessible and returns webapp', async () => {
+    if (!config) throw new Error('Config not loaded')
+    if (!authConfig) throw new Error('Auth not loaded')
+    
+    const tunnelEndpoint = config.endpoints.find(e => e.type === 'tunnel')
+    if (!tunnelEndpoint) throw new Error('No tunnel endpoint')
+    
+    let tunnelUrl = tunnelEndpoint.url
+    if (!tunnelUrl.includes('@')) {
+      const urlObj = new URL(tunnelUrl)
+      urlObj.username = authConfig.username!
+      urlObj.password = authConfig.password!
+      tunnelUrl = urlObj.toString()
+    }
+    
+    let success = false
+    let lastError = ''
+    
+    for (let i = 0; i < 5; i++) {
+      try {
+        const resp = await fetch(`${tunnelUrl}/api/health`, { 
+          signal: AbortSignal.timeout(10000),
+          headers: {
+            'Authorization': `Basic ${Buffer.from(`${authConfig.username}:${authConfig.password}`).toString('base64')}`
+          }
+        })
+        
+        if (resp.ok) {
+          const data = await resp.json() as { status: string }
+          if (data.status === 'healthy') {
+            success = true
+            break
+          }
+          lastError = `Status: ${data.status}`
+        } else {
+          lastError = `HTTP ${resp.status}`
+        }
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e)
+      }
+      await sleep(2000)
+    }
+    
+    if (!success) {
+      throw new Error(`Tunnel URL not accessible: ${lastError}. URL: ${tunnelUrl.replace(/:[^:@]+@/, ':***@')}`)
+    }
+  })
+
+  await runTest('Tunnel serves HTML for root path (webapp)', async () => {
+    if (!config) throw new Error('Config not loaded')
+    if (!authConfig) throw new Error('Auth not loaded')
+    
+    const tunnelEndpoint = config.endpoints.find(e => e.type === 'tunnel')
+    if (!tunnelEndpoint) throw new Error('No tunnel endpoint')
+    
+    let tunnelUrl = tunnelEndpoint.url
+    if (!tunnelUrl.includes('@')) {
+      const urlObj = new URL(tunnelUrl)
+      urlObj.username = authConfig.username!
+      urlObj.password = authConfig.password!
+      tunnelUrl = urlObj.toString()
+    }
+    
+    const resp = await fetch(tunnelUrl, { 
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'Authorization': `Basic ${Buffer.from(`${authConfig.username}:${authConfig.password}`).toString('base64')}`
+      }
+    })
+    
+    if (!resp.ok) {
+      throw new Error(`Root path returned HTTP ${resp.status}`)
+    }
+    
+    const contentType = resp.headers.get('content-type') || ''
+    const body = await resp.text()
+    
+    if (!contentType.includes('text/html') && !body.includes('<!DOCTYPE') && !body.includes('<html')) {
+      throw new Error(`Root path did not return HTML. Content-Type: ${contentType}`)
+    }
+  })
+}
+
 async function main() {
   console.log('\n╔═══════════════════════════════════════════════════════╗')
   console.log('║   OpenCode Manager - Native Start E2E Tests           ║')
@@ -348,6 +525,7 @@ async function main() {
   const startTime = Date.now()
 
   try {
+    await testEndpointsFile()
     await testCleanupScript()
     await testNormalMode()
     await testClientMode()
