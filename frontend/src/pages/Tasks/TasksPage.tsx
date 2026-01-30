@@ -40,7 +40,7 @@ export default function TasksPage() {
       if (!res.ok) throw new Error('Failed to fetch tasks')
       const data = await res.json()
       setTasks(data)
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load tasks',
@@ -53,6 +53,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     fetchTasks()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleDelete = async (id: number) => {
@@ -62,7 +63,7 @@ export default function TasksPage() {
       if (!res.ok) throw new Error('Failed to delete')
       setTasks(tasks.filter((t) => t.id !== id))
       toast({ title: 'Task deleted' })
-    } catch (error) {
+    } catch {
       toast({ title: 'Error', description: 'Failed to delete task', variant: 'destructive' })
     }
   }
@@ -74,7 +75,7 @@ export default function TasksPage() {
       const updated = await res.json()
       setTasks(tasks.map((t) => (t.id === id ? updated : t)))
       toast({ title: `Task ${updated.status === 'active' ? 'resumed' : 'paused'}` })
-    } catch (error) {
+    } catch {
       toast({ title: 'Error', description: 'Failed to toggle task', variant: 'destructive' })
     }
   }
@@ -86,7 +87,7 @@ export default function TasksPage() {
       toast({ title: 'Task execution started' })
       // Optionally refresh to see last run update, though it might take a moment
       setTimeout(fetchTasks, 1000)
-    } catch (error) {
+    } catch {
       toast({ title: 'Error', description: 'Failed to run task', variant: 'destructive' })
     }
   }
