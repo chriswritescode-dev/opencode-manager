@@ -97,32 +97,52 @@ STT MUST work with two providers, switchable in Settings → Voice:
 ## 4. Telegram Integration
 
 ### Requirement
-When `TELEGRAM_BOT_TOKEN` environment variable is provided, Telegram bot integration MUST be enabled.
+When `TELEGRAM_BOT_TOKEN` environment variable is provided, Telegram bot integration MUST start automatically.
+
+### Architecture
+```
+┌─────────────┐     ┌──────────────────────────────────────┐
+│  Telegram   │────▶│         opencode-manager             │
+│   User      │◀────│  ┌──────────┐    ┌──────────────┐   │
+└─────────────┘     │  │ Telegram │───▶│   OpenCode   │   │
+                    │  │ Service  │◀───│   SDK Client │   │
+                    │  └──────────┘    └──────────────┘   │
+                    └──────────────────────────────────────┘
+```
 
 ### Behavior
 1. Check for `TELEGRAM_BOT_TOKEN` on startup
-2. If present, initialize Telegram bot
+2. If present, start Telegram bot using grammy library
 3. Bot receives messages and forwards to OpenCode session
-4. Responses are sent back to Telegram chat
-5. Status visible in Settings or health endpoint
+4. Responses are sent back to Telegram chat (chunked for 4096 char limit)
+5. Status visible in health endpoint: `/api/health`
+6. Optional allowlist via `TELEGRAM_ALLOWLIST` env var
 
 ### Configuration
 ```bash
-# Environment variable
-TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+# Required - Bot token from @BotFather
+TELEGRAM_BOT_TOKEN=<your-bot-token-from-botfather>
 
-# Or in .env file
-TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+# Optional - Comma-separated chat IDs for access control
+TELEGRAM_ALLOWLIST=<chat-id-1>,<chat-id-2>
 ```
 
+### API Endpoints
+- `GET /api/telegram/status` - Bot status, session count, allowlist count
+- `POST /api/telegram/start` - Start bot manually
+- `POST /api/telegram/stop` - Stop bot
+- `GET /api/telegram/sessions` - List active chat sessions
+- `GET /api/telegram/allowlist` - List allowed chat IDs
+- `POST /api/telegram/allowlist` - Add chat ID to allowlist
+- `DELETE /api/telegram/allowlist/:chatId` - Remove from allowlist
+
 ### Features
+- Per-chat session persistence (stored in SQLite)
 - Forward text messages to OpenCode
 - Receive and display OpenCode responses
-- Support for voice messages (transcribed via STT)
-- Optional: Support for file attachments
-
-### Documentation
-See `docs/telegram-owpenbot.md` for setup guide using owpenbot.
+- Typing indicator while processing
+- Message queuing to prevent race conditions
+- Optional allowlist for access control
 
 ---
 

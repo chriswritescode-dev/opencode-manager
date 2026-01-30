@@ -143,6 +143,31 @@ export function runMigrations(db: Database): void {
       logger.debug('Scheduled tasks table might already exist:', error)
     }
     
+    try {
+      db.run(`
+        CREATE TABLE IF NOT EXISTS telegram_sessions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_id TEXT UNIQUE NOT NULL,
+          opencode_session_id TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `)
+      db.run('CREATE INDEX IF NOT EXISTS idx_telegram_sessions_chat_id ON telegram_sessions(chat_id)')
+      
+      db.run(`
+        CREATE TABLE IF NOT EXISTS telegram_allowlist (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          chat_id TEXT UNIQUE NOT NULL,
+          added_at INTEGER NOT NULL
+        )
+      `)
+      db.run('CREATE INDEX IF NOT EXISTS idx_telegram_allowlist_chat_id ON telegram_allowlist(chat_id)')
+      logger.info('Telegram tables created/verified')
+    } catch (error) {
+      logger.debug('Telegram tables might already exist:', error)
+    }
+    
     logger.info('Database migrations completed successfully')
   } catch (error) {
     logger.error('Failed to run database migrations:', error)

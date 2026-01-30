@@ -87,7 +87,7 @@ Add Telegram bot directly to opencode-manager backend using the `grammy` library
 1. Create a Telegram bot via [@BotFather](https://t.me/BotFather):
    - Send `/newbot` to @BotFather
    - Follow prompts to name your bot
-   - Copy the bot token (format: `123456789:ABCdefGHIjklMNOpqrsTUVwxyz`)
+   - Copy the bot token (format: `<bot-id>:<secret-token>`)
 
 2. opencode-manager running with API accessible
 
@@ -450,7 +450,7 @@ Add Telegram settings to `frontend/src/pages/SettingsPage.tsx`:
           <Label>Bot Token</Label>
           <Input
             type="password"
-            placeholder="123456789:ABCdef..."
+            placeholder="Enter bot token from @BotFather"
             value={telegramToken}
             onChange={(e) => setTelegramToken(e.target.value)}
           />

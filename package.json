@@ -68,9 +68,11 @@
   },
   "dependencies": {
     "@opencode-ai/sdk": "^1.1.36",
+    "backend": "^0.0.0",
     "class-variance-authority": "^0.7.1",
     "dotenv": "^17.2.3",
     "eventsource": "^4.1.0",
+    "grammy": "^1.39.3",
     "node-pty": "^1.1.0",
     "ws": "^8.18.3"
   },
