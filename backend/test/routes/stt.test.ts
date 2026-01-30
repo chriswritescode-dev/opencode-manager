@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
+const mockWhisperManager = vi.hoisted(() => ({
+  syncStatus: vi.fn(),
+  transcribe: vi.fn(),
+  getModels: vi.fn(),
+  getStatus: vi.fn(),
+  getPort: vi.fn(),
+  getHost: vi.fn(),
+  getBaseUrl: vi.fn()
+}))
+
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
 }))
@@ -30,37 +40,6 @@ vi.mock('../../src/services/settings', () => ({
   }))
 }))
 
-const mockWhisperManager = {
-  syncStatus: vi.fn().mockResolvedValue({
-    running: true,
-    port: 5552,
-    host: '127.0.0.1',
-    model: 'base',
-    error: null
-  }),
-  transcribe: vi.fn().mockResolvedValue({
-    text: 'Hello world',
-    language: 'en',
-    language_probability: 0.98,
-    duration: 2.5
-  }),
-  getModels: vi.fn().mockResolvedValue({
-    models: ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'],
-    current: 'base',
-    default: 'base'
-  }),
-  getStatus: vi.fn().mockReturnValue({
-    running: true,
-    port: 5552,
-    host: '127.0.0.1',
-    model: 'base',
-    error: null
-  }),
-  getPort: vi.fn().mockReturnValue(5552),
-  getHost: vi.fn().mockReturnValue('127.0.0.1'),
-  getBaseUrl: vi.fn().mockReturnValue('http://127.0.0.1:5552')
-}
-
 vi.mock('../../src/services/whisper', () => ({
   whisperServerManager: mockWhisperManager
 }))
@@ -75,6 +54,36 @@ describe('STT Routes', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockDb = {} as any
+    
+    mockWhisperManager.syncStatus.mockResolvedValue({
+      running: true,
+      port: 5552,
+      host: '127.0.0.1',
+      model: 'base',
+      error: null
+    })
+    mockWhisperManager.transcribe.mockResolvedValue({
+      text: 'Hello world',
+      language: 'en',
+      language_probability: 0.98,
+      duration: 2.5
+    })
+    mockWhisperManager.getModels.mockResolvedValue({
+      models: ['tiny', 'base', 'small', 'medium', 'large-v2', 'large-v3'],
+      current: 'base',
+      default: 'base'
+    })
+    mockWhisperManager.getStatus.mockReturnValue({
+      running: true,
+      port: 5552,
+      host: '127.0.0.1',
+      model: 'base',
+      error: null
+    })
+    mockWhisperManager.getPort.mockReturnValue(5552)
+    mockWhisperManager.getHost.mockReturnValue('127.0.0.1')
+    mockWhisperManager.getBaseUrl.mockReturnValue('http://127.0.0.1:5552')
+    
     sttApp = createSTTRoutes(mockDb)
   })
 

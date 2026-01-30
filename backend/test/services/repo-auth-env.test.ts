@@ -36,6 +36,20 @@ vi.mock('../../src/services/settings', () => ({
   })),
 }))
 
+vi.mock('../../src/services/opencode-sdk-client', () => ({
+  opencodeSdkClient: {
+    isConfigured: vi.fn().mockReturnValue(false),
+    configure: vi.fn(),
+    listProjects: vi.fn().mockResolvedValue([]),
+    listSessions: vi.fn().mockResolvedValue([]),
+    getVersion: vi.fn().mockResolvedValue(null),
+    checkHealth: vi.fn().mockResolvedValue(false),
+    getCurrentProject: vi.fn().mockResolvedValue(null),
+    getAllProjectPaths: vi.fn().mockResolvedValue([]),
+    getBaseUrl: vi.fn().mockReturnValue(''),
+  },
+}))
+
 describe('repoService.cloneRepo auth env', () => {
   beforeEach(() => {
     vi.clearAllMocks()
