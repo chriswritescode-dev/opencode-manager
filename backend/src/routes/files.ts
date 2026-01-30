@@ -8,14 +8,18 @@ import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 export function createFileRoutes() {
   const app = new Hono()
 
-  app.get('/*/download-zip', async (c) => {
+  app.get('download-zip', async(c) => {
+    return c.json({ error: 'No path provided' }, 400)
+  })
+
+  app.get(':path{.+}/download-zip', async (c) => {
+    const userPath = c.req.param('path')
+
+    if (!userPath) {
+      return c.json({ error: 'No path provided' }, 400)
+    }
+
     try {
-      const userPath = c.req.path.replace(/^\/api\/files\/(.*)\/download-zip$/, '$1')
-
-      if (!userPath) {
-        return c.json({ error: 'No path provided' }, 400)
-      }
-
       logger.info(`Starting ZIP archive creation for ${userPath}`)
 
       const archivePath = await archiveService.createDirectoryArchive(userPath)
@@ -59,7 +63,7 @@ export function createFileRoutes() {
         const startLine = parseInt(startLineParam, 10)
         const endLine = parseInt(endLineParam, 10)
         
-        if (isNaN(startLine) || isNaN(endLine) || startLine < 0 || endLine < startLine) {
+        if (isNaN(startLine) || isNaN(endLine) || startLine < 0 || endLine <= startLine) {
           return c.json({ error: 'Invalid line range parameters' }, 400)
         }
         
