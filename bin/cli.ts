@@ -132,7 +132,16 @@ async function checkServerHealth(port: number): Promise<boolean> {
     const response = await fetch(`http://127.0.0.1:${port}/doc`, {
       signal: AbortSignal.timeout(2000)
     })
-    return response.ok
+    return response.status > 0
+  } catch {
+    return false
+  }
+}
+
+function isPortInUse(port: number): boolean {
+  try {
+    const output = execSync(`lsof -ti:${port}`, { encoding: 'utf8' }).trim()
+    return output.length > 0
   } catch {
     return false
   }
@@ -199,6 +208,20 @@ function cleanupManagedPorts(): void {
 }
 
 async function startOpenCodeServer(port: number): Promise<boolean> {
+  if (isPortInUse(port)) {
+    console.log(`\n⚠️  Port ${port} is already in use`)
+    for (let i = 0; i < 10; i++) {
+      if (await checkServerHealth(port)) {
+        console.log(`✓ Existing server on port ${port} is responding`)
+        return true
+      }
+      await new Promise(r => setTimeout(r, 500))
+    }
+    console.log(`   Server on port ${port} not responding, killing and restarting...`)
+    killProcessOnPort(port)
+    await new Promise(r => setTimeout(r, 1000))
+  }
+
   console.log(`\n🚀 Starting opencode server on port ${port}...`)
   
   const serverProcess = spawn('opencode', ['serve', '--port', port.toString(), '--hostname', '127.0.0.1'], {
