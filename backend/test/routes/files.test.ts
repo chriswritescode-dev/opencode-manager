@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, type MockedFunction } from 'vitest'
 import { createFileRoutes } from '../../src/routes/files'
 import { Hono } from 'hono'
 import type { ReadStream } from 'fs'
@@ -12,20 +12,6 @@ interface FileUploadResult {
   size: number
   mimeType: string
 }
-
-const getFile = vi.fn()
-const getRawFileContent = vi.fn()
-const getFileRange = vi.fn()
-const uploadFile = vi.fn()
-const createFileOrFolder = vi.fn()
-const deleteFileOrFolder = vi.fn()
-const renameOrMoveFile = vi.fn()
-const applyFilePatches = vi.fn()
-
-const createDirectoryArchive = vi.fn()
-const getArchiveSize = vi.fn()
-const getArchiveStream = vi.fn()
-const deleteArchive = vi.fn()
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
@@ -43,22 +29,36 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
 }))
 
 vi.mock('../../src/services/files', () => ({
-  getFile,
-  getRawFileContent,
-  getFileRange,
-  uploadFile,
-  createFileOrFolder,
-  deleteFileOrFolder,
-  renameOrMoveFile,
-  applyFilePatches,
+  getFile: vi.fn(),
+  getRawFileContent: vi.fn(),
+  getFileRange: vi.fn(),
+  uploadFile: vi.fn(),
+  createFileOrFolder: vi.fn(),
+  deleteFileOrFolder: vi.fn(),
+  renameOrMoveFile: vi.fn(),
+  applyFilePatches: vi.fn(),
 }))
 
 vi.mock('../../src/services/archive', () => ({
-  createDirectoryArchive,
-  getArchiveSize,
-  getArchiveStream,
-  deleteArchive,
+  createDirectoryArchive: vi.fn(),
+  getArchiveSize: vi.fn(),
+  getArchiveStream: vi.fn(),
+  deleteArchive: vi.fn(),
 }))
+
+const getFile = fileService.getFile as MockedFunction<typeof fileService.getFile>
+const getRawFileContent = fileService.getRawFileContent as MockedFunction<typeof fileService.getRawFileContent>
+const getFileRange = fileService.getFileRange as MockedFunction<typeof fileService.getFileRange>
+const uploadFile = fileService.uploadFile as MockedFunction<typeof fileService.uploadFile>
+const createFileOrFolder = fileService.createFileOrFolder as MockedFunction<typeof fileService.createFileOrFolder>
+const deleteFileOrFolder = fileService.deleteFileOrFolder as MockedFunction<typeof fileService.deleteFileOrFolder>
+const renameOrMoveFile = fileService.renameOrMoveFile as MockedFunction<typeof fileService.renameOrMoveFile>
+const applyFilePatches = fileService.applyFilePatches as MockedFunction<typeof fileService.applyFilePatches>
+
+const createDirectoryArchive = archiveService.createDirectoryArchive as MockedFunction<typeof archiveService.createDirectoryArchive>
+const getArchiveSize = archiveService.getArchiveSize as MockedFunction<typeof archiveService.getArchiveSize>
+const getArchiveStream = archiveService.getArchiveStream as MockedFunction<typeof archiveService.getArchiveStream>
+const deleteArchive = archiveService.deleteArchive as MockedFunction<typeof archiveService.deleteArchive>
 
 describe('File Routes', () => {
   let app: Hono
@@ -391,7 +391,9 @@ describe('File Routes', () => {
     })
 
     it('should return error when deletion fails', async () => {
-      deleteFileOrFolder.mockRejectedValue(new Error('File not found'))
+      const error = new Error('File not found') as any
+      error.statusCode = 404
+      deleteFileOrFolder.mockRejectedValue(error)
 
       const response = await app.request('/api/files/test-repo/nonexistent.ts', {
         method: 'DELETE',
@@ -436,7 +438,9 @@ describe('File Routes', () => {
       })
 
       it('should return error when patch application fails', async () => {
-        applyFilePatches.mockRejectedValue(new Error('Invalid patch'))
+        const error = new Error('Invalid patch') as any
+        error.statusCode = 404
+        applyFilePatches.mockRejectedValue(error)
 
         const response = await app.request('/api/files/test-repo/test.ts', {
           method: 'PATCH',
@@ -472,7 +476,9 @@ describe('File Routes', () => {
       })
 
       it('should return error when rename fails', async () => {
-        renameOrMoveFile.mockRejectedValue(new Error('File not found'))
+        const error = new Error('File not found') as any
+        error.statusCode = 404
+        renameOrMoveFile.mockRejectedValue(error)
 
         const response = await app.request('/api/files/test-repo/nonexistent.ts', {
           method: 'PATCH',
@@ -499,9 +505,10 @@ describe('File Routes', () => {
     }
 
     it('should reject path with ../ segments via service error', async () => {
-      getFile.mockRejectedValue({ message: 'Path traversal detected', statusCode: 403 })
+      const error = { message: 'Path traversal detected', statusCode: 403 }
+      getFile.mockRejectedValue(error)
 
-      const response = await app.request('/api/files/../../../etc/passwd')
+      const response = await app.request('/api/files/test-repo/../etc/passwd')
       const body = await response.json() as { error: string }
 
       expect(response.status).toBe(403)
@@ -509,7 +516,8 @@ describe('File Routes', () => {
     })
 
     it('should reject encoded path traversal attempts', async () => {
-      getFile.mockRejectedValue({ message: 'Path traversal detected', statusCode: 403 })
+      const error = { message: 'Path traversal detected', statusCode: 403 }
+      getFile.mockRejectedValue(error)
 
       const response = await app.request('/api/files/test-repo/..%2Fetc')
       const body = await response.json() as { error: string }
