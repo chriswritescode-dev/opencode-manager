@@ -1,5 +1,19 @@
 # OpenCode WebUI - Agent Guidelines
 
+## ⚠️ CRITICAL: Read Product Requirements First
+
+**Before implementing or modifying ANY feature, read `docs/requirements.md`.**
+
+This document defines the mandatory requirements:
+1. **Cloudflare Tunnel** - MUST always start, endpoint MUST be in endpoints.json
+2. **TTS** - MUST work with Coqui/Chatterbox AND Browser API, switchable in Settings
+3. **STT** - MUST work with Faster Whisper AND Browser API, switchable in Settings  
+4. **Telegram** - MUST work when TELEGRAM_BOT_TOKEN is provided
+
+**DO NOT** implement changes that violate these requirements.
+
+---
+
 ## ⚠️ CRITICAL: Post-Deployment Testing Protocol
 
 **After ANY deployment or service reinstallation, you MUST follow the testing protocol in `docs/testing.md`.**

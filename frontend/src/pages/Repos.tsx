@@ -1,10 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { RepoList } from "@/components/repo/RepoList";
 import { AddRepoDialog } from "@/components/repo/AddRepoDialog";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/layout/Header";
 import { Button } from "@/components/ui/button";
-import { Plus, FolderOpen, Bell, BellOff, BellRing, Clock, Command } from "lucide-react";
+import { Plus, FolderOpen, Bell, BellOff, BellRing, Clock, Command, CalendarClock } from "lucide-react";
 import { useNotifications } from "@/hooks/useNotifications";
 import { RecentSessions } from "@/components/session/RecentSessions";
 import { useSessionSwitcherStore } from "@/stores/sessionSwitcherStore";
@@ -75,6 +76,7 @@ function NotificationButton() {
 }
 
 export function Repos() {
+  const navigate = useNavigate();
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const openSwitcher = useSessionSwitcherStore((state) => state.open);
@@ -99,6 +101,14 @@ export function Repos() {
               <Command className="w-4 h-4" />
             </Button>
             <NotificationButton />
+            <Button
+              variant="outline"
+              onClick={() => navigate('/tasks')}
+              title="Scheduled Tasks"
+            >
+              <CalendarClock className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Tasks</span>
+            </Button>
             <Button
               variant="outline"
               onClick={() => setFileBrowserOpen(true)}
