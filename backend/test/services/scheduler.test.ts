@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from 'vitest'
 import type { Database } from 'bun:sqlite'
 
 vi.mock('bun:sqlite', () => ({
@@ -674,9 +674,9 @@ describe('SchedulerService - Cron Trigger Simulation', () => {
     vi.clearAllMocks()
     cronCallbacks = new Map()
     insertedTasks = []
-    taskIdCounter = 1
+    taskIdCounter = 1;
 
-    vi.mocked(cron.schedule).mockImplementation((expression: string, callback: any, options: any) => {
+    (cron.schedule as Mock).mockImplementation((expression: string, callback: any, options: any) => {
       cronCallbacks.set(expression, callback)
       return {
         stop: vi.fn(),

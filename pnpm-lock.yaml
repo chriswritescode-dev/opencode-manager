@@ -11,6 +11,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: ^1.1.36
         version: 1.1.43
+      backend:
+        specifier: ^0.0.0
+        version: 0.0.0
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -20,6 +23,9 @@ importers:
       eventsource:
         specifier: ^4.1.0
         version: 4.1.0
+      grammy:
+        specifier: ^1.39.3
+        version: 1.39.3
       node-pty:
         specifier: ^1.1.0
         version: 1.1.0
@@ -1894,6 +1900,9 @@ packages:
     peerDependenciesMeta:
       react-native-b4a:
         optional: true
+
+  backend@0.0.0:
+    resolution: {integrity: sha512-Fq2aG5+zmmsKv2Dhm3ijAU5spnKOb5ldJlnnC/Vhk6n8In6zaq9eCPBMRiz2j94P/r84QEaBmtwh9tjaDPiQqg==}
 
   bail@2.0.2:
     resolution: {integrity: sha512-0xO6mYd7JB2YesxDKplafRpsiOzPt9V02ddPCLbY1xYGPOX24NTyN50qnUxgCPcSoYMhKpAuBTjQoRZCAkUDRw==}
@@ -5873,6 +5882,8 @@ snapshots:
       - debug
 
   b4a@1.7.3: {}
+
+  backend@0.0.0: {}
 
   bail@2.0.2: {}
 
