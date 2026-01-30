@@ -137,3 +137,26 @@ File: `backend/test/services/telegram.test.ts` (DELETED)
 ### Test Summary
 - **Total Tests**: 103 (all passing)
 - **Test Files**: 7
+
+## Bug Fixes (Added During Feature Development)
+
+### Stale Tunnel URL Cleanup
+**Commit**: 1c62196
+
+**Problem**: When the service starts WITHOUT a tunnel, old tunnel entries in `~/.local/run/opencode-manager/endpoints.json` are NOT removed, leaving stale/inaccessible URLs.
+
+**Fix**: Added else clause to `bin/cli.ts` `updateEndpoints()` function to remove tunnel entries when no tunnel URL is provided:
+```typescript
+if (tunnelUrl) {
+  config.endpoints = config.endpoints.filter(e => e.type !== 'tunnel' || e.url === tunnelUrl)
+  config.endpoints.push({ type: 'tunnel', url: tunnelUrl, timestamp })
+} else {
+  config.endpoints = config.endpoints.filter(e => e.type !== 'tunnel')
+}
+```
+
+## PR Status
+
+- **PR #17**: https://github.com/dzianisv/opencode-manager/pull/17
+- **CI Status**: Running (Build & Unit Tests, Voice API E2E, Browser E2E)
+- **All commits pushed**
