@@ -19,10 +19,10 @@ Integrate Telegram bot directly into opencode-manager so it starts automatically
 - [x] Task 7: Auto-start Telegram on backend startup
 - [x] Task 8: Add Telegram status to health endpoint
 - [x] Task 9: Write unit tests for Telegram service
-- [ ] Task 10: Write integration tests (E2E test script)
+- [ ] Task 10: Write integration tests (E2E test script) - future work
 - [x] Task 11: Update docs/requirements.md
 - [x] Task 12: Run all tests and verify
-- [ ] Task 13: Create PR
+- [x] Task 13: Create PR - https://github.com/chriswritescode-dev/opencode-manager/pull/98
 
 ## Architecture
 
