@@ -82,8 +82,6 @@ function updateEndpoints(localUrl: string, tunnelUrl?: string): void {
   if (tunnelUrl) {
     config.endpoints = config.endpoints.filter(e => e.type !== 'tunnel' || e.url === tunnelUrl)
     config.endpoints.push({ type: 'tunnel', url: tunnelUrl, timestamp })
-  } else {
-    config.endpoints = config.endpoints.filter(e => e.type !== 'tunnel')
   }
   
   fs.writeFileSync(ENDPOINTS_FILE, JSON.stringify(config, null, 2), { mode: 0o600 })
