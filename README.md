@@ -4,6 +4,14 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 
 ## Demo
 
+### Responsive Dashboard
+
+<p align="center">
+  <img src="docs/assets/dashboard-responsive.gif" alt="Responsive Dashboard - Mobile, Tablet, Desktop" width="600" />
+</p>
+
+*Responsive design: The dashboard adapts seamlessly from mobile to desktop. Recent Sessions and Repositories use consistent card styling with hover effects and grid layouts.*
+
 ### Talk Mode (Voice-to-Code)
 
 <p align="center">
@@ -11,6 +19,46 @@ Mobile-first web interface for OpenCode AI agents. Manage, control, and code wit
 </p>
 
 *Voice-powered coding: Speak your request, get AI-generated code. The demo shows the Talk Mode E2E test - voice input is transcribed via Whisper STT, sent to OpenCode AI, and the response streams back in real-time.*
+
+### Feature Tour
+
+<p align="center">
+  <img src="docs/assets/feature-tour.gif" alt="Feature Tour - Dashboard, Search, Settings, Chat" width="600" />
+</p>
+
+*Key features: Dashboard overview, global search (Cmd+K), voice settings (TTS/STT/Talk Mode), Cloudflare tunnel status with metrics, keyboard shortcuts, OpenCode config, AI providers, and chat sessions.*
+
+## Why This Fork?
+
+This fork of [opencode-manager](https://github.com/chriswritescode-dev/opencode-manager) adds production-ready voice features, cloud deployment, and remote access:
+
+| Feature | This Fork | Upstream |
+|---------|-----------|----------|
+| **Built-in STT** | ✅ Faster Whisper server (local, no API key) | ❌ External API only |
+| **Built-in TTS** | ✅ Coqui + Chatterbox engines (local) | ❌ External API only |
+| **Browser Voice** | ✅ Web Speech API fallback | ✅ Web Speech API |
+| **System Service** | ✅ `install-service` for macOS/Linux | ❌ Manual startup |
+| **Cloudflare Tunnel** | ✅ Built-in, auto-starts with service | ❌ Not included |
+| **Tunnel Metrics UI** | ✅ Live connection stats in Settings | ❌ Not included |
+| **Cloud Deploy** | ✅ One-command Azure deployment | ❌ Not included |
+| **Basic Auth** | ✅ Caddy proxy with auth | ❌ Not included |
+| **E2E Voice Tests** | ✅ Browser + API tests | ❌ Not included |
+| **Large Output Fix** | ✅ Context overflow prevention | ❌ Uses official OpenCode |
+
+**Quick Start:**
+```bash
+# Install globally
+bun install -g github:dzianisv/opencode-manager
+
+# Run as system service (auto-starts on boot, includes tunnel)
+opencode-manager install-service
+
+# Or run manually
+opencode-manager start
+
+# Access from anywhere via Cloudflare tunnel URL
+cat ~/.local/run/opencode-manager/endpoints.json
+```
 
 ## Why We Use a Fork of OpenCode
 
