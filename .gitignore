@@ -29,3 +29,6 @@ temp/
 .tts/
 .reflection/
 .test/
+
+# Transient planning docs
+plan.md
