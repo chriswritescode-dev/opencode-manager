@@ -67,14 +67,22 @@
     "tesseract.js": "^7.0.0"
   },
   "dependencies": {
+    "@hono/node-server": "^1.19.5",
+    "@hono/node-ws": "^1.2.0",
     "@opencode-ai/sdk": "^1.1.36",
-    "backend": "^0.0.0",
+    "archiver": "^7.0.1",
     "class-variance-authority": "^0.7.1",
     "dotenv": "^17.2.3",
     "eventsource": "^4.1.0",
     "grammy": "^1.39.3",
+    "hono": "^4.10.1",
+    "node-cron": "^4.2.1",
     "node-pty": "^1.1.0",
-    "ws": "^8.18.3"
+    "socket.io": "^4.8.3",
+    "strip-json-comments": "^3.1.1",
+    "web-push": "^3.6.7",
+    "ws": "^8.18.3",
+    "zod": "^4.1.12"
   },
   "engines": {
     "node": ">=18",
