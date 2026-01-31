@@ -12,9 +12,10 @@ export function createFileRoutes() {
     const path = c.req.path
 
     if (path.endsWith('/download-zip')) {
-      const userPath = path.replace(/\/api\/files\/(.+?)\/download-zip$/, '$1')
+      const match = path.match(/\/api\/files\/(.+?)\/download-zip$/)
+      const userPath = match?.[1]
 
-      if (!userPath || userPath === '/download-zip') {
+      if (!userPath) {
         return c.json({ error: 'No path provided' }, 400)
       }
 
