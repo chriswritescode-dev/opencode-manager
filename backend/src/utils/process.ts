@@ -6,6 +6,7 @@ interface ExecuteCommandOptions {
   silent?: boolean
   env?: Record<string, string>
   ignoreExitCode?: boolean
+  timeout?: number
 }
 
 export async function executeCommand(
@@ -45,6 +46,15 @@ export async function executeCommand(
 
     let stdout = ''
     let stderr = ''
+    let isResolved = false
+
+    const timeoutId = options.timeout ? setTimeout(() => {
+      if (!isResolved) {
+        isResolved = true
+        proc.kill('SIGKILL')
+        reject(new Error(`Command timed out after ${options.timeout}ms: ${args.join(' ')}`))
+      }
+    }, options.timeout) : undefined
 
     proc.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString()
@@ -55,13 +65,22 @@ export async function executeCommand(
     })
 
     proc.on('error', (error: Error) => {
-      if (!options.silent) {
-        logger.error(`Command failed: ${args.join(' ')}`, error)
+      if (!isResolved) {
+        isResolved = true
+        if (timeoutId) clearTimeout(timeoutId)
+        if (!options.silent) {
+          logger.error(`Command failed: ${args.join(' ')}`, error)
+        }
+        reject(error)
       }
-      reject(error)
     })
 
     proc.on('close', (code: number | null) => {
+      if (isResolved) return
+      
+      isResolved = true
+      if (timeoutId) clearTimeout(timeoutId)
+      
       if (options.ignoreExitCode) {
         resolve({ exitCode: code || 0, stdout, stderr })
       } else if (code === 0) {

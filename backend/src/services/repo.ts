@@ -6,7 +6,32 @@ import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from './git-auth'
+import { isGitHubHttpsUrl } from '../utils/git-auth'
 import path from 'path'
+
+const GIT_CLONE_TIMEOUT = 300000
+
+function enhanceCloneError(error: unknown, repoUrl: string, originalMessage: string): Error {
+  const message = originalMessage.toLowerCase()
+  
+  if (message.includes('authentication failed') || message.includes('could not authenticate') || message.includes('invalid credentials')) {
+    return new Error(`Authentication failed for ${repoUrl}. Please add your credentials in Settings > Git Credentials.`)
+  }
+  
+  if (message.includes('repository not found') || message.includes('404')) {
+    return new Error(`Repository not found: ${repoUrl}. Check the URL and ensure you have access to it.`)
+  }
+  
+  if (message.includes('permission denied') || (isGitHubHttpsUrl(repoUrl) && message.includes('fatal'))) {
+    return new Error(`Access denied to ${repoUrl}. Please add your credentials in Settings > Git Credentials and ensure you have proper access.`)
+  }
+  
+  if (message.includes('timed out')) {
+    return new Error(`Clone timed out for ${repoUrl}. The repository might be too large or there could be network issues. Try again or verify the repository exists.`)
+  }
+  
+  return error instanceof Error ? error : new Error(originalMessage)
+}
 
 interface ErrorWithMessage {
   message: string
@@ -349,27 +374,37 @@ export async function cloneRepo(
       }
       
       try {
-        await executeCommand(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
+        await executeCommand(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
       } catch (error: unknown) {
         if (isErrorWithMessage(error) && getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        logger.info(`Branch '${branch}' not found during clone, cloning default branch and creating branch locally`)
-        await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
-        let localBranchExists = 'missing'
-        try {
-          await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
-          localBranchExists = 'exists'
-        } catch {
-          localBranchExists = 'missing'
-        }
+        if (branch && isErrorWithMessage(error) && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
+          logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
+          try {
+            await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
+          } catch (cloneError: unknown) {
+            throw enhanceCloneError(cloneError, normalizedRepoUrl, getErrorMessage(cloneError))
+          }
+          
+          let localBranchExists = 'missing'
+          try {
+            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
+            localBranchExists = 'exists'
+          } catch {
+            localBranchExists = 'missing'
+          }
+          
           if (localBranchExists.trim() === 'missing') {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', '-b', branch])
           } else {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
           }
+        } else {
+          throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
+        }
       }
     } else {
       if (baseRepoExists.trim() === 'exists') {
@@ -442,7 +477,7 @@ export async function cloneRepo(
           ? ['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName]
           : ['git', 'clone', normalizedRepoUrl, worktreeDirName]
         
-        await executeCommand(cloneCmd, { cwd: getReposPath(), env })
+        await executeCommand(cloneCmd, { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
       } catch (error: unknown) {
         if (isErrorWithMessage(error) && getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
@@ -451,7 +486,12 @@ export async function cloneRepo(
         
         if (branch && isErrorWithMessage(error) && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
-          await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env })
+          try {
+            await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
+          } catch (cloneError: unknown) {
+            throw enhanceCloneError(cloneError, normalizedRepoUrl, getErrorMessage(cloneError))
+          }
+          
           let localBranchExists = 'missing'
           try {
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
@@ -466,7 +506,7 @@ export async function cloneRepo(
             await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
           }
         } else {
-          throw error
+          throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
         }
       }
     }
