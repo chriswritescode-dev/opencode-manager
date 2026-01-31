@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
 import type { UserPreferences } from '@/api/types/settings'
+import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 
 export function useSettings(userId = 'default') {
   const queryClient = useQueryClient()
@@ -43,8 +44,8 @@ export function useSettings(userId = 'default') {
       }
     },
     onSettled: () => {
-      // Refetch to ensure server state
       queryClient.invalidateQueries({ queryKey: ['settings', userId] })
+      invalidateConfigCaches(queryClient)
     },
   })
 

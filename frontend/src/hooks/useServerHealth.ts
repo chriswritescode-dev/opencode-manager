@@ -1,8 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { settingsApi } from '@/api/settings'
-import { useMutation } from '@tanstack/react-query'
-import { useQueryClient } from '@tanstack/react-query'
+import { invalidateConfigCaches, invalidateSettingsCaches } from '@/lib/queryInvalidation'
 
 interface HealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy'
@@ -34,8 +33,7 @@ export function useServerHealth(enabled = true) {
       return await settingsApi.reloadOpenCodeConfig()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
       toast.success('Server configuration reloaded successfully')
     },
     onError: (error: unknown) => {
@@ -53,9 +51,7 @@ export function useServerHealth(enabled = true) {
       return await settingsApi.rollbackOpenCodeConfig()
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateSettingsCaches(queryClient)
       toast.success(data.message)
     },
     onError: () => {

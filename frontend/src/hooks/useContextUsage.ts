@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useMessages } from './useOpenCode'
 import { useQuery } from '@tanstack/react-query'
-import { useSessionAgent } from './useSessionAgent'
 import { useModelSelection } from './useModelSelection'
 
 interface ContextUsage {
@@ -43,11 +42,8 @@ async function fetchProviders(opcodeUrl: string): Promise<ProvidersResponse> {
 
 export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string): ContextUsage => {
   const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
-  const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
   const { modelString: globalModelString } = useModelSelection(opcodeUrl, directory)
-  const modelString = sessionAgent.model 
-    ? `${sessionAgent.model.providerID}/${sessionAgent.model.modelID}` 
-    : globalModelString
+  const modelString = globalModelString
 
   const { data: providersData } = useQuery({
     queryKey: ['providers', opcodeUrl],

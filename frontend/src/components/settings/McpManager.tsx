@@ -8,6 +8,7 @@ import { AddMcpServerDialog } from './AddMcpServerDialog'
 import { McpServerCard } from './McpServerCard'
 import { useMcpServers } from '@/hooks/useMcpServers'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 
 interface McpServerConfig {
   type: 'local' | 'remote'
@@ -61,8 +62,7 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
       await onUpdate(updatedConfig)
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
-      queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
+      invalidateConfigCaches(queryClient)
       setDeleteConfirmServer(null)
     },
   })

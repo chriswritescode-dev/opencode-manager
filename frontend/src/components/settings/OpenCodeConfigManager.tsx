@@ -18,6 +18,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
+import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import type { OpenCodeConfig } from '@/api/types/settings'
 
 interface Command {
@@ -86,7 +87,7 @@ export function OpenCodeConfigManager() {
       return await settingsApi.reloadOpenCodeConfig()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
     },
   })
 
@@ -95,7 +96,7 @@ export function OpenCodeConfigManager() {
       return await settingsApi.restartOpenCodeServer()
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
     },
   })
 
@@ -104,8 +105,7 @@ export function OpenCodeConfigManager() {
       return await settingsApi.upgradeOpenCode()
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
       if (data.upgraded) {
         showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
       } else {
@@ -113,8 +113,7 @@ export function OpenCodeConfigManager() {
       }
     },
     onError: (error) => {
-      queryClient.invalidateQueries({ queryKey: ['health'] })
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
       
       const defaultMessage = 'Failed to upgrade OpenCode'
       
@@ -186,9 +185,8 @@ export function OpenCodeConfigManager() {
         }
       } else {
         showToast.success('Configuration updated')
+        invalidateConfigCaches(queryClient)
       }
-
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
     } catch (error) {
       console.error('Failed to update config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to update config'), { id: 'update-restart' })
@@ -242,7 +240,7 @@ export function OpenCodeConfigManager() {
         showToast.success('Configuration created', { id: 'create-config' })
       }
 
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
     } catch (error) {
       console.error('Failed to create config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to create configuration'), { id: 'create-config' })
@@ -259,9 +257,11 @@ export function OpenCodeConfigManager() {
       setIsUpdating(true)
       await settingsApi.deleteOpenCodeConfig(config.name)
       setDeleteConfirmConfig(null)
+      if (selectedConfig?.id === config.id) {
+        setSelectedConfig(null)
+      }
       fetchConfigs()
-      // Invalidate agents cache in case deleted config had agents
-      queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+      invalidateConfigCaches(queryClient)
     } catch (error) {
       console.error('Failed to delete config:', error)
     } finally {
@@ -501,7 +501,7 @@ export function OpenCodeConfigManager() {
               ? 'Configuration saved and server reloaded'
               : 'Configuration saved'
             showToast.success(successMsg, { id: 'edit-config' })
-            queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+            invalidateConfigCaches(queryClient)
           } catch (error) {
             showToast.error(getApiErrorMessage(error, 'Failed to save configuration'), { id: 'edit-config' })
             throw error
@@ -586,7 +586,7 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Commands</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys(selectedConfig.content.command as Record<string, Command> || {}).length} configured
+                            {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length} configured
                           </span>
                         </div>
                         <Edit className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
@@ -594,7 +594,7 @@ export function OpenCodeConfigManager() {
                       <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-1 sm:p-4 max-h-[50vh] overflow-y-auto">
                           <CommandsEditor
-                            commands={(selectedConfig.content.command as Record<string, Command>) || {}}
+                            commands={(selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}}
                             onChange={(commands) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -623,7 +623,7 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Agents</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys(selectedConfig.content.agent as Record<string, Agent> || {}).length} configured
+                            {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length} configured
                           </span>
                         </div>
                         <Edit className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
@@ -631,7 +631,7 @@ export function OpenCodeConfigManager() {
                       <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-4 max-h-[50vh] overflow-y-auto">
                           <AgentsEditor
-                            agents={(selectedConfig.content.agent as Record<string, Agent>) || {}}
+                            agents={(selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}}
                             onChange={(agents) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -660,7 +660,7 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">MCP Servers</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys((selectedConfig.content.mcp as Record<string, unknown>) || {}).length} configured
+                            {Object.keys((selectedConfig.content?.mcp as Record<string, unknown> | undefined) ?? {}).length} configured
                           </span>
                         </div>
                         <Edit className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
