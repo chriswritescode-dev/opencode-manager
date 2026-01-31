@@ -8,52 +8,75 @@ import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 export function createFileRoutes() {
   const app = new Hono()
 
-  app.get('download-zip', async(c) => {
-    return c.json({ error: 'No path provided' }, 400)
-  })
+  app.get('*', async (c) => {
+    const path = c.req.path
 
-  app.get(':path{.+}/download-zip', async (c) => {
-    const userPath = c.req.param('path')
+    if (path.endsWith('/download-zip')) {
+      const userPath = path.replace(/\/api\/files\/(.+?)\/download-zip$/, '$1')
 
-    if (!userPath) {
-      return c.json({ error: 'No path provided' }, 400)
+      if (!userPath || userPath === '/download-zip') {
+        return c.json({ error: 'No path provided' }, 400)
+      }
+
+      try {
+        logger.info(`Starting ZIP archive creation for ${userPath}`)
+
+        const includeGit = c.req.query('includeGit') === 'true'
+        const includePathsParam = c.req.query('includePaths')
+        const includePaths = includePathsParam ? includePathsParam.split(',').map((p: string) => p.trim()) : undefined
+
+        const options: import('../services/archive').ArchiveOptions = {
+          includeGit,
+          includePaths
+        }
+
+        const archivePath = await archiveService.createDirectoryArchive(userPath, undefined, options)
+        const archiveSize = await archiveService.getArchiveSize(archivePath)
+        const archiveStream = archiveService.getArchiveStream(archivePath)
+        const dirName = userPath.split('/').pop() || 'download'
+
+        logger.info(`ZIP archive created: ${archivePath} (${archiveSize} bytes)`)
+
+        archiveStream.on('end', () => {
+          archiveService.deleteArchive(archivePath)
+        })
+
+        archiveStream.on('error', () => {
+          archiveService.deleteArchive(archivePath)
+        })
+
+        return new Response(archiveStream as unknown as ReadableStream, {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/zip',
+            'Content-Disposition': `attachment; filename="${dirName}.zip"`,
+            'Content-Length': archiveSize.toString(),
+          },
+        })
+      } catch (error: unknown) {
+        logger.error('Failed to create directory archive:', error)
+        return c.json({ error: getErrorMessage(error) || 'Failed to create archive' }, getStatusCode(error) as ContentfulStatusCode)
+      }
+    }
+
+    if (path.endsWith('/ignored-paths')) {
+      const userPath = path.replace(/\/api\/files\/(.+?)\/ignored-paths$/, '$1')
+
+      if (!userPath || userPath === '/ignored-paths') {
+        return c.json({ error: 'No path provided' }, 400)
+      }
+
+      try {
+        const ignoredPaths = await archiveService.getIgnoredPathsList(userPath)
+        return c.json({ ignoredPaths })
+      } catch (error: unknown) {
+        logger.error('Failed to get ignored paths:', error)
+        return c.json({ error: getErrorMessage(error) || 'Failed to get ignored paths' }, getStatusCode(error) as ContentfulStatusCode)
+      }
     }
 
     try {
-      logger.info(`Starting ZIP archive creation for ${userPath}`)
-
-      const archivePath = await archiveService.createDirectoryArchive(userPath)
-      const archiveSize = await archiveService.getArchiveSize(archivePath)
-      const archiveStream = archiveService.getArchiveStream(archivePath)
-      const dirName = userPath.split('/').pop() || 'download'
-
-      logger.info(`ZIP archive created: ${archivePath} (${archiveSize} bytes)`)
-
-      archiveStream.on('end', () => {
-        archiveService.deleteArchive(archivePath)
-      })
-
-      archiveStream.on('error', () => {
-        archiveService.deleteArchive(archivePath)
-      })
-
-      return new Response(archiveStream as unknown as ReadableStream, {
-        status: 200,
-        headers: {
-          'Content-Type': 'application/zip',
-          'Content-Disposition': `attachment; filename="${dirName}.zip"`,
-          'Content-Length': archiveSize.toString(),
-        },
-      })
-    } catch (error: unknown) {
-      logger.error('Failed to create directory archive:', error)
-      return c.json({ error: getErrorMessage(error) || 'Failed to create archive' }, getStatusCode(error) as ContentfulStatusCode)
-    }
-  })
-
-  app.get('/*', async (c) => {
-    try {
-      const userPath = c.req.path.replace(/^\/api\/files\//, '') || ''
+      const userPath = path.replace(/^\/api\/files\//, '') || ''
       const download = c.req.query('download') === 'true'
       const raw = c.req.query('raw') === 'true'
       const startLineParam = c.req.query('startLine')

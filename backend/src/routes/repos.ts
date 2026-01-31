@@ -261,23 +261,32 @@ app.get('/', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
       const repo = db.getRepoById(database, id)
-      
+
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
-      
+
       const repoPath = path.resolve(getReposPath(), repo.localPath)
       const repoName = path.basename(repo.localPath)
-      
+
+      const includeGit = c.req.query('includeGit') === 'true'
+      const includePathsParam = c.req.query('includePaths')
+      const includePaths = includePathsParam ? includePathsParam.split(',').map(p => p.trim()) : undefined
+
+      const options: import('../services/archive').ArchiveOptions = {
+        includeGit,
+        includePaths
+      }
+
       logger.info(`Starting archive creation for repo ${id}: ${repoPath}`)
-      const archivePath = await archiveService.createRepoArchive(repoPath)
+      const archivePath = await archiveService.createRepoArchive(repoPath, options)
       const archiveSize = await archiveService.getArchiveSize(archivePath)
       const archiveStream = archiveService.getArchiveStream(archivePath)
-      
+
       archiveStream.on('end', () => {
         archiveService.deleteArchive(archivePath)
       })
-      
+
       archiveStream.on('error', () => {
         archiveService.deleteArchive(archivePath)
       })
