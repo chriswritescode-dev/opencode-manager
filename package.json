@@ -1,6 +1,6 @@
 {
   "name": "opencode-manager",
-  "version": "0.8.2",
+  "version": "0.8.21",
   "private": false,
   "type": "module",
   "packageManager": "pnpm@10.28.1",
