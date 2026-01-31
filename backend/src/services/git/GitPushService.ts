@@ -31,10 +31,10 @@ export class GitPushService {
     
     try {
       const args = ['git', '-C', fullPath, 'push']
-      return executeCommand(args, { env })
+      return await executeCommand(args, { env })
     } catch (error) {
       if (isNoUpstreamError(error as Error)) {
-return await this.pushWithUpstream(repoId, fullPath, env)
+        return await this.pushWithUpstream(repoId, fullPath, env)
       }
       throw error
     }

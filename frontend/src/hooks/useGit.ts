@@ -45,8 +45,10 @@ export function useGit(repoId: number | undefined) {
       if (!repoId) throw new Error('No repo ID')
       return gitPush(repoId, options?.setUpstream ?? false)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      queryClient.setQueryData(['gitStatus', repoId], data)
+      const keysToInvalidate = ['fileDiff', 'gitLog', 'repo', 'branches']
+      keysToInvalidate.forEach(key => queryClient.invalidateQueries({ queryKey: [key, repoId] }))
       showToast.success('Push completed')
     },
     onError: (error) => {
