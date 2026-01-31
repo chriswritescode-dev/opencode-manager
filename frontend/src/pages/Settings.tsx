@@ -3,6 +3,7 @@ import { Header } from '@/components/layout/Header'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
+import { IntegrationSettings } from '@/components/settings/IntegrationSettings'
 
 export function Settings() {
   return (
@@ -11,12 +12,18 @@ export function Settings() {
 
       <div className="max-w-4xl mx-auto p-6">
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 mb-8 bg-[#141414] border border-[#262626] p-1">
+          <TabsList className="grid w-full grid-cols-4 mb-8 bg-[#141414] border border-[#262626] p-1">
             <TabsTrigger 
               value="general"
               className="data-[state=active]:bg-blue-800 data-[state=active]:text-white text-zinc-400"
             >
               General
+            </TabsTrigger>
+            <TabsTrigger 
+              value="integrations"
+              className="data-[state=active]:bg-blue-800 data-[state=active]:text-white text-zinc-400"
+            >
+              Integrations
             </TabsTrigger>
             <TabsTrigger 
               value="shortcuts"
@@ -36,11 +43,17 @@ export function Settings() {
             <GeneralSettings />
           </TabsContent>
 
+          <TabsContent value="integrations">
+            <div className="bg-card border border-border rounded-lg p-6">
+              <IntegrationSettings />
+            </div>
+          </TabsContent>
+
           <TabsContent value="shortcuts">
             <KeyboardShortcuts />
           </TabsContent>
 
-<TabsContent value="opencode">
+          <TabsContent value="opencode">
             <OpenCodeConfigManager />
           </TabsContent>
 
