@@ -103,7 +103,7 @@ bun run scripts/test-browser.ts --url http://localhost:5001 --user admin --pass 
 
 ```bash
 lsof -ti:5001
-cd /Users/engineer/workspace/opencode-manager
+cd /path/to/opencode-manager
 AUTH_USERNAME=admin AUTH_PASSWORD=PASSWORD PORT=5001 bun backend/src/index.ts
 ```
 
