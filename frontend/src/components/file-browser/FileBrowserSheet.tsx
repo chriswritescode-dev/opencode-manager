@@ -33,15 +33,15 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
   const [currentPath, setCurrentPath] = useState<string>(basePath || '.')
   const [downloadDialog, setDownloadDialog] = useState<{ type: 'directory' | 'repository' } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
-  
+
   const { bind, swipeStyles } = useSwipeBack(onClose, {
     enabled: isOpen && !isEditing,
   })
-  
+
   useEffect(() => {
     return bind(containerRef.current)
   }, [bind])
-  
+
   useEffect(() => {
     if (isOpen) {
       setShouldRender(true)
@@ -75,14 +75,14 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
     }
   }, [repoName, basePath])
 
-  const handleDownloadDirectory = useCallback(async () => {
+  const handleDownloadDirectory = useCallback(async (options: { includeGit?: boolean, includePaths?: string[] }) => {
     if (!currentPath) return
-    await downloadDirectoryAsZip(currentPath)
+    await downloadDirectoryAsZip(currentPath, options)
   }, [currentPath])
 
-  const handleDownloadRepo = useCallback(async () => {
+  const handleDownloadRepo = useCallback(async (options: { includeGit?: boolean, includePaths?: string[] }) => {
     if (!repoId || !repoName) return
-    await downloadRepo(repoId, repoName)
+    await downloadRepo(repoId, repoName, options)
   }, [repoId, repoName])
 
   const handleOpenDownloadDialog = (type: 'directory' | 'repository') => {
@@ -116,7 +116,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
   if (!isOpen && !shouldRender) return null
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className="fixed inset-0 z-50"
       style={{
@@ -193,6 +193,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
           ? 'This will create a ZIP archive of the current directory and all its contents.'
           : 'This will create a ZIP archive of the entire repository.'}
         itemName={downloadDialog?.type === 'directory' ? currentPath.split('/').pop() || 'Directory' : repoName || 'Repository'}
+        targetPath={downloadDialog?.type === 'directory' ? currentPath : basePath}
       />
     </div>
   )

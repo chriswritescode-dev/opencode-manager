@@ -44,8 +44,28 @@ export async function applyFilePatches(path: string, patches: PatchOperation[]):
   return response.json()
 }
 
-export async function downloadDirectoryAsZip(path: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/files/${path}/download-zip`)
+export async function getIgnoredPaths(path: string): Promise<{ ignoredPaths: string[] }> {
+  const response = await fetch(`${API_BASE_URL}/api/files/${path}/ignored-paths`)
+
+  if (!response.ok) {
+    throw new Error('Failed to get ignored paths')
+  }
+
+  return response.json()
+}
+
+export interface DownloadOptions {
+  includeGit?: boolean
+  includePaths?: string[]
+}
+
+export async function downloadDirectoryAsZip(path: string, options?: DownloadOptions): Promise<void> {
+  const params = new URLSearchParams()
+  if (options?.includeGit) params.append('includeGit', 'true')
+  if (options?.includePaths?.length) params.append('includePaths', options.includePaths.join(','))
+
+  const url = `${API_BASE_URL}/api/files/${path}/download-zip${params.toString() ? '?' + params.toString() : ''}`
+  const response = await fetch(url)
 
   if (!response.ok) {
     const error = await response.json()
@@ -53,13 +73,13 @@ export async function downloadDirectoryAsZip(path: string): Promise<void> {
   }
 
   const blob = await response.blob()
-  const url = window.URL.createObjectURL(blob)
+  const urlObj = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
+  a.href = urlObj
   const dirName = path.split('/').pop() || 'download'
   a.download = `${dirName}.zip`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  window.URL.revokeObjectURL(url)
+  window.URL.revokeObjectURL(urlObj)
 }

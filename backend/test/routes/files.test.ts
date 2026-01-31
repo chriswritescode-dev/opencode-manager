@@ -83,7 +83,10 @@ describe('File Routes', () => {
 
       const response = await app.request('/api/files/test-repo/src/download-zip')
 
-      expect(createDirectoryArchive).toHaveBeenCalledWith('test-repo/src')
+      expect(createDirectoryArchive).toHaveBeenCalledWith('test-repo/src', undefined, {
+        includeGit: false,
+        includePaths: undefined,
+      })
       expect(getArchiveSize).toHaveBeenCalledWith('/tmp/test-repo-123.zip')
       expect(getArchiveStream).toHaveBeenCalledWith('/tmp/test-repo-123.zip')
       expect(getFile).not.toHaveBeenCalled()

@@ -20,6 +20,7 @@ interface RepoCardProps {
     cloneStatus: string;
     isWorktree?: boolean;
     isLocal?: boolean;
+    fullPath?: string;
   };
   onDelete: (id: number) => void;
   isDeleting: boolean;
@@ -39,8 +40,8 @@ export function RepoCard({
   const navigate = useNavigate();
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [showSourceControl, setShowSourceControl] = useState(false);
-  
-  const repoName = repo.repoUrl 
+
+  const repoName = repo.repoUrl
     ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
     : repo.localPath || "Local Repo";
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch;
@@ -64,9 +65,9 @@ export function RepoCard({
     action();
   };
 
-  const handleDownload = async () => {
+  const handleDownload = async (options: { includeGit?: boolean, includePaths?: string[] }) => {
     try {
-      await downloadRepo(repo.id, repoName);
+      await downloadRepo(repo.id, repoName, options);
       showToast.success("Download complete");
     } catch (error: unknown) {
       showToast.error(error instanceof Error ? error.message : "Download failed");
@@ -88,7 +89,7 @@ export function RepoCard({
         <div>
           <div className="flex items-start gap-3 mb-1">
             {onSelect && (
-              <div 
+              <div
                 onClick={(e) => handleActionClick(e, () => onSelect(repo.id, !isSelected))}
               >
                 <Checkbox
@@ -206,6 +207,7 @@ export function RepoCard({
         title="Download Repository"
         description="This will create a ZIP archive of the entire repository."
         itemName={repoName}
+        targetPath={repo.fullPath}
       />
     </div>
   );

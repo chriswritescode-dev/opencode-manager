@@ -180,8 +180,18 @@ export async function createBranch(id: number, branch: string): Promise<Repo> {
   return response.json()
 }
 
-export async function downloadRepo(id: number, repoName: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/download`)
+export interface DownloadOptions {
+  includeGit?: boolean
+  includePaths?: string[]
+}
+
+export async function downloadRepo(id: number, repoName: string, options?: DownloadOptions): Promise<void> {
+  const params = new URLSearchParams()
+  if (options?.includeGit) params.append('includeGit', 'true')
+  if (options?.includePaths?.length) params.append('includePaths', options.includePaths.join(','))
+
+  const url = `${API_BASE_URL}/api/repos/${id}/download${params.toString() ? '?' + params.toString() : ''}`
+  const response = await fetch(url)
 
   if (!response.ok) {
     const error = await response.json()
@@ -189,14 +199,14 @@ export async function downloadRepo(id: number, repoName: string): Promise<void> 
   }
 
   const blob = await response.blob()
-  const url = window.URL.createObjectURL(blob)
+  const urlObj = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
+  a.href = urlObj
   a.download = `${repoName}.zip`
   document.body.appendChild(a)
   a.click()
   document.body.removeChild(a)
-  window.URL.revokeObjectURL(url)
+  window.URL.revokeObjectURL(urlObj)
 }
 
 export async function updateRepoOrder(order: number[]): Promise<void> {
