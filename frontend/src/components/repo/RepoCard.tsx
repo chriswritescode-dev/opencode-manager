@@ -55,7 +55,7 @@ export function RepoCard({
   const unstagedCount = gitStatus?.files.filter((f) => !f.staged).length || 0;
 
   const handleCardClick = () => {
-    if (isReady && !showSourceControl) {
+    if (isReady && !showSourceControl && !showDownloadDialog) {
       navigate(`/repos/${repo.id}`);
     }
   };
