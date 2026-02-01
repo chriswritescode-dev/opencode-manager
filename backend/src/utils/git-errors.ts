@@ -9,5 +9,5 @@ export function isNoUpstreamError(error: Error): boolean {
 
 export function parseBranchNameFromError(error: Error): string | null {
   const match = error.message.match(/The current branch (.+) has no upstream branch/i)
-  return match ? match[1].trim() : null
+  return match?.[1]?.trim() ?? null
 }
