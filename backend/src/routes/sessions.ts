@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import { pruneSessions } from '../services/session-prune'
 import { logger } from '../utils/logger'
 
 interface SessionWithRepo {
@@ -209,63 +210,11 @@ export function createSessionRoutes(database: Database) {
         return c.json({ error: 'Days must be between 1 and 365' }, 400)
       }
       
-      const cutoffTime = Date.now() - (days * 24 * 60 * 60 * 1000)
-      const opencodePort = opencodeServerManager.getPort()
-      
-      // Get all sessions from OpenCode API
-      const sessionsRes = await fetch(`http://127.0.0.1:${opencodePort}/session`)
-      if (!sessionsRes.ok) {
-        return c.json({ error: 'Failed to fetch sessions from OpenCode' }, 500)
-      }
-      
-      const allSessions = await sessionsRes.json() as Array<{
-        id: string
-        title?: string
-        directory: string
-        parentID?: string
-        time: { created: number; updated: number }
-      }>
-      
-      // Filter to sessions older than cutoff and not child sessions
-      const sessionsToDelete = allSessions.filter(session => {
-        if (session.parentID) return false // Skip child sessions
-        return session.time.updated < cutoffTime
-      })
-      
-      logger.info(`Pruning ${sessionsToDelete.length} sessions older than ${days} days`)
-      
-      const deleted: string[] = []
-      const failed: Array<{ id: string; error: string }> = []
-      
-      for (const session of sessionsToDelete) {
-        try {
-          const deleteRes = await fetch(
-            `http://127.0.0.1:${opencodePort}/session/${session.id}?directory=${encodeURIComponent(session.directory)}`,
-            { method: 'DELETE' }
-          )
-          
-          if (deleteRes.ok) {
-            deleted.push(session.id)
-            logger.debug(`Deleted session ${session.id}`)
-          } else {
-            const errText = await deleteRes.text().catch(() => 'Unknown error')
-            failed.push({ id: session.id, error: errText })
-            logger.warn(`Failed to delete session ${session.id}: ${errText}`)
-          }
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : 'Unknown error'
-          failed.push({ id: session.id, error: errMsg })
-          logger.warn(`Error deleting session ${session.id}:`, err)
-        }
-      }
+      const result = await pruneSessions(days)
       
       return c.json({
         success: true,
-        deleted: deleted.length,
-        failed: failed.length,
-        failedSessions: failed,
-        cutoffDays: days,
-        cutoffDate: new Date(cutoffTime).toISOString(),
+        ...result,
       })
     } catch (error: unknown) {
       logger.error('Failed to prune sessions:', error)

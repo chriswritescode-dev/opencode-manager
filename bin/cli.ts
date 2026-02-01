@@ -15,6 +15,8 @@ const CONFIG_DIR = path.join(os.homedir(), '.local', 'run', 'opencode-manager')
 const ENDPOINTS_FILE = path.join(CONFIG_DIR, 'endpoints.json')
 const AUTH_FILE = path.join(CONFIG_DIR, 'auth.json')
 const CLOUDFLARED_LOG_FILE = path.join(CONFIG_DIR, 'cloudflared.log')
+const MAX_LOG_SIZE_BYTES = 5 * 1024 * 1024 // 5MB
+const MAX_LOG_BACKUPS = 3
 
 interface AuthConfig {
   username: string
@@ -34,6 +36,42 @@ interface EndpointsConfig {
 function ensureConfigDir(): void {
   if (!fs.existsSync(CONFIG_DIR)) {
     fs.mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
+  }
+}
+
+/**
+ * Rotate a log file if it exceeds the maximum size.
+ * Creates backups like: cloudflared.log.1, cloudflared.log.2, etc.
+ */
+function rotateLogFile(logPath: string): void {
+  try {
+    if (!fs.existsSync(logPath)) return
+    
+    const stats = fs.statSync(logPath)
+    if (stats.size < MAX_LOG_SIZE_BYTES) return
+    
+    console.log(`📜 Rotating log file (${Math.round(stats.size / 1024)}KB): ${path.basename(logPath)}`)
+    
+    // Remove oldest backup if it exists
+    const oldestBackup = `${logPath}.${MAX_LOG_BACKUPS}`
+    if (fs.existsSync(oldestBackup)) {
+      fs.unlinkSync(oldestBackup)
+    }
+    
+    // Shift existing backups: .2 -> .3, .1 -> .2
+    for (let i = MAX_LOG_BACKUPS - 1; i >= 1; i--) {
+      const current = `${logPath}.${i}`
+      const next = `${logPath}.${i + 1}`
+      if (fs.existsSync(current)) {
+        fs.renameSync(current, next)
+      }
+    }
+    
+    // Move current log to .1
+    fs.renameSync(logPath, `${logPath}.1`)
+    
+  } catch (err) {
+    console.warn('⚠️  Failed to rotate log file:', err)
   }
 }
 
@@ -252,6 +290,9 @@ async function startCloudflaredTunnel(localPort: number, auth: AuthConfig): Prom
     fs.mkdirSync(CONFIG_DIR, { recursive: true })
   }
 
+  // Rotate log file if needed
+  rotateLogFile(CLOUDFLARED_LOG_FILE)
+
   // Open log file for appending
   const logStream = fs.createWriteStream(CLOUDFLARED_LOG_FILE, { flags: 'a' })
   const timestamp = () => new Date().toISOString()
@@ -368,6 +409,12 @@ async function commandStart(args: string[]): Promise<void> {
   console.log('\n╔═══════════════════════════════════════╗')
   console.log('║      OpenCode Manager - Start         ║')
   console.log('╚═══════════════════════════════════════╝')
+
+  // Rotate log files if they're too large
+  ensureConfigDir()
+  rotateLogFile(path.join(CONFIG_DIR, 'stdout.log'))
+  rotateLogFile(path.join(CONFIG_DIR, 'stderr.log'))
+  rotateLogFile(CLOUDFLARED_LOG_FILE)
 
   const auth = noAuth ? { username: '', password: '' } : getOrCreateAuth()
 

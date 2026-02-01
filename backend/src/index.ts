@@ -33,6 +33,7 @@ import { proxyRequest } from './services/proxy'
 import { logger } from './utils/logger'
 import { chatterboxServerManager } from './services/chatterbox'
 import { startGlobalSSEListener, stopGlobalSSEListener } from './services/global-sse'
+import { autoPruneOnStartup } from './services/session-prune'
 import { 
   getWorkspacePath, 
   getReposPath, 
@@ -311,6 +312,12 @@ try {
     logger.info(`Synced ${syncResult.added} projects from OpenCode (${syncResult.skipped} skipped)`)
   } catch (error) {
     logger.warn('Failed to sync projects from OpenCode:', error)
+  }
+
+  try {
+    await autoPruneOnStartup(db)
+  } catch (error) {
+    logger.warn('Auto-prune on startup failed:', error)
   }
 
   try {
