@@ -39,8 +39,8 @@ fi
 echo -e "${YELLOW}Stopping container...${NC}"
 $DOCKER_COMPOSE down
 
-echo -e "${YELLOW}Rebuilding image...${NC}"
-$DOCKER_COMPOSE build
+echo -e "${YELLOW}Rebuilding image with no cache...${NC}"
+$DOCKER_COMPOSE build --no-cache
 
 echo -e "${YELLOW}Starting container...${NC}"
 $DOCKER_COMPOSE up -d
