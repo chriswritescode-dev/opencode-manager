@@ -166,6 +166,8 @@ export function useSTT(userId = 'default') {
       audioRecorder.current = new AudioRecorder()
     }
 
+    audioRecorder.current.warmup()
+
     setupAudioRecorder(audioRecorder.current)
 
     return () => {

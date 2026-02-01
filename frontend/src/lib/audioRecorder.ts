@@ -53,6 +53,26 @@ export class AudioRecorder {
     )
   }
 
+  async warmup(): Promise<boolean> {
+    if (!AudioRecorder.isSupported()) {
+      return false
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      })
+      stream.getTracks().forEach(track => track.stop())
+      return true
+    } catch {
+      return false
+    }
+  }
+
   getState(): AudioRecorderState {
     return this.state
   }
@@ -185,4 +205,9 @@ export function getAudioRecorder(): AudioRecorder {
 
 export function isAudioRecordingSupported(): boolean {
   return AudioRecorder.isSupported()
+}
+
+export async function warmupAudioRecorder(): Promise<boolean> {
+  const recorder = getAudioRecorder()
+  return recorder.warmup()
 }
