@@ -14,6 +14,7 @@ const MANAGED_PORTS = [5001, 5002, 5003, 5173, 5174, 5175, 5176, 5552, 5553, 555
 const CONFIG_DIR = path.join(os.homedir(), '.local', 'run', 'opencode-manager')
 const ENDPOINTS_FILE = path.join(CONFIG_DIR, 'endpoints.json')
 const AUTH_FILE = path.join(CONFIG_DIR, 'auth.json')
+const CLOUDFLARED_LOG_FILE = path.join(CONFIG_DIR, 'cloudflared.log')
 
 interface AuthConfig {
   username: string
@@ -246,6 +247,21 @@ async function startOpenCodeServer(port: number): Promise<boolean> {
 async function startCloudflaredTunnel(localPort: number, auth: AuthConfig): Promise<{ process: ReturnType<typeof spawn>, url: string | null, urlWithAuth: string | null }> {
   console.log('\n🌐 Starting Cloudflare tunnel...')
 
+  // Ensure config directory exists
+  if (!fs.existsSync(CONFIG_DIR)) {
+    fs.mkdirSync(CONFIG_DIR, { recursive: true })
+  }
+
+  // Open log file for appending
+  const logStream = fs.createWriteStream(CLOUDFLARED_LOG_FILE, { flags: 'a' })
+  const timestamp = () => new Date().toISOString()
+  
+  // Write startup marker
+  logStream.write(`\n${'='.repeat(80)}\n`)
+  logStream.write(`[${timestamp()}] Cloudflare tunnel starting...\n`)
+  logStream.write(`[${timestamp()}] Target: http://localhost:${localPort}\n`)
+  logStream.write(`${'='.repeat(80)}\n\n`)
+
   const tunnelProcess = spawn('cloudflared', ['tunnel', '--no-autoupdate', '--protocol', 'http2', '--url', `http://localhost:${localPort}`], {
     stdio: ['ignore', 'pipe', 'pipe'],
   })
@@ -257,6 +273,13 @@ async function startCloudflaredTunnel(localPort: number, auth: AuthConfig): Prom
 
     const handleOutput = (data: Buffer) => {
       const output = data.toString()
+      
+      // Log to file with timestamp
+      const lines = output.split('\n').filter(line => line.trim())
+      for (const line of lines) {
+        logStream.write(`[${timestamp()}] ${line}\n`)
+      }
+      
       const urlMatch = output.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/)
       if (urlMatch && !tunnelUrl) {
         tunnelUrl = urlMatch[0]
@@ -270,8 +293,14 @@ async function startCloudflaredTunnel(localPort: number, auth: AuthConfig): Prom
   })
 
   tunnelProcess.on('error', (err) => {
+    logStream.write(`[${timestamp()}] ERROR: Failed to start cloudflared: ${err.message}\n`)
     console.error('\n❌ Failed to start cloudflared:', err.message)
     console.log('Install cloudflared: brew install cloudflared')
+  })
+
+  tunnelProcess.on('exit', (code, signal) => {
+    logStream.write(`[${timestamp()}] Process exited with code ${code}, signal ${signal}\n`)
+    logStream.end()
   })
 
   const url = await urlPromise
@@ -287,11 +316,13 @@ async function startCloudflaredTunnel(localPort: number, auth: AuthConfig): Prom
   }
 
   if (url) {
+    logStream.write(`[${timestamp()}] Tunnel established: ${url}\n`)
     console.log(`✓ Tunnel URL: ${url}`)
     if (urlWithAuth) {
-      console.log(`✓ With auth:  ${urlWithAuth}`)
+      console.log(`   Tunnel: ${urlWithAuth}`)
     }
-    console.log()
+  } else {
+    logStream.write(`[${timestamp()}] WARNING: Failed to get tunnel URL within timeout\n`)
   }
 
   return { process: tunnelProcess, url, urlWithAuth }

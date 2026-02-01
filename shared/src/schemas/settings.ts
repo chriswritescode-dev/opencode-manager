@@ -85,6 +85,12 @@ export const NotificationConfigSchema = z.object({
   sound: z.boolean().default(false),
 });
 
+export const SessionPruneConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  intervalDays: z.number().min(1).max(365).default(7),
+  lastPrunedAt: z.number().optional(),
+});
+
 export const CustomAgentSchema = z.object({
   name: z.string(),
   description: z.string(),
@@ -130,6 +136,12 @@ export type NotificationConfig = {
   sound: boolean;
 };
 
+export type SessionPruneConfig = {
+  enabled: boolean;
+  intervalDays: number;
+  lastPrunedAt?: number;
+};
+
 const isBrowser = typeof navigator !== 'undefined';
 const isMac = isBrowser && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
 const CMD_KEY = isMac ? 'Cmd' : 'Ctrl';
@@ -167,6 +179,7 @@ export const UserPreferencesSchema = z.object({
   stt: STTConfigSchema.optional(),
   talkMode: TalkModeConfigSchema.optional(),
   notifications: NotificationConfigSchema.optional(),
+  sessionPrune: SessionPruneConfigSchema.optional(),
   lastKnownGoodConfig: z.string().optional(),
 });
 
@@ -209,6 +222,12 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
   sound: false,
 };
 
+export const DEFAULT_SESSION_PRUNE_CONFIG: SessionPruneConfig = {
+  enabled: false,
+  intervalDays: 7,
+  lastPrunedAt: undefined,
+};
+
 export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
   mode: "build" as const,
@@ -224,6 +243,7 @@ export const DEFAULT_USER_PREFERENCES = {
   stt: DEFAULT_STT_CONFIG,
   talkMode: DEFAULT_TALK_MODE_CONFIG,
   notifications: DEFAULT_NOTIFICATION_CONFIG,
+  sessionPrune: DEFAULT_SESSION_PRUNE_CONFIG,
 };
 
 export const SettingsResponseSchema = z.object({

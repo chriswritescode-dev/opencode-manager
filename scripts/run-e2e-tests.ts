@@ -108,8 +108,10 @@ Options:
   --help, -h        Show this help
 
 Tests run:
-  1. Voice API (STT status, transcription, TTS, talk mode flow)
-  2. Browser E2E (Full browser test with audio capture)
+  1. Push Notifications (subscription, delivery, session complete)
+  2. Voice API (STT status, transcription, TTS, talk mode flow)
+  3. Push Browser E2E (browser-based push subscription and delivery)
+  4. Browser E2E (Full browser test with audio capture)
 
 Example:
   # Start the app first
@@ -147,13 +149,23 @@ Example:
   const results: TestResult[] = []
 
   console.log('-'.repeat(60))
-  console.log('1. Voice API Tests (STT, TTS, Talk Mode flow)')
+  console.log('1. Push Notification Tests (subscription, delivery)')
+  console.log('-'.repeat(60))
+  results.push(await runTest('Push Notifications', 'scripts/test-push-notifications.ts', testArgs))
+
+  console.log('\n' + '-'.repeat(60))
+  console.log('2. Voice API Tests (STT, TTS, Talk Mode flow)')
   console.log('-'.repeat(60))
   results.push(await runTest('Voice API', 'scripts/test-voice.ts', testArgs))
 
   if (!skipBrowser) {
     console.log('\n' + '-'.repeat(60))
-    console.log('2. Browser E2E Tests (Full Talk Mode with audio capture)')
+    console.log('3. Push Notification Browser Tests (subscription via browser)')
+    console.log('-'.repeat(60))
+    results.push(await runTest('Push Browser E2E', 'scripts/test-push-browser.ts', testArgs))
+
+    console.log('\n' + '-'.repeat(60))
+    console.log('4. Browser E2E Tests (Full Talk Mode with audio capture)')
     console.log('-'.repeat(60))
     results.push(await runTest('Browser E2E', 'scripts/test-browser.ts', testArgs))
   }

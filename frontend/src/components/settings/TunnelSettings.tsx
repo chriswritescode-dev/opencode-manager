@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import { Loader2, Globe, Wifi, WifiOff, MapPin, Activity, Clock, ExternalLink, Copy, Check } from 'lucide-react'
+import { Loader2, Globe, Wifi, WifiOff, MapPin, Activity, Clock, ExternalLink, Copy, Check, FileText, ChevronDown, ChevronUp, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
@@ -90,6 +90,123 @@ function ResponseCodeBreakdown({ codes }: { codes: Record<string, number> }) {
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+interface TunnelLogsResponse {
+  exists: boolean
+  lines: string[]
+  totalLines: number
+  requestedLines?: number
+  path?: string
+  message?: string
+  error?: string
+}
+
+function TunnelLogs() {
+  const [expanded, setExpanded] = useState(false)
+  const [lines, setLines] = useState(100)
+
+  const { data: logs, isLoading, refetch, isRefetching } = useQuery<TunnelLogsResponse>({
+    queryKey: ['tunnel', 'logs', lines],
+    queryFn: async () => {
+      const response = await apiClient.get(`/api/tunnel/logs?lines=${lines}`)
+      return response.data
+    },
+    enabled: expanded,
+    refetchInterval: expanded ? 5000 : false,
+  })
+
+  const getLineClass = (line: string) => {
+    if (line.includes('ERROR') || line.includes('error')) return 'text-red-400'
+    if (line.includes('WARNING') || line.includes('warn')) return 'text-yellow-400'
+    if (line.includes('Tunnel established') || line.includes('connected')) return 'text-green-400'
+    return 'text-muted-foreground'
+  }
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between p-4 bg-accent/30 hover:bg-accent/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <FileText className="w-4 h-4 text-muted-foreground" />
+          <span className="font-medium text-foreground">Tunnel Logs</span>
+          {logs?.totalLines !== undefined && (
+            <Badge variant="secondary" className="text-xs">
+              {logs.totalLines} lines
+            </Badge>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {expanded && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={(e) => {
+                e.stopPropagation()
+                refetch()
+              }}
+              disabled={isRefetching}
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`} />
+            </Button>
+          )}
+          {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border">
+          {isLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : !logs?.exists ? (
+            <div className="p-4 text-sm text-muted-foreground">
+              {logs?.message || 'Log file does not exist yet.'}
+            </div>
+          ) : logs.error ? (
+            <div className="p-4 text-sm text-red-400">
+              Error: {logs.error}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between px-4 py-2 bg-accent/20 border-b border-border">
+                <span className="text-xs text-muted-foreground">
+                  Showing last {logs.requestedLines} of {logs.totalLines} lines
+                </span>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={lines}
+                    onChange={(e) => setLines(parseInt(e.target.value, 10))}
+                    className="text-xs bg-background border border-border rounded px-2 py-1"
+                  >
+                    <option value={50}>50 lines</option>
+                    <option value={100}>100 lines</option>
+                    <option value={250}>250 lines</option>
+                    <option value={500}>500 lines</option>
+                    <option value={1000}>1000 lines</option>
+                  </select>
+                </div>
+              </div>
+              <div className="max-h-80 overflow-y-auto bg-black/50 p-4 font-mono text-xs">
+                {logs.lines.length === 0 ? (
+                  <span className="text-muted-foreground">No log entries</span>
+                ) : (
+                  logs.lines.map((line, i) => (
+                    <div key={i} className={`${getLineClass(line)} whitespace-pre-wrap break-all`}>
+                      {line}
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -214,6 +331,8 @@ export function TunnelSettings() {
           {status.message}
         </div>
       )}
+
+      <TunnelLogs />
     </div>
   )
 }

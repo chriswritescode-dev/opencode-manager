@@ -12,6 +12,7 @@ import { TTSSettings } from './TTSSettings'
 import { STTSettings } from './STTSettings'
 import { TalkModeSettings } from './TalkModeSettings'
 import { NotificationSettings } from './NotificationSettings'
+import { SessionPruneSettings } from './SessionPruneSettings'
 import { showToast } from '@/lib/toast'
 
 export function GeneralSettings() {
@@ -237,6 +238,10 @@ onClick={async () => {
 
       <div className="mt-6">
         <NotificationSettings />
+      </div>
+
+      <div className="mt-6">
+        <SessionPruneSettings />
       </div>
     </div>
   )

@@ -146,7 +146,66 @@ TELEGRAM_ALLOWLIST=<chat-id-1>,<chat-id-2>
 
 ---
 
-## 5. Settings UI
+## 5. Push Notifications
+
+### Requirement
+When a session becomes idle (agent finishes work), push notifications MUST be sent to all subscribed devices (Android Chrome, macOS Safari/Chrome, etc.).
+
+### Architecture
+```
+┌─────────────────┐     ┌──────────────────────────────────────┐
+│  Mobile/Desktop │◀────│         opencode-manager             │
+│   Browser       │     │  ┌──────────────┐    ┌───────────┐  │
+│  (Android/macOS)│     │  │ Global SSE   │───▶│ web-push  │  │
+└─────────────────┘     │  │ Listener     │    │ library   │  │
+        ▲               │  └──────────────┘    └───────────┘  │
+        │               │         │                    │      │
+        │               │         ▼                    ▼      │
+        │               │  session.idle ──▶ sendPushNotification
+        │               └──────────────────────────────────────┘
+        │                              │
+        └──────────────────────────────┘
+              Web Push Protocol
+```
+
+### Behavior
+1. User enables notifications in browser (clicks bell icon on Repos page)
+2. Service Worker registers and subscribes to push via VAPID
+3. Subscription is saved to SQLite database
+4. When `session.idle` event fires, backend sends push via web-push library
+5. Browser displays system notification even when app is closed/backgrounded
+6. Clicking notification opens the session in the app
+
+### Notification Types
+| Event | Title | Body | Interaction |
+|-------|-------|------|-------------|
+| Session Complete | "Session Complete" | "Your OpenCode session has finished" | Standard |
+| Permission Request | "Permission Required" | "[Tool] requires your approval" | Requires interaction |
+
+### API Endpoints
+- `GET /api/push/vapid-public-key` - Get VAPID public key for subscription
+- `POST /api/push/subscribe` - Save push subscription
+- `POST /api/push/unsubscribe` - Remove push subscription
+- `POST /api/push/send` - Send push notification (internal/test)
+- `POST /api/push/test` - Send test notification to all subscriptions
+
+### Configuration
+```bash
+# Optional - Custom VAPID keys (defaults provided)
+VAPID_PUBLIC_KEY=<your-public-key>
+VAPID_PRIVATE_KEY=<your-private-key>
+VAPID_EMAIL=mailto:admin@example.com
+```
+
+### Service Worker
+The frontend includes `/sw.js` which:
+- Listens for `push` events
+- Displays system notifications with custom icons
+- Handles notification clicks to open the app
+
+---
+
+## 6. Settings UI
 
 ### Requirement
 Settings page MUST provide configuration for all voice features with working test buttons.
@@ -169,7 +228,7 @@ All settings stored in SQLite database and survive restarts.
 
 ---
 
-## 6. Health Checks
+## 7. Health Checks
 
 ### Requirement
 Health endpoints MUST accurately report status of all services.
@@ -211,11 +270,20 @@ All features MUST be tested before release:
 # Unit tests (103+ tests, 80% coverage)
 pnpm test
 
+# Push Notification E2E tests (API-level)
+bun run scripts/test-push-notifications.ts --url http://localhost:5001
+
+# Push Notification Browser E2E tests (with real browser)
+bun run scripts/test-push-browser.ts --url http://localhost:5001
+
 # Voice E2E tests
 bun run scripts/test-voice.ts --url http://localhost:5001
 
 # Browser E2E tests (full Talk Mode pipeline)
 bun run scripts/test-browser.ts --url http://localhost:5001
+
+# Run all E2E tests
+bun run scripts/run-e2e-tests.ts --url http://localhost:5001
 
 # Manual Settings UI verification
 # 1. Open Settings → Voice
@@ -237,4 +305,6 @@ Before any release, verify:
 - [ ] TTS works with Coqui/Chatterbox (test in Settings)
 - [ ] TTS works with Browser API (test in Settings)
 - [ ] Telegram bot works when TELEGRAM_BOT_TOKEN is set
-- [ ] All E2E tests pass
+- [ ] Push notifications work on Android Chrome (subscribe and receive on session.idle)
+- [ ] Push notifications work on macOS (subscribe and receive on session.idle)
+- [ ] All E2E tests pass (including test-push-notifications.ts)

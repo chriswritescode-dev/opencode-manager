@@ -190,5 +190,42 @@ export function createTunnelRoutes() {
     })
   })
 
+  app.get('/logs', async (c) => {
+    const logPath = join(homedir(), '.local', 'run', 'opencode-manager', 'cloudflared.log')
+    const lines = parseInt(c.req.query('lines') || '100', 10)
+    
+    if (!existsSync(logPath)) {
+      return c.json({
+        exists: false,
+        lines: [],
+        totalLines: 0,
+        message: 'Log file does not exist yet. Tunnel may not have been started.'
+      })
+    }
+    
+    try {
+      const content = readFileSync(logPath, 'utf-8')
+      const allLines = content.split('\n').filter(line => line.trim())
+      const totalLines = allLines.length
+      const requestedLines = Math.min(Math.max(1, lines), 1000) // Cap at 1000 lines
+      const returnedLines = allLines.slice(-requestedLines)
+      
+      return c.json({
+        exists: true,
+        lines: returnedLines,
+        totalLines,
+        requestedLines,
+        path: logPath
+      })
+    } catch (err) {
+      return c.json({
+        exists: true,
+        lines: [],
+        totalLines: 0,
+        error: err instanceof Error ? err.message : 'Failed to read log file'
+      }, 500)
+    }
+  })
+
   return app
 }
