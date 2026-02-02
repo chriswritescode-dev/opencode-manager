@@ -6,7 +6,7 @@ import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent } from '@/api/types'
 import { showToast } from '@/lib/toast'
-import { subscribeToSSE } from '@/lib/sseManager'
+import { subscribeToSSE, addSSEDirectory } from '@/lib/sseManager'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
@@ -51,6 +51,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const clientsRef = useRef<Map<string, OpenCodeClient>>(new Map())
   const prevPermissionCountRef = useRef(0)
+  const initialFetchDoneRef = useRef(false)
   const MAX_CACHED_CLIENTS = 50
 
   useEffect(() => {
@@ -259,10 +260,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'question.replied':
         case 'question.rejected':
           if ('requestID' in event.properties && 'sessionID' in event.properties) {
+            const sessionID = event.properties.sessionID as string
             removeQuestion(
               event.properties.requestID as string,
-              event.properties.sessionID as string
+              sessionID
             )
+            queryClient.invalidateQueries({ 
+              queryKey: ['opencode', 'messages'],
+              predicate: (query) => query.queryKey.includes(sessionID)
+            })
           }
           break
       }
@@ -270,13 +276,38 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     const handleStatusChange = (connected: boolean) => {
       if (connected) {
+        initialFetchDoneRef.current = false
         fetchInitialPendingData()
       }
     }
 
     const unsubscribe = subscribeToSSE(handleSSEMessage, handleStatusChange)
     return unsubscribe
-  }, [addPermission, removePermission, addQuestion, removeQuestion, fetchInitialPendingData])
+  }, [addPermission, removePermission, addQuestion, removeQuestion, fetchInitialPendingData, queryClient])
+
+  useEffect(() => {
+    if (!repos || repos.length === 0) return
+
+    const cleanupFns: (() => void)[] = []
+    const uniqueDirectories = [...new Set(repos.map(r => r.fullPath))]
+
+    uniqueDirectories.forEach(directory => {
+      const cleanup = addSSEDirectory(directory)
+      cleanupFns.push(cleanup)
+    })
+
+    return () => {
+      cleanupFns.forEach(fn => fn())
+    }
+  }, [repos])
+
+  useEffect(() => {
+    if (!repos || repos.length === 0) return
+    if (initialFetchDoneRef.current) return
+
+    initialFetchDoneRef.current = true
+    fetchInitialPendingData()
+  }, [repos, fetchInitialPendingData])
 
   const value: EventContextValue = useMemo(() => ({
     permissions: {

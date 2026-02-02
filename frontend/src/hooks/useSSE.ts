@@ -6,7 +6,7 @@ import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
-import { subscribeToSSE, reconnectSSE, addSSEDirectory, removeSSEDirectory } from '@/lib/sseManager'
+import { subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib/sseManager'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 
 const handleRestartServer = async () => {
@@ -309,6 +309,16 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         break
       }
 
+      case 'question.replied':
+      case 'question.rejected': {
+        if (!('sessionID' in event.properties)) break
+        const { sessionID } = event.properties
+        queryClient.invalidateQueries({ 
+          queryKey: ['opencode', 'messages', opcodeUrl, sessionID, directory] 
+        })
+        break
+      }
+
       default:
         break
     }
@@ -358,9 +368,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       }
     }
 
-    if (directory) {
-      addSSEDirectory(directory)
-    }
+    const directoryCleanup = directory ? addSSEDirectory(directory) : undefined
 
     const unsubscribe = subscribeToSSE(handleMessage, handleStatusChange)
 
@@ -376,9 +384,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
       unsubscribe()
-      if (directory) {
-        removeSSEDirectory(directory)
-      }
+      directoryCleanup?.()
     }
   }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData])
 

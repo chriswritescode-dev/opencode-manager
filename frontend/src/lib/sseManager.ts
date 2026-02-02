@@ -15,7 +15,7 @@ class SSEManager {
   private static instance: SSEManager
   private eventSource: EventSource | null = null
   private subscribers: Map<string, SSESubscriber> = new Map()
-  private directories: Set<string> = new Set()
+  private directoryRefCounts: Map<string, number> = new Map()
   private pendingDirectories: Set<string> = new Set()
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay: number = RECONNECT_DELAY_MS
@@ -65,18 +65,17 @@ class SSEManager {
   }
 
   addDirectory(directory: string): () => void {
-    if (this.directories.has(directory)) {
-      return () => this.cleanupDirectory(directory)
-    }
+    const currentCount = this.directoryRefCounts.get(directory) ?? 0
+    this.directoryRefCounts.set(directory, currentCount + 1)
     
-    this.directories.add(directory)
-    
-    if (this.clientId && this.isConnected) {
-      this.subscribeToDirectory(directory)
-    } else {
-      this.pendingDirectories.add(directory)
-      if (!this.eventSource) {
-        this.reconnect()
+    if (currentCount === 0) {
+      if (this.clientId && this.isConnected) {
+        this.subscribeToDirectory(directory)
+      } else {
+        this.pendingDirectories.add(directory)
+        if (!this.eventSource) {
+          this.reconnect()
+        }
       }
     }
 
@@ -84,15 +83,20 @@ class SSEManager {
   }
 
   private cleanupDirectory(directory: string): void {
-    this.directories.delete(directory)
-    this.pendingDirectories.delete(directory)
-    
-    if (this.clientId && this.isConnected) {
-      fetch('/api/sse/unsubscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: this.clientId, directories: [directory] })
-      }).catch(() => {})
+    const currentCount = this.directoryRefCounts.get(directory) ?? 0
+    if (currentCount <= 1) {
+      this.directoryRefCounts.delete(directory)
+      this.pendingDirectories.delete(directory)
+      
+      if (this.clientId && this.isConnected) {
+        fetch('/api/sse/unsubscribe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ clientId: this.clientId, directories: [directory] })
+        }).catch(() => {})
+      }
+    } else {
+      this.directoryRefCounts.set(directory, currentCount - 1)
     }
   }
 
@@ -133,27 +137,17 @@ class SSEManager {
   }
 
   removeDirectory(directory: string): void {
-    if (!this.directories.has(directory)) return
-    
-    this.directories.delete(directory)
-    
-    if (this.clientId && this.isConnected) {
-      fetch('/api/sse/unsubscribe', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ clientId: this.clientId, directories: [directory] })
-      }).catch(() => {})
-    }
+    this.cleanupDirectory(directory)
   }
 
   getDirectories(): string[] {
-    return Array.from(this.directories)
+    return Array.from(this.directoryRefCounts.keys())
   }
 
   private buildUrl(): string {
     const url = new URL('/api/sse/stream', window.location.origin)
-    if (this.directories.size > 0) {
-      url.searchParams.set('directories', Array.from(this.directories).join(','))
+    if (this.directoryRefCounts.size > 0) {
+      url.searchParams.set('directories', Array.from(this.directoryRefCounts.keys()).join(','))
     }
     return url.toString()
   }
