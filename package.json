@@ -58,7 +58,8 @@
     "docker:logs": "docker-compose logs -f",
     "docker:restart": "docker-compose restart",
     "install:opencode-attach": "bun scripts/install-opencode-attach.ts",
-    "uninstall:opencode-attach": "bun scripts/install-opencode-attach.ts uninstall"
+    "uninstall:opencode-attach": "bun scripts/install-opencode-attach.ts uninstall",
+    "install-service": "bash scripts/reinstall-local.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
