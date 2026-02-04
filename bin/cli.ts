@@ -859,9 +859,21 @@ interface SttStatusResponse {
   }
 }
 
-interface TtsVoice {
-  id: string
-  name: string
+interface TtsStatusResponse {
+  enabled: boolean
+  configured: boolean
+  provider: string
+  coqui?: {
+    running: boolean
+    device?: string
+    model?: string
+    error?: string
+  }
+  chatterbox?: {
+    running: boolean
+    device?: string
+    error?: string
+  }
 }
 
 async function commandHealth(args: string[]): Promise<void> {
@@ -886,7 +898,7 @@ async function commandHealth(args: string[]): Promise<void> {
   const results: {
     backend: { ok: boolean; data?: HealthResponse; error?: string }
     stt: { ok: boolean; data?: SttStatusResponse; error?: string }
-    tts: { ok: boolean; voiceCount?: number; error?: string }
+    tts: { ok: boolean; data?: TtsStatusResponse; error?: string }
   } = {
     backend: { ok: false },
     stt: { ok: false },
@@ -927,15 +939,21 @@ async function commandHealth(args: string[]): Promise<void> {
     results.stt = { ok: false, error: err instanceof Error ? err.message : 'Connection failed' }
   }
 
-  // Check TTS voices
+  // Check TTS status
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/tts/voices`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/tts/status`, {
       signal: AbortSignal.timeout(5000),
       headers,
     })
     if (response.ok) {
-      const voices = await response.json() as TtsVoice[]
-      results.tts = { ok: Array.isArray(voices) && voices.length > 0, voiceCount: voices.length }
+      const data = await response.json() as TtsStatusResponse
+      // TTS is ok if configured and either provider's server is running
+      const providerRunning = 
+        (data.provider === 'coqui' && data.coqui?.running) ||
+        (data.provider === 'chatterbox' && data.chatterbox?.running) ||
+        (data.provider === 'external' && data.configured) ||
+        (data.provider === 'builtin')
+      results.tts = { ok: data.configured && providerRunning, data }
     } else {
       results.tts = { ok: false, error: `HTTP ${response.status}` }
     }
@@ -987,16 +1005,26 @@ async function commandHealth(args: string[]): Promise<void> {
 
   // TTS status
   if (results.tts.ok) {
-    console.log(`✅ TTS:        available (${results.tts.voiceCount} voice${results.tts.voiceCount === 1 ? '' : 's'})`)
+    const provider = results.tts.data?.provider || 'unknown'
+    console.log(`✅ TTS:        running (${provider})`)
+    if (verbose && results.tts.data) {
+      if (results.tts.data.coqui?.running) {
+        console.log(`               Model: ${results.tts.data.coqui.model || 'unknown'}`)
+      }
+    }
+  } else if (results.tts.data?.configured) {
+    const provider = results.tts.data?.provider || 'unknown'
+    console.log(`⚠️  TTS:        configured (${provider}) but not running`)
   } else {
-    console.log(`❌ TTS:        ${results.tts.error || 'not available'}`)
+    console.log(`❌ TTS:        ${results.tts.error || 'not configured'}`)
   }
 
   console.log('')
 
   // Overall status
   const allHealthy = results.backend.ok && results.stt.ok && results.tts.ok
-  const coreHealthy = results.backend.ok
+  const backendDegraded = results.backend.data?.status === 'degraded'
+  const coreHealthy = results.backend.ok || backendDegraded
 
   if (allHealthy) {
     console.log('🎉 All services healthy!\n')
