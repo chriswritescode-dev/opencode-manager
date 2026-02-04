@@ -138,6 +138,7 @@ Usage: opencode-manager <command> [options]
 
 Commands:
   start              Start the OpenCode Manager server
+  health             Check health of locally running service
   install-service    Install as a user service (macOS/Linux)
   uninstall-service  Remove the user service
   status             Show service status
@@ -150,6 +151,11 @@ Start Options:
   --port, -p <port>  Backend API port (default: 5001)
   --no-auth          Disable basic authentication
 
+Health Options:
+  --port, -p <port>  Backend API port to check (default: 5001)
+  --verbose, -v      Show detailed information
+  --json             Output results as JSON
+
 Service Options:
   --no-tunnel        Disable Cloudflare tunnel (tunnel enabled by default)
 
@@ -160,6 +166,8 @@ one will be started automatically.
 Examples:
   opencode-manager start
   opencode-manager start --tunnel
+  opencode-manager health
+  opencode-manager health --verbose
   opencode-manager install-service
   opencode-manager install-service --no-tunnel
   opencode-manager status
@@ -826,6 +834,188 @@ function commandLogs(): void {
   }
 }
 
+interface HealthResponse {
+  status: string
+  timestamp?: string
+  database?: string
+  opencode?: string
+  opencodePort?: number
+  opencodeVersion?: string
+  opencodeMinVersion?: string
+  opencodeVersionSupported?: boolean
+  telegram?: {
+    running: boolean
+    sessions: number
+    allowlist: number
+  }
+  error?: string
+}
+
+interface SttStatusResponse {
+  server: {
+    running: boolean
+    model?: string
+    port?: number
+  }
+}
+
+interface TtsVoice {
+  id: string
+  name: string
+}
+
+async function commandHealth(args: string[]): Promise<void> {
+  const portIdx = args.findIndex(a => a === '--port' || a === '-p')
+  const port = portIdx >= 0 ? parseInt(args[portIdx + 1]) || DEFAULT_PORT : DEFAULT_PORT
+  const verbose = args.includes('--verbose') || args.includes('-v')
+  const jsonOutput = args.includes('--json')
+
+  // Load auth credentials
+  let auth: AuthConfig | null = null
+  if (fs.existsSync(AUTH_FILE)) {
+    try {
+      auth = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf8')) as AuthConfig
+    } catch {}
+  }
+
+  const headers: Record<string, string> = {}
+  if (auth?.username && auth?.password) {
+    headers['Authorization'] = `Basic ${Buffer.from(`${auth.username}:${auth.password}`).toString('base64')}`
+  }
+
+  const results: {
+    backend: { ok: boolean; data?: HealthResponse; error?: string }
+    stt: { ok: boolean; data?: SttStatusResponse; error?: string }
+    tts: { ok: boolean; voiceCount?: number; error?: string }
+  } = {
+    backend: { ok: false },
+    stt: { ok: false },
+    tts: { ok: false },
+  }
+
+  // Check backend health
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`, {
+      signal: AbortSignal.timeout(5000),
+      headers,
+    })
+    if (response.ok) {
+      const data = await response.json() as HealthResponse
+      results.backend = { ok: data.status === 'healthy', data }
+    } else if (response.status === 401) {
+      results.backend = { ok: false, error: 'Authentication failed' }
+    } else {
+      results.backend = { ok: false, error: `HTTP ${response.status}` }
+    }
+  } catch (err) {
+    results.backend = { ok: false, error: err instanceof Error ? err.message : 'Connection failed' }
+  }
+
+  // Check STT status
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/stt/status`, {
+      signal: AbortSignal.timeout(5000),
+      headers,
+    })
+    if (response.ok) {
+      const data = await response.json() as SttStatusResponse
+      results.stt = { ok: data.server?.running === true, data }
+    } else {
+      results.stt = { ok: false, error: `HTTP ${response.status}` }
+    }
+  } catch (err) {
+    results.stt = { ok: false, error: err instanceof Error ? err.message : 'Connection failed' }
+  }
+
+  // Check TTS voices
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/tts/voices`, {
+      signal: AbortSignal.timeout(5000),
+      headers,
+    })
+    if (response.ok) {
+      const voices = await response.json() as TtsVoice[]
+      results.tts = { ok: Array.isArray(voices) && voices.length > 0, voiceCount: voices.length }
+    } else {
+      results.tts = { ok: false, error: `HTTP ${response.status}` }
+    }
+  } catch (err) {
+    results.tts = { ok: false, error: err instanceof Error ? err.message : 'Connection failed' }
+  }
+
+  // Output results
+  if (jsonOutput) {
+    console.log(JSON.stringify(results, null, 2))
+    process.exit(results.backend.ok ? 0 : 1)
+    return
+  }
+
+  console.log('\n🏥 OpenCode Manager Health Check\n')
+  console.log(`   Port: ${port}`)
+  console.log('')
+
+  // Backend status
+  if (results.backend.ok) {
+    console.log(`✅ Backend:    healthy`)
+    if (verbose && results.backend.data) {
+      const d = results.backend.data
+      console.log(`               Database: ${d.database || 'unknown'}`)
+      console.log(`               OpenCode: ${d.opencode || 'unknown'} (v${d.opencodeVersion || '?'})`)
+      if (d.telegram) {
+        console.log(`               Telegram: ${d.telegram.running ? 'running' : 'stopped'} (${d.telegram.sessions} sessions)`)
+      }
+    }
+  } else if (results.backend.data?.status === 'degraded') {
+    console.log(`⚠️  Backend:    degraded`)
+    if (verbose && results.backend.data) {
+      console.log(`               Database: ${results.backend.data.database || 'unknown'}`)
+      console.log(`               OpenCode: ${results.backend.data.opencode || 'unknown'}`)
+    }
+  } else {
+    console.log(`❌ Backend:    ${results.backend.error || 'unhealthy'}`)
+  }
+
+  // STT status
+  if (results.stt.ok) {
+    console.log(`✅ STT:        running`)
+    if (verbose && results.stt.data?.server) {
+      console.log(`               Model: ${results.stt.data.server.model || 'unknown'}`)
+    }
+  } else {
+    console.log(`❌ STT:        ${results.stt.error || 'not running'}`)
+  }
+
+  // TTS status
+  if (results.tts.ok) {
+    console.log(`✅ TTS:        available (${results.tts.voiceCount} voice${results.tts.voiceCount === 1 ? '' : 's'})`)
+  } else {
+    console.log(`❌ TTS:        ${results.tts.error || 'not available'}`)
+  }
+
+  console.log('')
+
+  // Overall status
+  const allHealthy = results.backend.ok && results.stt.ok && results.tts.ok
+  const coreHealthy = results.backend.ok
+
+  if (allHealthy) {
+    console.log('🎉 All services healthy!\n')
+    process.exit(0)
+  } else if (coreHealthy) {
+    console.log('⚠️  Core services healthy, some optional services unavailable\n')
+    process.exit(0)
+  } else {
+    console.log('❌ Service unhealthy\n')
+    if (!fs.existsSync(AUTH_FILE)) {
+      console.log('💡 Tip: No auth credentials found. Is the service installed?')
+      console.log(`   Run: opencode-manager install-service\n`)
+    } else {
+      console.log('💡 Tip: Check logs with: opencode-manager logs\n')
+    }
+    process.exit(1)
+  }
+}
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
   const command = args[0] || 'help'
@@ -834,6 +1024,9 @@ async function main(): Promise<void> {
   switch (command) {
     case 'start':
       await commandStart(commandArgs)
+      break
+    case 'health':
+      await commandHealth(commandArgs)
       break
     case 'install-service':
       commandInstallService(commandArgs)

@@ -59,7 +59,8 @@
     "docker:restart": "docker-compose restart",
     "install:opencode-attach": "bun scripts/install-opencode-attach.ts",
     "uninstall:opencode-attach": "bun scripts/install-opencode-attach.ts uninstall",
-    "install-service": "bash scripts/reinstall-local.sh"
+    "install-service": "bash scripts/reinstall-local.sh",
+    "install-local": "pnpm build && tar -czf backend-dist.tar.gz backend/dist && tar -czf frontend-dist.tar.gz frontend/dist && npm pack --quiet && TARBALL=\"$(pwd)/$(ls -t opencode-manager-*.tgz | head -1)\" && bun install -g \"$TARBALL\" && rm -f \"$TARBALL\" && INSTALL_DIR=\"$(dirname $(dirname $(readlink -f $(which opencode-manager))))\" && cd \"$INSTALL_DIR\" && tar -xzf backend-dist.tar.gz && tar -xzf frontend-dist.tar.gz"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",
