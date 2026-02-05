@@ -265,6 +265,51 @@ class SSEManager {
   getConnectionStatus(): boolean {
     return this.isConnected
   }
+
+  async ensureConnected(timeoutMs: number = 5000): Promise<boolean> {
+    if (this.isConnected && this.clientId) {
+      return true
+    }
+
+    if (this.subscribers.size === 0) {
+      return false
+    }
+
+    this.reconnectDelay = RECONNECT_DELAY_MS
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
+    
+    if (this.eventSource) {
+      this.eventSource.close()
+      this.eventSource = null
+    }
+
+    return new Promise<boolean>((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve(false)
+      }, timeoutMs)
+
+      const checkConnection = () => {
+        if (this.isConnected && this.clientId) {
+          clearTimeout(timeout)
+          resolve(true)
+        }
+      }
+
+      const originalNotify = this.notifyStatusChange.bind(this)
+      this.notifyStatusChange = (connected: boolean) => {
+        originalNotify(connected)
+        if (connected) {
+          this.notifyStatusChange = originalNotify
+          checkConnection()
+        }
+      }
+
+      this.connect()
+    })
+  }
 }
 
 export const sseManager = SSEManager.getInstance()
@@ -290,4 +335,8 @@ export function reconnectSSE(): void {
 
 export function isSSEConnected(): boolean {
   return sseManager.getConnectionStatus()
+}
+
+export async function ensureSSEConnected(timeoutMs?: number): Promise<boolean> {
+  return sseManager.ensureConnected(timeoutMs)
 }

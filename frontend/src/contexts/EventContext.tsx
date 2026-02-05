@@ -6,7 +6,7 @@ import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent } from '@/api/types'
 import { showToast } from '@/lib/toast'
-import { subscribeToSSE, addSSEDirectory } from '@/lib/sseManager'
+import { subscribeToSSE, addSSEDirectory, ensureSSEConnected } from '@/lib/sseManager'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
@@ -156,6 +156,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [allPermissions.length, showPermissionDialog])
 
   const respondToPermission = useCallback(async (permissionID: string, sessionID: string, response: PermissionResponse) => {
+    const connected = await ensureSSEConnected()
+    if (!connected) {
+      showToast.error('Unable to connect. Please try again.')
+      throw new Error('SSE connection failed')
+    }
     const client = getClient(sessionID)
     if (!client) throw new Error('No client found for session')
     await client.respondToPermission(sessionID, permissionID, response)
@@ -163,6 +168,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [getClient, removePermission])
 
   const replyToQuestion = useCallback(async (requestID: string, answers: string[][]) => {
+    const connected = await ensureSSEConnected()
+    if (!connected) {
+      showToast.error('Unable to connect. Please try again.')
+      throw new Error('SSE connection failed')
+    }
     const question = Object.values(questionsBySession).flat().find(q => q.id === requestID)
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
@@ -172,6 +182,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [getClient, removeQuestion, questionsBySession])
 
   const rejectQuestion = useCallback(async (requestID: string) => {
+    const connected = await ensureSSEConnected()
+    if (!connected) {
+      showToast.error('Unable to connect. Please try again.')
+      throw new Error('SSE connection failed')
+    }
     const question = Object.values(questionsBySession).flat().find(q => q.id === requestID)
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
