@@ -11,6 +11,7 @@ import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
+import { ensureSSEConnected, reconnectSSE } from "../lib/sseManager";
 
 const titleGeneratingSessionsState = new Set<string>();
 const titleGeneratingListeners = new Set<() => void>();
@@ -267,6 +268,12 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     }) => {
       if (!client) throw new Error("No client available");
 
+      const connected = await ensureSSEConnected();
+      if (!connected) {
+        showToast.error("Unable to connect. Please try again.");
+        throw new Error("SSE connection failed");
+      }
+
       setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
@@ -342,6 +349,13 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
                             !axiosError.response;
       
       if (isNetworkError) {
+        return;
+      }
+
+      const fetchError = error as { statusCode?: number };
+      const isCloudflareTimeout = fetchError.statusCode === 524;
+      if (isCloudflareTimeout) {
+        reconnectSSE();
         return;
       }
       

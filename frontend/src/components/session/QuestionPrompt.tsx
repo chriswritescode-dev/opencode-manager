@@ -181,18 +181,18 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
     <div 
       className="w-full bg-gradient-to-br from-blue-500/10 to-blue-600/5 border-2 border-blue-500/30 rounded-xl shadow-lg shadow-blue-500/10 backdrop-blur-sm mb-3 overflow-hidden"
     >
-      <div className="flex items-center justify-between px-3 py-2 border-b border-blue-500/20 bg-blue-500/5">
+      <div className="flex items-center justify-between px-2 py-1.5 sm:px-3 sm:py-2 border-b border-blue-500/20 bg-blue-500/5">
         <div className="flex items-center gap-2">
           {totalSteps > 1 && (
             <button
               onClick={goToPrev}
               disabled={currentIndex === 0}
-              className="p-1 rounded hover:bg-blue-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="p-0.5 sm:p-1 rounded hover:bg-blue-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
-              <ChevronLeft className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400" />
             </button>
           )}
-          <span className="text-sm font-semibold text-blue-400">
+          <span className="text-xs sm:text-sm font-semibold text-blue-400">
             {isConfirmStep ? 'Review' : (
               totalSteps > 1 
                 ? `Question ${currentIndex + 1}/${questions.length}` 
@@ -203,22 +203,22 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
             <button
               onClick={goToNext}
               disabled={currentIndex === totalSteps - 1}
-              className="p-1 rounded hover:bg-blue-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              className="p-0.5 sm:p-1 rounded hover:bg-blue-500/20 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
             >
-              <ChevronRight className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400" />
             </button>
           )}
         </div>
         <button
           onClick={handleReject}
           disabled={isSubmitting}
-          className="p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
+          className="p-1 sm:p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
         >
-          <X className="w-4 h-4" />
+          <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
 
-      <div className="p-3 max-h-[70vh] overflow-y-auto">
+      <div className="p-2 sm:p-3 max-h-[50vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden">
         {isConfirmStep ? (
           <ConfirmStep 
             questions={questions} 
@@ -243,7 +243,7 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
       </div>
 
       {totalSteps > 1 && (
-        <div className="flex justify-center gap-1.5 py-2 border-t border-blue-500/10">
+        <div className="flex justify-center gap-1 sm:gap-1.5 py-1.5 sm:py-2 border-t border-blue-500/10">
           {Array.from({ length: totalSteps }).map((_, i) => (
             <button
               key={i}
@@ -252,7 +252,7 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
                 setExpandedOther(null)
               }}
               className={cn(
-                "w-2 h-2 rounded-full transition-all duration-200",
+                "w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full transition-all duration-200",
                 i === currentIndex 
                   ? "bg-blue-500 scale-125" 
                   : i < questions.length && hasAnswerForQuestion(i)
@@ -264,13 +264,12 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
         </div>
       )}
 
-      <div className="flex gap-2 px-3 pb-3">
+      <div className="flex gap-1.5 sm:gap-2 px-2 pb-2 sm:px-3 sm:pb-3">
         <Button
-          variant="outline"
           size="sm"
           onClick={handleReject}
           disabled={isSubmitting}
-          className="flex-1 h-10 border-blue-500/30 hover:bg-blue-500/10 hover:border-blue-500/50"
+          className="flex-1 h-8 sm:h-10 text-xs sm:text-sm bg-muted hover:bg-muted/80 text-foreground"
         >
           Dismiss
         </Button>
@@ -280,10 +279,10 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
               size="sm"
               onClick={handleSubmit}
               disabled={isSubmitting || !allQuestionsAnswered}
-              className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white"
+              className="flex-1 h-8 sm:h-10 text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white"
             >
               {isSubmitting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
               ) : (
                 'Submit'
               )}
@@ -293,10 +292,11 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
               size="sm"
               onClick={handleNext}
               disabled={currentIndex === totalSteps - 1 || (expandedOther === currentIndex && !customInputs[currentIndex]?.trim())}
-              className="flex-1 h-10 bg-blue-600 hover:bg-blue-700 text-white"
+              className="flex-1 h-8 sm:h-10 text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              {expandedOther === currentIndex ? 'Confirm' : (currentIndex === questions.length - 1 ? 'Review' : 'Next')}
-              <ChevronRight className="w-4 h-4 ml-1" />
+              <span className="hidden sm:inline">{expandedOther === currentIndex ? 'Confirm' : (currentIndex === questions.length - 1 ? 'Review' : 'Next')}</span>
+              <span className="sm:hidden">{expandedOther === currentIndex ? 'OK' : (currentIndex === questions.length - 1 ? 'Review' : '→')}</span>
+              <ChevronRight className="hidden sm:block w-4 h-4 ml-1" />
             </Button>
           )
         )}
@@ -346,15 +346,15 @@ function QuestionStep({
   const isCustomSelected = confirmedCustom && answers.includes(confirmedCustom)
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm font-semibold text-foreground">
+    <div className="space-y-2 sm:space-y-3">
+      <p className="text-xs sm:text-sm font-semibold text-foreground">
         {question.question}
         {isMultiSelect && (
           <span className="text-foreground/60 font-normal ml-1">(select all that apply)</span>
         )}
       </p>
 
-      <div className="space-y-2">
+      <div className="space-y-1.5 sm:space-y-2">
         {question.options.map((option, i) => {
           const isSelected = answers.includes(option.label)
           return (
@@ -362,24 +362,24 @@ function QuestionStep({
               key={i}
               onClick={() => onSelectOption(option.label)}
               className={cn(
-                "w-full text-left p-3 rounded-lg border-2 transition-all duration-200 active:scale-[0.98]",
+                "w-full text-left p-2 sm:p-3 rounded-lg border-2 transition-all duration-200 active:scale-[0.98]",
                 isSelected
                   ? "border-blue-500 bg-blue-500/10"
                   : "border-border hover:border-blue-500/50 hover:bg-blue-500/5"
               )}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-start justify-between gap-1.5 sm:gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                   <div className={cn(
-                    "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+                    "w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors",
                     isSelected 
                       ? "border-blue-500 bg-blue-500" 
                       : "border-muted-foreground"
                   )}>
-                    {isSelected && <Check className="w-3 h-3 text-white" />}
+                    {isSelected && <Check className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />}
                   </div>
                   <span className={cn(
-                    "text-sm font-semibold",
+                    "text-xs sm:text-sm font-semibold",
                     isSelected ? "text-blue-400" : "text-foreground"
                   )}>
                     {option.label}
@@ -387,7 +387,7 @@ function QuestionStep({
                 </div>
               </div>
               {option.description && (
-                <p className="text-xs text-foreground/70 mt-1 ml-7">
+                <p className="text-[10px] sm:text-xs text-foreground/70 mt-0.5 sm:mt-1 ml-5 sm:ml-7">
                   {option.description}
                 </p>
               )}
@@ -404,23 +404,23 @@ function QuestionStep({
             }
           }}
           className={cn(
-            "w-full text-left p-3 rounded-lg border-2 transition-all duration-200",
+            "w-full text-left p-2 sm:p-3 rounded-lg border-2 transition-all duration-200",
             expandedOther || isCustomSelected
               ? "border-blue-500 bg-blue-500/10"
               : "border-border hover:border-blue-500/50 hover:bg-blue-500/5"
           )}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <div className={cn(
-              "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors",
+              "w-4 h-4 sm:w-5 sm:h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors",
               isCustomSelected
                 ? "border-blue-500 bg-blue-500" 
                 : "border-muted-foreground"
             )}>
-              {isCustomSelected && <Check className="w-3 h-3 text-white" />}
+              {isCustomSelected && <Check className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />}
             </div>
             <span className={cn(
-              "text-sm font-semibold",
+              "text-xs sm:text-sm font-semibold",
               expandedOther || isCustomSelected ? "text-blue-400" : "text-foreground"
             )}>
               Other...
@@ -429,13 +429,13 @@ function QuestionStep({
         </button>
 
         {expandedOther && (
-          <div className="ml-7 space-y-2 animate-in slide-in-from-top-2 duration-200">
+          <div className="ml-5 sm:ml-7 space-y-1.5 sm:space-y-2 animate-in slide-in-from-top-2 duration-200">
             <Textarea
               ref={textareaRef}
               value={customInput}
               onChange={(e) => onCustomInputChange(e.target.value)}
               placeholder="Type your own answer..."
-              className="min-h-[80px] text-sm resize-none border-blue-500/30 focus:border-blue-500"
+              className="min-h-[60px] sm:min-h-[80px] text-xs sm:text-sm resize-none border-blue-500/30 focus:border-blue-500"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -450,7 +450,7 @@ function QuestionStep({
         )}
 
         {!expandedOther && isCustomSelected && (
-          <div className="ml-7 text-xs text-muted-foreground">
+          <div className="ml-5 sm:ml-7 text-[10px] sm:text-xs text-muted-foreground">
             {confirmedCustom}
           </div>
         )}
@@ -467,10 +467,10 @@ interface ConfirmStepProps {
 
 function ConfirmStep({ questions, answers, onEditQuestion }: ConfirmStepProps) {
   return (
-    <div className="space-y-3">
-      <p className="text-sm font-semibold text-foreground">Review your answers</p>
+    <div className="space-y-2 sm:space-y-3">
+      <p className="text-xs sm:text-sm font-semibold text-foreground">Review your answers</p>
       
-      <div className="space-y-2">
+      <div className="space-y-1.5 sm:space-y-2">
         {questions.map((q, i) => {
           const answer = answers[i] ?? []
           const hasAnswer = answer.length > 0
@@ -479,23 +479,23 @@ function ConfirmStep({ questions, answers, onEditQuestion }: ConfirmStepProps) {
               key={i}
               onClick={() => onEditQuestion(i)}
               className={cn(
-                "w-full text-left p-3 rounded-lg border transition-colors",
+                "w-full text-left p-2 sm:p-3 rounded-lg border transition-colors",
                 hasAnswer 
                   ? "border-green-500/40 bg-green-500/10 hover:bg-green-500/15" 
                   : "border-red-500/40 bg-red-500/10 hover:bg-red-500/15"
               )}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-1.5 sm:gap-2">
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs text-foreground/60 truncate">{q.header}</p>
+                  <p className="text-[10px] sm:text-xs text-foreground/60 truncate">{q.header}</p>
                   <p className={cn(
-                    "text-sm font-semibold mt-0.5",
+                    "text-xs sm:text-sm font-semibold mt-0.5",
                     hasAnswer ? "text-green-400" : "text-red-400"
                   )}>
                     {hasAnswer ? answer.join(', ') : '(not answered)'}
                   </p>
                 </div>
-                <ChevronRight className="w-4 h-4 text-foreground/50 flex-shrink-0 mt-1" />
+                <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-foreground/50 flex-shrink-0 mt-0.5 sm:mt-1" />
               </div>
             </button>
           )

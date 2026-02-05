@@ -105,6 +105,12 @@ export function OpenCodeConfigManager() {
       return await settingsApi.upgradeOpenCode()
     },
     onSuccess: (data) => {
+      if (data.upgraded && data.newVersion) {
+        queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
+          if (!old) return old
+          return { ...old, opencodeVersion: data.newVersion }
+        })
+      }
       invalidateConfigCaches(queryClient)
       if (data.upgraded) {
         showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
@@ -113,15 +119,17 @@ export function OpenCodeConfigManager() {
       }
     },
     onError: (error) => {
-      invalidateConfigCaches(queryClient)
-      
       const defaultMessage = 'Failed to upgrade OpenCode'
       
       if (error && typeof error === 'object' && 'response' in error) {
         const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
         const data = response?.data
         
-        if (data?.recovered) {
+        if (data?.recovered && data.newVersion) {
+          queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
+            if (!old) return old
+            return { ...old, opencodeVersion: data.newVersion }
+          })
           showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: 'upgrade-opencode' })
         } else {
           showToast.error(data?.recoveryMessage || defaultMessage, { id: 'upgrade-opencode' })
@@ -129,6 +137,7 @@ export function OpenCodeConfigManager() {
       } else {
         showToast.error(defaultMessage, { id: 'upgrade-opencode' })
       }
+      invalidateConfigCaches(queryClient)
     },
   })
 
