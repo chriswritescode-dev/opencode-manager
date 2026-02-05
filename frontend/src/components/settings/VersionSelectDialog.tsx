@@ -5,6 +5,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from '@/components/ui/button'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
+import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 
 interface VersionSelectDialogProps {
   open: boolean
@@ -25,20 +26,30 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
   const installMutation = useMutation({
     mutationFn: (version: string) => settingsApi.installOpenCodeVersion(version),
     onSuccess: (result) => {
+      if (result.newVersion) {
+        queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
+          if (!old) return old
+          return { ...old, opencodeVersion: result.newVersion }
+        })
+      }
       queryClient.invalidateQueries({ queryKey: ['opencode-versions'] })
-      queryClient.invalidateQueries({ queryKey: ['server-health'] })
+      invalidateConfigCaches(queryClient)
       showToast.success(result.message)
       onOpenChange(false)
     },
     onError: (error) => {
       queryClient.invalidateQueries({ queryKey: ['opencode-versions'] })
-      queryClient.invalidateQueries({ queryKey: ['server-health'] })
+      invalidateConfigCaches(queryClient)
       
       if (error && typeof error === 'object' && 'response' in error) {
         const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
         const data = response?.data
         
         if (data?.recovered) {
+          queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
+            if (!old) return old
+            return { ...old, opencodeVersion: data.newVersion }
+          })
           showToast.success(`Install failed but server recovered at v${data.newVersion}`)
         } else {
           showToast.error(data?.recoveryMessage || 'Failed to install version')
