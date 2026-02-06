@@ -1,5 +1,4 @@
-import { X, Mic } from 'lucide-react'
-import { SquareFill } from '@/components/ui/square-fill'
+import { X, Mic, MicOff } from 'lucide-react'
 
 interface RecordingOverlayProps {
   interimTranscript: string
@@ -44,7 +43,7 @@ export function RecordingOverlay({
           onClick={onStop}
           className="flex items-center gap-2 px-4 py-1.5 rounded-lg text-sm font-medium bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white border border-red-500/60 shadow-md shadow-red-500/30 transition-all duration-200 active:scale-95"
         >
-          <SquareFill className="w-3 h-3" />
+          <MicOff className="w-3 h-3" />
           <span>Done</span>
         </button>
       </div>

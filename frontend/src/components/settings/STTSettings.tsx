@@ -6,9 +6,8 @@ import { useSettings } from '@/hooks/useSettings'
 import { useSTT } from '@/hooks/useSTT'
 import { isWebRecognitionSupported, getAvailableLanguages } from '@/lib/webSpeechRecognizer'
 import { sttApi } from '@/api/stt'
-import { Mic, Loader2, XCircle, CheckCircle2, RefreshCw, Eye, EyeOff } from 'lucide-react'
+import { Mic, Loader2, XCircle, CheckCircle2, RefreshCw, Eye, EyeOff, MicOff } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
-import { SquareFill } from '@/components/ui/square-fill'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Combobox } from '@/components/ui/combobox'
 import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
@@ -445,7 +444,7 @@ export function STTSettings() {
                 >
                   {isRecording ? (
                     <>
-                      <SquareFill className="w-4 h-4" />
+                      <MicOff className="w-4 h-4" />
                       Stop
                     </>
                   ) : isProcessing ? (
