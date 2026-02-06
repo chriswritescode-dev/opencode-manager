@@ -233,7 +233,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
                       {...field}
                       placeholder="The system prompt that defines the agent's behavior and role"
                       rows={6}
-                      className="font-mono text-sm"
+                      className="font-mono md:text-sm"
                     />
                   </FormControl>
                   <FormMessage />

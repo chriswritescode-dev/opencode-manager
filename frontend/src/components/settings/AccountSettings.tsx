@@ -163,11 +163,11 @@ export function AccountSettings() {
               <div className="space-y-3 sm:space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs sm:text-sm">Name</Label>
-                  <Input value={user.name} disabled className="h-9 sm:h-10 text-sm" />
+                  <Input value={user.name} disabled className="h-9 sm:h-10 md:text-sm" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs sm:text-sm">Email</Label>
-                  <Input value={user.email} disabled className="h-9 sm:h-10 text-sm" />
+                  <Input value={user.email} disabled className="h-9 sm:h-10 md:text-sm" />
                 </div>
                 <Button variant="outline" onClick={() => setEditingProfile(false)} className="h-9 sm:h-10">
                   Done
@@ -216,7 +216,7 @@ export function AccountSettings() {
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="Enter current password"
-                    className="h-9 sm:h-10 text-sm"
+                    className="h-9 sm:h-10 md:text-sm"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -227,7 +227,7 @@ export function AccountSettings() {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="At least 8 characters"
-                    className="h-9 sm:h-10 text-sm"
+                    className="h-9 sm:h-10 md:text-sm"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -271,7 +271,7 @@ export function AccountSettings() {
               placeholder="Passkey name (optional)"
               value={passkeyName}
               onChange={(e) => setPasskeyName(e.target.value)}
-              className="h-9 sm:h-10 text-sm"
+              className="h-9 sm:h-10 md:text-sm"
             />
             <Button 
               onClick={handleAddPasskey} 

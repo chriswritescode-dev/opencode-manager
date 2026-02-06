@@ -435,7 +435,7 @@ function QuestionStep({
               value={customInput}
               onChange={(e) => onCustomInputChange(e.target.value)}
               placeholder="Type your own answer..."
-              className="min-h-[60px] sm:min-h-[80px] text-xs sm:text-sm resize-none border-blue-500/30 focus:border-blue-500"
+              className="min-h-[60px] sm:min-h-[80px] text-[16px] sm:text-xs md:text-sm resize-none border-blue-500/30 focus:border-blue-500"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()

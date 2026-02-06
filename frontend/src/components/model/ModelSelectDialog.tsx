@@ -57,7 +57,7 @@ function SearchInput({ onSearch, initialValue = "" }: SearchInputProps) {
           placeholder="Search models..."
           value={value}
           onChange={(e) => setValue(e.target.value)}
-          className="pl-10 text-sm"
+          className="pl-10 md:text-sm"
         />
       </div>
     </div>

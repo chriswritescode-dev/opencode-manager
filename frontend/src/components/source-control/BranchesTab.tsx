@@ -132,7 +132,7 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
                 placeholder="New branch name..."
                 value={newBranchName}
                 onChange={(e) => setNewBranchName(e.target.value)}
-                className="h-8 text-sm"
+                className="h-8 md:text-sm"
                 autoFocus
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handleCreateBranch()

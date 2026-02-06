@@ -122,7 +122,7 @@ export function AgentsMdEditor() {
       <Textarea
         value={content}
         onChange={(e) => handleContentChange(e.target.value)}
-        className="font-mono text-sm min-h-[300px] resize-y"
+        className="font-mono md:text-sm min-h-[300px] resize-y"
         placeholder="# Agent Instructions&#10;&#10;Add global instructions for AI agents here..."
       />
       

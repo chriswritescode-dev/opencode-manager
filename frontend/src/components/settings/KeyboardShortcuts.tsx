@@ -176,7 +176,7 @@ export function KeyboardShortcuts() {
             <div className="flex items-center gap-2">
               <input
                 type="text"
-                className="px-3 py-1.5 bg-accent border border-primary rounded text-sm text-foreground font-mono outline-none"
+                className="px-3 py-1.5 bg-accent border border-primary rounded text-[16px] md:text-sm text-foreground font-mono outline-none"
                 placeholder="Press keys..."
                 value={currentKeys || ''}
                 autoFocus
@@ -218,7 +218,7 @@ export function KeyboardShortcuts() {
               <div className="flex items-center gap-2">
                 <input
                   type="text"
-                  className="px-3 py-1.5 bg-accent border border-primary rounded text-sm text-foreground font-mono outline-none"
+                  className="px-3 py-1.5 bg-accent border border-primary rounded text-[16px] md:text-sm text-foreground font-mono outline-none"
                   placeholder="Press keys..."
                   value={currentKeys || ''}
                   autoFocus

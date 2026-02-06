@@ -87,7 +87,7 @@ export function OpenCodeConfigEditor({
               setEditError('')
               setEditErrorLine(null)
             }}
-            className="flex-1 font-mono text-xs sm:text-sm resize-none h-full rounded-none sm:rounded-md"
+            className="flex-1 font-mono text-[16px] sm:text-xs md:text-sm resize-none h-full rounded-none sm:rounded-md"
           />
           {editError && (
             <div className="absolute bottom-0 left-0 right-0 bg-background/95 border-t p-2 sm:p-3">

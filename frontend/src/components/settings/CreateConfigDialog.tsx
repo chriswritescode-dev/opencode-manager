@@ -138,7 +138,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
               onChange={(e) => handleContentChange(e.target.value)}
               placeholder='{"$schema": "https://opencode.ai/config.json", "theme": "dark"}'
               rows={12}
-              className="font-mono text-sm"
+              className="font-mono md:text-sm"
             />
             {error && (
               <p className="text-sm text-red-500 mt-2">

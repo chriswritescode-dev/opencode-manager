@@ -128,7 +128,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
                     placeholder="Commit message..."
                     value={commitMessage}
                     onChange={(e) => setCommitMessage(e.target.value)}
-                    className="min-h-[80px] text-sm resize-none"
+                    className="min-h-[80px] md:text-sm resize-none"
                     onKeyDown={(e) => {
                       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canCommit) {
                         handleCommit()
@@ -211,7 +211,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
               placeholder="Commit message..."
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
-              className="min-h-[80px] text-sm resize-none"
+              className="min-h-[80px] md:text-sm resize-none"
               onKeyDown={(e) => {
                 if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && canCommit) {
                   handleCommit()

@@ -353,7 +353,7 @@ export function ProviderSettings() {
                   placeholder="Search providers..."
                   value={availableSearch}
                   onChange={(e) => setAvailableSearch(e.target.value)}
-                  className="pl-9 text-sm"
+                  className="pl-9 md:text-sm"
                 />
               </div>
 
