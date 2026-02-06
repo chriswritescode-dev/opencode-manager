@@ -370,14 +370,6 @@ class SSEAggregator {
     return false
   }
 
-  getClientVisibilityDetails(): Array<{ id: string; visible: boolean; directories: string[] }> {
-    return Array.from(this.clients.values()).map(client => ({
-      id: client.id,
-      visible: client.visible,
-      directories: Array.from(client.directories),
-    }))
-  }
-
   getActiveDirectories(): string[] {
     return Array.from(this.connections.keys())
   }

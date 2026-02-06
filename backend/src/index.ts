@@ -209,24 +209,19 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
   if (!ENV.VAPID.SUBJECT) {
     logger.warn('VAPID_SUBJECT is not set — push notifications require a mailto: subject (e.g. mailto:you@example.com)')
   } else if (!ENV.VAPID.SUBJECT.startsWith('mailto:')) {
-    logger.warn(`VAPID_SUBJECT="${ENV.VAPID.SUBJECT}" does not use mailto: format — iOS/Safari push notifications will fail. Use mailto:you@example.com`)
+    logger.warn(`VAPID_SUBJECT="${ENV.VAPID.SUBJECT}" does not use mailto: format — iOS/Safari push notifications will fail`)
   }
-
-  const vapidSubject = ENV.VAPID.SUBJECT || 'mailto:push@localhost'
 
   notificationService.configureVapid({
     publicKey: ENV.VAPID.PUBLIC_KEY,
     privateKey: ENV.VAPID.PRIVATE_KEY,
-    subject: vapidSubject,
+    subject: ENV.VAPID.SUBJECT || 'mailto:push@localhost',
   })
   sseAggregator.onEvent((directory, event) => {
     notificationService.handleSSEEvent(directory, event).catch((err) => {
       logger.error('Push notification dispatch error:', err)
     })
   })
-  logger.info('Push notifications enabled')
-} else {
-  logger.info('Push notifications disabled (no VAPID keys configured)')
 }
 
 app.route('/api/auth', createAuthRoutes(auth))

@@ -2,8 +2,6 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { PushSubscriptionRequestSchema } from "@opencode-manager/shared/schemas";
 import type { NotificationService } from "../services/notification";
-import { logger } from "../utils/logger";
-import { sseAggregator } from "../services/sse-aggregator";
 
 export function createNotificationRoutes(
   notificationService: NotificationService
@@ -31,8 +29,6 @@ export function createNotificationRoutes(
     }
 
     const { endpoint, keys, deviceName } = parsed.data;
-
-    logger.info(`[push:subscribe] user="${userId}" device="${deviceName ?? "unknown"}" endpoint="${endpoint}"`);
 
     const subscription = notificationService.saveSubscription(
       userId,
@@ -94,39 +90,9 @@ export function createNotificationRoutes(
       );
     }
 
-    const results = await notificationService.sendTestNotification(userId);
+    await notificationService.sendTestNotification(userId);
 
-    return c.json({ success: true, devicesNotified: subscriptions.length, diagnostics: results });
-  });
-
-  app.get("/debug", (c) => {
-    const userId = c.req.query('userId') || 'default'
-    const subscriptions = notificationService.getSubscriptions(userId);
-    const clients = sseAggregator.getClientVisibilityDetails();
-    const hasVisibleClients = sseAggregator.hasVisibleClients();
-    const vapidDetails = notificationService.getVapidDetails();
-
-    return c.json({
-      vapidConfigured: notificationService.isConfigured(),
-      vapidPublicKeyPrefix: vapidDetails?.publicKey.slice(0, 20) + "...",
-      vapidSubject: vapidDetails?.subject,
-      vapidPublicKeyLength: vapidDetails?.publicKey.length,
-      vapidPrivateKeyLength: vapidDetails?.privateKeyLength,
-      serverTime: new Date().toISOString(),
-      serverTimestamp: Date.now(),
-      hasVisibleClients,
-      sseClients: clients,
-      subscriptions: subscriptions.map(sub => ({
-        id: sub.id,
-        endpoint: sub.endpoint,
-        endpointDomain: new URL(sub.endpoint).hostname,
-        deviceName: sub.deviceName,
-        createdAt: new Date(sub.createdAt).toISOString(),
-        lastUsedAt: sub.lastUsedAt ? new Date(sub.lastUsedAt).toISOString() : null,
-        p256dhLength: sub.p256dh.length,
-        authLength: sub.auth.length,
-      })),
-    });
+    return c.json({ success: true, devicesNotified: subscriptions.length });
   });
 
   return app;
