@@ -6,9 +6,10 @@ import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManag
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
+import { NotificationSettings } from '@/components/settings/NotificationSettings'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, X, Key, GitBranch, User, Volume2 } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, X, Key, GitBranch, User, Volume2, Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSwipeBack } from '@/hooks/useMobile'
 
@@ -17,7 +18,7 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice'
+type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
@@ -43,6 +44,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const menuItems = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
+    { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Push notification preferences' },
     { id: 'voice', icon: Volume2, label: 'Voice', description: 'Text-to-speech and speech-to-text settings' },
     { id: 'git', icon: GitBranch, label: 'Git', description: 'Git identity and credentials for repositories' },
     { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', description: 'Customize keyboard shortcuts' },
@@ -59,7 +61,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent 
         ref={contentRef}
-        className="max-w-4xl w-full h-[100vh] sm:h-auto sm:w-[95vw] sm:max-h-[90vh] bg-gradient-to-br from-background via-background to-background border-border p-0 sm:rounded-lg overflow-hidden !flex !flex-col left-0 top-0 translate-x-0 translate-y-0 max-h-[100vh] sm:left-[50%] sm:top-[50%] sm:translate-x-[-50%] sm:translate-y-[-50%] [&>button:last-child]:hidden"
+        className="w-full h-[100vh] sm:h-auto sm:w-[95vw] sm:max-h-[90vh] bg-gradient-to-br from-background via-background to-background border-border p-0 sm:rounded-lg overflow-hidden !flex !flex-col left-0 top-0 translate-x-0 translate-y-0 max-h-[100vh] sm:left-[50%] sm:top-[50%] sm:translate-x-[-50%] sm:translate-y-[-50%] [&>button:last-child]:hidden"
         style={swipeStyles}
       >
         
@@ -71,12 +73,15 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           </div>
           <Tabs defaultValue="account" className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
-              <TabsList className="grid w-full grid-cols-7 bg-card p-1">
+              <TabsList className="grid w-full grid-cols-8 bg-card p-1">
                 <TabsTrigger value="account" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   Account
                 </TabsTrigger>
                 <TabsTrigger value="general" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   General
+                </TabsTrigger>
+                <TabsTrigger value="notifications" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                  Notify
                 </TabsTrigger>
                 <TabsTrigger value="voice" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   Voice
@@ -100,6 +105,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
               <div className="px-6 pb-6">
                 <TabsContent value="account" className="mt-0"><AccountSettings /></TabsContent>
                 <TabsContent value="general" className="mt-0"><GeneralSettings /></TabsContent>
+                <TabsContent value="notifications" className="mt-0"><NotificationSettings /></TabsContent>
                 <TabsContent value="voice" className="mt-0"><VoiceSettings /></TabsContent>
                 <TabsContent value="git" className="mt-0"><GitSettings /></TabsContent>
                 <TabsContent value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
@@ -162,6 +168,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
             {mobileView === 'account' && <AccountSettings />}
             {mobileView === 'general' && <GeneralSettings />}
+            {mobileView === 'notifications' && <NotificationSettings />}
             {mobileView === 'voice' && <VoiceSettings />}
             {mobileView === 'git' && <GitSettings />}
             {mobileView === 'shortcuts' && <KeyboardShortcuts />}

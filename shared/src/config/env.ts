@@ -87,6 +87,12 @@ export const ENV = {
     LOG_LEVEL: getEnvString('LOG_LEVEL', DEFAULTS.LOGGING.LOG_LEVEL),
   },
 
+  VAPID: {
+    PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
+    PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY ?? '',
+    SUBJECT: getEnvString('VAPID_SUBJECT', 'mailto:admin@opencode.local'),
+  },
+
   AUTH: {
     SECRET: getEnvString('AUTH_SECRET', process.env.NODE_ENV === 'production' ? '' : generateDefaultSecret()),
     TRUSTED_ORIGINS: getEnvString('AUTH_TRUSTED_ORIGINS', 'http://localhost:5173,http://localhost:5003'),

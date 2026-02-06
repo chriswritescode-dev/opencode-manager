@@ -12,6 +12,7 @@ coverage/
 .vscode/
 .idea/
 *.test.js
+*.tsbuildinfo
 
 data/
 workspace/

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NotificationPreferencesSchema, DEFAULT_NOTIFICATION_PREFERENCES } from "./notifications";
 
 export const CustomCommandSchema = z.object({
   name: z.string(),
@@ -124,6 +125,7 @@ export const UserPreferencesSchema = z.object({
   gitIdentity: GitIdentitySchema.optional(),
   tts: TTSConfigSchema.optional(),
   stt: STTConfigSchema.optional(),
+  notifications: NotificationPreferencesSchema.optional(),
   lastKnownGoodConfig: z.string().optional(),
   repoOrder: z.array(z.number()).optional(),
 });
@@ -169,6 +171,7 @@ export const DEFAULT_USER_PREFERENCES = {
   gitIdentity: DEFAULT_GIT_IDENTITY,
   tts: DEFAULT_TTS_CONFIG,
   stt: DEFAULT_STT_CONFIG,
+  notifications: DEFAULT_NOTIFICATION_PREFERENCES,
 };
 
 export const SettingsResponseSchema = z.object({

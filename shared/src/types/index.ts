@@ -30,6 +30,12 @@ import {
   SessionSchema,
   MessageSchema,
 } from '../schemas/opencode'
+import {
+  NotificationPreferencesSchema,
+  PushSubscriptionRequestSchema,
+  PushSubscriptionRecordSchema,
+  PushNotificationPayloadSchema,
+} from '../schemas/notifications'
 
 export type UserPreferences = z.infer<typeof UserPreferencesSchema>
 export type SettingsResponse = z.infer<typeof SettingsResponseSchema>
@@ -57,6 +63,11 @@ export type FilePatchRequest = z.infer<typeof FilePatchRequestSchema>
 
 export type Session = z.infer<typeof SessionSchema>
 export type Message = z.infer<typeof MessageSchema>
+
+export type NotificationPreferences = z.infer<typeof NotificationPreferencesSchema>
+export type PushSubscriptionRequest = z.infer<typeof PushSubscriptionRequestSchema>
+export type PushSubscriptionRecord = z.infer<typeof PushSubscriptionRecordSchema>
+export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>
 
 export interface ErrorResponse {
   error: string

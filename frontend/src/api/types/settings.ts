@@ -8,8 +8,9 @@ import {
   type STTConfig,
   type OpenCodeConfigContent,
 } from '@opencode-manager/shared'
+import type { NotificationPreferences } from '@opencode-manager/shared/types'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigContent }
+export type { TTSConfig, STTConfig, OpenCodeConfigContent, NotificationPreferences }
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY }
 
 export interface CustomCommand {
@@ -54,6 +55,7 @@ export interface UserPreferences {
   gitIdentity?: GitIdentity
   tts?: TTSConfig
   stt?: STTConfig
+  notifications?: NotificationPreferences
   repoOrder?: number[]
 }
 
