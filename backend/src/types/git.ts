@@ -38,3 +38,13 @@ export interface GitDiffOptions {
   ignoreWhitespace?: boolean
   unified?: boolean
 }
+
+export interface GitBranch {
+  name: string
+  type: 'local' | 'remote'
+  current: boolean
+  upstream?: string
+  ahead?: number
+  behind?: number
+  isWorktree?: boolean
+}

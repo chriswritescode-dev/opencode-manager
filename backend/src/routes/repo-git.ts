@@ -3,25 +3,15 @@ import type { Database } from 'bun:sqlite'
 import * as db from '../db/queries'
 import { logger } from '../utils/logger'
 import { getErrorMessage } from '../utils/error-utils'
-import { GitCommitService } from '../services/git/GitCommitService'
-import { GitPushService } from '../services/git/GitPushService'
-import { GitLogService } from '../services/git/GitLogService'
-import { GitStatusService } from '../services/git/GitStatusService'
-import { GitFetchPullService } from '../services/git/GitFetchPullService'
-import { GitBranchService } from '../services/git/GitBranchService'
+import { GitService } from '../services/git/GitService'
 import type { GitAuthService } from '../services/git-auth'
-import { GitDiffService } from '../services/git/GitDiffService'
+import { SettingsService } from '../services/settings'
 import type { GitStatusResponse } from '../types/git'
 
 export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthService) {
   const app = new Hono()
-  const gitDiffService = new GitDiffService(gitAuthService)
-  const gitFetchPullService = new GitFetchPullService(gitAuthService)
-  const gitBranchService = new GitBranchService(gitAuthService)
-  const gitCommitService = new GitCommitService(gitAuthService)
-  const gitPushService = new GitPushService(gitAuthService, gitBranchService)
-  const gitLogService = new GitLogService(gitAuthService, gitDiffService)
-  const gitStatusService = new GitStatusService(gitAuthService)
+  const settingsService = new SettingsService(database)
+  const git = new GitService(gitAuthService, settingsService)
 
   app.get('/:id/git/status', async (c) => {
     try {
@@ -32,7 +22,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
 
       return c.json(status)
     } catch (error: unknown) {
@@ -53,7 +43,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       const statuses = await Promise.all(
         repoIds.map(async (id) => {
           try {
-            const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
             return [id, status]
           } catch (error: unknown) {
             logger.error(`Failed to get git status for repo ${id}:`, error)
@@ -92,7 +82,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      const diff = await gitLogService.getDiff(id, filePath, database)
+      const diff = await git.getDiff(id, filePath, database)
 
       return c.json(diff)
     } catch (error: unknown) {
@@ -117,7 +107,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      const diffResponse = await gitLogService.getFullDiff(id, filePath, database, includeStaged)
+      const diffResponse = await git.getFullDiff(id, filePath, database, includeStaged)
       return c.json(diffResponse)
     } catch (error: unknown) {
       logger.error('Failed to get full file diff:', error)
@@ -134,9 +124,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      await gitFetchPullService.fetch(id, database)
+      await git.fetch(id, database)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to fetch git:', error)
@@ -153,9 +143,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      await gitFetchPullService.pull(id, database)
+      await git.pull(id, database)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to pull git:', error)
@@ -179,9 +169,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'message is required' }, 400)
       }
 
-      await gitCommitService.commit(id, message, database, stagedPaths)
+      await git.commit(id, message, database, stagedPaths)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to commit git:', error)
@@ -201,9 +191,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       const body = await c.req.json()
       const { setUpstream } = body
 
-      await gitPushService.push(id, { setUpstream: setUpstream || false }, database)
+      await git.push(id, { setUpstream: setUpstream || false }, database)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to push git:', error)
@@ -227,9 +217,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'paths is required and must be an array' }, 400)
       }
 
-      await gitCommitService.stageFiles(id, paths, database)
+      await git.stageFiles(id, paths, database)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to stage files:', error)
@@ -253,9 +243,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'paths is required and must be an array' }, 400)
       }
 
-      await gitCommitService.unstageFiles(id, paths, database)
+      await git.unstageFiles(id, paths, database)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to unstage files:', error)
@@ -273,7 +263,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       }
 
       const limit = parseInt(c.req.query('limit') || '10', 10)
-      const commits = await gitLogService.getLog(id, database, limit)
+      const commits = await git.getLog(id, database, limit)
 
       return c.json({ commits })
     } catch (error: unknown) {
@@ -298,9 +288,9 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'commitHash is required' }, 400)
       }
 
-      await gitCommitService.resetToCommit(id, commitHash, database)
+      await git.resetToCommit(id, commitHash, database)
 
-      const status = await gitStatusService.getStatus(id, database)
+      const status = await git.getStatus(id, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to reset to commit:', error)
@@ -317,8 +307,8 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      const branches = await gitBranchService.getBranches(id, database)
-      const status = await gitBranchService.getBranchStatus(id, database)
+      const branches = await git.getBranches(id, database)
+      const status = await git.getBranchStatus(id, database)
 
       return c.json({ branches, status })
     } catch (error: unknown) {

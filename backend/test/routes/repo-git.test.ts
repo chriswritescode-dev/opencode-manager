@@ -177,7 +177,7 @@ describe('Repo Git Routes', () => {
       const { executeCommand } = await import('../../src/utils/process')
       const executeCommandMock = executeCommand as MockedFunction<typeof executeCommand>
 
-      getRepoByIdMock.mockReturnValue({ id: 1, localPath: 'test-repo' } as any)
+      getRepoByIdMock.mockReturnValue({ id: 1, localPath: 'test-repo', fullPath: '/repos/test-repo' } as any)
       executeCommandMock.mockImplementation((args) => {
         if (args.includes('status')) return Promise.resolve('M  file.ts')
         if (args.includes('rev-parse')) return Promise.resolve('abc123')
@@ -199,7 +199,7 @@ describe('Repo Git Routes', () => {
       const { executeCommand } = await import('../../src/utils/process')
       const executeCommandMock = executeCommand as MockedFunction<typeof executeCommand>
 
-      getRepoByIdMock.mockReturnValue({ id: 1, localPath: 'test-repo' } as any)
+      getRepoByIdMock.mockReturnValue({ id: 1, localPath: 'test-repo', fullPath: '/repos/test-repo' } as any)
       executeCommandMock.mockImplementation((args) => {
         if (args.includes('status')) return Promise.resolve('M  file.ts')
         if (args.includes('rev-parse')) return Promise.resolve('abc123')

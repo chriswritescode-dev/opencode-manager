@@ -1,0 +1,693 @@
+import { GitAuthService } from '../git-auth'
+import { executeCommand } from '../../utils/process'
+import { logger } from '../../utils/logger'
+import { getErrorMessage } from '../../utils/error-utils'
+import { getRepoById } from '../../db/queries'
+import { resolveGitIdentity, createGitIdentityEnv } from '../../utils/git-auth'
+import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
+import { SettingsService } from '../settings'
+import type { Database } from 'bun:sqlite'
+import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType } from '../../types/git'
+import path from 'path'
+
+export class GitService {
+  constructor(
+    private gitAuthService: GitAuthService,
+    private settingsService: SettingsService
+  ) {}
+
+  async getStatus(repoId: number, database: Database): Promise<GitStatusResponse> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const repoPath = repo.fullPath
+      const env = this.gitAuthService.getGitEnvironment()
+
+      const [branch, branchStatus, porcelainOutput] = await Promise.all([
+        this.getCurrentBranch(repoPath, env),
+        this.getBranchStatusFromPath(repoPath, env),
+        executeCommand(['git', '-C', repoPath, 'status', '--porcelain'], { env })
+      ])
+
+      const files = this.parsePorcelainOutput(porcelainOutput)
+      const hasChanges = files.length > 0
+
+      return {
+        branch,
+        ahead: branchStatus.ahead,
+        behind: branchStatus.behind,
+        files,
+        hasChanges
+      }
+    } catch (error: unknown) {
+      logger.error(`Failed to get status for repo ${repoId}:`, error)
+      throw error
+    }
+  }
+
+  async getFileDiff(repoId: number, filePath: string, database: Database, options?: GitDiffOptions & { includeStaged?: boolean }): Promise<FileDiffResponse> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found: ${repoId}`)
+    }
+
+    const repoPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+    const includeStaged = options?.includeStaged ?? true
+
+    const status = await this.getFileStatus(repoPath, filePath, env)
+
+    if (status.status === 'untracked') {
+      return this.getUntrackedFileDiff(repoPath, filePath, env)
+    }
+
+    return this.getTrackedFileDiff(repoPath, filePath, env, includeStaged, options)
+  }
+
+  async getFullDiff(repoId: number, filePath: string, database: Database, includeStaged?: boolean): Promise<FileDiffResponse> {
+    return this.getFileDiff(repoId, filePath, database, { includeStaged })
+  }
+
+  async getLog(repoId: number, database: Database, limit: number = 10): Promise<GitCommit[]> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found: ${repoId}`)
+      }
+
+      const repoPath = path.resolve(repo.fullPath)
+      const logArgs = [
+        'git',
+        '-C',
+        repoPath,
+        'log',
+        `--all`,
+        `-n`,
+        String(limit),
+        '--format=%H|%an|%ae|%at|%s'
+      ]
+      const logEnv = this.gitAuthService.getGitEnvironment(true)
+      const output = await executeCommand(logArgs, { env: logEnv })
+
+      const lines = output.trim().split('\n')
+      const commits: GitCommit[] = []
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+
+        const parts = line.split('|')
+        const [hash, authorName, authorEmail, timestamp, ...messageParts] = parts
+        const message = messageParts.join('|')
+
+        if (hash) {
+          commits.push({
+            hash,
+            authorName: authorName || '',
+            authorEmail: authorEmail || '',
+            date: timestamp || '',
+            message: message || ''
+          })
+        }
+      }
+
+      const unpushedCommits = await this.getUnpushedCommitHashes(repoPath, logEnv)
+
+      return commits.map(commit => ({
+        ...commit,
+        unpushed: unpushedCommits.has(commit.hash)
+      }))
+    } catch (error: unknown) {
+      logger.error(`Failed to get git log for repo ${repoId}:`, error)
+      throw new Error(`Failed to get git log: ${getErrorMessage(error)}`)
+    }
+  }
+
+  async getCommit(repoId: number, hash: string, database: Database): Promise<GitCommit | null> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found: ${repoId}`)
+      }
+
+      const repoPath = path.resolve(repo.fullPath)
+      const logArgs = [
+        'git',
+        '-C',
+        repoPath,
+        'log',
+        '--format=%H|%an|%ae|%at|%s',
+        hash,
+        '-1'
+      ]
+      const env = this.gitAuthService.getGitEnvironment(true)
+
+      const output = await executeCommand(logArgs, { env })
+
+      if (!output.trim()) {
+        return null
+      }
+
+      const parts = output.trim().split('|')
+      const [commitHash, authorName, authorEmail, timestamp, ...messageParts] = parts
+      const message = messageParts.join('|')
+
+      if (!commitHash) {
+        return null
+      }
+
+      return {
+        hash: commitHash,
+        authorName: authorName || '',
+        authorEmail: authorEmail || '',
+        date: timestamp || '',
+        message: message || ''
+      }
+    } catch (error: unknown) {
+      logger.error(`Failed to get commit ${hash} for repo ${repoId}:`, error)
+      throw new Error(`Failed to get commit: ${getErrorMessage(error)}`)
+    }
+  }
+
+  async getDiff(repoId: number, filePath: string, database: Database): Promise<string> {
+    const result = await this.getFileDiff(repoId, filePath, database)
+    return result.diff
+  }
+
+  async commit(repoId: number, message: string, database: Database, stagedPaths?: string[]): Promise<string> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const repoPath = repo.fullPath
+      const authEnv = this.gitAuthService.getGitEnvironment()
+
+      const settings = this.settingsService.getSettings('default')
+      const gitCredentials = settings.preferences.gitCredentials || []
+      const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
+      const identityEnv = identity ? createGitIdentityEnv(identity) : {}
+
+      const env = { ...authEnv, ...identityEnv }
+
+      const args = ['git', '-C', repoPath, 'commit', '-m', message]
+
+      if (stagedPaths && stagedPaths.length > 0) {
+        args.push('--')
+        args.push(...stagedPaths)
+      }
+
+      const result = await executeCommand(args, { env })
+
+      return result
+    } catch (error: unknown) {
+      logger.error(`Failed to commit changes for repo ${repoId}:`, error)
+      throw error
+    }
+  }
+
+  async stageFiles(repoId: number, paths: string[], database: Database): Promise<string> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const repoPath = repo.fullPath
+      const env = this.gitAuthService.getGitEnvironment()
+
+      if (paths.length === 0) {
+        return ''
+      }
+
+      const args = ['git', '-C', repoPath, 'add', '--', ...paths]
+      const result = await executeCommand(args, { env })
+
+      return result
+    } catch (error: unknown) {
+      logger.error(`Failed to stage files for repo ${repoId}:`, error)
+      throw error
+    }
+  }
+
+  async unstageFiles(repoId: number, paths: string[], database: Database): Promise<string> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const repoPath = repo.fullPath
+      const env = this.gitAuthService.getGitEnvironment()
+
+      if (paths.length === 0) {
+        return ''
+      }
+
+      const args = ['git', '-C', repoPath, 'restore', '--staged', '--', ...paths]
+      const result = await executeCommand(args, { env })
+
+      return result
+    } catch (error: unknown) {
+      logger.error(`Failed to unstage files for repo ${repoId}:`, error)
+      throw error
+    }
+  }
+
+  async resetToCommit(repoId: number, commitHash: string, database: Database): Promise<string> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const repoPath = repo.fullPath
+      const env = this.gitAuthService.getGitEnvironment()
+
+      const args = ['git', '-C', repoPath, 'reset', '--hard', commitHash]
+      const result = await executeCommand(args, { env })
+
+      return result
+    } catch (error: unknown) {
+      logger.error(`Failed to reset to commit ${commitHash} for repo ${repoId}:`, error)
+      throw error
+    }
+  }
+
+  async push(repoId: number, options: { setUpstream?: boolean }, database: Database): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error('Repository not found')
+    }
+
+    const fullPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+
+    if (options.setUpstream) {
+      return await this.pushWithUpstream(repoId, fullPath, env)
+    }
+
+    try {
+      const args = ['git', '-C', fullPath, 'push']
+      return await executeCommand(args, { env })
+    } catch (error) {
+      if (isNoUpstreamError(error as Error)) {
+        return await this.pushWithUpstream(repoId, fullPath, env)
+      }
+      throw error
+    }
+  }
+
+  async fetch(repoId: number, database: Database): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error('Repository not found')
+    }
+
+    const fullPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment(true)
+
+    return executeCommand(['git', '-C', fullPath, 'fetch', '--all', '--prune'], { env })
+  }
+
+  async pull(repoId: number, database: Database): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error('Repository not found')
+    }
+
+    const fullPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment(false)
+
+    return executeCommand(['git', '-C', fullPath, 'pull'], { env })
+  }
+
+  async getBranches(repoId: number, database: Database): Promise<GitBranch[]> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const fullPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+
+    let currentBranch = ''
+    try {
+      const currentStdout = await executeCommand(['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { env, silent: true })
+      currentBranch = currentStdout.trim()
+    } catch {
+      void 0
+    }
+
+    const stdout = await executeCommand(['git', '-C', fullPath, 'branch', '-vv', '-a'], { env, silent: true })
+    const lines = stdout.split('\n').filter(line => line.trim())
+
+    const branches: GitBranch[] = []
+    const seenNames = new Set<string>()
+
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+
+      const isCurrent = trimmed.startsWith('*')
+      const isWorktree = trimmed.startsWith('+')
+      const namePart = trimmed.replace(/^[*+]?\s*/, '')
+
+      const firstSpace = namePart.indexOf(' ')
+      const firstBracket = namePart.indexOf('[')
+      const cutIndex = firstSpace === -1 ? (firstBracket === -1 ? namePart.length : firstBracket) : (firstBracket === -1 ? firstSpace : Math.min(firstSpace, firstBracket))
+      const branchName = namePart.slice(0, cutIndex).trim()
+
+      if (!branchName || branchName === '+' || branchName === '->' || branchName.includes('->')) continue
+      if (/^[0-9a-f]{6,40}$/.test(branchName)) continue
+
+      const branch: GitBranch = {
+        name: branchName,
+        type: branchName.startsWith('remotes/') ? 'remote' : 'local',
+        current: isCurrent && (branchName === currentBranch || branchName === `remotes/${currentBranch}`),
+        isWorktree
+      }
+
+      if (seenNames.has(branch.name)) continue
+      seenNames.add(branch.name)
+
+      const upstreamMatch = namePart.match(/\[([^:]+):?\s*(ahead\s+(\d+))?,?\s*(behind\s+(\d+))?\]/)
+      if (upstreamMatch) {
+        branch.upstream = upstreamMatch[1]
+        branch.ahead = upstreamMatch[3] ? parseInt(upstreamMatch[3]) : 0
+        branch.behind = upstreamMatch[5] ? parseInt(upstreamMatch[5]) : 0
+      }
+
+      if (branch.current && (!branch.ahead || !branch.behind)) {
+        try {
+          const status = await this.getBranchStatusFromDb(repoId, database)
+          branch.ahead = status.ahead
+          branch.behind = status.behind
+        } catch {
+          void 0
+        }
+      }
+
+      branches.push(branch)
+    }
+
+    return branches.sort((a, b) => {
+      if (a.current !== b.current) return b.current ? 1 : -1
+      if (a.type !== b.type) return a.type === 'local' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+  }
+
+  async getBranchStatus(repoId: number, database: Database): Promise<{ ahead: number; behind: number }> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const fullPath = path.resolve(repo.fullPath)
+      const env = this.gitAuthService.getGitEnvironment()
+
+      const stdout = await executeCommand(['git', '-C', fullPath, 'rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], { env, silent: true })
+      const [ahead, behind] = stdout.trim().split(/\s+/).map(Number)
+
+      return { ahead: ahead || 0, behind: behind || 0 }
+    } catch (error) {
+      logger.warn(`Could not get branch status for repo ${repoId}, returning zeros:`, error)
+      return { ahead: 0, behind: 0 }
+    }
+  }
+
+  async createBranch(repoId: number, branchName: string, database: Database): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const fullPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+
+    const result = await executeCommand(['git', '-C', fullPath, 'checkout', '-b', branchName], { env })
+
+    return result
+  }
+
+  async switchBranch(repoId: number, branchName: string, database: Database): Promise<string> {
+    const repo = getRepoById(database, repoId)
+    if (!repo) {
+      throw new Error(`Repository not found`)
+    }
+
+    const fullPath = path.resolve(repo.fullPath)
+    const env = this.gitAuthService.getGitEnvironment()
+
+    const result = await executeCommand(['git', '-C', fullPath, 'checkout', branchName], { env })
+
+    return result
+  }
+
+  private async getCurrentBranch(repoPath: string, env: Record<string, string> | undefined): Promise<string> {
+    try {
+      const branch = await executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'HEAD'], { env, silent: true })
+      return branch.trim()
+    } catch {
+      return ''
+    }
+  }
+
+  private async getBranchStatusFromPath(repoPath: string, env: Record<string, string> | undefined): Promise<{ ahead: number; behind: number }> {
+    try {
+      const stdout = await executeCommand(['git', '-C', repoPath, 'rev-list', '--left-right', '--count', 'HEAD...@{upstream}'], { env, silent: true })
+      const [ahead, behind] = stdout.trim().split(/\s+/).map(Number)
+
+      return { ahead: ahead || 0, behind: behind || 0 }
+    } catch {
+      return { ahead: 0, behind: 0 }
+    }
+  }
+
+  private parsePorcelainOutput(output: string): GitFileStatus[] {
+    const fileMap = new Map<string, GitFileStatus>()
+    const lines = output.split('\n').filter(line => line.length > 0)
+
+    for (const line of lines) {
+      if (line.length < 3) continue
+
+      const stagedStatus = line[0] as string
+      const unstagedStatus = line[1] as string
+      let filePath = line.substring(3)
+      let oldPath: string | undefined
+
+      if ((stagedStatus === 'R' || stagedStatus === 'C') && filePath.includes(' -> ')) {
+        const arrowIndex = filePath.indexOf(' -> ')
+        oldPath = filePath.substring(0, arrowIndex)
+        filePath = filePath.substring(arrowIndex + 4)
+      }
+
+      const existing = fileMap.get(filePath)
+
+      if (stagedStatus !== ' ' && stagedStatus !== '?') {
+        const fileStatus: GitFileStatus = {
+          path: filePath,
+          status: this.parseStatusCode(stagedStatus),
+          staged: true,
+          ...(oldPath && { oldPath })
+        }
+        fileMap.set(filePath, fileStatus)
+        continue
+      }
+
+      if (unstagedStatus !== ' ' && unstagedStatus !== '?' && !existing) {
+        const fileStatus: GitFileStatus = {
+          path: filePath,
+          status: this.parseStatusCode(unstagedStatus),
+          staged: false,
+          ...(oldPath && { oldPath })
+        }
+        fileMap.set(filePath, fileStatus)
+        continue
+      }
+
+      if ((stagedStatus === '?' || unstagedStatus === '?') && !existing) {
+        const fileStatus: GitFileStatus = {
+          path: filePath,
+          status: 'untracked',
+          staged: false
+        }
+        fileMap.set(filePath, fileStatus)
+      }
+    }
+
+    return Array.from(fileMap.values())
+  }
+
+  private parseStatusCode(code: string): GitFileStatusType {
+    switch (code) {
+      case 'M':
+        return 'modified'
+      case 'A':
+        return 'added'
+      case 'D':
+        return 'deleted'
+      case 'R':
+        return 'renamed'
+      case 'C':
+        return 'copied'
+      case '?':
+        return 'untracked'
+      default:
+        return 'modified'
+    }
+  }
+
+  private async getFileStatus(repoPath: string, filePath: string, env: Record<string, string>): Promise<{ status: string }> {
+    try {
+      const output = await executeCommand([
+        'git', '-C', repoPath, 'status', '--porcelain', '--', filePath
+      ], { env, silent: true })
+
+      if (!output.trim()) {
+        return { status: 'untracked' }
+      }
+
+      const statusCode = output.trim().split(' ')[0]
+      return { status: statusCode || 'untracked' }
+    } catch {
+      return { status: 'untracked' }
+    }
+  }
+
+  private async getUntrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>): Promise<FileDiffResponse> {
+    const result = await executeCommand([
+      'git', '-C', repoPath, 'diff', '--no-index', '--', '/dev/null', filePath
+    ], { env, ignoreExitCode: true })
+
+    if (typeof result === 'string') {
+      return this.parseDiffOutput(result, 'untracked', filePath)
+    }
+
+    return this.parseDiffOutput((result as { stdout: string }).stdout, 'untracked', filePath)
+  }
+
+  private async getTrackedFileDiff(repoPath: string, filePath: string, env: Record<string, string>, includeStaged: boolean, options?: GitDiffOptions): Promise<FileDiffResponse> {
+    try {
+      const hasCommits = await this.hasCommits(repoPath)
+      const diffArgs = ['git', '-C', repoPath, 'diff']
+
+      if (options?.showContext !== undefined) {
+        diffArgs.push(`-U${options.showContext}`)
+      }
+
+      if (options?.ignoreWhitespace) {
+        diffArgs.push('--ignore-all-space')
+      }
+
+      if (options?.unified !== undefined) {
+        diffArgs.push(`--unified=${options.unified}`)
+      }
+
+      if (hasCommits) {
+        if (includeStaged) {
+          diffArgs.push('HEAD', '--', filePath)
+        } else {
+          diffArgs.push('--', filePath)
+        }
+      } else {
+        return {
+          path: filePath,
+          status: 'added',
+          diff: `New file (no commits yet): ${filePath}`,
+          additions: 0,
+          deletions: 0,
+          isBinary: false
+        }
+      }
+
+      const diff = await executeCommand(diffArgs, { env })
+      return this.parseDiffOutput(diff, 'modified', filePath)
+    } catch (error) {
+      logger.warn(`Failed to get diff for tracked file ${filePath}:`, error)
+      throw new Error(`Failed to get file diff: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  private parseDiffOutput(diff: string, status: string, filePath?: string): FileDiffResponse {
+    let additions = 0
+    let deletions = 0
+    let isBinary = false
+
+    if (typeof diff === 'string') {
+      if (diff.includes('Binary files') || diff.includes('GIT binary patch')) {
+        isBinary = true
+      } else {
+        const lines = diff.split('\n')
+        for (const line of lines) {
+          if (line.startsWith('+') && !line.startsWith('+++')) additions++
+          if (line.startsWith('-') && !line.startsWith('---')) deletions++
+        }
+      }
+    }
+
+    return {
+      path: filePath || '',
+      status: status as GitFileStatusType,
+      diff: typeof diff === 'string' ? diff : '',
+      additions,
+      deletions,
+      isBinary
+    }
+  }
+
+  private async hasCommits(repoPath: string): Promise<boolean> {
+    try {
+      await executeCommand(['git', '-C', repoPath, 'rev-parse', 'HEAD'], { silent: true })
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  private async getUnpushedCommitHashes(repoPath: string, env: Record<string, string>): Promise<Set<string>> {
+    try {
+      const output = await executeCommand(
+        ['git', '-C', repoPath, 'log', '--not', '--remotes', '--format=%H'],
+        { env, silent: true }
+      )
+      const hashes = output.trim().split('\n').filter(Boolean)
+      return new Set(hashes)
+    } catch {
+      return new Set()
+    }
+  }
+
+  private async pushWithUpstream(repoId: number, fullPath: string, env: Record<string, string>): Promise<string> {
+    let branchName: string | null = null
+
+    try {
+      const result = await executeCommand(
+        ['git', '-C', fullPath, 'rev-parse', '--abbrev-ref', 'HEAD'],
+        { env }
+      )
+      branchName = result.trim()
+      if (branchName === 'HEAD') {
+        branchName = null
+      }
+    } catch (error) {
+      branchName = parseBranchNameFromError(error as Error)
+    }
+
+    if (!branchName) {
+      throw new Error('Unable to detect current branch. Ensure you are on a branch before pushing with --set-upstream.')
+    }
+
+    const args = ['git', '-C', fullPath, 'push', '--set-upstream', 'origin', branchName]
+    return executeCommand(args, { env })
+  }
+
+  private async getBranchStatusFromDb(repoId: number, database: Database): Promise<{ ahead: number; behind: number }> {
+    return this.getBranchStatus(repoId, database)
+  }
+}
