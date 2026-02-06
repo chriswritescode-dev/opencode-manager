@@ -39,6 +39,9 @@ services:
       - PASSKEY_RP_ID=${PASSKEY_RP_ID:-localhost}
       - PASSKEY_RP_NAME=${PASSKEY_RP_NAME:-OpenCode Manager}
       - PASSKEY_ORIGIN=${PASSKEY_ORIGIN:-http://localhost:5003}
+      - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@opencode.local}
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
