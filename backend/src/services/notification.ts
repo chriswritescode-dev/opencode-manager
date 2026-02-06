@@ -200,21 +200,39 @@ export class NotificationService {
     event: SSEEvent
   ): Promise<void> {
     const config = EVENT_CONFIG[event.type];
-    if (!config) return;
+    if (!config) {
+      logger.debug(`[push] Ignoring SSE event type="${event.type}" (no notification config)`);
+      return;
+    }
 
-    if (this.hasActiveSSEClients()) return;
+    logger.info(`[push] Processing SSE event type="${event.type}" for directory="${_directory}"`);
 
-    if (!this.isConfigured()) return;
+    if (this.hasActiveSSEClients()) {
+      logger.info(`[push] Skipping push — active visible SSE clients detected`);
+      return;
+    }
+
+    if (!this.isConfigured()) {
+      logger.warn(`[push] Skipping push — VAPID not configured`);
+      return;
+    }
 
     const userIds = this.getAllUserIds();
+    logger.info(`[push] Found ${userIds.length} user(s) with push subscriptions`);
 
     for (const userId of userIds) {
       const settings = this.settingsService.getSettings(userId);
       const notifPrefs =
         settings.preferences.notifications ?? DEFAULT_NOTIFICATION_PREFERENCES;
 
-      if (!notifPrefs.enabled) continue;
-      if (!notifPrefs.events[config.preferencesKey]) continue;
+      if (!notifPrefs.enabled) {
+        logger.info(`[push] Skipping user="${userId}" — notifications disabled`);
+        continue;
+      }
+      if (!notifPrefs.events[config.preferencesKey]) {
+        logger.info(`[push] Skipping user="${userId}" — event "${config.preferencesKey}" disabled`);
+        continue;
+      }
 
       const sessionId = event.properties.sessionID as string | undefined;
 
@@ -230,37 +248,58 @@ export class NotificationService {
         },
       };
 
+      logger.info(`[push] Sending push to user="${userId}" title="${payload.title}"`);
       await this.sendToUser(userId, payload);
     }
   }
 
-  async sendTestNotification(userId: string): Promise<void> {
-    await this.sendToUser(userId, {
+  async sendTestNotification(userId: string): Promise<{ sent: number; failed: number; results: Array<{ endpoint: string; status: string; statusCode?: number; error?: string }> }> {
+    const subscriptions = this.getSubscriptions(userId);
+    logger.info(`[push:test] Sending test notification to user="${userId}" (${subscriptions.length} subscription(s))`);
+    for (const sub of subscriptions) {
+      logger.info(`[push:test] Subscription endpoint: ${sub.endpoint}`);
+    }
+    const results = await this.sendToUserWithResults(userId, {
       title: "Test Notification",
       body: "Push notifications are working correctly",
       tag: "test",
       data: { eventType: "test", url: "/" },
     });
+    logger.info(`[push:test] Results: ${JSON.stringify(results)}`);
+    return results;
   }
 
   private async sendToUser(
     userId: string,
     payload: PushNotificationPayload
   ): Promise<void> {
-    const subscriptions = this.getSubscriptions(userId);
+    await this.sendToUserWithResults(userId, payload);
+  }
 
+  private async sendToUserWithResults(
+    userId: string,
+    payload: PushNotificationPayload
+  ): Promise<{ sent: number; failed: number; results: Array<{ endpoint: string; status: string; statusCode?: number; error?: string }> }> {
+    const subscriptions = this.getSubscriptions(userId);
     const expiredEndpoints: string[] = [];
+    const results: Array<{ endpoint: string; status: string; statusCode?: number; error?: string }> = [];
+
+    logger.info(`[push] Delivering to ${subscriptions.length} subscription(s) for user="${userId}"`);
 
     await Promise.allSettled(
       subscriptions.map(async (sub) => {
+        const endpointPreview = sub.endpoint.slice(0, 80);
         try {
-          await webpush.sendNotification(
+          const response = await webpush.sendNotification(
             {
               endpoint: sub.endpoint,
               keys: { p256dh: sub.p256dh, auth: sub.auth },
             },
             JSON.stringify(payload)
           );
+
+          logger.info(`[push] Success for ${endpointPreview}... — statusCode=${response.statusCode} headers=${JSON.stringify(response.headers)}`);
+          results.push({ endpoint: endpointPreview, status: "success", statusCode: response.statusCode });
 
           this.db
             .prepare(
@@ -269,13 +308,14 @@ export class NotificationService {
             .run(Date.now(), sub.id);
         } catch (error) {
           const statusCode = (error as { statusCode?: number }).statusCode;
+          const body = (error as { body?: string }).body;
+          const message = (error as Error).message;
+
+          logger.error(`[push] Failed for ${endpointPreview}... — statusCode=${statusCode} body="${body}" message="${message}"`);
+          results.push({ endpoint: endpointPreview, status: "failed", statusCode, error: body ?? message });
+
           if (statusCode === 404 || statusCode === 410) {
             expiredEndpoints.push(sub.endpoint);
-          } else {
-            logger.error(
-              `Failed to send push to ${sub.endpoint.slice(0, 50)}...:`,
-              error
-            );
           }
         }
       })
@@ -283,7 +323,11 @@ export class NotificationService {
 
     for (const endpoint of expiredEndpoints) {
       this.removeSubscription(endpoint);
-      logger.info(`Removed expired push subscription: ${endpoint.slice(0, 50)}...`);
+      logger.info(`[push] Removed expired push subscription: ${endpoint.slice(0, 50)}...`);
     }
+
+    const sent = results.filter(r => r.status === "success").length;
+    const failed = results.filter(r => r.status === "failed").length;
+    return { sent, failed, results };
   }
 }

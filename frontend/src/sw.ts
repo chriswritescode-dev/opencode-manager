@@ -22,16 +22,36 @@ interface PushNotificationData {
   };
 }
 
+console.warn("[sw] Service worker loaded");
+
+self.addEventListener("activate", (event) => {
+  console.warn("[sw] Service worker activated");
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener("install", () => {
+  console.warn("[sw] Service worker installed");
+  self.skipWaiting();
+});
+
 self.addEventListener("push", (event: PushEvent) => {
-  if (!event.data) return;
+  console.warn("[sw:push] Push event received", { hasData: !!event.data });
+
+  if (!event.data) {
+    console.warn("[sw:push] No data in push event, ignoring");
+    return;
+  }
 
   let payload: PushNotificationData;
   try {
     payload = event.data.json() as PushNotificationData;
-  } catch {
+    console.warn("[sw:push] Parsed payload", JSON.stringify(payload));
+  } catch (parseError) {
+    const rawText = event.data.text();
+    console.warn("[sw:push] Failed to parse JSON, using raw text", rawText, parseError);
     payload = {
       title: "OpenCode Manager",
-      body: event.data.text(),
+      body: rawText,
       data: { eventType: "unknown" },
     };
   }
@@ -45,10 +65,22 @@ self.addEventListener("push", (event: PushEvent) => {
     requireInteraction: isHighPriority(payload.data?.eventType),
   };
 
-  event.waitUntil(self.registration.showNotification(payload.title, options));
+  console.warn("[sw:push] Showing notification", { title: payload.title, options: JSON.stringify(options) });
+
+  const notificationPromise = self.registration
+    .showNotification(payload.title, options)
+    .then(() => {
+      console.warn("[sw:push] showNotification resolved successfully");
+    })
+    .catch((err: unknown) => {
+      console.error("[sw:push] showNotification FAILED", err);
+    });
+
+  event.waitUntil(notificationPromise);
 });
 
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
+  console.warn("[sw:click] Notification clicked", event.notification.data);
   event.notification.close();
 
   const url = (event.notification.data?.url as string) ?? "/";
