@@ -1,23 +1,17 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { Plus, Loader2, RefreshCw } from 'lucide-react'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { AddMcpServerDialog } from './AddMcpServerDialog'
 import { McpServerCard } from './McpServerCard'
+import { McpOAuthDialog } from './McpOAuthDialog'
 import { useMcpServers } from '@/hooks/useMcpServers'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
-
-interface McpServerConfig {
-  type: 'local' | 'remote'
-  enabled?: boolean
-  command?: string[]
-  url?: string
-  environment?: Record<string, string>
-  timeout?: number
-}
+import type { McpServerConfig } from '@/api/mcp'
+import { mcpApi } from '@/api/mcp'
+import type { McpAuthStartResponse } from '@/api/mcp'
 
 interface McpManagerProps {
   config: {
@@ -34,6 +28,8 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [deleteConfirmServer, setDeleteConfirmServer] = useState<{ id: string; name: string } | null>(null)
   const [togglingServerId, setTogglingServerId] = useState<string | null>(null)
+  const [authDialogServerId, setAuthDialogServerId] = useState<string | null>(null)
+  const [removeAuthConfirmServer, setRemoveAuthConfirmServer] = useState<string | null>(null)
   
   const queryClient = useQueryClient()
   const { 
@@ -43,6 +39,8 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
     connect,
     disconnect,
     authenticate,
+    removeAuth,
+    isRemovingAuth,
     isToggling
   } = useMcpServers()
 
@@ -74,21 +72,64 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
   const handleToggleServer = async (serverId: string) => {
     const currentStatus = mcpStatus?.[serverId]
     if (!currentStatus) return
+
+    const serverConfig = mcpServers[serverId]
+    const isRemote = serverConfig?.type === 'remote'
+    const hasOAuthConfig = isRemote && !!serverConfig?.oauth
+    const hasOAuthError = currentStatus.status === 'failed' && isRemote && /oauth|auth.*state/i.test(currentStatus.error)
+    const isOAuthServer = hasOAuthConfig || hasOAuthError || (currentStatus.status === 'needs_auth' && isRemote)
     
+    if (currentStatus.status === 'needs_auth' || (currentStatus.status === 'failed' && isOAuthServer)) {
+      setAuthDialogServerId(serverId)
+      return
+    }
+
     setTogglingServerId(serverId)
     try {
       if (currentStatus.status === 'connected') {
         await disconnect(serverId)
       } else if (currentStatus.status === 'disabled') {
         await connect(serverId)
-      } else if (currentStatus.status === 'needs_auth') {
-        await authenticate(serverId)
       } else if (currentStatus.status === 'failed') {
         await connect(serverId)
       }
     } finally {
       setTogglingServerId(null)
       refetchStatus()
+    }
+  }
+
+  const handleAuthenticate = (serverId: string) => {
+    setAuthDialogServerId(serverId)
+  }
+
+  const handleOAuthAutoAuth = async () => {
+    if (!authDialogServerId) return
+    await authenticate(authDialogServerId)
+    refetchStatus()
+    setAuthDialogServerId(null)
+  }
+
+  const handleOAuthStartAuth = async (): Promise<McpAuthStartResponse> => {
+    if (!authDialogServerId) throw new Error('No server ID')
+    return await mcpApi.startAuth(authDialogServerId)
+  }
+
+  const handleOAuthCompleteAuth = async (code: string) => {
+    if (!authDialogServerId) return
+    await mcpApi.completeAuth(authDialogServerId, code)
+    refetchStatus()
+    setAuthDialogServerId(null)
+  }
+
+  const handleRemoveAuth = (serverId: string) => {
+    setRemoveAuthConfirmServer(serverId)
+  }
+
+  const handleConfirmRemoveAuth = () => {
+    if (removeAuthConfirmServer) {
+      removeAuth(removeAuthConfirmServer)
+      setRemoveAuthConfirmServer(null)
     }
   }
 
@@ -164,13 +205,11 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
       </div>
 
       {Object.keys(mcpServers).length === 0 ? (
-        <Card>
-          <CardContent className="p-2 sm:p-8 text-center">
-            <p className="text-muted-foreground">No MCP servers configured. Add your first server to get started.</p>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border border-border p-6 sm:p-8 text-center">
+          <p className="text-muted-foreground">No MCP servers configured. Add your first server to get started.</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="space-y-2">
           {Object.entries(mcpServers).map(([serverId, serverConfig]) => {
             const status = mcpStatus?.[serverId]
             const isConnected = status?.status === 'connected'
@@ -186,7 +225,10 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
                 errorMessage={errorMessage}
                 isAnyOperationPending={isAnyOperationPending}
                 togglingServerId={togglingServerId}
+                isRemovingAuth={isRemovingAuth}
                 onToggleServer={handleToggleServer}
+                onAuthenticate={handleAuthenticate}
+                onRemoveAuth={handleRemoveAuth}
                 onDeleteServer={(id, name) => setDeleteConfirmServer({ id, name })}
               />
             )
@@ -204,6 +246,31 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
         itemName={deleteConfirmServer?.name}
         isDeleting={deleteServerMutation.isPending}
       />
+
+      <McpOAuthDialog
+        open={!!authDialogServerId}
+        onOpenChange={(open) => !open && setAuthDialogServerId(null)}
+        serverName={authDialogServerId || ''}
+        onAutoAuth={handleOAuthAutoAuth}
+        onStartAuth={handleOAuthStartAuth}
+        onCompleteAuth={handleOAuthCompleteAuth}
+      />
+
+      <DeleteDialog
+        open={!!removeAuthConfirmServer}
+        onOpenChange={() => setRemoveAuthConfirmServer(null)}
+        onConfirm={handleConfirmRemoveAuth}
+        onCancel={() => setRemoveAuthConfirmServer(null)}
+        title="Remove Authentication"
+        description="This will remove the OAuth credentials for this MCP server. You will need to re-authenticate to use this server again."
+        itemName={mcpServers[removeAuthConfirmServer || ''] ? getDisplayName(removeAuthConfirmServer || '') : ''}
+        isDeleting={isRemovingAuth}
+      />
     </div>
   )
+
+  function getDisplayName(serverId: string): string {
+    const name = serverId.replace(/[-_]/g, ' ')
+    return name.charAt(0).toUpperCase() + name.slice(1)
+  }
 }

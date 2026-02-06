@@ -1,20 +1,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, XCircle, AlertCircle, Plug } from 'lucide-react'
-import { mcpApi, type McpStatus } from '@/api/mcp'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { Loader2, XCircle, AlertCircle, Plug, Shield, MoreVertical, Key, RefreshCw } from 'lucide-react'
+import { McpOAuthDialog } from '@/components/settings/McpOAuthDialog'
+import { mcpApi, type McpStatus, type McpServerConfig, type McpAuthStartResponse } from '@/api/mcp'
 import { useMutation } from '@tanstack/react-query'
 import { showToast } from '@/lib/toast'
-
-interface McpServerConfig {
-  type: 'local' | 'remote'
-  enabled?: boolean
-  command?: string[]
-  url?: string
-  environment?: Record<string, string>
-  timeout?: number
-}
 
 interface RepoMcpDialogProps {
   open: boolean
@@ -28,6 +24,8 @@ interface RepoMcpDialogProps {
 export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcpDialogProps) {
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
+  const [removeAuthConfirmServer, setRemoveAuthConfirmServer] = useState<string | null>(null)
+  const [authDialogServerId, setAuthDialogServerId] = useState<string | null>(null)
   
   const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> | undefined || {}
   const serverIds = Object.keys(mcpServers)
@@ -68,6 +66,40 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
       showToast.error(error instanceof Error ? error.message : 'Failed to update MCP server')
     },
   })
+
+  const removeAuthMutation = useMutation({
+    mutationFn: async (serverId: string) => {
+      if (!directory) throw new Error('No directory provided')
+      await mcpApi.removeAuthDirectory(serverId, directory)
+    },
+    onSuccess: async () => {
+      showToast.success('Authentication removed for this location')
+      setRemoveAuthConfirmServer(null)
+      await fetchStatus()
+    },
+    onError: (error) => {
+      showToast.error(error instanceof Error ? error.message : 'Failed to remove authentication')
+    },
+  })
+
+  const handleOAuthAutoAuth = async () => {
+    if (!authDialogServerId || !directory) return
+    await mcpApi.authenticateDirectory(authDialogServerId, directory)
+    await fetchStatus()
+    setAuthDialogServerId(null)
+  }
+
+  const handleOAuthStartAuth = async (): Promise<McpAuthStartResponse> => {
+    if (!authDialogServerId) throw new Error('No server ID')
+    return await mcpApi.startAuth(authDialogServerId)
+  }
+
+  const handleOAuthCompleteAuth = async (code: string) => {
+    if (!authDialogServerId) return
+    await mcpApi.completeAuth(authDialogServerId, code)
+    await fetchStatus()
+    setAuthDialogServerId(null)
+  }
   
   useEffect(() => {
     if (open && directory) {
@@ -156,7 +188,14 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
                 const serverConfig = mcpServers[serverId]
                 const status = localStatus[serverId]
                 const isConnected = status?.status === 'connected'
+                const needsAuth = status?.status === 'needs_auth'
                 const failed = status?.status === 'failed'
+                const isRemote = serverConfig.type === 'remote'
+                const hasOAuthConfig = isRemote && !!serverConfig.oauth
+                const hasOAuthError = failed && isRemote && /oauth|auth.*state/i.test(status.error)
+                const isOAuthServer = hasOAuthConfig || hasOAuthError || (needsAuth && isRemote)
+                const connectedWithOAuth = isOAuthServer && isConnected
+                const showAuthButton = needsAuth || (isOAuthServer && failed)
                 
                 return (
                   <div
@@ -168,6 +207,11 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
                         <p className="text-sm font-medium truncate">
                           {getDisplayName(serverId)}
                         </p>
+                        {connectedWithOAuth && (
+                          <span title="OAuth authenticated">
+                            <Shield className="h-3 w-3 text-muted-foreground" />
+                          </span>
+                        )}
                         {getStatusBadge(status)}
                       </div>
                       <p className="text-xs text-muted-foreground truncate">
@@ -181,20 +225,94 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
                       )}
                     </div>
                     
-                    <Switch
-                      checked={isConnected}
-                      disabled={toggleMutation.isPending}
-                      onCheckedChange={(enabled) => {
-                        toggleMutation.mutate({ serverId, enable: enabled })
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    />
+                    <div className="flex items-center gap-2">
+                      {showAuthButton ? (
+                        <Button
+                          onClick={() => setAuthDialogServerId(serverId)}
+                          disabled={toggleMutation.isPending}
+                          variant="default"
+                          size="sm"
+                        >
+                          <Key className="h-3 w-3 mr-1" />
+                          Auth
+                        </Button>
+                      ) : (
+                        <Switch
+                          checked={isConnected}
+                          disabled={toggleMutation.isPending || removeAuthMutation.isPending}
+                          onCheckedChange={(enabled) => {
+                            toggleMutation.mutate({ serverId, enable: enabled })
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      )}
+                      {(isOAuthServer || needsAuth) && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {showAuthButton && (
+                              <DropdownMenuItem onClick={() => setAuthDialogServerId(serverId)}>
+                                <Key className="h-4 w-4 mr-2" />
+                                Authenticate
+                              </DropdownMenuItem>
+                            )}
+                            {connectedWithOAuth && (
+                              <DropdownMenuItem onClick={() => setAuthDialogServerId(serverId)}>
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Re-authenticate
+                              </DropdownMenuItem>
+                            )}
+                            {connectedWithOAuth && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => setRemoveAuthConfirmServer(serverId)}
+                                  disabled={removeAuthMutation.isPending}
+                                >
+                                  <Shield className="h-4 w-4 mr-2" />
+                                  {removeAuthMutation.isPending ? 'Removing...' : 'Remove Auth'}
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
+                    </div>
                   </div>
                 )
               })}
             </div>
           )}
         </div>
+
+        <DeleteDialog
+          open={!!removeAuthConfirmServer}
+          onOpenChange={() => setRemoveAuthConfirmServer(null)}
+          onConfirm={() => {
+            if (removeAuthConfirmServer) {
+              removeAuthMutation.mutate(removeAuthConfirmServer)
+            }
+          }}
+          onCancel={() => setRemoveAuthConfirmServer(null)}
+          title="Remove Authentication"
+          description="This will remove the OAuth credentials for this MCP server at this location. You will need to re-authenticate to use this server here again."
+          itemName={removeAuthConfirmServer ? getDisplayName(removeAuthConfirmServer) : ''}
+          isDeleting={removeAuthMutation.isPending}
+        />
+
+        <McpOAuthDialog
+          open={!!authDialogServerId}
+          onOpenChange={(o) => !o && setAuthDialogServerId(null)}
+          serverName={authDialogServerId || ''}
+          onAutoAuth={handleOAuthAutoAuth}
+          onStartAuth={handleOAuthStartAuth}
+          onCompleteAuth={handleOAuthCompleteAuth}
+          directory={directory}
+        />
       </DialogContent>
     </Dialog>
   )

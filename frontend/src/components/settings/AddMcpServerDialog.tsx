@@ -30,6 +30,10 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
   const [environment, setEnvironment] = useState<EnvironmentVariable[]>([])
   const [timeout, setTimeout] = useState('')
   const [enabled, setEnabled] = useState(true)
+  const [oauthEnabled, setOauthEnabled] = useState(false)
+  const [oauthClientId, setOauthClientId] = useState('')
+  const [oauthClientSecret, setOauthClientSecret] = useState('')
+  const [oauthScope, setOauthScope] = useState('')
   
   const queryClient = useQueryClient()
   const { addServerAsync, isAddingServer } = useMcpServers()
@@ -67,6 +71,14 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
           throw new Error('URL is required for remote MCP servers')
         }
         mcpConfig.url = url.trim()
+        
+        if (oauthEnabled) {
+          const oauthConfig: Record<string, string> = {}
+          if (oauthClientId.trim()) oauthConfig.clientId = oauthClientId.trim()
+          if (oauthClientSecret.trim()) oauthConfig.clientSecret = oauthClientSecret.trim()
+          if (oauthScope.trim()) oauthConfig.scope = oauthScope.trim()
+          mcpConfig.oauth = Object.keys(oauthConfig).length > 0 ? oauthConfig : true
+        }
       }
 
       if (timeout && parseInt(timeout)) {
@@ -84,6 +96,15 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
       await settingsApi.updateOpenCodeConfig(config.name, { content: updatedConfig })
       
       if (enabled) {
+        const buildOauthField = () => {
+          if (serverType !== 'remote' || !oauthEnabled) return undefined
+          const cfg: Record<string, string> = {}
+          if (oauthClientId.trim()) cfg.clientId = oauthClientId.trim()
+          if (oauthClientSecret.trim()) cfg.clientSecret = oauthClientSecret.trim()
+          if (oauthScope.trim()) cfg.scope = oauthScope.trim()
+          return Object.keys(cfg).length > 0 ? cfg : true
+        }
+
         await addServerAsync({ 
           name: serverId, 
           config: {
@@ -100,6 +121,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
                 }, {} as Record<string, string>)
               : undefined,
             timeout: timeout && parseInt(timeout) ? parseInt(timeout) : undefined,
+            oauth: buildOauthField(),
           }
         })
       }
@@ -146,6 +168,10 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
     setEnvironment([])
     setTimeout('')
     setEnabled(true)
+    setOauthEnabled(false)
+    setOauthClientId('')
+    setOauthClientSecret('')
+    setOauthScope('')
     onOpenChange(false)
   }
 
@@ -153,149 +179,203 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="w-full max-w-3xl bg-card border-border">
-        <DialogHeader>
+      <DialogContent mobileFullscreen className="sm:inset-auto sm:left-[50%] sm:top-[50%] sm:w-[95vw] sm:max-w-3xl sm:h-auto sm:max-h-[90vh] flex flex-col gap-0 bg-card border-border pb-safe">
+        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 shrink-0">
           <DialogTitle>Add MCP Server</DialogTitle>
           <DialogDescription>
             Configure a new Model Context Protocol server for your OpenCode configuration
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div>
-            <Label htmlFor="serverId">Server ID</Label>
-            <Input
-              id="serverId"
-              value={serverId}
-              onChange={(e) => setServerId(e.target.value)}
-              placeholder="e.g., filesystem, git, my-server"
-              className="bg-background border-border"
-            />
-            <p className="text-xs text-muted-foreground">
-              Unique identifier for this MCP server (lowercase, no spaces)
-            </p>
-          </div>
-
-          <div>
-            <Label htmlFor="serverType">Server Type</Label>
-            <Select value={serverType} onValueChange={(value: 'local' | 'remote') => setServerType(value)}>
-              <SelectTrigger className="bg-background border-border">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="local">Local (Command)</SelectItem>
-                <SelectItem value="remote">Remote (HTTP)</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {serverType === 'local' ? (
+        <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 py-3 sm:py-4">
+          <div className="space-y-4">
             <div>
-              <Label htmlFor="command">Command</Label>
+              <Label htmlFor="serverId">Server ID</Label>
               <Input
-                id="command"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                placeholder="npx @modelcontextprotocol/server-filesystem /tmp"
-                className="bg-background border-border font-mono"
+                id="serverId"
+                value={serverId}
+                onChange={(e) => setServerId(e.target.value)}
+                placeholder="e.g., filesystem, git, my-server"
+                className="bg-background border-border"
               />
               <p className="text-xs text-muted-foreground">
-                Command and arguments to run the MCP server
+                Unique identifier for this MCP server (lowercase, no spaces)
               </p>
             </div>
-          ) : (
-            <div>
-              <Label htmlFor="url">Server URL</Label>
-              <Input
-                id="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="http://localhost:3000/mcp"
-                className="bg-background border-border font-mono"
-              />
-              <p className="text-xs text-muted-foreground">
-                URL of the remote MCP server
-              </p>
-            </div>
-          )}
 
-          {serverType === 'local' && (
             <div>
-              <div className="flex items-center justify-between">
-                <Label>Environment Variables</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className='h-6'
-                  onClick={handleAddEnvironmentVar}
-                >
-                  +
-                </Button>
+              <Label htmlFor="serverType">Server Type</Label>
+              <Select value={serverType} onValueChange={(value: 'local' | 'remote') => setServerType(value)}>
+                <SelectTrigger className="bg-background border-border">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="local">Local (Command)</SelectItem>
+                  <SelectItem value="remote">Remote (HTTP)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {serverType === 'local' ? (
+              <div>
+                <Label htmlFor="command">Command</Label>
+                <Input
+                  id="command"
+                  value={command}
+                  onChange={(e) => setCommand(e.target.value)}
+                  placeholder="npx @modelcontextprotocol/server-filesystem /tmp"
+                  className="bg-background border-border font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Command and arguments to run the MCP server
+                </p>
               </div>
-              {environment.map((env, index) => (
-                <div key={index} className="flex gap-2">
-                  <Input
-                    value={env.key}
-                    onChange={(e) => handleUpdateEnvironmentVar(index, 'key', e.target.value)}
-                    placeholder="API_KEY"
-                    className="bg-background border-border font-mono"
+            ) : (
+              <div>
+                <Label htmlFor="url">Server URL</Label>
+                <Input
+                  id="url"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  placeholder="http://localhost:3000/mcp"
+                  className="bg-background border-border font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  URL of the remote MCP server
+                </p>
+              </div>
+            )}
+
+            {serverType === 'remote' && (
+              <div className="space-y-3">
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    id="oauth"
+                    checked={oauthEnabled}
+                    onCheckedChange={setOauthEnabled}
                   />
-                  <Input
-                    value={env.value}
-                    onChange={(e) => handleUpdateEnvironmentVar(index, 'value', e.target.value)}
-                    placeholder="your-api-key-here"
-                    className="bg-background border-border font-mono"
-                  />
-                  {environment.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() => handleRemoveEnvironmentVar(index)}
-                    >
-                      x
-                    </Button>
-                  )}
+                  <Label htmlFor="oauth">Enable OAuth</Label>
                 </div>
-              ))}
+                {oauthEnabled && (
+                  <div className="space-y-3 pl-4 border-l-2 border-border">
+                    <p className="text-xs text-muted-foreground">
+                      Leave fields blank to use the server's default OAuth discovery
+                    </p>
+                    <div>
+                      <Label htmlFor="oauthClientId">Client ID</Label>
+                      <Input
+                        id="oauthClientId"
+                        value={oauthClientId}
+                        onChange={(e) => setOauthClientId(e.target.value)}
+                        placeholder="Optional"
+                        className="bg-background border-border font-mono"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="oauthClientSecret">Client Secret</Label>
+                      <Input
+                        id="oauthClientSecret"
+                        type="password"
+                        value={oauthClientSecret}
+                        onChange={(e) => setOauthClientSecret(e.target.value)}
+                        placeholder="Optional"
+                        className="bg-background border-border font-mono"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="oauthScope">Scope</Label>
+                      <Input
+                        id="oauthScope"
+                        value={oauthScope}
+                        onChange={(e) => setOauthScope(e.target.value)}
+                        placeholder="e.g., read write"
+                        className="bg-background border-border font-mono"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {serverType === 'local' && (
+              <div>
+                <div className="flex items-center justify-between">
+                  <Label>Environment Variables</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className='h-6'
+                    onClick={handleAddEnvironmentVar}
+                  >
+                    +
+                  </Button>
+                </div>
+                {environment.map((env, index) => (
+                  <div key={index} className="flex gap-2">
+                    <Input
+                      value={env.key}
+                      onChange={(e) => handleUpdateEnvironmentVar(index, 'key', e.target.value)}
+                      placeholder="API_KEY"
+                      className="bg-background border-border font-mono"
+                    />
+                    <Input
+                      value={env.value}
+                      onChange={(e) => handleUpdateEnvironmentVar(index, 'value', e.target.value)}
+                      placeholder="your-api-key-here"
+                      className="bg-background border-border font-mono"
+                    />
+                    {environment.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleRemoveEnvironmentVar(index)}
+                      >
+                        x
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Environment variables to set when running the MCP server
+                </p>
+              </div>
+            )}
+
+            <div>
+              <Label htmlFor="timeout">Timeout (ms)</Label>
+              <Input
+                id="timeout"
+                value={timeout}
+                onChange={(e) => setTimeout(e.target.value)}
+                placeholder="5000"
+                className="bg-background border-border"
+              />
               <p className="text-xs text-muted-foreground">
-                Environment variables to set when running the MCP server
+                Timeout in milliseconds for fetching tools (default: 5000)
               </p>
             </div>
-          )}
 
-          <div>
-            <Label htmlFor="timeout">Timeout (ms)</Label>
-            <Input
-              id="timeout"
-              value={timeout}
-              onChange={(e) => setTimeout(e.target.value)}
-              placeholder="5000"
-              className="bg-background border-border"
-            />
-            <p className="text-xs text-muted-foreground">
-              Timeout in milliseconds for fetching tools (default: 5000)
-            </p>
-          </div>
-
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="enabled"
-              checked={enabled}
-              onCheckedChange={setEnabled}
-            />
-            <Label htmlFor="enabled">Connect immediately after adding</Label>
+            <div className="flex items-center space-x-2">
+              <Switch
+                id="enabled"
+                checked={enabled}
+                onCheckedChange={setEnabled}
+              />
+              <Label htmlFor="enabled">Connect immediately after adding</Label>
+            </div>
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>
+        <DialogFooter className="flex flex-row gap-2 w-full px-4 sm:px-6 pb-4 sm:pb-6 pt-3 shrink-0 border-t border-border gap-2">
+          <Button variant="outline" onClick={handleClose} className="flex-1">
             Cancel
           </Button>
           <Button
             onClick={handleAdd}
             disabled={!serverId || isPending}
+            className="flex-1"
           >
             {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Add MCP Server

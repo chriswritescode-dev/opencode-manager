@@ -1,18 +1,10 @@
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
-import { Trash2, XCircle, AlertCircle, Key } from 'lucide-react'
-import type { McpStatus } from '@/api/mcp'
-
-interface McpServerConfig {
-  type: 'local' | 'remote'
-  enabled?: boolean
-  command?: string[]
-  url?: string
-  environment?: Record<string, string>
-  timeout?: number
-}
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
+import { XCircle, AlertCircle, Key, MoreVertical, Shield, Trash2, RefreshCw } from 'lucide-react'
+import type { McpStatus, McpServerConfig } from '@/api/mcp'
 
 interface McpServerCardProps {
   serverId: string
@@ -22,7 +14,10 @@ interface McpServerCardProps {
   errorMessage: string | null
   isAnyOperationPending: boolean
   togglingServerId: string | null
+  isRemovingAuth: boolean
   onToggleServer: (serverId: string) => void
+  onAuthenticate?: (serverId: string) => void
+  onRemoveAuth?: (serverId: string) => void
   onDeleteServer: (serverId: string, serverName: string) => void
 }
 
@@ -91,55 +86,103 @@ export function McpServerCard({
   errorMessage,
   isAnyOperationPending,
   togglingServerId,
+  isRemovingAuth,
   onToggleServer,
+  onAuthenticate,
+  onRemoveAuth,
   onDeleteServer
 }: McpServerCardProps) {
+  const needsAuth = status?.status === 'needs_auth'
+  const isRemote = serverConfig.type === 'remote'
+  const hasOAuthConfig = isRemote && !!serverConfig.oauth
+  const hasOAuthError = status?.status === 'failed' && isRemote && /oauth|auth.*state/i.test(status.error)
+  const isOAuthServer = hasOAuthConfig || hasOAuthError || (needsAuth && isRemote)
+  const connectedWithOAuth = isOAuthServer && isConnected
+  const showAuthButton = needsAuth || (isOAuthServer && status?.status === 'failed')
+  const displayName = getServerDisplayName(serverId)
+
   return (
-    <Card key={serverId} className={errorMessage ? 'border-red-500/50' : ''}>
-<CardHeader className="pb-3">
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">{getServerDisplayName(serverId)}</CardTitle>
-            <div className="flex items-center gap-2">
-              {status ? getStatusBadge(status) : (
-                <Badge variant="outline" className="text-xs">Loading...</Badge>
-              )}
-            </div>
+    <div className={`flex items-center justify-between gap-3 p-3 rounded-lg border bg-card ${errorMessage ? 'border-red-500/50' : 'border-border'}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-0.5">
+          <p className="text-sm font-medium truncate">{displayName}</p>
+          {connectedWithOAuth && (
+            <span title="OAuth authenticated">
+              <Shield className="h-3 w-3 text-muted-foreground" />
+            </span>
+          )}
+          {status ? getStatusBadge(status) : (
+            <Badge variant="outline" className="text-xs">Loading...</Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground truncate">
+          {getServerDescription(serverConfig)}
+        </p>
+        {errorMessage && (
+          <div className="flex items-start gap-1.5 mt-1.5 text-xs text-red-500">
+            <XCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
+            <span className="break-words line-clamp-2">{errorMessage}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Switch
-              checked={isConnected}
-              onCheckedChange={() => onToggleServer(serverId)}
-              disabled={isAnyOperationPending || togglingServerId === serverId}
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => onDeleteServer(serverId, getServerDisplayName(serverId))}
-              className="text-red-500 hover:text-red-600"
-            >
-              <Trash2 className="h-4 w-4" />
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {showAuthButton && onAuthenticate ? (
+          <Button
+            onClick={() => onAuthenticate(serverId)}
+            disabled={isAnyOperationPending || togglingServerId === serverId}
+            variant="default"
+            size="sm"
+          >
+            <Key className="h-3 w-3 mr-1" />
+            Auth
+          </Button>
+        ) : (
+          <Switch
+            checked={isConnected}
+            onCheckedChange={() => onToggleServer(serverId)}
+            disabled={isAnyOperationPending || togglingServerId === serverId}
+          />
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+              <MoreVertical className="h-4 w-4" />
             </Button>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className='p-2'>
-        <div className="text-sm text-muted-foreground space-y-1">
-          <p>{getServerDescription(serverConfig)}</p>
-          {serverConfig.timeout && (
-            <p>Timeout: {serverConfig.timeout}ms</p>
-          )}
-          {serverConfig.environment && Object.keys(serverConfig.environment).length > 0 && (
-            <p>Environment variables: {Object.keys(serverConfig.environment).length} configured</p>
-          )}
-          {errorMessage && (
-            <div className="flex items-start gap-2 mt-2 p-2 bg-red-500/10 rounded text-red-600 text-xs">
-              <XCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
-              <span className="break-words">{errorMessage}</span>
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {showAuthButton && onAuthenticate && (
+              <DropdownMenuItem onClick={() => onAuthenticate(serverId)}>
+                <Key className="h-4 w-4 mr-2" />
+                Authenticate
+              </DropdownMenuItem>
+            )}
+            {connectedWithOAuth && onAuthenticate && (
+              <DropdownMenuItem onClick={() => onAuthenticate(serverId)}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Re-authenticate
+              </DropdownMenuItem>
+            )}
+            {connectedWithOAuth && onRemoveAuth && (
+              <DropdownMenuItem 
+                onClick={() => onRemoveAuth(serverId)}
+                disabled={isRemovingAuth}
+              >
+                <Shield className="h-4 w-4 mr-2" />
+                {isRemovingAuth ? 'Removing...' : 'Remove Auth'}
+              </DropdownMenuItem>
+            )}
+            {(showAuthButton || connectedWithOAuth) && <DropdownMenuSeparator />}
+            <DropdownMenuItem 
+              onClick={() => onDeleteServer(serverId, displayName)}
+              className="text-red-600"
+            >
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Server
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
   )
 }
