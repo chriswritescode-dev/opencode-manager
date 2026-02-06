@@ -76,6 +76,7 @@ On first launch, you'll be prompted to create an admin account. That's it!
 - **Mobile-First Design** - Responsive UI optimized for mobile
 - **PWA Installable** - Add to home screen on any device
 - **iOS Optimized** - Proper keyboard handling and swipe navigation
+- **Push Notifications** - Background alerts for agent events when app is closed
 
 ## Installation
 
@@ -162,6 +163,19 @@ PASSKEY_RP_ID=yourdomain.com
 PASSKEY_RP_NAME=OpenCode Manager
 PASSKEY_ORIGIN=https://yourdomain.com
 ```
+
+### Push Notifications (VAPID)
+
+Enable push notifications for the PWA (background alerts for agent questions, permission requests, errors, and session completions):
+
+```bash
+# Generate keys: npx web-push generate-vapid-keys
+VAPID_PUBLIC_KEY=your-public-key
+VAPID_PRIVATE_KEY=your-private-key
+VAPID_SUBJECT=mailto:you@yourdomain.com
+```
+
+**Important**: `VAPID_SUBJECT` MUST use `mailto:` format for iOS/Safari push notifications to work. Apple's push service rejects `https://` subjects.
 
 ### Dev Server Ports
 

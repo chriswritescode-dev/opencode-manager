@@ -33,9 +33,38 @@ Complete reference for all configuration options.
 | `PASSKEY_RP_NAME` | Display name for passkey prompts | `OpenCode Manager` |
 | `PASSKEY_ORIGIN` | Origin URL for WebAuthn (backend port) | `http://localhost:5003` |
 
-!!! tip "IMPORTANT"
-    - `PASSKEY_ORIGIN` must use the **backend** port (5003), not the frontend port (5173)
-    - The origin must exactly match where the auth API is served
+
+## Push Notifications (VAPID)
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `VAPID_PUBLIC_KEY` | VAPID public key for push notifications | Yes |
+| `VAPID_PRIVATE_KEY` | VAPID private key for push notifications | Yes |
+| `VAPID_SUBJECT` | Contact email for VAPID (MUST use `mailto:` format) | Yes |
+
+### Generating VAPID Keys
+
+Generate VAPID public/private key pair:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Add to `.env`:
+
+```bash
+VAPID_PUBLIC_KEY=BMx-1234567890abcdefghijklmnopqrstuv...
+VAPID_PRIVATE_KEY=abcd1234567890abcdef...
+VAPID_SUBJECT=mailto:you@example.com
+```
+
+!!! warning "iOS/Safari Requirement"
+    `VAPID_SUBJECT` **MUST** use `mailto:` format for iOS/Safari push notifications to work. Apple's push service rejects `https://` subjects.
+
+    **Correct:** `VAPID_SUBJECT=mailto:you@yourdomain.com`
+    **Incorrect:** `VAPID_SUBJECT=https://yourdomain.com`
+
+When configured, users can enable push notifications in Settings → Notifications to receive background alerts for agent events.
 
 ## Server
 
@@ -67,6 +96,11 @@ GITHUB_CLIENT_SECRET=your-client-secret
 PASSKEY_RP_ID=localhost
 PASSKEY_RP_NAME=OpenCode Manager
 PASSKEY_ORIGIN=http://localhost:5003
+
+# Push notifications (optional)
+VAPID_PUBLIC_KEY=BMx-1234567890abcdefghijklmnopqrstuv...
+VAPID_PRIVATE_KEY=abcd1234567890abcdef...
+VAPID_SUBJECT=mailto:you@example.com
 ```
 
 ## Generating Secrets
@@ -84,10 +118,32 @@ Output example:
 K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=
 ```
 
-!!! warning "Security"
-    - Never commit AUTH_SECRET to version control
-    - Use different secrets for development and production
-    - Rotate secrets periodically
+
+### VAPID Keys
+
+Generate VAPID public/private key pair for push notifications:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Output example:
+```
+=======================================
+Public Key:
+BMx-1234567890abcdefghijklmnopqrstuv...
+
+Private Key:
+abcd1234567890abcdef...
+
+Subject:
+mailto:you@example.com
+===========================================
+```
+
+!!! warning "iOS/Safari Requirement"
+    `VAPID_SUBJECT` **MUST** use `mailto:` format for iOS/Safari push notifications to work.
+
 
 ## Environment Precedence
 
@@ -98,14 +154,4 @@ Variables are loaded in this order (later overrides earlier):
 3. Docker Compose `environment` section
 4. Docker Compose `env_file` reference
 
-## Validating Configuration
-
-Check your configuration:
-
-```bash
-# View current environment (inside container)
-docker exec opencode-manager env | grep -E '^(AUTH|ADMIN|PASSKEY)'
-
-# Check if secrets are set (without revealing values)
-docker exec opencode-manager sh -c 'if [ -n "$AUTH_SECRET" ]; then echo "AUTH_SECRET: set"; else echo "AUTH_SECRET: NOT SET"; fi'
 ```

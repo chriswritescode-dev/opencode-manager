@@ -68,3 +68,12 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 [Learn more →](mobile.md)
 
+### Push Notifications
+
+- **Background Alerts** - Receive notifications when the app is closed
+- **Agent Events** - Get alerted for permissions, questions, errors, and completions
+- **Multi-Device** - Subscribe multiple devices (phone, tablet, desktop)
+- **Customizable** - Control which events trigger notifications
+
+[Learn more →](notifications.md)
+
