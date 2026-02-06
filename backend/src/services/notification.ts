@@ -9,6 +9,9 @@ import {
 } from "@opencode-manager/shared/schemas";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
+import { getRepoByLocalPath } from "../db/queries";
+import { getReposPath } from "@opencode-manager/shared/config/env";
+import path from "path";
 
 interface VapidConfig {
   publicKey: string;
@@ -245,6 +248,17 @@ export class NotificationService {
 
       const sessionId = event.properties.sessionID as string | undefined;
 
+      let notificationUrl = "/";
+      if (sessionId && _directory) {
+        const reposBasePath = getReposPath();
+        const localPath = path.relative(reposBasePath, _directory);
+        const repo = getRepoByLocalPath(this.db, localPath);
+        
+        if (repo) {
+          notificationUrl = `/repos/${repo.id}/sessions/${sessionId}`;
+        }
+      }
+
       const payload: PushNotificationPayload = {
         title: config.title,
         body: config.bodyFn(event.properties),
@@ -253,7 +267,7 @@ export class NotificationService {
           eventType: event.type,
           sessionId,
           directory: _directory,
-          url: sessionId ? `/repos/${encodeURIComponent(_directory)}/sessions/${sessionId}` : "/",
+          url: notificationUrl,
         },
       };
 
