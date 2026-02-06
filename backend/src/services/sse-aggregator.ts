@@ -10,6 +10,7 @@ interface SSEClient {
   id: string
   callback: SSEClientCallback
   directories: Set<string>
+  visible: boolean
 }
 
 interface DirectoryConnection {
@@ -49,7 +50,8 @@ class SSEAggregator {
     const client: SSEClient = {
       id,
       callback,
-      directories: new Set(directories)
+      directories: new Set(directories),
+      visible: false
     }
     this.clients.set(id, client)
     
@@ -349,6 +351,23 @@ class SSEAggregator {
 
   getClientCount(): number {
     return this.clients.size
+  }
+
+  setClientVisibility(id: string, visible: boolean): boolean {
+    const client = this.clients.get(id)
+    if (!client) {
+      logger.warn(`setClientVisibility: client ${id} not found`)
+      return false
+    }
+    client.visible = visible
+    return true
+  }
+
+  hasVisibleClients(): boolean {
+    for (const client of this.clients.values()) {
+      if (client.visible) return true
+    }
+    return false
   }
 
   getActiveDirectories(): string[] {

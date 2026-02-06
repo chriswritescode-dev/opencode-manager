@@ -192,7 +192,7 @@ export class NotificationService {
   }
 
   private hasActiveSSEClients(): boolean {
-    return sseAggregator.getClientCount() > 0;
+    return sseAggregator.hasVisibleClients();
   }
 
   async handleSSEEvent(

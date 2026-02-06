@@ -6,7 +6,7 @@ import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
-import { subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib/sseManager'
+import { sseManager, subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib/sseManager'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 
 const handleRestartServer = async () => {
@@ -363,6 +363,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       if (connected) {
         setError(null)
         fetchInitialData()
+        sseManager.reportVisibility(document.visibilityState === 'visible')
       } else {
         setError('Connection lost. Reconnecting...')
       }
@@ -376,11 +377,17 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       reconnectSSE()
     }
 
+    const handleVisibilityChange = () => {
+      sseManager.reportVisibility(document.visibilityState === 'visible')
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     window.addEventListener('focus', handleReconnect)
     window.addEventListener('online', handleReconnect)
 
     return () => {
       mountedRef.current = false
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
       unsubscribe()

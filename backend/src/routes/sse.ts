@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
 import { sseAggregator } from '../services/sse-aggregator'
-import { SSESubscribeSchema } from '@opencode-manager/shared/schemas'
+import { SSESubscribeSchema, SSEVisibilitySchema } from '@opencode-manager/shared/schemas'
 import { logger } from '../utils/logger'
 import { DEFAULTS } from '@opencode-manager/shared/config'
 
@@ -82,6 +82,19 @@ export function createSSERoutes() {
       return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
     }
     const success = sseAggregator.removeDirectories(result.data.clientId, result.data.directories)
+    if (!success) {
+      return c.json({ success: false, error: 'Client not found' }, 404)
+    }
+    return c.json({ success: true })
+  })
+
+  app.post('/visibility', async (c) => {
+    const body = await c.req.json()
+    const result = SSEVisibilitySchema.safeParse(body)
+    if (!result.success) {
+      return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
+    }
+    const success = sseAggregator.setClientVisibility(result.data.clientId, result.data.visible)
     if (!success) {
       return c.json({ success: false, error: 'Client not found' }, 404)
     }
