@@ -104,10 +104,16 @@ export function createNotificationRoutes(
     const subscriptions = notificationService.getSubscriptions(userId);
     const clients = sseAggregator.getClientVisibilityDetails();
     const hasVisibleClients = sseAggregator.hasVisibleClients();
+    const vapidDetails = notificationService.getVapidDetails();
 
     return c.json({
       vapidConfigured: notificationService.isConfigured(),
-      vapidPublicKey: notificationService.getVapidPublicKey()?.slice(0, 20) + "...",
+      vapidPublicKeyPrefix: vapidDetails?.publicKey.slice(0, 20) + "...",
+      vapidSubject: vapidDetails?.subject,
+      vapidPublicKeyLength: vapidDetails?.publicKey.length,
+      vapidPrivateKeyLength: vapidDetails?.privateKeyLength,
+      serverTime: new Date().toISOString(),
+      serverTimestamp: Date.now(),
       hasVisibleClients,
       sseClients: clients,
       subscriptions: subscriptions.map(sub => ({

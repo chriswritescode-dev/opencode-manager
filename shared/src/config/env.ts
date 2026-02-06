@@ -90,7 +90,7 @@ export const ENV = {
   VAPID: {
     PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY ?? '',
     PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY ?? '',
-    SUBJECT: getEnvString('VAPID_SUBJECT', 'mailto:admin@opencode.local'),
+    SUBJECT: process.env.VAPID_SUBJECT ?? '',
   },
 
   AUTH: {

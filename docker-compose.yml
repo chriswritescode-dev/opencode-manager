@@ -41,7 +41,7 @@ services:
       - PASSKEY_ORIGIN=${PASSKEY_ORIGIN:-http://localhost:5003}
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
-      - VAPID_SUBJECT=${VAPID_SUBJECT:-mailto:admin@opencode.local}
+      - VAPID_SUBJECT=${VAPID_SUBJECT:-}
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data

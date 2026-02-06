@@ -206,10 +206,18 @@ try {
 const notificationService = new NotificationService(db)
 
 if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
+  if (!ENV.VAPID.SUBJECT) {
+    logger.warn('VAPID_SUBJECT is not set — push notifications require a mailto: subject (e.g. mailto:you@example.com)')
+  } else if (!ENV.VAPID.SUBJECT.startsWith('mailto:')) {
+    logger.warn(`VAPID_SUBJECT="${ENV.VAPID.SUBJECT}" does not use mailto: format — iOS/Safari push notifications will fail. Use mailto:you@example.com`)
+  }
+
+  const vapidSubject = ENV.VAPID.SUBJECT || 'mailto:push@localhost'
+
   notificationService.configureVapid({
     publicKey: ENV.VAPID.PUBLIC_KEY,
     privateKey: ENV.VAPID.PRIVATE_KEY,
-    subject: ENV.VAPID.SUBJECT,
+    subject: vapidSubject,
   })
   sseAggregator.onEvent((directory, event) => {
     notificationService.handleSSEEvent(directory, event).catch((err) => {

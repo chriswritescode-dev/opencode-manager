@@ -78,11 +78,20 @@ export class NotificationService {
   configureVapid(config: VapidConfig): void {
     this.vapidConfig = config;
     webpush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
-    logger.info("VAPID credentials configured for push notifications");
+    logger.info(`VAPID configured — subject="${config.subject}" publicKeyLength=${config.publicKey.length} privateKeyLength=${config.privateKey.length}`);
   }
 
   getVapidPublicKey(): string | null {
     return this.vapidConfig?.publicKey ?? null;
+  }
+
+  getVapidDetails(): { publicKey: string; privateKeyLength: number; subject: string } | null {
+    if (!this.vapidConfig) return null;
+    return {
+      publicKey: this.vapidConfig.publicKey,
+      privateKeyLength: this.vapidConfig.privateKey.length,
+      subject: this.vapidConfig.subject,
+    };
   }
 
   isConfigured(): boolean {
