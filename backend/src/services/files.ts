@@ -274,36 +274,24 @@ function getMimeType(filePath: string): AllowedMimeType {
   return mimeTypes[ext] || 'text/plain'
 }
 
-async function countFileLines(filePath: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    let lineCount = 0
-    const stream = createReadStream(filePath, { encoding: 'utf8' })
-    const rl = createInterface({ input: stream, crlfDelay: Infinity })
-    
-    rl.on('line', () => { lineCount++ })
-    rl.on('close', () => resolve(lineCount))
-    rl.on('error', reject)
-  })
-}
-
-async function readFileLines(filePath: string, startLine: number, endLine: number): Promise<string[]> {
+async function readFileLinesAndCount(
+  filePath: string,
+  startLine: number,
+  endLine: number
+): Promise<{ lines: string[]; totalLines: number }> {
   return new Promise((resolve, reject) => {
     const lines: string[] = []
     let currentLine = 0
     const stream = createReadStream(filePath, { encoding: 'utf8' })
     const rl = createInterface({ input: stream, crlfDelay: Infinity })
-    
+
     rl.on('line', (line) => {
       if (currentLine >= startLine && currentLine < endLine) {
         lines.push(line)
       }
       currentLine++
-      if (currentLine >= endLine) {
-        rl.close()
-        stream.destroy()
-      }
     })
-    rl.on('close', () => resolve(lines))
+    rl.on('close', () => resolve({ lines, totalLines: currentLine }))
     rl.on('error', reject)
   })
 }
@@ -322,9 +310,8 @@ export async function getFileRange(userPath: string, startLine: number, endLine:
     throw { message: 'Path is a directory', statusCode: 400 }
   }
   
-  const totalLines = await countFileLines(validatedPath)
+  const { lines, totalLines } = await readFileLinesAndCount(validatedPath, startLine, endLine)
   const clampedEnd = Math.min(endLine, totalLines)
-  const lines = await readFileLines(validatedPath, startLine, clampedEnd)
   const mimeType = getMimeType(validatedPath)
   
   return {

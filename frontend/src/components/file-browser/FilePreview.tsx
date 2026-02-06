@@ -9,7 +9,7 @@ import { MarkdownRenderer } from './MarkdownRenderer'
 
 const API_BASE = API_BASE_URL
 
-const VIRTUALIZATION_THRESHOLD_BYTES = 8_000
+const VIRTUALIZATION_THRESHOLD_BYTES = 50_000
 const MARKDOWN_PREVIEW_SIZE_LIMIT = 1_000_000
 
 interface FilePreviewProps {
