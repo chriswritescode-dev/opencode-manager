@@ -16,6 +16,18 @@ export interface GitCommit {
   unpushed?: boolean
 }
 
+export interface CommitFile {
+  path: string
+  status: GitFileStatusType
+  oldPath?: string
+  additions: number
+  deletions: number
+}
+
+export interface CommitDetails extends GitCommit {
+  files: CommitFile[]
+}
+
 export interface GitStatusResponse {
   branch: string
   ahead: number

@@ -12,6 +12,7 @@ interface GitFlatFileListProps {
   onSelect: (path: string, staged: boolean) => void
   onStage?: (paths: string[]) => void
   onUnstage?: (paths: string[]) => void
+  onDiscard?: (paths: string[], staged: boolean) => void
   selectedFile?: string
 }
 
@@ -83,6 +84,13 @@ export function GitFlatFileList({
     }
   }
 
+  const handleDiscardAll = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (onDiscard) {
+      onDiscard(filteredFiles.map(f => f.path), staged)
+    }
+  }
+
   if (filteredFiles.length === 0) {
     return null
   }
@@ -93,24 +101,36 @@ export function GitFlatFileList({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           {staged ? 'Staged Changes' : 'Changes'} ({filteredFiles.length})
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-6 px-2 text-xs"
-          onClick={staged ? handleUnstageAll : handleStageAll}
-        >
-          {staged ? (
-            <>
-              <Minus className="w-3 h-3 mr-1" />
-              Unstage All
-            </>
-          ) : (
-            <>
-              <Plus className="w-3 h-3 mr-1" />
-              Stage All
-            </>
+        <div className="flex items-center gap-1">
+          {onDiscard && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-rose-500 hover:text-rose-600"
+              onClick={handleDiscardAll}
+            >
+              Discard All
+            </Button>
           )}
-        </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            onClick={staged ? handleUnstageAll : handleStageAll}
+          >
+            {staged ? (
+              <>
+                <Minus className="w-3 h-3 mr-1" />
+                Unstage All
+              </>
+            ) : (
+              <>
+                <Plus className="w-3 h-3 mr-1" />
+                Stage All
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {groupedFiles.map(({ status, files: groupFiles }) => {
@@ -145,6 +165,7 @@ export function GitFlatFileList({
                     onSelect={onSelect}
                     onStage={handleStageFile}
                     onUnstage={handleUnstageFile}
+                    onDiscard={onDiscard ? ((path: string, staged: boolean) => onDiscard([path], staged)) : undefined}
                   />
                 ))}
               </div>

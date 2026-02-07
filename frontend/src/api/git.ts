@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { API_BASE_URL } from '@/config'
-import type { GitStatusResponse, FileDiffResponse, GitCommit } from '@/types/git'
+import type { GitStatusResponse, FileDiffResponse, GitCommit, CommitDetails } from '@/types/git'
 
 export class GitError extends Error {
   code?: string
@@ -77,6 +77,26 @@ export async function fetchGitDiff(repoId: number, path: string): Promise<{ diff
 export async function fetchGitLog(repoId: number, limit?: number): Promise<{ commits: GitCommit[] }> {
   const params = limit ? `?limit=${limit}` : ''
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/log${params}`)
+
+  if (!response.ok) {
+    await handleApiError(response)
+  }
+
+  return response.json()
+}
+
+export async function fetchCommitDetails(repoId: number, hash: string): Promise<CommitDetails> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${hash}`)
+
+  if (!response.ok) {
+    await handleApiError(response)
+  }
+
+  return response.json()
+}
+
+export async function fetchCommitDiff(repoId: number, hash: string, path: string): Promise<FileDiffResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${hash}/diff?path=${encodeURIComponent(path)}`)
 
   if (!response.ok) {
     await handleApiError(response)
@@ -165,6 +185,20 @@ export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<
   return response.json()
 }
 
+export async function gitDiscardFiles(repoId: number, paths: string[], staged: boolean): Promise<GitStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths, staged }),
+  })
+
+  if (!response.ok) {
+    await handleApiError(response)
+  }
+
+  return response.json()
+}
+
 export async function gitReset(repoId: number, commitHash: string): Promise<GitStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/reset`, {
     method: 'POST',
@@ -201,6 +235,14 @@ export function useGitLog(repoId: number | undefined, limit?: number) {
     queryKey: ['gitLog', repoId, limit],
     queryFn: () => repoId ? fetchGitLog(repoId, limit) : Promise.reject(new Error('No repo ID')),
     enabled: !!repoId,
+  })
+}
+
+export function useCommitDetails(repoId: number | undefined, hash: string | undefined) {
+  return useQuery({
+    queryKey: ['commitDetails', repoId, hash],
+    queryFn: () => (repoId && hash) ? fetchCommitDetails(repoId, hash) : Promise.reject(new Error('Missing params')),
+    enabled: !!repoId && !!hash,
   })
 }
 

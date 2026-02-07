@@ -7,7 +7,7 @@ import { resolveGitIdentity, createGitIdentityEnv } from '../../utils/git-auth'
 import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
 import { SettingsService } from '../settings'
 import type { Database } from 'bun:sqlite'
-import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType } from '../../types/git'
+import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
 import path from 'path'
 
 export class GitService {
@@ -254,6 +254,152 @@ export class GitService {
     } catch (error: unknown) {
       logger.error(`Failed to unstage files for repo ${repoId}:`, error)
       throw error
+    }
+  }
+
+  async discardChanges(repoId: number, paths: string[], staged: boolean, database: Database): Promise<string> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found`)
+      }
+
+      const repoPath = repo.fullPath
+      const env = this.gitAuthService.getGitEnvironment()
+
+      if (paths.length === 0) {
+        return ''
+      }
+
+      let args: string[]
+      if (staged) {
+        args = ['git', '-C', repoPath, 'restore', '--staged', '--worktree', '--source=HEAD', '--', ...paths]
+      } else {
+        args = ['git', '-C', repoPath, 'checkout', '--', ...paths]
+      }
+
+      const result = await executeCommand(args, { env })
+      return result
+    } catch (error: unknown) {
+      logger.error(`Failed to discard changes for repo ${repoId}:`, error)
+      throw error
+    }
+  }
+
+  async getCommitDetails(repoId: number, hash: string, database: Database): Promise<CommitDetails | null> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found: ${repoId}`)
+      }
+
+      const repoPath = path.resolve(repo.fullPath)
+      const env = this.gitAuthService.getGitEnvironment(true)
+
+      const commitOutput = await executeCommand(
+        ['git', '-C', repoPath, 'log', '-1', '--format=%H|%an|%ae|%at|%s', hash],
+        { env }
+      )
+
+      if (!commitOutput.trim()) {
+        return null
+      }
+
+      const parts = commitOutput.trim().split('|')
+      const [commitHash, authorName, authorEmail, timestamp, ...messageParts] = parts
+      const message = messageParts.join('|')
+
+      if (!commitHash) {
+        return null
+      }
+
+      const unpushedCommits = await this.getUnpushedCommitHashes(repoPath, env)
+
+      const filesOutput = await executeCommand(
+        ['git', '-C', repoPath, 'show', '--name-status', '--format=', hash],
+        { env }
+      )
+
+      const files: CommitFile[] = []
+      const fileLines = filesOutput.trim().split('\n').filter(line => line.trim())
+
+      for (const line of fileLines) {
+        const parts = line.split('\t')
+        const statusCode = parts[0]
+        const filePath = parts[1]
+        const oldPath = parts.length > 2 ? parts[2] : undefined
+
+        if (!filePath) continue
+
+        let status: GitFileStatusType = 'modified'
+        switch (statusCode.charAt(0)) {
+          case 'A': status = 'added'; break
+          case 'D': status = 'deleted'; break
+          case 'R': status = 'renamed'; break
+          case 'C': status = 'copied'; break
+          case 'M': status = 'modified'; break
+          default: status = 'modified'
+        }
+
+        const diffOutput = await executeCommand(
+          ['git', '-C', repoPath, 'show', '--stat', '--format=', `${hash} -- ${filePath}`],
+          { env }
+        )
+
+        let additions = 0
+        let deletions = 0
+        const statMatch = diffOutput.match(/(\d+) insertion|\d+ change[s]?.*?([\d,]+) insertion/)
+        const delMatch = diffOutput.match(/(\d+) deletion/)
+        if (statMatch) {
+          additions = parseInt(statMatch[1].replace(/,/g, ''))
+        }
+        if (delMatch) {
+          deletions = parseInt(delMatch[1].replace(/,/g, ''))
+        }
+
+        files.push({
+          path: filePath,
+          status,
+          oldPath,
+          additions,
+          deletions
+        })
+      }
+
+      return {
+        hash: commitHash,
+        authorName: authorName || '',
+        authorEmail: authorEmail || '',
+        date: timestamp || '',
+        message: message || '',
+        unpushed: unpushedCommits.has(commitHash),
+        files
+      }
+    } catch (error: unknown) {
+      logger.error(`Failed to get commit details for repo ${repoId}:`, error)
+      throw new Error(`Failed to get commit details: ${getErrorMessage(error)}`)
+    }
+  }
+
+  async getCommitDiff(repoId: number, hash: string, path: string, database: Database): Promise<FileDiffResponse> {
+    try {
+      const repo = getRepoById(database, repoId)
+      if (!repo) {
+        throw new Error(`Repository not found: ${repoId}`)
+      }
+
+      const repoPath = path.resolve(repo.fullPath)
+      const env = this.gitAuthService.getGitEnvironment(true)
+
+      const diff = await executeCommand(
+        ['git', '-C', repoPath, 'show', '--no-stat', '--format=', `${hash} -- ${path}`],
+        { env }
+      )
+
+      return this.parseDiffOutput(diff, 'modified', path)
+    } catch (error: unknown) {
+      logger.error(`Failed to get commit diff for repo ${repoId}:`, error)
+      throw new Error(`Failed to get commit diff: ${getErrorMessage(error)}`)
     }
   }
 

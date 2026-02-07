@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, fetchGitLog, fetchGitDiff, gitReset, getApiErrorMessage } from '@/api/git'
+import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, gitDiscardFiles, fetchGitLog, fetchGitDiff, gitReset, getApiErrorMessage } from '@/api/git'
 import { createBranch, switchBranch } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 
@@ -98,6 +98,20 @@ export function useGit(repoId: number | undefined) {
     },
   })
 
+  const discardFilesMutation = useMutation({
+    mutationFn: ({ paths, staged }: { paths: string[]; staged: boolean }) => {
+      if (!repoId) throw new Error('No repo ID')
+      return gitDiscardFiles(repoId, paths, staged)
+    },
+    onSuccess: () => {
+      invalidateCache()
+      showToast.success('Changes discarded')
+    },
+    onError: (error) => {
+      showToast.error(getApiErrorMessage(error))
+    },
+  })
+
   const log = useMutation({
     mutationFn: ({ limit }: { limit?: number }) => {
       if (!repoId) throw new Error('No repo ID')
@@ -167,6 +181,7 @@ export function useGit(repoId: number | undefined) {
     commit,
     stageFiles: stageFilesMutation,
     unstageFiles: unstageFilesMutation,
+    discardFiles: discardFilesMutation,
     log,
     diff,
     createBranch: createBranchMutation,

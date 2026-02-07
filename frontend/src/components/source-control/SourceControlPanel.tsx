@@ -5,6 +5,7 @@ import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
 import { CommitsTab } from './CommitsTab'
 import { BranchesTab } from './BranchesTab'
+import { CommitDetailView } from './CommitDetailView'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -36,6 +37,7 @@ interface SourceControlPanelProps {
 }
 
 type Tab = 'changes' | 'commits' | 'branches'
+type View = 'default' | 'commit-detail'
 
 export function SourceControlPanel({
   repoId,
@@ -48,6 +50,9 @@ export function SourceControlPanel({
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
   const [selectedFile, setSelectedFile] = useState<{path: string, staged: boolean} | undefined>()
+  const [currentView, setCurrentView] = useState<View>('default')
+  const [selectedCommit, setSelectedCommit] = useState<string | undefined>()
+  const [selectedCommitFile, setSelectedCommitFile] = useState<string | undefined>()
   const { data: status } = useGitStatus(repoId)
   const git = useGit(repoId)
   const isMobile = useMobile()
@@ -58,6 +63,18 @@ export function SourceControlPanel({
       const message = getApiErrorMessage(error)
       showToast.error(message)
     }
+  }
+
+  const handleSelectCommit = (hash: string) => {
+    setSelectedCommit(hash)
+    setCurrentView('commit-detail')
+  }
+
+  const handleBackToCommits = () => {
+    setSelectedCommit(undefined)
+    setSelectedCommitFile(undefined)
+    setCurrentView('default')
+    setActiveTab('commits')
   }
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
@@ -167,7 +184,13 @@ export function SourceControlPanel({
       <div className={cn('flex-1 min-h-0', isMobile ? 'flex flex-col' : 'flex')}>
         <div className={cn(
           'overflow-hidden',
-          isMobile ? 'flex-1' : selectedFile ? 'w-[35%] border-r border-border' : 'flex-1'
+          isMobile 
+            ? 'flex-1' 
+            : currentView === 'commit-detail' 
+              ? 'flex-1' 
+              : selectedFile 
+                ? 'w-[35%] border-r border-border' 
+                : 'flex-1'
         )}>
           {activeTab === 'changes' && (
             <ChangesTab
@@ -177,15 +200,27 @@ export function SourceControlPanel({
               isMobile={isMobile}
             />
           )}
-          {activeTab === 'commits' && (
-            <CommitsTab repoId={repoId} />
+          {activeTab === 'commits' && currentView === 'default' && (
+            <CommitsTab repoId={repoId} onSelectCommit={handleSelectCommit} branch={currentBranch} />
           )}
-          {activeTab === 'branches' && (
+          {activeTab === 'branches' && currentView === 'default' && (
             <BranchesTab repoId={repoId} currentBranch={currentBranch} repoUrl={repoUrl} isRepoWorktree={isRepoWorktree} />
+          )}
+
+          {currentView === 'commit-detail' && selectedCommit && (
+            <div className="flex-1 overflow-hidden flex-col">
+              <CommitDetailView
+                repoId={repoId}
+                commitHash={selectedCommit}
+                onBack={handleBackToCommits}
+                onFileSelect={setSelectedCommitFile}
+                selectedFile={selectedCommitFile}
+              />
+            </div>
           )}
         </div>
 
-        {selectedFile && !isMobile && (
+        {selectedFile && !isMobile && currentView === 'default' && (
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="flex items-center justify-between px-3 py-2 border-b border-border">
               <span className="text-sm font-medium truncate">{selectedFile.path}</span>

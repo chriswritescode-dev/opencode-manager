@@ -48,3 +48,15 @@ export interface GitBranch {
   behind?: number
   isWorktree?: boolean
 }
+
+export interface CommitFile {
+  path: string
+  status: GitFileStatusType
+  oldPath?: string
+  additions: number
+  deletions: number
+}
+
+export interface CommitDetails extends GitCommit {
+  files: CommitFile[]
+}
