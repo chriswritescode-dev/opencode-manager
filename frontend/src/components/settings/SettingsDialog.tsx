@@ -9,37 +9,43 @@ import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, X, Key, GitBranch, User, Volume2, Bell } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSwipeBack } from '@/hooks/useMobile'
-
-interface SettingsDialogProps {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-}
+import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 
 type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog() {
+  const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const contentRef = useRef<HTMLDivElement>(null)
 
   const handleSwipeBack = useCallback(() => {
     if (mobileView === 'menu') {
       setMobileView('menu')
-      onOpenChange(false)
+      close()
     } else {
       setMobileView('menu')
     }
-  }, [mobileView, onOpenChange])
+  }, [mobileView, close])
 
   const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
-    enabled: open,
+    enabled: isOpen,
   })
 
   useEffect(() => {
     return bindSwipe(contentRef.current)
   }, [bindSwipe])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close()
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isOpen, close])
 
   const menuItems = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
@@ -52,26 +58,33 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
   ]
 
-  const handleClose = () => {
-    setMobileView('menu')
-    onOpenChange(false)
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab as SettingsView)
   }
 
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent 
-        ref={contentRef}
-        className="w-full h-[100vh] sm:h-auto sm:w-[95vw] sm:max-h-[90vh] bg-gradient-to-br from-background via-background to-background border-border p-0 sm:rounded-lg overflow-hidden !flex !flex-col left-0 top-0 translate-x-0 translate-y-0 max-h-[100vh] sm:left-[50%] sm:top-[50%] sm:translate-x-[-50%] sm:translate-y-[-50%] [&>button:last-child]:hidden"
-        style={swipeStyles}
-      >
-        
-        <div className="hidden sm:flex sm:flex-col sm:h-[90vh]">
-          <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0">
-            <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-              Settings
-            </h2>
-          </div>
-          <Tabs defaultValue="account" className="w-full flex flex-col flex-1 min-h-0">
+   return (
+     <Dialog open={isOpen} modal={false}>
+       <DialogContent 
+         ref={contentRef}
+         className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col z-[100]"
+         style={swipeStyles}
+         fullscreen
+       >
+         <div className="hidden sm:flex sm:flex-col sm:h-full">
+           <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
+             <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
+               Settings
+             </h2>
+             <Button
+               variant="ghost"
+               size="icon"
+               onClick={close}
+               className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
+             >
+               <X className="w-5 h-5" />
+             </Button>
+           </div>
+          <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
               <TabsList className="grid w-full grid-cols-8 bg-card p-1">
                 <TabsTrigger value="account" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
@@ -117,31 +130,31 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </div>
 
         <div className="sm:hidden flex flex-col h-full min-h-0 pt-safe">
-          <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-2 flex-1">
-              {mobileView !== 'menu' && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setMobileView('menu')}
-                  className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
-                >
-                  <ChevronLeft className="w-6 h-6" />
-                </Button>
-              )}
-              <h2 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-                {mobileView === 'menu' ? 'Settings' : menuItems.find(item => item.id === mobileView)?.label}
-              </h2>
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleClose}
-              className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px] flex-shrink-0"
-            >
-              <X className="w-6 h-6" />
-            </Button>
-          </div>
+           <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-4 py-4 flex items-center justify-between">
+             <div className="flex items-center gap-2 flex-1">
+               {mobileView !== 'menu' && (
+                 <Button
+                   variant="ghost"
+                   size="icon"
+                   onClick={() => setMobileView('menu')}
+                   className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
+                 >
+                   <ChevronLeft className="w-6 h-6" />
+                 </Button>
+               )}
+               <h2 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
+                 {mobileView === 'menu' ? 'Settings' : menuItems.find(item => item.id === mobileView)?.label}
+               </h2>
+             </div>
+             <Button
+               variant="ghost"
+               size="icon"
+               onClick={close}
+               className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px] flex-shrink-0"
+             >
+               <X className="w-6 h-6" />
+             </Button>
+           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-32">
             {mobileView === 'menu' && (
@@ -149,7 +162,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 {menuItems.map((item) => (
                   <button
                     key={item.id}
-                    onClick={() => setMobileView(item.id as SettingsView)}
+                    onClick={() => {
+                      setMobileView(item.id as SettingsView)
+                      setActiveTab(item.id as SettingsView)
+                    }}
                     className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
                   >
                     <div className="flex items-center gap-4">

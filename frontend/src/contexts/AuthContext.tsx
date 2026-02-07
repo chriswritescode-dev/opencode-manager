@@ -2,7 +2,6 @@
 import { createContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import { useSession, signIn, signUp, signOut, authClient, type AuthUser } from '@/lib/auth-client'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 
 interface AuthConfig {
   enabledProviders: string[]
@@ -113,7 +112,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const logout = useCallback(async () => {
-    useSettingsDialog.getState().close()
     await signOut()
     await refetch()
     navigate('/login', { replace: true })

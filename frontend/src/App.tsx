@@ -9,7 +9,6 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
 import { SettingsDialog } from './components/settings/SettingsDialog'
-import { useSettingsDialog } from './hooks/useSettingsDialog'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -49,7 +48,6 @@ function PermissionDialogWrapper() {
 }
 
 function AppShell() {
-  const { isOpen, close } = useSettingsDialog()
   useTheme()
 
   useEffect(() => {
@@ -66,7 +64,7 @@ function AppShell() {
       <EventProvider>
         <Outlet />
         <PermissionDialogWrapper />
-        <SettingsDialog open={isOpen} onOpenChange={close} />
+        <SettingsDialog />
         <Toaster
           position="bottom-right"
           expand={false}

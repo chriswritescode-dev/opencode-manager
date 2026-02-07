@@ -39,10 +39,10 @@ const DialogContent = React.forwardRef<
   DialogContentProps
 >(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
-  
+   
   return (
     <DialogPortal>
-      <DialogOverlay />
+      {!fullscreen && <DialogOverlay />}
       <DialogPrimitive.Content
         ref={ref}
         aria-describedby={undefined}
