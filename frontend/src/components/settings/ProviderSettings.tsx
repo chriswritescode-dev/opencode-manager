@@ -354,6 +354,7 @@ export function ProviderSettings() {
                   value={availableSearch}
                   onChange={(e) => setAvailableSearch(e.target.value)}
                   className="pl-9 md:text-sm"
+                  autoComplete="off"
                 />
               </div>
 
