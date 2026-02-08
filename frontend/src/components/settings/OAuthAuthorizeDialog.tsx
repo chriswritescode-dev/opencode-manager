@@ -45,7 +45,7 @@ export function OAuthAuthorizeDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-card border-border max-w-lg">
+      <DialogContent className="bg-card border-border max-w-lg z-[200]" overlayClassName="z-[200]">
         <DialogHeader>
           <DialogTitle>Connect to {providerName}</DialogTitle>
           <DialogDescription>

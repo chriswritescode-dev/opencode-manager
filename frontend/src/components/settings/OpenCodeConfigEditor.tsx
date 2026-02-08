@@ -70,7 +70,7 @@ export function OpenCodeConfigEditor({
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent mobileFullscreen className="gap-0 flex flex-col p-0 md:p-6 w-full min-w-0 sm:max-w-4xl">
+      <DialogContent mobileFullscreen className="gap-0 flex flex-col p-0 md:p-6 w-full min-w-0 sm:max-w-4xl z-[200]" overlayClassName="z-[200]">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle className="text-lg sm:text-xl font-semibold">
             {`Edit Config: ${config.name}`}

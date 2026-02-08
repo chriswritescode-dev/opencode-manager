@@ -179,7 +179,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent mobileFullscreen className="sm:inset-auto sm:left-[50%] sm:top-[50%] sm:w-[95vw] sm:max-w-3xl sm:h-auto sm:max-h-[90vh] flex flex-col gap-0 bg-card border-border pb-safe">
+      <DialogContent mobileFullscreen className="sm:inset-auto sm:left-[50%] sm:top-[50%] sm:w-[95vw] sm:max-w-3xl sm:h-auto sm:max-h-[90vh] flex flex-col gap-0 bg-card border-border pb-safe z-[200]" overlayClassName="z-[200]">
         <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 shrink-0">
           <DialogTitle>Add MCP Server</DialogTitle>
           <DialogDescription>

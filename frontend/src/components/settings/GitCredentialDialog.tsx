@@ -124,201 +124,205 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg z-[150]" overlayClassName="z-[140]">
-        <DialogHeader>
+      <DialogContent mobileFullscreen className="max-w-lg z-[200] h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col"
+                      overlayClassName="z-[200]">
+        <DialogHeader className="flex-shrink-0 px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3">
           <DialogTitle>{credential ? 'Edit Git Credential' : 'Add Git Credential'}</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="cred-name">Name *</Label>
-            <Input
-              id="cred-name"
-              placeholder="GitHub Personal, Work GitLab"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-              disabled={isSaving}
-              autoComplete="off"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="cred-type">Authentication Type</Label>
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant={formData.type === 'pat' ? 'default' : 'outline'}
-                onClick={() => setFormData({ ...formData, type: 'pat', sshPrivateKey: '', passphrase: '' })}
+        <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}
+              className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 py-2 sm:py-3 overflow-y-auto">
+          <div className="space-y-4 sm:space-y-4 flex-shrink-0">
+            <div className="space-y-2">
+              <Label htmlFor="cred-name">Name *</Label>
+              <Input
+                id="cred-name"
+                placeholder="GitHub Personal, Work GitLab"
+                value={formData.name}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 disabled={isSaving}
-                className="flex-1"
-              >
-                <Key className="h-4 w-4 mr-2" />
-                PAT
-              </Button>
-              <Button
-                type="button"
-                variant={formData.type === 'ssh' ? 'default' : 'outline'}
-                onClick={() => setFormData({ ...formData, type: 'ssh', token: '' })}
-                disabled={isSaving}
-                className="flex-1"
-              >
-                <Lock className="h-4 w-4 mr-2" />
-                SSH Key
-              </Button>
+                autoComplete="off"
+              />
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="cred-host">Host *</Label>
-            <Input
-              id="cred-host"
-              placeholder="github.com or git@github.com"
-              value={formData.host}
-              onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-              disabled={isSaving}
-              autoComplete="off"
-            />
-          </div>
-
-          {formData.type === 'pat' ? (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="cred-token">
-                  Access Token {credential?.token && !tokenEdited ? '(unchanged)' : '*'}
-                </Label>
-                <Input
-                  id="cred-token"
-                  type="password"
-                  placeholder={credential?.token ? maskToken(credential.token) : 'Personal access token'}
-                  value={formData.token || ''}
-                  onChange={(e) => {
-                    setTokenEdited(true)
-                    setFormData({ ...formData, token: e.target.value })
-                  }}
+            <div className="space-y-2">
+              <Label htmlFor="cred-type">Authentication Type</Label>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant={formData.type === 'pat' ? 'default' : 'outline'}
+                  onClick={() => setFormData({ ...formData, type: 'pat', sshPrivateKey: '', passphrase: '' })}
                   disabled={isSaving}
-                  autoComplete="new-password"
-                />
-                {credential?.token && !tokenEdited && (
+                  className="flex-1"
+                >
+                  <Key className="h-4 w-4 mr-2" />
+                  PAT
+                </Button>
+                <Button
+                  type="button"
+                  variant={formData.type === 'ssh' ? 'default' : 'outline'}
+                  onClick={() => setFormData({ ...formData, type: 'ssh', token: '' })}
+                  disabled={isSaving}
+                  className="flex-1"
+                >
+                  <Lock className="h-4 w-4 mr-2" />
+                  SSH Key
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="cred-host">Host *</Label>
+              <Input
+                id="cred-host"
+                placeholder="github.com or git@github.com"
+                value={formData.host}
+                onChange={(e) => setFormData({ ...formData, host: e.target.value })}
+                disabled={isSaving}
+                autoComplete="off"
+              />
+            </div>
+
+            {formData.type === 'pat' ? (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="cred-token">
+                    Access Token {credential?.token && !tokenEdited ? '(unchanged)' : '*'}
+                  </Label>
+                  <Input
+                    id="cred-token"
+                    type="password"
+                    placeholder={credential?.token ? maskToken(credential.token) : 'Personal access token'}
+                    value={formData.token || ''}
+                    onChange={(e) => {
+                      setTokenEdited(true)
+                      setFormData({ ...formData, token: e.target.value })
+                    }}
+                    disabled={isSaving}
+                    autoComplete="new-password"
+                  />
+                  {credential?.token && !tokenEdited && (
+                    <p className="text-xs text-muted-foreground">
+                      Leave empty to keep existing token
+                    </p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="cred-pat-username">Username (optional)</Label>
+                  <Input
+                    id="cred-pat-username"
+                    placeholder="Auto-detected if empty"
+                    value={formData.username || ''}
+                    onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                    disabled={isSaving}
+                    autoComplete="off"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="cred-ssh-key">SSH Private Key *</Label>
+                  <Textarea
+                    id="cred-ssh-key"
+                    placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                    value={formData.sshPrivateKey || ''}
+                    onChange={(e) => setFormData({ ...formData, sshPrivateKey: e.target.value })}
+                    disabled={isSaving}
+                    rows={10}
+                    className="font-mono text-xs sm:text-sm"
+                  />
                   <p className="text-xs text-muted-foreground">
-                    Leave empty to keep existing token
+                    Paste your private key content here
                   </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowPassphraseInput(!showPassphraseInput)}
+                    disabled={isSaving}
+                    className="w-full"
+                  >
+                    {showPassphraseInput ? 'Remove' : 'Add'} Passphrase
+                  </Button>
+                </div>
+
+                {showPassphraseInput && (
+                 <div className="space-y-2">
+                  <Label htmlFor="cred-passphrase">Passphrase</Label>
+                  <Input
+                    id="cred-passphrase"
+                    type="password"
+                    placeholder="Enter passphrase for SSH key"
+                    value={formData.passphrase || ''}
+                    onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
+                    disabled={isSaving}
+                    autoComplete="new-password"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    This passphrase will be required for each git operation
+                  </p>
+                </div>
                 )}
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="cred-pat-username">Username (optional)</Label>
-                <Input
-                  id="cred-pat-username"
-                  placeholder="Auto-detected if empty"
-                  value={formData.username || ''}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  disabled={isSaving}
-                  autoComplete="off"
-                />
-              </div>
-            </>
-          ) : (
-            <>
-              <div className="space-y-2">
-                <Label htmlFor="cred-ssh-key">SSH Private Key *</Label>
-                <Textarea
-                  id="cred-ssh-key"
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                  value={formData.sshPrivateKey || ''}
-                  onChange={(e) => setFormData({ ...formData, sshPrivateKey: e.target.value })}
-                  disabled={isSaving}
-                  rows={8}
-                  className="font-mono"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Paste your private key content here
-                </p>
-              </div>
+                 <div className="space-y-2">
+                  <Label htmlFor="test-passphrase">Passphrase for Test (if protected)</Label>
+                  <Input
+                    id="test-passphrase"
+                    type="password"
+                    placeholder="Enter passphrase to test connection"
+                    value={testPassphrase}
+                    onChange={(e) => setTestPassphrase(e.target.value)}
+                    disabled={isTesting || isSaving}
+                    autoComplete="new-password"
+                  />
+                </div>
 
-              <div className="space-y-2">
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => setShowPassphraseInput(!showPassphraseInput)}
-                  disabled={isSaving}
+                  onClick={handleTestConnection}
+                  disabled={isTesting || isSaving || !formData.sshPrivateKey?.trim()}
                   className="w-full"
                 >
-                  {showPassphraseInput ? 'Remove' : 'Add'} Passphrase
+                  {isTesting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  Test Connection
                 </Button>
-              </div>
 
-              {showPassphraseInput && (
-               <div className="space-y-2">
-                <Label htmlFor="cred-passphrase">Passphrase</Label>
-                <Input
-                  id="cred-passphrase"
-                  type="password"
-                  placeholder="Enter passphrase for SSH key"
-                  value={formData.passphrase || ''}
-                  onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
-                  disabled={isSaving}
-                  autoComplete="new-password"
-                />
-                <p className="text-xs text-muted-foreground">
-                  This passphrase will be required for each git operation
-                </p>
-              </div>
-              )}
-
-               <div className="space-y-2">
-                <Label htmlFor="test-passphrase">Passphrase for Test (if protected)</Label>
-                <Input
-                  id="test-passphrase"
-                  type="password"
-                  placeholder="Enter passphrase to test connection"
-                  value={testPassphrase}
-                  onChange={(e) => setTestPassphrase(e.target.value)}
-                  disabled={isTesting || isSaving}
-                  autoComplete="new-password"
-                />
-              </div>
-
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleTestConnection}
-                disabled={isTesting || isSaving || !formData.sshPrivateKey?.trim()}
-                className="w-full"
-              >
-                {isTesting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                Test Connection
-              </Button>
-
-              <Alert>
-                <AlertTriangle className="h-4 w-4" />
-                <p className="text-sm font-medium">Security Notice</p>
-                <p className="text-xs mt-1">
-                  Your private key will be encrypted at rest. Never share it with anyone.
-                </p>
-              </Alert>
-            </>
-          )}
-
-          <div className="flex justify-end gap-2 pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => onOpenChange(false)}
-              disabled={isSaving}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="submit"
-              disabled={isSaving || !formData.name.trim() || !formData.host.trim() ||
-                       (formData.type === 'pat' && !formData.token?.trim()) ||
-                       (formData.type === 'ssh' && !formData.sshPrivateKey?.trim())}
-            >
-              {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {credential ? 'Update' : 'Add'}
-            </Button>
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <p className="text-sm font-medium">Security Notice</p>
+                  <p className="text-xs mt-1">
+                    Your private key will be encrypted at rest. Never share it with anyone.
+                  </p>
+                </Alert>
+              </>
+            )}
           </div>
         </form>
+
+        <div className="flex justify-end gap-2 pt-2 sm:pt-4 px-4 sm:px-6 pb-4 sm:pb-6 flex-shrink-0">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSaving}
+          >
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            disabled={isSaving || !formData.name.trim() || !formData.host.trim() ||
+                     (formData.type === 'pat' && !formData.token?.trim()) ||
+                     (formData.type === 'ssh' && !formData.sshPrivateKey?.trim())}
+          >
+            {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            {credential ? 'Update' : 'Add'}
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   )
