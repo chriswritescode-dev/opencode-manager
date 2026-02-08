@@ -52,7 +52,7 @@ const DialogContent = React.forwardRef<
           fullscreen
             ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none"
             : mobileFullscreen
-              ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none sm:inset-auto sm:left-[50%] sm:top-[50%] sm:w-[90%] sm:max-w-lg sm:max-h-none sm:translate-x-[-50%] sm:translate-y-[-50%] sm:p-6 sm:rounded-lg"
+              ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none sm:inset-auto sm:left-[50%] sm:bottom-auto sm:w-[90%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-0 sm:p-6 sm:rounded-lg sm:top-[8%]"
               : "left-[50%] top-[50%] w-[90%] max-w-lg translate-x-[-50%] translate-y-[-50%] p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className
         )}
