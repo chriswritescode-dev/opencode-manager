@@ -32,17 +32,18 @@ interface DialogContentProps
   hideCloseButton?: boolean
   fullscreen?: boolean
   mobileFullscreen?: boolean
+  overlayClassName?: string
 }
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, ...props }, ref) => {
+>(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, overlayClassName, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
    
   return (
     <DialogPortal>
-      {!fullscreen && <DialogOverlay />}
+      {!fullscreen && <DialogOverlay className={overlayClassName} />}
       <DialogPrimitive.Content
         ref={ref}
         aria-describedby={undefined}

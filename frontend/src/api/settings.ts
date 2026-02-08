@@ -181,6 +181,14 @@ export const settingsApi = {
     })
   },
 
+  testSSHConnection: async (host: string, sshPrivateKey: string, passphrase?: string): Promise<{ success: boolean; message: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/test-ssh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ host, sshPrivateKey, passphrase }),
+    })
+  },
+
   getAgentsMd: async (): Promise<{ content: string }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/agents-md`)
   },

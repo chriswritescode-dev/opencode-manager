@@ -89,8 +89,13 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
 export const GitCredentialSchema = z.object({
   name: z.string(),
   host: z.string(),
-  token: z.string(),
+  type: z.enum(['pat', 'ssh']).default('pat'),
+  token: z.string().optional(),
+  sshPrivateKey: z.string().optional(),
+  sshPrivateKeyEncrypted: z.string().optional(),
+  hasPassphrase: z.boolean().optional(),
   username: z.string().optional(),
+  passphrase: z.string().optional(),
 });
 
 export type GitCredential = z.infer<typeof GitCredentialSchema>;

@@ -18,7 +18,7 @@ export function useSettingsDialogUrl(): UseSettingsDialogUrlReturn {
 
   const searchParams = new URLSearchParams(location.search)
   const isOpen = searchParams.get('settings') === 'open'
-  const activeTab = (searchParams.get('tab') as Tab) || 'menu'
+  const activeTab = (searchParams.get('tab') as Tab) || 'account'
 
   const open = useCallback(() => {
     const newParams = new URLSearchParams(location.search)
