@@ -10,7 +10,6 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Git Worktrees** - Work on multiple branches simultaneously
 - **Source Control Panel** - View changes, commits, and branches in a unified interface
 - **Diff Viewer** - Unified diffs with line numbers and change counts
-- **Push PRs** - Create and push pull requests directly from the UI
 
 [Learn more →](git.md)
 
@@ -59,6 +58,14 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Voice Controls** - Configurable voice and speed settings
 
 [Learn more →](tts.md)
+
+### Speech-to-Text
+
+- **Browser STT** - Built-in Web Speech API support
+- **External STT** - Connect to OpenAI-compatible Whisper endpoints
+- **Voice Input** - Dictate messages with microphone button
+
+[Learn more →](stt.md)
 
 ### Mobile & PWA
 

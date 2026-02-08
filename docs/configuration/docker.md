@@ -15,11 +15,11 @@ docker-compose up -d
 Default configuration:
 
 ```yaml
-version: '3.8'
-
 services:
-  opencode-manager:
-    build: .
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: opencode-manager
     ports:
       - "5003:5003"      # OpenCode Manager
@@ -28,20 +28,23 @@ services:
       - "5102:5102"      # Dev server 3
       - "5103:5103"      # Dev server 4
     volumes:
-      - ./workspace:/workspace
-      - ./data:/app/data
-      - opencode-cache:/root/.opencode
+      - opencode-workspace:/workspace
+      - opencode-data:/app/data
     environment:
       - NODE_ENV=production
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 3s
       retries: 3
+      start_period: 40s
 
 volumes:
-  opencode-cache:
+  opencode-workspace:
+    driver: local
+  opencode-data:
+    driver: local
 ```
 
 ## Port Configuration
@@ -108,10 +111,10 @@ Repository storage:
 
 ```yaml
 volumes:
-  - ./workspace:/workspace
+  - opencode-workspace:/workspace
 ```
 
-All cloned repositories are stored here. The directory is created automatically.
+All cloned repositories are stored here. Uses a named volume for data persistence across container recreations.
 
 ### Data
 
@@ -119,7 +122,7 @@ Database and configuration:
 
 ```yaml
 volumes:
-  - ./data:/app/data
+  - opencode-data:/app/data
 ```
 
 Contains:
@@ -127,16 +130,7 @@ Contains:
 - User settings
 - Session data
 
-### OpenCode Cache
-
-OpenCode runtime cache:
-
-```yaml
-volumes:
-  - opencode-cache:/root/.opencode
-```
-
-Using a named volume for better performance.
+Uses a named volume for data persistence.
 
 ## Environment Variables
 
@@ -174,10 +168,11 @@ The container includes health checks:
 
 ```yaml
 healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:5003/health"]
+  test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
   interval: 30s
-  timeout: 10s
+  timeout: 3s
   retries: 3
+  start_period: 40s
 ```
 
 Check health status:

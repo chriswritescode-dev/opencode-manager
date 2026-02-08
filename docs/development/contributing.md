@@ -115,14 +115,14 @@ refactor: extract git service from routes
 ### Writing Tests
 
 ```typescript
-import { expect, test, describe, beforeEach } from 'bun:test'
+import { describe, it, expect, beforeEach } from 'vitest'
 
 describe('featureName', () => {
   beforeEach(() => {
     // Setup
   })
 
-  test('should do something', async () => {
+  it('should do something', async () => {
     const result = await doSomething()
     expect(result).toBe(expected)
   })
@@ -142,10 +142,10 @@ describe('featureName', () => {
 pnpm test
 
 # With coverage
-cd backend && bun test --coverage
+cd backend && vitest --coverage
 
 # Single file
-cd backend && bun test path/to/test.ts
+cd backend && vitest path/to/test.ts
 ```
 
 ## Architecture Decisions

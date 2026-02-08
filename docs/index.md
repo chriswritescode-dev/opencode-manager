@@ -30,26 +30,11 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 - **Multi-Repository Support** - Clone and manage multiple git repos with private repo support
 - **Git Integration** - View diffs, manage branches, create PRs directly from the UI
 - **Real-time Chat** - Stream responses with file mentions and custom slash commands
-- **Mobile-First PWA** - Install as an app on any device with offline support
+- **Mobile-First PWA** - Install as an app on any device with push notifications
 - **Push Notifications** - Get background alerts for agent events when app is closed
 - **AI Configuration** - Configure models, providers, OAuth, and custom agents
-- **MCP Servers** - Add local or remote MCP servers with pre-built templates
+- **MCP Servers** - Add local or remote MCP servers with OAuth support
 
-## System Requirements
-
-### Docker (Recommended)
-
-- Docker Engine 20.10+
-- Docker Compose v2+
-- 2GB RAM minimum
-- 5GB disk space
-
-### Local Development
-
-- [pnpm](https://pnpm.io) - Package manager
-- [Bun](https://bun.sh) - Backend runtime
-- [OpenCode TUI](https://opencode.ai) - `npm i -g @opencode/tui`
-- [Node.js 24+](https://nodejs.org/en/about/previous-releases)
 
 ## Next Steps
 

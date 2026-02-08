@@ -52,30 +52,26 @@ Syntax highlighting is provided for common languages including:
 
 ### Create File
 
-1. Right-click in the file browser
-2. Select **New File**
-3. Enter filename with extension
-4. File is created and opened for editing
+1. Click the **New File** button in the file browser toolbar
+2. Enter filename with extension
+3. File is created and opened for editing
 
 ### Create Folder
 
-1. Right-click in the file browser
-2. Select **New Folder**
-3. Enter folder name
-4. Folder is created in current directory
+1. Click the **New Folder** button in the file browser toolbar
+2. Enter folder name
+3. Folder is created in current directory
 
 ### Rename
 
-1. Right-click a file or folder
-2. Select **Rename**
-3. Enter new name
-4. Press Enter to confirm
+1. Click the **rename** action on a file or folder
+2. Enter new name
+3. Press Enter to confirm
 
 ### Delete
 
-1. Right-click a file or folder
-2. Select **Delete**
-3. Confirm deletion
+1. Click the **delete** action on a file or folder
+2. Confirm deletion
 
 !!! warning
     Deletion is permanent and cannot be undone through the UI. Use git to recover deleted files if needed.

@@ -1,3 +1,7 @@
+<p align="center">
+    <img src=".github/social-preview.png" alt="OpenCode Manager" width="600" style="border: none" />
+</p>
+
 # OpenCode Manager
 
 Mobile-first web interface for [OpenCode](https://opencode.ai) AI agents. Manage, control, and code from any device - your phone, tablet, or desktop.

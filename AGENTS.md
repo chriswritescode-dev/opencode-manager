@@ -2,7 +2,7 @@
 
 ## Commands
 
-- `pnpm dev` - Start both backend (5001) and frontend (5173)
+- `pnpm dev` - Start both backend (5003) and frontend (5173)
 - `pnpm dev:backend` - Backend only: `bun --watch backend/src/index.ts`
 - `pnpm dev:frontend` - Frontend only: `cd frontend && vite`
 - `pnpm build` - Build both backend and frontend
@@ -50,6 +50,6 @@
 - Never leave dead code: remove unused code, commented-out blocks, and unused variables/imports.
 - ./temp/opencode is reference only, never commit has opencode src
 - Use shared types from workspace package (@opencode-manager/shared)
-- OpenCode server runs on port 5551, backend API on port 5001
+- OpenCode server runs on port 5551, backend API on port 5003
 - Prefer pnpm over npm for all package management
 - Run `pnpm lint` after completing tasks to ensure code quality

@@ -29,10 +29,7 @@ Type `/` to see available commands:
 |---------|-------------|
 | `/help` | Show available commands |
 | `/new` | Start a new session |
-| `/models` | List available AI models |
-| `/export` | Export session history |
 | `/compact` | Compact session context |
-| `/clear` | Clear current session |
 
 ### Custom Commands
 
@@ -52,14 +49,6 @@ template: |
 ```
 
 Use with `/review` in chat.
-
-#### Template Variables
-
-| Variable | Description |
-|----------|-------------|
-| `{{selection}}` | Currently selected text |
-| `{{file}}` | Current file path |
-| `{{clipboard}}` | Clipboard contents |
 
 ## File Mentions
 

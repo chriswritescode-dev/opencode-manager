@@ -78,11 +78,7 @@ AUTH_SECRET=your-generated-secret
 
 ### Session Duration
 
-Sessions last until:
-
-- User logs out
-- Browser is closed (unless "Remember me")
-- Session expires (configurable)
+Sessions expire after 7 days. A new session is created on each login.
 
 ### Secure Cookies
 
@@ -149,7 +145,7 @@ PASSKEY_ORIGIN=http://192.168.1.244:5003
 ### Adding a Passkey
 
 1. Log in with password
-2. Go to **Settings > Security**
+2. Go to **Settings > Account**
 3. Click **Add Passkey**
 4. Follow browser/device prompts
 5. Name your passkey

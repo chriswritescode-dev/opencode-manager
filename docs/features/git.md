@@ -82,21 +82,6 @@ View file changes with a unified diff format:
 
 ![Diff Viewer](../images/git/git-diffview.png)
 
-## Pull Requests
-
-Create and push PRs directly from the UI:
-
-1. Make your changes and commit them
-2. Open **Source Control > Branches**
-3. Click **Create PR**
-4. Fill in:
-   - Title
-   - Description
-   - Target branch (usually `main`)
-5. Click **Create**
-
-The PR is created on GitHub and you'll receive a link to view it.
-
 ## Repository Actions
 
 ### Pull

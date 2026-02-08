@@ -47,7 +47,7 @@ When these are set:
 
 After initial setup, you can add passkey authentication for passwordless login:
 
-1. Go to **Settings > Security**
+1. Go to **Settings > Account**
 2. Click **Add Passkey**
 3. Follow your browser/device prompts
 4. Name your passkey (e.g., "MacBook Touch ID")
