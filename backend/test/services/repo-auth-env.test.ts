@@ -25,6 +25,20 @@ vi.mock('../../src/db/queries', () => ({
   deleteRepo,
 }))
 
+vi.mock('../../src/services/settings', () => ({
+  SettingsService: vi.fn().mockImplementation(() => ({
+    getSettings: vi.fn().mockReturnValue({ preferences: { gitCredentials: [] } }),
+  })),
+}))
+
+vi.mock('../../src/utils/ssh-key-manager', () => ({
+  parseSSHHost: vi.fn((url: string) => ({ user: 'git', host: url, port: null })),
+  writeTemporarySSHKey: vi.fn(),
+  buildSSHCommand: vi.fn(),
+  buildSSHCommandWithKnownHosts: vi.fn(),
+  cleanupSSHKey: vi.fn(),
+}))
+
 const mockEnv = {
   GIT_TERMINAL_PROMPT: '0',
   LANG: 'en_US.UTF-8',
@@ -33,6 +47,12 @@ const mockEnv = {
 
 const mockGitAuthService = {
   getGitEnvironment: vi.fn().mockReturnValue(mockEnv),
+  getSSHEnvironment: vi.fn().mockReturnValue({}),
+  setupSSHKey: vi.fn(),
+  cleanupSSHKey: vi.fn(),
+  verifyHostKeyBeforeOperation: vi.fn().mockResolvedValue(true),
+  setupSSHForRepoUrl: vi.fn().mockResolvedValue(false),
+  setSSHPort: vi.fn(),
 } as unknown as GitAuthService
 
 describe('repoService.cloneRepo auth env', () => {

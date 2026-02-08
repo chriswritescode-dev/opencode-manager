@@ -45,6 +45,18 @@ export function GitSettings() {
     setIsCredentialDialogOpen(true)
   }
 
+  const handleEditClick = (e: React.MouseEvent, index: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    openEditCredentialDialog(index)
+  }
+
+  const handleDeleteClick = (e: React.MouseEvent, index: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    removeCredential(index)
+  }
+
   const saveCredential = async (credential: GitCredential) => {
     let newCredentials: GitCredential[]
 
@@ -216,10 +228,11 @@ export function GitSettings() {
               ) : (
                 <div className="border border-border rounded-lg overflow-hidden">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted/50">
+                     <thead className="bg-muted/50">
                       <tr>
                         <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
                         <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Host</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Type</th>
                         <th className="px-3 py-2 text-right font-medium text-muted-foreground">Actions</th>
                       </tr>
                     </thead>
@@ -235,32 +248,37 @@ export function GitSettings() {
                           <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
                             {cred.host}
                           </td>
-                           <td className="px-3 py-2">
-                             <div className="flex items-center justify-end gap-1">
+                          <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
+                            <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
+                              {cred.type === 'ssh' ? 'SSH' : 'PAT'}
+                            </span>
+                          </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 w-7 p-0"
+                                  onClick={(e) => handleEditClick(e, index)}
+                                  disabled={isSaving}
+                                  title="Edit"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
                                <Button
                                  type="button"
                                  variant="ghost"
                                  size="sm"
-                                 className="h-7 w-7 p-0"
-                                 onClick={() => openEditCredentialDialog(index)}
+                                 className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                                 onClick={(e) => handleDeleteClick(e, index)}
                                  disabled={isSaving}
-                                 title="Edit"
+                                 title="Delete"
                                >
-                                 <Pencil className="h-3.5 w-3.5" />
+                                 <Trash2 className="h-3.5 w-3.5" />
                                </Button>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                                onClick={() => removeCredential(index)}
-                                disabled={isSaving}
-                                title="Delete"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </td>
+                             </div>
+                           </td>
                         </tr>
                       ))}
                     </tbody>

@@ -28,8 +28,13 @@ export interface CustomAgent {
 export interface GitCredential {
   name: string
   host: string
-  token: string
+  type: 'pat' | 'ssh'
+  token?: string
+  sshPrivateKey?: string
+  sshPrivateKeyEncrypted?: string
+  hasPassphrase?: boolean
   username?: string
+  passphrase?: string
 }
 
 export interface GitIdentity {

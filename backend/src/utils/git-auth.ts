@@ -1,8 +1,13 @@
 export interface GitCredential {
   name: string
   host: string
-  token: string
+  type: 'pat' | 'ssh'
+  token?: string
+  sshPrivateKey?: string
+  sshPrivateKeyEncrypted?: string
+  hasPassphrase?: boolean
   username?: string
+  passphrase?: string
 }
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
@@ -29,6 +34,29 @@ export function getDefaultUsername(host: string): string {
   } catch {
     return 'oauth2'
   }
+}
+
+export function isSSHUrl(url: string): boolean {
+  return url.startsWith('git@') || url.startsWith('ssh://')
+}
+
+export function extractHostFromSSHUrl(url: string): string | null {
+  if (url.startsWith('git@')) {
+    const match = url.match(/^git@([^:]+):/)
+    const host = match?.[1]
+    return host || null
+  }
+  if (url.startsWith('ssh://')) {
+    try {
+      const parsed = new URL(url)
+      const hostname = parsed.hostname ?? ''
+      const port = parsed.port ?? ''
+      return port ? `${hostname}:${port}` : parsed.hostname || null
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 export function normalizeHost(host: string): string {
@@ -70,7 +98,7 @@ export function createGitEnv(credentials: GitCredential[]): Record<string, strin
 }
 
 export function createGitHubGitEnv(gitToken: string): Record<string, string> {
-  return createGitEnv([{ name: 'GitHub', host: 'https://github.com/', token: gitToken }])
+  return createGitEnv([{ name: 'GitHub', host: 'https://github.com/', token: gitToken, type: 'pat' }])
 }
 
 export function findGitHubCredential(credentials: GitCredential[]): GitCredential | null {
@@ -97,6 +125,43 @@ export function getCredentialForHost(credentials: GitCredential[], host: string)
   })
 }
 
+export function getSSHCredentialsForHost(credentials: GitCredential[], host: string): GitCredential[] {
+  return credentials.filter(cred => {
+    if (cred.type !== 'ssh') return false
+    
+    const credHost = cred.host.toLowerCase()
+    const targetHost = host.toLowerCase()
+    
+    if (credHost === targetHost) {
+      return true
+    }
+    
+    try {
+      const parsedCredHost = new URL(credHost)
+      const credHostname = parsedCredHost.hostname.toLowerCase()
+      const credPort = parsedCredHost.port || (parsedCredHost.protocol.includes('ssh') ? 22 : null)
+      const normalizedCredHost = credPort ? `${credHostname}:${credPort}` : credHostname
+      
+      const parsedTargetHost = new URL(`ssh://dummy@${targetHost}`)
+      const targetHostname = parsedTargetHost.hostname.toLowerCase()
+      const targetPort = parsedTargetHost.port || 22
+      const normalizedTargetHost = targetPort !== '' ? `${targetHostname}:${targetPort}` : targetHostname
+      
+      return normalizedCredHost === normalizedTargetHost
+    } catch {
+      if (credHost.includes(':')) {
+        const [credHostname, credPort] = credHost.split(':')
+        if (targetHost.includes(':')) {
+          const [targetHostname, targetPort] = targetHost.split(':')
+          return credHostname === targetHostname && credPort === targetPort
+        }
+        return credHostname === targetHost
+      }
+      return credHost === targetHost
+    }
+  })
+}
+
 export interface GitHubUserInfo {
   name: string | null
   email: string
@@ -117,7 +182,7 @@ export async function resolveGitIdentity(
   }
 
   const githubCred = findGitHubCredential(credentials)
-  if (githubCred) {
+  if (githubCred && githubCred.token) {
     const githubUser = await fetchGitHubUserInfo(githubCred.token)
     if (githubUser) {
       return {

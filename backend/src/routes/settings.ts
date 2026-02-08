@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { execSync } from 'child_process'
+import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
@@ -15,6 +15,8 @@ import {
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../constants'
+import { validateSSHPrivateKey } from '../utils/ssh-validation'
+import { encryptSecret } from '../utils/crypto'
 
 function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.split('.').map(s => Number(s))
@@ -50,20 +52,42 @@ function getOpenCodeInstallMethod(): string {
   return 'curl'
 }
 
-function execWithTimeout(command: string, timeoutMs: number): { output: string; timedOut: boolean } {
+function execWithTimeout(command: string, timeoutMs: number, env?: Record<string, string>): { output: string; timedOut: boolean } {
   try {
     const output = execSync(command, {
       encoding: 'utf8',
       timeout: timeoutMs,
-      killSignal: 'SIGKILL'
+      killSignal: 'SIGKILL',
+      env: env ? { ...process.env, ...env } : undefined
     })
     return { output, timedOut: false }
   } catch (error) {
     if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === null) {
       return { output: '', timedOut: true }
     }
+    if (error && typeof error === 'object' && ('stdout' in error || 'stderr' in error)) {
+      const stdout = (error as { stdout?: string }).stdout || ''
+      const stderr = (error as { stderr?: string }).stderr || ''
+      return { output: stdout + stderr, timedOut: false }
+    }
     throw error
   }
+}
+
+function spawnWithTimeout(args: string[], timeoutMs: number, env?: Record<string, string>): { output: string; timedOut: boolean } {
+  const result = spawnSync(args[0]!, args.slice(1), {
+    encoding: 'utf8',
+    timeout: timeoutMs,
+    killSignal: 'SIGKILL',
+    env: env ? { ...process.env, ...env } : undefined
+  })
+
+  if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
+    return { output: '', timedOut: true }
+  }
+
+  const output = (result.stdout || '') + (result.stderr || '')
+  return { output, timedOut: false }
 }
 
 const UpdateSettingsSchema = z.object({
@@ -100,6 +124,12 @@ const ConnectMcpDirectorySchema = z.object({
   directory: z.string().min(1),
 })
 
+const TestSSHConnectionSchema = z.object({
+  host: z.string().min(1),
+  sshPrivateKey: z.string().min(1),
+  passphrase: z.string().optional(),
+})
+
 
 async function extractOpenCodeError(response: Response, defaultError: string): Promise<string> {
   const errorObj = await response.json().catch(() => null)
@@ -128,18 +158,42 @@ export function createSettingsRoutes(db: Database) {
       const userId = c.req.query('userId') || 'default'
       const body = await c.req.json()
       const validated = UpdateSettingsSchema.parse(body)
-      
+
+      if (validated.preferences.gitCredentials) {
+        const validations = await Promise.all(
+          validated.preferences.gitCredentials.map(async (cred: Record<string, unknown>) => {
+            if (cred.type === 'ssh' && cred.sshPrivateKey) {
+              const validation = await validateSSHPrivateKey(cred.sshPrivateKey as string)
+              if (!validation.valid) {
+                throw new Error(`Invalid SSH key for credential '${cred.name}': ${validation.error}`)
+              }
+
+              const result: Record<string, unknown> = {
+                ...cred,
+                sshPrivateKeyEncrypted: encryptSecret(cred.sshPrivateKey as string),
+                hasPassphrase: validation.hasPassphrase,
+                passphrase: cred.passphrase ? encryptSecret(cred.passphrase as string) : undefined,
+              }
+              delete result.sshPrivateKey
+              return result
+            }
+            return cred
+          })
+        )
+        validated.preferences.gitCredentials = validations
+      }
+
       const currentSettings = settingsService.getSettings(userId)
       const settings = settingsService.updateSettings(validated.preferences, userId)
-      
+
       let serverRestarted = false
-      
+
       const credentialsChanged = validated.preferences.gitCredentials !== undefined &&
         JSON.stringify(currentSettings.preferences.gitCredentials || []) !== JSON.stringify(validated.preferences.gitCredentials)
-      
+
       const identityChanged = validated.preferences.gitIdentity !== undefined &&
         JSON.stringify(currentSettings.preferences.gitIdentity || {}) !== JSON.stringify(validated.preferences.gitIdentity)
-      
+
       let reloadError: string | undefined
       if (credentialsChanged || identityChanged) {
         const changeType = [credentialsChanged && 'credentials', identityChanged && 'identity'].filter(Boolean).join(' and ')
@@ -156,6 +210,9 @@ export function createSettingsRoutes(db: Database) {
       return c.json({ ...settings, serverRestarted, reloadError })
     } catch (error) {
       logger.error('Failed to update settings:', error)
+      if (error instanceof Error && error.message.startsWith('Invalid SSH key')) {
+        return c.json({ error: error.message }, 400)
+      }
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid settings data', details: error.issues }, 400)
       }
@@ -772,6 +829,120 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to update AGENTS.md' }, 500)
+    }
+  })
+
+  app.post('/test-ssh', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { host, sshPrivateKey, passphrase } = TestSSHConnectionSchema.parse(body)
+
+      logger.info(`Testing SSH connection to ${host}`)
+
+      const validation = await validateSSHPrivateKey(sshPrivateKey)
+      if (!validation.valid) {
+        return c.json({
+          success: false,
+          message: validation.error || 'Invalid SSH key'
+        }, 400)
+      }
+
+      const { writeTemporarySSHKey, cleanupSSHKey, parseSSHHost } = await import('../utils/ssh-key-manager')
+
+      let keyPath: string | null = null
+      try {
+        keyPath = await writeTemporarySSHKey(sshPrivateKey, 'test')
+
+        const { user, host: sshHost, port } = parseSSHHost(host)
+
+        const sshArgs = [
+          '-T',
+          '-i', keyPath,
+          '-o', 'IdentitiesOnly=yes',
+          '-o', 'PasswordAuthentication=no',
+          '-o', 'StrictHostKeyChecking=accept-new',
+          '-o', 'UserKnownHostsFile=/dev/null',
+        ]
+
+        if (port && port !== '22') {
+          sshArgs.push('-p', port)
+        }
+
+        sshArgs.push(`${user}@${sshHost}`)
+
+        let executable = 'ssh'
+        const env: Record<string, string> = {}
+        if (passphrase) {
+          executable = 'sshpass'
+          sshArgs.unshift('-e', 'ssh')
+          env.SSHPASS = passphrase
+        }
+
+        const { output, timedOut } = spawnWithTimeout([executable, ...sshArgs], 30000, env)
+
+        if (timedOut) {
+          logger.warn(`SSH connection test to ${host} timed out`)
+          return c.json({
+            success: false,
+            message: 'Connection timed out. This may indicate a network issue or an incorrect host.'
+          })
+        }
+
+        const outputStr = String(output)
+
+        if (outputStr.includes('Permission denied') || outputStr.includes('Access denied')) {
+          return c.json({
+            success: false,
+            message: 'Permission denied. The SSH key may not be authorized on this host, or the passphrase is incorrect.'
+          })
+        }
+
+        if (outputStr.includes('Could not resolve hostname') || outputStr.includes('Name or service not known')) {
+          return c.json({
+            success: false,
+            message: 'Could not resolve hostname. Please check that the host is correct and accessible.'
+          })
+        }
+
+        if (outputStr.includes('Connection refused') || outputStr.includes('Connection timed out')) {
+          return c.json({
+            success: false,
+            message: 'Connection refused or timed out. The host may be down or not accepting SSH connections.'
+          })
+        }
+
+        const authenticated = outputStr.includes('successfully authenticated') ||
+                              outputStr.includes('You\'ve successfully authenticated') ||
+                              outputStr.includes('Welcome to')
+
+        if (authenticated) {
+          logger.info(`SSH connection test to ${host} succeeded`)
+          return c.json({
+            success: true,
+            message: `Successfully connected to ${host}`
+          })
+        }
+
+        logger.warn(`SSH connection test to ${host} returned ambiguous output: ${outputStr}`)
+        return c.json({
+          success: false,
+          message: `Authentication failed. The key may not be authorized on this host. Details: ${outputStr.trim().substring(0, 200)}`
+        })
+
+      } finally {
+        if (keyPath) {
+          await cleanupSSHKey(keyPath)
+        }
+      }
+    } catch (error) {
+      logger.error('Failed to test SSH connection:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({
+        success: false,
+        message: error instanceof Error ? error.message : 'Failed to test SSH connection'
+      }, 500)
     }
   })
 

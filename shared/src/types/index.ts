@@ -77,3 +77,6 @@ export interface ErrorResponse {
 export interface SuccessResponse {
   success: boolean
 }
+
+export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
+export type { GitCredential } from '../schemas/settings'
