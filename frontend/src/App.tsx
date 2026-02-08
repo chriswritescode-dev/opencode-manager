@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom'
 import { Toaster } from 'sonner'
@@ -62,15 +62,6 @@ function PermissionDialogWrapper() {
 
 function AppShell() {
   useTheme()
-
-  useEffect(() => {
-    const loader = document.getElementById('app-loader')
-    if (loader) {
-      loader.style.transition = 'opacity 0.2s ease-out'
-      loader.style.opacity = '0'
-      setTimeout(() => loader.remove(), 200)
-    }
-  }, [])
 
   return (
     <AuthProvider>
