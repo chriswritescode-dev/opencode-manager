@@ -19,6 +19,10 @@ For private repositories, configure a GitHub Personal Access Token:
 2. Enter your GitHub PAT
 3. Ensure the token has `repo` scope
 
+### SSH Repositories
+
+SSH key authentication added for git repositories. Configure SSH keys in Settings > Credentials.
+
 ## Git Worktrees
 
 Work on multiple branches simultaneously without switching:

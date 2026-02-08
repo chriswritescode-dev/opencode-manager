@@ -49,6 +49,7 @@ On first launch, you'll be prompted to create an admin account. That's it!
 
 ### Repository & Git
 - **Multi-Repository Support** - Clone and manage multiple git repos with private repo support via GitHub PAT
+- **SSH Authentication** - SSH key authentication for git repositories
 - **Git Worktrees** - Work on multiple branches simultaneously
 - **Source Control Panel** - View changes, commits, and branches in a unified interface
 - **Diff Viewer** - Unified diffs with line numbers and change counts
