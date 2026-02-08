@@ -6,8 +6,9 @@ import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from './git-auth'
-import { isGitHubHttpsUrl } from '../utils/git-auth'
+import { isGitHubHttpsUrl, isSSHUrl } from '../utils/git-auth'
 import path from 'path'
+import { parseSSHHost } from '../utils/ssh-key-manager'
 
 const GIT_CLONE_TIMEOUT = 300000
 
@@ -22,7 +23,11 @@ function enhanceCloneError(error: unknown, repoUrl: string, originalMessage: str
     return new Error(`Repository not found: ${repoUrl}. Check the URL and ensure you have access to it.`)
   }
   
-  if (message.includes('permission denied') || (isGitHubHttpsUrl(repoUrl) && message.includes('fatal'))) {
+  if (isSSHUrl(repoUrl) && message.includes('permission denied')) {
+    return new Error(`Access denied to ${repoUrl}. Please add your SSH credentials in Settings > Git Credentials and ensure your SSH key has access to this repository.`)
+  }
+  
+  if (isGitHubHttpsUrl(repoUrl) && (message.includes('permission denied') || message.includes('fatal'))) {
     return new Error(`Access denied to ${repoUrl}. Please add your credentials in Settings > Git Credentials and ensure you have proper access.`)
   }
   
@@ -299,23 +304,30 @@ export async function cloneRepo(
   branch?: string,
   useWorktree: boolean = false
 ): Promise<Repo> {
-  const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(repoUrl)
+  const isSSH = isSSHUrl(repoUrl)
+  const preserveSSH = isSSH
+  const hasSSHCredential = await gitAuthService.setupSSHForRepoUrl(repoUrl, database)
+
+  const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(repoUrl, preserveSSH)
   const baseRepoDirName = repoName
   const worktreeDirName = branch && useWorktree ? `${repoName}-${branch.replace(/[\\/]/g, '-')}` : repoName
   const localPath = worktreeDirName
-  
+
   const existing = db.getRepoByUrlAndBranch(database, normalizedRepoUrl, branch)
-  
+
   if (existing) {
     logger.info(`Repo branch already exists: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`)
+    if (hasSSHCredential) {
+      await gitAuthService.cleanupSSHKey()
+    }
     return existing
   }
-  
+
   await ensureDirectoryExists(getReposPath())
   const baseRepoExists = await executeCommand(['bash', '-c', `test -d ${baseRepoDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
-  
+
   const shouldUseWorktree = useWorktree && branch && baseRepoExists.trim() === 'exists'
-  
+
   const createRepoInput: CreateRepoInput = {
     repoUrl: normalizedRepoUrl,
     localPath,
@@ -332,7 +344,10 @@ export async function cloneRepo(
   const repo = db.createRepo(database, createRepoInput)
 
   try {
-    const env = gitAuthService.getGitEnvironment()
+    const env = {
+      ...gitAuthService.getGitEnvironment(),
+      ...(isSSH ? gitAuthService.getSSHEnvironment() : {})
+    }
 
     if (shouldUseWorktree) {
       logger.info(`Creating worktree for branch: ${branch}`)
@@ -518,6 +533,8 @@ export async function cloneRepo(
     logger.error(`Failed to create repo: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`, error)
     db.deleteRepo(database, repo.id)
     throw error
+  } finally {
+    await gitAuthService.cleanupSSHKey()
   }
 }
 
@@ -643,14 +660,26 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
   db.deleteRepo(database, repoId)
 }
 
-function normalizeRepoUrl(url: string): { url: string; name: string } {
+function normalizeRepoUrl(url: string, preserveSSH: boolean = false): { url: string; name: string } {
   const sshMatch = url.match(/^git@([^:]+):(.+?)(?:\.git)?$/)
   if (sshMatch) {
     const [, host, pathPart] = sshMatch
     const path = pathPart ?? ''
     const repoName = path.split('/').pop() || `repo-${Date.now()}`
     return {
-      url: `https://${host}/${path.replace(/\.git$/, '')}`,
+      url: preserveSSH ? url : `https://${host}/${path.replace(/\.git$/, '')}`,
+      name: repoName
+    }
+  }
+
+  if (url.startsWith('ssh://')) {
+    const { host } = parseSSHHost(url)
+    const pathParts = url.split(`${host}/`)
+    const pathPart = pathParts[1] || ''
+    const repoName = pathPart.replace(/\.git$/, '').split('/').pop() || `repo-${Date.now()}`
+    
+    return {
+      url: preserveSSH ? url : `https://${host}/${pathPart.replace(/\.git$/, '')}`,
       name: repoName
     }
   }

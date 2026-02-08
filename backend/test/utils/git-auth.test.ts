@@ -209,9 +209,9 @@ describe('fetchGitHubUserInfo', () => {
 describe('findGitHubCredential', () => {
   it('should find GitHub credential in credentials array', () => {
     const credentials: GitCredential[] = [
-      { name: 'gitlab', host: 'https://gitlab.com/', token: 'gitlab-token' },
-      { name: 'github', host: 'https://github.com/', token: 'github-token' },
-      { name: 'private', host: 'https://git.example.com/', token: 'private-token' },
+      { name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gitlab-token' },
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'github-token' },
+      { name: 'private', host: 'https://git.example.com/', type: 'pat', token: 'private-token' },
     ]
 
     const result = findGitHubCredential(credentials)
@@ -219,13 +219,14 @@ describe('findGitHubCredential', () => {
     expect(result).toEqual({
       name: 'github',
       host: 'https://github.com/',
+      type: 'pat',
       token: 'github-token'
     })
   })
 
   it('should not find GitHub credential with www subdomain', () => {
     const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://www.github.com/', token: 'github-token' },
+      { name: 'github', host: 'https://www.github.com/', type: 'pat', token: 'github-token' },
     ]
 
     const result = findGitHubCredential(credentials)
@@ -241,8 +242,8 @@ describe('findGitHubCredential', () => {
 
   it('should return null when no GitHub credential exists', () => {
     const credentials: GitCredential[] = [
-      { name: 'gitlab', host: 'https://gitlab.com/', token: 'gitlab-token' },
-      { name: 'private', host: 'https://git.example.com/', token: 'private-token' },
+      { name: 'gitlab', host: 'https://gitlab.com/', type: 'pat', token: 'gitlab-token' },
+      { name: 'private', host: 'https://git.example.com/', type: 'pat', token: 'private-token' },
     ]
 
     const result = findGitHubCredential(credentials)
@@ -273,7 +274,7 @@ describe('resolveGitIdentity', () => {
   it('should prioritize manual name but use GitHub email', async () => {
     const manual = { name: 'Custom Name', email: undefined }
     const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', token: 'gh-token' },
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' },
     ]
 
     const userResponse = {
@@ -306,7 +307,7 @@ describe('resolveGitIdentity', () => {
   it('should use GitHub identity when no manual identity', async () => {
     const manual = undefined
     const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', token: 'gh-token' },
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' },
     ]
 
     const userResponse = {
@@ -339,7 +340,7 @@ describe('resolveGitIdentity', () => {
   it('should use login as name when GitHub name is null', async () => {
     const manual = undefined
     const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', token: 'gh-token' },
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'gh-token' },
     ]
 
     const userResponse = {
@@ -372,7 +373,7 @@ describe('resolveGitIdentity', () => {
   it('should return partial identity when GitHub fails but manual has one field', async () => {
     const manual = { name: 'Only Name', email: undefined }
     const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', token: 'invalid-token' },
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'invalid-token' },
     ]
 
     global.fetch = vi.fn() as any;
@@ -399,7 +400,7 @@ describe('resolveGitIdentity', () => {
   it('should return null when both manual fields are empty and GitHub fails', async () => {
     const manual = { name: undefined, email: undefined }
     const credentials: GitCredential[] = [
-      { name: 'github', host: 'https://github.com/', token: 'invalid-token' },
+      { name: 'github', host: 'https://github.com/', type: 'pat', token: 'invalid-token' },
     ]
 
     global.fetch = vi.fn() as any;

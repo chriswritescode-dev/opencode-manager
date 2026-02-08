@@ -179,6 +179,11 @@ export interface SSESessionErrorEvent {
   }
 }
 
+export interface SSESSHHostKeyRequestEvent {
+  type: 'ssh.host-key-request'
+  properties: SSHHostKeyRequest
+}
+
 export type SSEEvent =
   | SSEMessagePartUpdatedEvent
   | SSEMessageUpdatedEvent
@@ -198,6 +203,7 @@ export type SSEEvent =
   | SSEQuestionRejectedEvent
   | SSEInstallationUpdatedEvent
   | SSEInstallationUpdateAvailableEvent
+  | SSESSHHostKeyRequestEvent
 
 export type ContentPart = 
   | { type: 'text', content: string }
@@ -216,3 +222,17 @@ export interface ImageAttachment {
   mime: string
   dataUrl: string
 }
+
+export interface SSHHostKeyRequest {
+  id: string
+  requestId: string
+  host: string
+  ip?: string
+  keyType: string
+  fingerprint: string
+  isKeyChanged?: boolean
+  timestamp: number
+  action: 'verify'
+}
+
+export type SSHHostKeyResponse = 'accept' | 'reject'

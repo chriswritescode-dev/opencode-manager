@@ -403,6 +403,22 @@ class SSEAggregator {
     })
     return result
   }
+
+  broadcastToAll(event: string, data: string): void {
+    this.clients.forEach((client) => {
+      try {
+        client.callback(event, data)
+      } catch { /* ignore broadcast errors */ }
+    })
+  }
 }
 
 export const sseAggregator = SSEAggregator.getInstance()
+
+export function broadcastSSHHostKeyRequest(data: Record<string, unknown>): void {
+  const event = JSON.stringify({
+    type: 'ssh.host-key-request',
+    properties: data,
+  })
+  sseAggregator.broadcastToAll('message', event)
+}

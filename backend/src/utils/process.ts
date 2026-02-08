@@ -36,6 +36,8 @@ export async function executeCommand(
       logger.info(`  GIT_ASKPASS: ${effectiveEnv.GIT_ASKPASS || '(not set)'}`)
       logger.info(`  VSCODE_GIT_IPC_HANDLE: ${effectiveEnv.VSCODE_GIT_IPC_HANDLE || '(not set)'}`)
       logger.info(`  GIT_TERMINAL_PROMPT: ${effectiveEnv.GIT_TERMINAL_PROMPT || '(not set)'}`)
+      logger.info(`  GIT_SSH_COMMAND: ${effectiveEnv.GIT_SSH_COMMAND || '(not set)'}`)
+      logger.info(`  VSCODE_GIT_SSH_HOST_KEY: ${effectiveEnv.VSCODE_GIT_SSH_HOST_KEY || '(not set)'}`)
     }
     
     const proc: ChildProcess = spawn(command || '', cmdArgs, {

@@ -4,7 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
-import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent } from '@/api/types'
+import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, SSHHostKeyRequest } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { subscribeToSSE, addSSEDirectory, ensureSSEConnected } from '@/lib/sseManager'
 import { OPENCODE_API_ENDPOINT } from '@/config'
@@ -13,7 +13,13 @@ import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessi
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
 
+interface SSHHostKeyState {
+  request: SSHHostKeyRequest | null
+  respond: (requestId: string, approved: boolean) => Promise<void>
+}
+
 interface EventContextValue {
+  sshHostKey: SSHHostKeyState
   permissions: {
     current: PermissionRequest | null
     pendingCount: number
@@ -44,6 +50,18 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
+
+  const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
+
+  const respondToSSHHostKey = useCallback(async (requestId: string, approved: boolean) => {
+    try {
+      const { respondSSHHostKey } = await import('@/api/ssh')
+      await respondSSHHostKey(requestId, approved)
+      setSSHHostKeyRequest(null)
+    } catch {
+      showToast.error('Failed to respond to SSH host key verification')
+    }
+  }, [])
 
   const [permissionsBySession, setPermissionsBySession] = useState<PermissionsBySession>({})
   const [questionsBySession, setQuestionsBySession] = useState<QuestionsBySession>({})
@@ -272,6 +290,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             addQuestion(event.properties as QuestionRequest)
           }
           break
+        case 'ssh.host-key-request':
+          if ('requestId' in event.properties && 'host' in event.properties) {
+            setSSHHostKeyRequest(event.properties as SSHHostKeyRequest)
+          }
+          break
         case 'question.replied':
         case 'question.rejected':
           if ('requestID' in event.properties && 'sessionID' in event.properties) {
@@ -325,6 +348,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [repos, fetchInitialPendingData])
 
   const value: EventContextValue = useMemo(() => ({
+    sshHostKey: {
+      request: sshHostKeyRequest,
+      respond: respondToSSHHostKey,
+    },
     permissions: {
       current: currentPermission,
       pendingCount: allPermissions.length,
@@ -348,6 +375,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     getRepoIdForSession,
     getClient,
   }), [
+    sshHostKeyRequest,
+    respondToSSHHostKey,
     currentPermission,
     allPermissions.length,
     respondToPermission,
