@@ -45,13 +45,12 @@ docker-compose restart
 docker exec -it opencode-manager sh
 ```
 
-### Volume Mounts
+### Volumes
 
-| Path | Purpose |
-|------|---------|
-| `./workspace` | Repository storage |
-| `./data` | Database and config |
-| `opencode-cache` | OpenCode cache |
+| Volume | Container Path | Purpose |
+|--------|---------------|---------|
+| `opencode-workspace` | `/workspace` | Repository storage |
+| `opencode-data` | `/app/data` | Database and config |
 
 ## Local Development
 
@@ -61,7 +60,7 @@ For contributors who want to develop locally instead of using Docker.
 
 - [pnpm](https://pnpm.io/installation) - Package manager (required for workspaces)
 - [Bun](https://bun.sh) - Backend runtime
-- [OpenCode TUI](https://opencode.ai) - `npm install -g @opencode/tui`
+- [OpenCode TUI](https://opencode.ai) - `curl -fsSL https://opencode.ai/install | bash`
 - [Node.js 24+](https://nodejs.org/en/about/previous-releases)
 
 ### Setup

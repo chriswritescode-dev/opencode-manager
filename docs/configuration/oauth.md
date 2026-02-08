@@ -109,12 +109,7 @@ On first OAuth login:
 
 ### Linking Accounts
 
-If you have an existing password account:
-
-1. Log in with password
-2. Go to **Settings > Connected Accounts**
-3. Click **Connect** for a provider
-4. Authorize the connection
+If you have an existing password account, logging in with an OAuth provider that uses the same email will link the accounts automatically.
 
 ## Production Considerations
 

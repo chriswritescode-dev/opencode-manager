@@ -45,6 +45,7 @@ nav:
     - AI Configuration: features/ai-config.md
     - MCP Servers: features/mcp.md
     - Text-to-Speech: features/tts.md
+    - Speech-to-Text: features/stt.md
     - Push Notifications: features/notifications.md
     - Mobile & PWA: features/mobile.md
   - Configuration:

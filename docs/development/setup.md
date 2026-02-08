@@ -51,7 +51,9 @@ opencode-manager/
 │   │   └── lib/          # Utilities
 │   └── public/           # Static assets
 ├── shared/               # Shared types and utilities
-└── docker/               # Docker configuration
+├── scripts/              # Build and Docker entrypoint scripts
+├── Dockerfile            # Docker image definition
+└── docker-compose.yml    # Docker Compose configuration
 ```
 
 ## Available Scripts
@@ -88,28 +90,27 @@ pnpm typecheck    # TypeScript check
 
 ## Database
 
-Using Better SQLite3 with Drizzle ORM.
+Using Bun's built-in SQLite (`bun:sqlite`) with hand-written migrations.
 
 ### Location
 
-- **Development**: `./backend/data/opencode.db`
+- **Development**: `./data/opencode.db`
 - **Docker**: `/app/data/opencode.db`
 
 ### Schema Changes
 
-1. Edit schema in `backend/src/db/schema.ts`
-2. Generate migration: `cd backend && bun run db:generate`
-3. Apply migration: `cd backend && bun run db:migrate`
+1. Edit migrations in `backend/src/db/migrations.ts`
+2. Migrations run automatically on startup
 
 ### Inspection
 
 ```bash
-sqlite3 ./backend/data/opencode.db
+sqlite3 ./data/opencode.db
 
 # Useful commands
 .tables                  # List tables
-.schema users            # Show table schema
-SELECT * FROM users;     # View data
+.schema user             # Show table schema
+SELECT * FROM user;      # View data
 ```
 
 ## Testing
@@ -130,11 +131,11 @@ cd backend && bun test --coverage
 ### Writing Tests
 
 ```typescript
-import { expect, test, describe } from 'bun:test'
+import { describe, it, expect } from 'vitest'
 import { repoService } from '../src/services/repo'
 
 describe('repoService', () => {
-  test('listAll returns repositories', async () => {
+  it('listAll returns repositories', async () => {
     const repos = await repoService.listAll()
     expect(Array.isArray(repos)).toBe(true)
   })

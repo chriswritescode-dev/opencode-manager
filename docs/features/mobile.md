@@ -46,15 +46,15 @@ The UI is optimized for mobile devices:
 
 ## PWA Features
 
-### Offline Support
+### App Shell Caching
 
-Limited offline functionality:
+Static assets are cached for faster loads:
 
-- View cached sessions
-- Browse cached files
-- Queue messages for later
+- App shell (HTML, CSS, JS)
+- Icons and images
+- Fonts and static assets
 
-Full functionality requires network connection.
+Full functionality requires network connection to the backend.
 
 ### Background Updates
 
@@ -112,9 +112,8 @@ Swipe from the left edge to go back:
 
 ### Swipe Requirements
 
-- Start from the left edge (first 20px)
-- Swipe at least 50px right
-- Swipe quickly (within 300ms)
+- Start from the left edge (first 30px)
+- Swipe at least 80px right
 
 ## Touch Optimizations
 

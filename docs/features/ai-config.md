@@ -6,19 +6,9 @@ Configure AI models, providers, and custom agents.
 
 Browse and select from available AI models:
 
-1. Go to **Settings > Models**
-2. Browse models by provider
-3. Filter by capability (chat, code, vision)
-4. Click a model to set as default
-
-### Model Capabilities
-
-| Capability | Description |
-|------------|-------------|
-| Chat | General conversation |
-| Code | Code generation and analysis |
-| Vision | Image understanding |
-| Function Calling | Tool use support |
+1. Click the **model selector** in the chat interface
+2. Browse available models
+3. Click a model to set it for the current session
 
 ### Changing Models Mid-Session
 
@@ -57,7 +47,7 @@ For providers that support OAuth (Anthropic, GitHub Copilot):
 
 After adding credentials:
 
-1. Go to **Settings > Models**
+1. Open a chat session and click the model selector
 2. Models from that provider should appear
 3. Select a model and try sending a message
 
@@ -134,14 +124,6 @@ When context is running low:
 3. Be more concise in prompts
 4. Remove unnecessary file mentions
 
-### Context Limits by Model
+### Context Limits
 
-Different models have different context limits:
-
-| Model | Context Limit |
-|-------|---------------|
-| GPT-4 | 8K - 128K tokens |
-| Claude 3 | 200K tokens |
-| GPT-3.5 | 4K - 16K tokens |
-
-Check your model's documentation for exact limits.
+Different models have different context limits. Check your provider's documentation for exact limits per model.

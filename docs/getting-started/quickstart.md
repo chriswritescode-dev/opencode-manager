@@ -71,7 +71,6 @@ Before chatting, you need to configure at least one AI provider:
 |---------|-------------|
 | `/help` | Show available commands |
 | `/new` | Start a new session |
-| `/models` | List available models |
 | `/compact` | Reduce session context |
 
 ### File Mentions
@@ -98,7 +97,5 @@ Now that you're set up, explore more features:
 |----------|--------|
 | `Enter` | Send message |
 | `Shift+Enter` | New line |
-| `Ctrl+/` | Toggle sidebar |
-| `Ctrl+K` | Command palette |
 
-Customize shortcuts in Settings > Keyboard Shortcuts.
+The app uses a configurable leader key system (`Cmd+O` on Mac, `Ctrl+O` on other platforms) for additional shortcuts. Customize in Settings > Keyboard Shortcuts.

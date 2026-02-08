@@ -11,8 +11,7 @@ Complete reference for all configuration options.
 | `ADMIN_PASSWORD` | Pre-configured admin password | - |
 | `ADMIN_PASSWORD_RESET` | Set to `true` to reset admin password | `false` |
 | `AUTH_TRUSTED_ORIGINS` | Comma-separated list of trusted origins (frontend + backend) | `http://localhost:5173,http://localhost:5003` |
-| `AUTH_SECURE_COOKIES` | Use secure cookies (HTTPS only) | `true` in prod |
-| `AUTH_SECURE_COOKIES` | Use secure cookies (HTTPS only) | `true` in prod |
+| `AUTH_SECURE_COOKIES` | Use secure cookies (HTTPS only) | `true` in prod, `false` in dev |
 
 ## OAuth Providers
 
@@ -71,12 +70,65 @@ When configured, users can enable push notifications in Settings → Notificatio
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `PORT` | Server port | `5003` |
+| `HOST` | Server bind address | `0.0.0.0` |
 | `NODE_ENV` | Environment (`development` or `production`) | `development` |
-| `WORKSPACE_PATH` | Path to workspace directory | `/workspace` |
+| `CORS_ORIGIN` | CORS origin for frontend | `http://localhost:5173` |
+| `LOG_LEVEL` | Logging level | `info` |
+| `DEBUG` | Enable debug logging | `false` |
+
+## Database
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DATABASE_PATH` | Path to SQLite database file | `./data/opencode.db` |
+
+## Workspace
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WORKSPACE_PATH` | Path to workspace directory | `./workspace` (Docker: `/workspace`) |
+
+## OpenCode Server
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENCODE_SERVER_PORT` | Port for the OpenCode CLI server | `5551` |
+| `OPENCODE_HOST` | OpenCode server bind address | `127.0.0.1` |
+
+## Timeouts
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PROCESS_START_WAIT_MS` | Wait time for OpenCode process to start | `2000` |
+| `PROCESS_VERIFY_WAIT_MS` | Wait time for process health verification | `1000` |
+| `HEALTH_CHECK_INTERVAL_MS` | Health check polling interval | `5000` |
+| `HEALTH_CHECK_TIMEOUT_MS` | Health check timeout | `30000` |
+
+## File Limits
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `MAX_FILE_SIZE_MB` | Maximum file size for reading/preview | `50` |
+| `MAX_UPLOAD_SIZE_MB` | Maximum upload file size | `50` |
+
+## Frontend (Vite)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `VITE_API_URL` | Backend API URL for frontend | `http://localhost:5003` |
+| `VITE_SERVER_PORT` | Backend port hint for frontend | `5003` |
+| `VITE_OPENCODE_PORT` | OpenCode server port hint | `5551` |
+| `VITE_MAX_FILE_SIZE_MB` | File size limit for frontend | `50` |
+| `VITE_MAX_UPLOAD_SIZE_MB` | Upload size limit for frontend | `50` |
 
 ## Example .env File
 
 ```bash
+# Server
+PORT=5003
+HOST=0.0.0.0
+NODE_ENV=development
+
 # Required for production
 AUTH_SECRET=generate-with-openssl-rand-base64-32
 
