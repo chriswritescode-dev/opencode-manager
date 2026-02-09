@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Loader2, Key, Lock, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
@@ -50,7 +50,15 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
           token: credential.type === 'pat' ? '' : credential.token
         })
       } else {
-        setFormData({ name: '', host: '', type: 'pat', token: '', username: '', sshPrivateKey: '', passphrase: '' })
+        setFormData({
+          name: '',
+          host: 'github.com',
+          type: 'pat',
+          token: '',
+          username: '',
+          sshPrivateKey: '',
+          passphrase: ''
+        })
       }
     }
   }, [open, credential])
@@ -151,7 +159,13 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
                 <Button
                   type="button"
                   variant={formData.type === 'pat' ? 'default' : 'outline'}
-                  onClick={() => setFormData({ ...formData, type: 'pat', sshPrivateKey: '', passphrase: '' })}
+                  onClick={() => setFormData({
+                    ...formData,
+                    type: 'pat',
+                    host: formData.type === 'pat' ? formData.host : 'github.com',
+                    sshPrivateKey: '',
+                    passphrase: ''
+                  })}
                   disabled={isSaving}
                   className="flex-1"
                 >
@@ -161,7 +175,12 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
                 <Button
                   type="button"
                   variant={formData.type === 'ssh' ? 'default' : 'outline'}
-                  onClick={() => setFormData({ ...formData, type: 'ssh', token: '' })}
+                  onClick={() => setFormData({
+                    ...formData,
+                    type: 'ssh',
+                    host: formData.type === 'ssh' ? formData.host : 'git@github.com',
+                    token: ''
+                  })}
                   disabled={isSaving}
                   className="flex-1"
                 >
@@ -251,24 +270,24 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
                 </div>
 
                 {showPassphraseInput && (
-                 <div className="space-y-2">
-                  <Label htmlFor="cred-passphrase">Passphrase</Label>
-                  <Input
-                    id="cred-passphrase"
-                    type="password"
-                    placeholder="Enter passphrase for SSH key"
-                    value={formData.passphrase || ''}
-                    onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
-                    disabled={isSaving}
-                    autoComplete="new-password"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    This passphrase will be required for each git operation
-                  </p>
-                </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="cred-passphrase">Passphrase</Label>
+                    <Input
+                      id="cred-passphrase"
+                      type="password"
+                      placeholder="Enter passphrase for SSH key"
+                      value={formData.passphrase || ''}
+                      onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
+                      disabled={isSaving}
+                      autoComplete="new-password"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      This passphrase will be required for each git operation
+                    </p>
+                  </div>
                 )}
 
-                 <div className="space-y-2">
+                <div className="space-y-2">
                   <Label htmlFor="test-passphrase">Passphrase for Test (if protected)</Label>
                   <Input
                     id="test-passphrase"
@@ -304,25 +323,28 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
           </div>
         </form>
 
-        <div className="flex justify-end gap-2 pt-2 sm:pt-4 px-4 sm:px-6 pb-4 sm:pb-6 flex-shrink-0">
+        <DialogFooter className="p-3 sm:p-4 border-t gap-2">
           <Button
             type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isSaving}
+            className="flex-1 sm:flex-none"
           >
             Cancel
           </Button>
           <Button
-            type="submit"
+            type="button"
+            onClick={handleSubmit}
             disabled={isSaving || !formData.name.trim() || !formData.host.trim() ||
                      (formData.type === 'pat' && !formData.token?.trim()) ||
                      (formData.type === 'ssh' && !formData.sshPrivateKey?.trim())}
+            className="flex-1 sm:flex-none"
           >
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {credential ? 'Update' : 'Add'}
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
