@@ -284,7 +284,7 @@ export class GitService {
 
       let args: string[]
       if (staged) {
-        args = ['git', '-C', repoPath, 'restore', '--staged', '--worktree', '--source=HEAD', '--', ...paths]
+        args = ['git', '-C', repoPath, 'restore', '--staged', '--worktree', '--source', 'HEAD', '--', ...paths]
       } else {
         args = ['git', '-C', repoPath, 'checkout', '--', ...paths]
       }
@@ -324,58 +324,49 @@ export class GitService {
         return null
       }
 
-      const unpushedCommits = await this.getUnpushedCommitHashes(repoPath, env)
-
       const filesOutput = await executeCommand(
-        ['git', '-C', repoPath, 'show', '--name-status', '--format=', hash],
+        ['git', '-C', repoPath, 'show', '--numstat', '--format=', hash],
         { env }
       )
 
       const files: CommitFile[] = []
-      const fileLines = filesOutput.trim().split('\n').filter(line => line.trim())
+      const lines = filesOutput.trim().split('\n')
 
-      for (const line of fileLines) {
+      let currentFile: CommitFile | null = null
+      for (const line of lines) {
+        if (!line.trim()) continue
+        
         const parts = line.split('\t')
-        const statusCode = parts[0]
-        const filePath = parts[1]
-        const oldPath = parts.length > 2 ? parts[2] : undefined
-
-        if (!filePath || !statusCode) continue
-
-        let status: GitFileStatusType = 'modified'
-        switch (statusCode.charAt(0)) {
-          case 'A': status = 'added'; break
-          case 'D': status = 'deleted'; break
-          case 'R': status = 'renamed'; break
-          case 'C': status = 'copied'; break
-          case 'M': status = 'modified'; break
-          default: status = 'modified'
+        if (parts.length >= 3 && parts[0].match(/^[AMDRC]/) && parts[1] && parts[2]) {
+          if (currentFile) files.push(currentFile)
+          const statusCode = parts[0]
+          const fromPath = parts[1]
+          const toPath = parts[2]
+          const isRename = statusCode === 'R'
+          const isCopy = statusCode === 'C'
+          
+          let status: GitFileStatusType = 'modified'
+          switch (statusCode.charAt(0)) {
+            case 'A': status = 'added'; break
+            case 'D': status = 'deleted'; break
+            case 'R': status = 'renamed'; break
+            case 'C': status = 'copied'; break
+            case 'M': status = 'modified'; break
+          }
+          
+          currentFile = {
+            path: toPath,
+            status,
+            oldPath: isRename || isCopy ? fromPath : undefined,
+            additions: 0,
+            deletions: 0
+          }
+        } else if (currentFile && parts.length === 2 && parts[0].match(/^\d+$/) && parts[1].match(/^\d+$/)) {
+          currentFile.additions = parseInt(parts[0], 10)
+          currentFile.deletions = parseInt(parts[1], 10)
         }
-
-        const diffOutput = await executeCommand(
-          ['git', '-C', repoPath, 'show', '--stat', '--format=', `${hash} -- ${filePath}`],
-          { env }
-        )
-
-        let additions = 0
-        let deletions = 0
-        const statMatch = diffOutput.match(/(\d+) insertion|\d+ change[s]?.*?([\d,]+) insertion/)
-        const delMatch = diffOutput.match(/(\d+) deletion/)
-        if (statMatch && statMatch[1]) {
-          additions = parseInt(statMatch[1].replace(/,/g, ''))
-        }
-        if (delMatch && delMatch[1]) {
-          deletions = parseInt(delMatch[1].replace(/,/g, ''))
-        }
-
-        files.push({
-          path: filePath,
-          status,
-          oldPath,
-          additions,
-          deletions
-        })
       }
+      if (currentFile) files.push(currentFile)
 
       return {
         hash: commitHash,
@@ -383,7 +374,7 @@ export class GitService {
         authorEmail: authorEmail || '',
         date: timestamp || '',
         message: message || '',
-        unpushed: unpushedCommits.has(commitHash),
+        unpushed: await this.isCommitUnpushed(repoPath, commitHash, env),
         files
       }
     } catch (error: unknown) {
@@ -843,6 +834,18 @@ export class GitService {
       return true
     } catch {
       return false
+    }
+  }
+
+  private async isCommitUnpushed(repoPath: string, commitHash: string, env: Record<string, string>): Promise<boolean> {
+    try {
+      await executeCommand(
+        ['git', '-C', repoPath, 'merge-base', '--is-ancestor', commitHash, 'HEAD'],
+        { env, silent: true }
+      )
+      return false
+    } catch {
+      return true
     }
   }
 

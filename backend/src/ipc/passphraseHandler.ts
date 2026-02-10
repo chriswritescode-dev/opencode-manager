@@ -1,3 +1,4 @@
+import * as crypto from 'crypto'
 import type { IPCServer, IPCHandler } from './ipcServer'
 import { logger } from '../utils/logger'
 
@@ -9,7 +10,6 @@ interface PassphraseResponse {
 
 export class PassphraseHandler implements IPCHandler {
   private resolveMap = new Map<string, { resolve: (passphrase: string) => void; reject: (error: Error) => void }>()
-  private requestCounter = 0
 
   constructor(ipcServer: IPCServer | undefined) {
     if (ipcServer) {
@@ -34,8 +34,7 @@ export class PassphraseHandler implements IPCHandler {
 
   requestPassphrase(credentialName: string, host: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      this.requestCounter++
-      const requestId = `passphrase-${Date.now()}-${this.requestCounter}`
+      const requestId = `passphrase-${crypto.randomBytes(16).toString('hex')}`
 
       this.resolveMap.set(requestId, { resolve, reject })
 

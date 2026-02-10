@@ -29,6 +29,7 @@ export function GitFlatFileList({
   onSelect,
   onStage,
   onUnstage,
+  onDiscard,
   selectedFile,
 }: GitFlatFileListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<GitFileStatusType>>(new Set())

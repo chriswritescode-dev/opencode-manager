@@ -79,7 +79,7 @@ export function CommitDetailView({ repoId, commitHash, onBack, onFileSelect, sel
             <GitFlatFileList
               files={commitFiles}
               staged={false}
-              onSelect={(path) => onFileSelect(path)}
+              onSelect={(path) => onFileSelect(path, false)}
               selectedFile={selectedFile}
             />
           </div>
