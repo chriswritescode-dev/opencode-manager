@@ -111,18 +111,19 @@ export class AskpassHandler implements IPCHandler {
     
     const settingsService = new SettingsService(this.database)
     const settings = settingsService.getSettings('default')
-    const gitCredentials: GitCredential[] = settings.preferences.gitCredentials || []
-    logger.info(`Found ${gitCredentials.length} configured git credentials`)
+    const allCredentials = (settings.preferences.gitCredentials || []) as GitCredential[]
+    const gitCredentials = allCredentials.filter(cred => !cred.type || cred.type === 'pat')
+    logger.info(`Found ${gitCredentials.length} configured PAT credentials (${allCredentials.length} total)`)
 
     for (const cred of gitCredentials) {
       const normalizedCred = this.normalizeHostname(cred.host)
       logger.debug(`Comparing: request='${normalizedRequest}' vs stored='${normalizedCred}' (raw: ${cred.host})`)
       
       if (normalizedCred === normalizedRequest) {
-        logger.info(`Found matching credential '${cred.name}' for ${hostname}`)
+        logger.info(`Found matching PAT credential '${cred.name}' for ${hostname}`)
         return {
           username: cred.username || this.getDefaultUsername(cred.host),
-          password: cred.token,
+          password: cred.token || '',
         }
       }
     }

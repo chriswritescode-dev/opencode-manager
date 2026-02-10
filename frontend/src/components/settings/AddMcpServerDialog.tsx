@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Loader2 } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
@@ -179,15 +179,12 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent mobileFullscreen className="sm:inset-auto sm:left-[50%] sm:top-[50%] sm:w-[95vw] sm:max-w-3xl sm:h-auto sm:max-h-[90vh] flex flex-col gap-0 bg-card border-border pb-safe">
-        <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3 shrink-0">
+      <DialogContent className="max-w-3xl max-h-[90vh] sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 z-[200]" overlayClassName="z-[200]">
+        <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle>Add MCP Server</DialogTitle>
-          <DialogDescription>
-            Configure a new Model Context Protocol server for your OpenCode configuration
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto min-h-0 px-4 sm:px-6 py-3 sm:py-4">
+        <div className="flex-1 overflow-y-auto p-2 sm:p-4">
           <div className="space-y-4">
             <div>
               <Label htmlFor="serverId">Server ID</Label>
@@ -368,14 +365,13 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
           </div>
         </div>
 
-        <DialogFooter className="flex flex-row gap-2 w-full px-4 sm:px-6 pb-4 sm:pb-6 pt-3 shrink-0 border-t border-border gap-2">
-          <Button variant="outline" onClick={handleClose} className="flex-1">
+        <DialogFooter className="p-3 sm:p-4 border-t gap-2">
+          <Button variant="outline" onClick={handleClose}>
             Cancel
           </Button>
           <Button
             onClick={handleAdd}
             disabled={!serverId || isPending}
-            className="flex-1"
           >
             {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Add MCP Server

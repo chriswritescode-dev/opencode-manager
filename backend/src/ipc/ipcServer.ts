@@ -33,6 +33,10 @@ export class IPCServer {
     this.handlers.set(`/${name}`, handler)
   }
 
+  getHandler(name: string): IPCHandler | undefined {
+    return this.handlers.get(`/${name}`)
+  }
+
   getEnv(): Record<string, string> {
     return { VSCODE_GIT_IPC_HANDLE: this.ipcHandlePath }
   }

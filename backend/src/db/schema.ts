@@ -121,6 +121,17 @@ export function initializeDatabase(dbPath: string = './data/opencode.db'): Datab
     
     CREATE INDEX IF NOT EXISTS idx_passkey_userId ON "passkey"(userId);
     CREATE INDEX IF NOT EXISTS idx_passkey_credentialID ON "passkey"(credentialID);
+
+    CREATE TABLE IF NOT EXISTS trusted_ssh_hosts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host TEXT NOT NULL UNIQUE,
+      key_type TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trusted_ssh_hosts_host ON trusted_ssh_hosts(host);
   `)
   
   runMigrations(db)

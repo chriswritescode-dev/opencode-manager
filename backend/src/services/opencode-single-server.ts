@@ -1,11 +1,21 @@
 import { spawn, execSync } from 'child_process'
 import path from 'path'
 import { logger } from '../utils/logger'
-import { createGitEnv, createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
+import { createGitEnv, createGitIdentityEnv, resolveGitIdentity, type GitCredential } from '../utils/git-auth'
+import {
+  buildSSHCommandWithKnownHosts,
+  buildSSHCommandWithConfig,
+  writePersistentSSHKey,
+  stripKeyPassphrase,
+  writeSSHConfig,
+  generateSSHConfig,
+  cleanupPersistentSSHKeys,
+  parseSSHHost
+} from '../utils/ssh-key-manager'
+import { decryptSecret } from '../utils/crypto'
 import { SettingsService } from './settings'
 import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
-import type { GitCredential } from '../utils/git-auth'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
@@ -115,6 +125,51 @@ class OpenCodeServerManager {
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
 
     const gitEnv = createGitEnv(gitCredentials)
+    const knownHostsPath = path.join(getWorkspacePath(), 'config', 'known_hosts')
+    let gitSshCommand: string
+    let sshConfigPath: string | null = null
+
+    const sshCredentials = gitCredentials.filter(cred => cred.type === 'ssh' && cred.sshPrivateKeyEncrypted)
+    if (sshCredentials.length > 0) {
+      logger.info(`Setting up ${sshCredentials.length} SSH credential(s) for OpenCode server`)
+
+      const sshConfigEntries: Array<{ hostname: string, port: string, keyPath: string }> = []
+
+      for (const cred of sshCredentials) {
+        try {
+          const { host, port } = parseSSHHost(cred.host)
+          const privateKey = decryptSecret(cred.sshPrivateKeyEncrypted!)
+          const keyPath = await writePersistentSSHKey(privateKey, cred.name)
+
+          if (cred.passphrase) {
+            const passphrase = decryptSecret(cred.passphrase)
+            stripKeyPassphrase(keyPath, passphrase)
+            logger.info(`Stripped passphrase from SSH key for ${cred.name} (${host}:${port})`)
+          } else {
+            logger.info(`Setup SSH key for ${cred.name} (${host}:${port}): ${keyPath}`)
+          }
+
+          sshConfigEntries.push({ hostname: host, port, keyPath })
+        } catch (error) {
+          logger.error(`Failed to setup SSH key for ${cred.name}:`, error)
+        }
+      }
+
+      if (sshConfigEntries.length > 0) {
+        const sshConfigContent = generateSSHConfig(sshConfigEntries)
+        sshConfigPath = path.join(getWorkspacePath(), 'config', 'ssh_config')
+        await writeSSHConfig(sshConfigPath, sshConfigContent)
+        gitSshCommand = buildSSHCommandWithConfig(sshConfigPath, knownHostsPath)
+        logger.info(`OpenCode server SSH config written to ${sshConfigPath} with ${sshConfigEntries.length} host(s)`)
+      } else {
+        gitSshCommand = buildSSHCommandWithKnownHosts(knownHostsPath)
+        logger.warn(`No SSH credentials could be set up, using default known_hosts only`)
+      }
+    } else {
+      gitSshCommand = buildSSHCommandWithKnownHosts(knownHostsPath)
+    }
+
+    logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
     let stderrOutput = ''
 
@@ -129,6 +184,7 @@ class OpenCodeServerManager {
           ...process.env,
           ...gitEnv,
           ...gitIdentityEnv,
+          GIT_SSH_COMMAND: gitSshCommand,
           XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.config'),
           OPENCODE_CONFIG: OPENCODE_CONFIG_PATH,
@@ -180,7 +236,7 @@ class OpenCodeServerManager {
 
   async stop(): Promise<void> {
     if (!this.serverPid) return
-    
+
     logger.info('Stopping OpenCode server')
     try {
       process.kill(this.serverPid, 'SIGTERM')
@@ -192,9 +248,9 @@ class OpenCodeServerManager {
         logger.warn(`Failed to send SIGTERM to ${this.serverPid}:`, error)
       }
     }
-    
+
     await new Promise(r => setTimeout(r, 2000))
-    
+
     try {
       process.kill(this.serverPid, 'SIGKILL')
     } catch (error) {
@@ -205,9 +261,15 @@ class OpenCodeServerManager {
         logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
       }
     }
-    
+
     this.serverPid = null
     this.isHealthy = false
+
+    try {
+      await cleanupPersistentSSHKeys()
+    } catch (error) {
+      logger.warn('Failed to cleanup persistent SSH keys:', error)
+    }
   }
 
   async restart(): Promise<void> {

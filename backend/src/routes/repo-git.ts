@@ -43,7 +43,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       const statuses = await Promise.all(
         repoIds.map(async (id) => {
           try {
-      const status = await git.getStatus(id, database)
+            const status = await git.getStatus(id, database)
             return [id, status]
           } catch (error: unknown) {
             logger.error(`Failed to get git status for repo ${id}:`, error)

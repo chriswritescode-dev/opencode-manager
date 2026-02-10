@@ -112,10 +112,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, [])
 
   const logout = useCallback(async () => {
-    await signOut()
-    await refetch()
-    navigate('/login', { replace: true })
-  }, [refetch, navigate])
+    await signOut({
+      fetchOptions: {
+        onSuccess: () => {
+          window.location.href = '/login'
+        },
+      },
+    })
+  }, [])
 
   const refreshSession = useCallback(async () => {
     await refetch()

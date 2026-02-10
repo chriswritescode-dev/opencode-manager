@@ -136,7 +136,7 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
   return (
     <div>
       <div 
-        className={`flex items-center gap-1 px-2 py-1 hover:bg-muted rounded cursor-pointer group ${
+        className={`flex items-center gap-1 px-2 py-1 mb-4 hover:bg-muted rounded cursor-pointer group ${
           selectedFile?.path === file.path ? 'bg-muted' : ''
         }`}
         style={{ paddingLeft: `${level * 16 + 8}px` }}

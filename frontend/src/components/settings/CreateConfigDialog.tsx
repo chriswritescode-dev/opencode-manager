@@ -104,7 +104,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] sm:max-h-[85vh] flex flex-col">
+        <DialogContent className="max-w-2xl max-h-[90vh] sm:max-h-[85vh] flex flex-col z-[200]" overlayClassName="z-[200]">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Create OpenCode Config</DialogTitle>
         </DialogHeader>

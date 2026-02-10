@@ -1,0 +1,29 @@
+version: 1
+allow-breaks: true
+
+# Paths to ignore for scanning
+paths-ignore:
+  - 'node_modules/**'
+  - '.vscode/**'
+  - '.idea/**'
+  - 'dist/**'
+  - 'build/**'
+  - 'coverage/**'
+  - '*.min.js'
+  - '*.min.css'
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/*.spec.ts'
+  - '**/*.spec.tsx'
+  - 'temp/**'
+  - '**/*.md'
+
+# Specific files to ignore
+files-ignore:
+  - 'package-lock.json'
+  - 'yarn.lock'
+  - 'pnpm-lock.yaml'
+
+# Ignore common test/dev files
+secrets-filter:
+  level: weak

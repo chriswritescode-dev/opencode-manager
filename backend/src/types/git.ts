@@ -36,7 +36,7 @@ export interface FileDiffResponse {
 export interface GitDiffOptions {
   showContext?: number
   ignoreWhitespace?: boolean
-  unified?: boolean
+  unified?: number
 }
 
 export interface GitBranch {

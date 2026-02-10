@@ -41,7 +41,10 @@ export function SettingsDialog() {
   useEffect(() => {
     if (!isOpen) return
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close()
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        close()
+      }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
@@ -116,14 +119,14 @@ export function SettingsDialog() {
 
             <div className="flex-1 overflow-y-auto">
               <div className="px-6 pb-6">
-                <TabsContent value="account" className="mt-0"><AccountSettings /></TabsContent>
-                <TabsContent value="general" className="mt-0"><GeneralSettings /></TabsContent>
-                <TabsContent value="notifications" className="mt-0"><NotificationSettings /></TabsContent>
-                <TabsContent value="voice" className="mt-0"><VoiceSettings /></TabsContent>
-                <TabsContent value="git" className="mt-0"><GitSettings /></TabsContent>
-                <TabsContent value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
-                <TabsContent value="opencode" className="mt-0"><OpenCodeConfigManager /></TabsContent>
-                <TabsContent value="providers" className="mt-0"><ProviderSettings /></TabsContent>
+                <TabsContent key="account" value="account" className="mt-0"><AccountSettings /></TabsContent>
+                <TabsContent key="general" value="general" className="mt-0"><GeneralSettings /></TabsContent>
+                <TabsContent key="notifications" value="notifications" className="mt-0"><NotificationSettings /></TabsContent>
+                <TabsContent key="voice" value="voice" className="mt-0"><VoiceSettings /></TabsContent>
+                <TabsContent key="git" value="git" className="mt-0"><GitSettings /></TabsContent>
+                <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
+                <TabsContent key="opencode" value="opencode" className="mt-0"><OpenCodeConfigManager /></TabsContent>
+                <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
               </div>
             </div>
           </Tabs>
@@ -156,41 +159,41 @@ export function SettingsDialog() {
              </Button>
            </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-32">
-            {mobileView === 'menu' && (
-              <div className="space-y-3">
-                {menuItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      setMobileView(item.id as SettingsView)
-                      setActiveTab(item.id as SettingsView)
-                    }}
-                    className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-accent rounded-lg">
-                        <item.icon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <h3 className="font-semibold text-foreground mb-1">{item.label}</h3>
-                        <p className="text-sm text-muted-foreground">{item.description}</p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+           <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-32">
+             {mobileView === 'menu' && (
+               <div className="space-y-3">
+                 {menuItems.map((item) => (
+                   <button
+                     key={item.id}
+                     onClick={() => {
+                       setMobileView(item.id as SettingsView)
+                       setActiveTab(item.id as SettingsView)
+                     }}
+                     className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
+                   >
+                     <div className="flex items-center gap-4">
+                       <div className="p-3 bg-accent rounded-lg">
+                         <item.icon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                       </div>
+                       <div className="flex-1 min-w-0">
+                         <h3 className="font-semibold text-foreground mb-1">{item.label}</h3>
+                         <p className="text-sm text-muted-foreground">{item.description}</p>
+                       </div>
+                     </div>
+                   </button>
+                 ))}
+               </div>
+             )}
 
-            {mobileView === 'account' && <AccountSettings />}
-            {mobileView === 'general' && <GeneralSettings />}
-            {mobileView === 'notifications' && <NotificationSettings />}
-            {mobileView === 'voice' && <VoiceSettings />}
-            {mobileView === 'git' && <GitSettings />}
-            {mobileView === 'shortcuts' && <KeyboardShortcuts />}
-            {mobileView === 'opencode' && <OpenCodeConfigManager />}
-            {mobileView === 'providers' && <ProviderSettings />}
-          </div>
+             {mobileView === 'account' && <div key="account"><AccountSettings /></div>}
+             {mobileView === 'general' && <div key="general"><GeneralSettings /></div>}
+             {mobileView === 'notifications' && <div key="notifications"><NotificationSettings /></div>}
+             {mobileView === 'voice' && <div key="voice"><VoiceSettings /></div>}
+             {mobileView === 'git' && <div key="git"><GitSettings /></div>}
+             {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
+             {mobileView === 'opencode' && <div key="opencode"><OpenCodeConfigManager /></div>}
+             {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
+           </div>
         </div>
       </DialogContent>
     </Dialog>

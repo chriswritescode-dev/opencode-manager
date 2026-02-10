@@ -27,6 +27,26 @@ vi.mock('../../src/utils/process', () => ({
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getReposPath: vi.fn(() => '/repos'),
+  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
+  ENV: {
+    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    SERVER: { PORT: 5001, HOST: '0.0.0.0', CORS_ORIGIN: '*', NODE_ENV: 'test' },
+    AUTH: { SECRET: 'test-secret' },
+  },
+}))
+
+vi.mock('@opencode-manager/shared/config', () => ({
+  DEFAULTS: {
+    SSE: {
+      RECONNECT_DELAY_MS: 1000,
+      MAX_RECONNECT_DELAY_MS: 30000,
+      IDLE_GRACE_PERIOD_MS: 120000,
+    },
+  },
+}))
+
+vi.mock('eventsource', () => ({
+  EventSource: vi.fn(),
 }))
 
 const getRepoByIdMock = db.getRepoById as MockedFunction<typeof db.getRepoById>

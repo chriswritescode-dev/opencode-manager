@@ -3,7 +3,7 @@ import { executeCommand } from '../../utils/process'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
 import { getRepoById } from '../../db/queries'
-import { resolveGitIdentity, createGitIdentityEnv } from '../../utils/git-auth'
+import { resolveGitIdentity, createGitIdentityEnv, isSSHUrl } from '../../utils/git-auth'
 import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
 import { SettingsService } from '../settings'
 import type { Database } from 'bun:sqlite'
@@ -62,6 +62,17 @@ export class GitService {
 
     if (status.status === 'untracked') {
       return this.getUntrackedFileDiff(repoPath, filePath, env)
+    }
+
+    if (status.status === 'clean') {
+      return {
+        path: filePath,
+        status: 'modified',
+        diff: '',
+        additions: 0,
+        deletions: 0,
+        isBinary: false
+      }
     }
 
     return this.getTrackedFileDiff(repoPath, filePath, env, includeStaged, options)
@@ -187,7 +198,7 @@ export class GitService {
       const authEnv = this.gitAuthService.getGitEnvironment()
 
       const settings = this.settingsService.getSettings('default')
-      const gitCredentials = settings.preferences.gitCredentials || []
+      const gitCredentials = (settings.preferences.gitCredentials || []) as import('../../utils/git-auth').GitCredential[]
       const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
       const identityEnv = identity ? createGitIdentityEnv(identity) : {}
 
@@ -401,6 +412,28 @@ export class GitService {
       logger.error(`Failed to get commit diff for repo ${repoId}:`, error)
       throw new Error(`Failed to get commit diff: ${getErrorMessage(error)}`)
     }
+  private async setupSSHIfNeeded(repoUrl: string | undefined, database: Database): Promise<void> {
+    await this.gitAuthService.setupSSHForRepoUrl(repoUrl, database)
+  }
+
+  private async cleanupSSHForRepo(): Promise<void> {
+    await this.gitAuthService.cleanupSSHKey()
+  }
+
+  private getEnvironmentForRepo(repo: { repoUrl?: string; fullPath: string }, silent: boolean = false): Record<string, string> {
+    if (!repo.repoUrl) {
+      return this.gitAuthService.getGitEnvironment(silent)
+    }
+
+    const isSSH = isSSHUrl(repo.repoUrl)
+    const baseEnv = this.gitAuthService.getGitEnvironment(silent)
+
+    if (!isSSH) {
+      return baseEnv
+    }
+
+    const sshEnv = this.gitAuthService.getSSHEnvironment()
+    return { ...baseEnv, ...sshEnv }
   }
 
   async resetToCommit(repoId: number, commitHash: string, database: Database): Promise<string> {
@@ -430,20 +463,26 @@ export class GitService {
     }
 
     const fullPath = path.resolve(repo.fullPath)
-    const env = this.gitAuthService.getGitEnvironment()
 
-    if (options.setUpstream) {
-      return await this.pushWithUpstream(repoId, fullPath, env)
-    }
+    await this.setupSSHIfNeeded(repo.repoUrl, database)
 
     try {
-      const args = ['git', '-C', fullPath, 'push']
-      return await executeCommand(args, { env })
-    } catch (error) {
-      if (isNoUpstreamError(error as Error)) {
+      const env = this.getEnvironmentForRepo(repo)
+      if (options.setUpstream) {
         return await this.pushWithUpstream(repoId, fullPath, env)
       }
-      throw error
+
+      try {
+        const args = ['git', '-C', fullPath, 'push']
+        return await executeCommand(args, { env })
+      } catch (error) {
+        if (isNoUpstreamError(error as Error)) {
+          return await this.pushWithUpstream(repoId, fullPath, env)
+        }
+        throw error
+      }
+    } finally {
+      await this.cleanupSSHForRepo()
     }
   }
 
@@ -454,9 +493,15 @@ export class GitService {
     }
 
     const fullPath = path.resolve(repo.fullPath)
-    const env = this.gitAuthService.getGitEnvironment(true)
 
-    return executeCommand(['git', '-C', fullPath, 'fetch', '--all', '--prune'], { env })
+    await this.setupSSHIfNeeded(repo.repoUrl, database)
+
+    try {
+      const env = this.getEnvironmentForRepo(repo, true)
+      return await executeCommand(['git', '-C', fullPath, 'fetch', '--all', '--prune'], { env })
+    } finally {
+      await this.cleanupSSHForRepo()
+    }
   }
 
   async pull(repoId: number, database: Database): Promise<string> {
@@ -466,9 +511,15 @@ export class GitService {
     }
 
     const fullPath = path.resolve(repo.fullPath)
-    const env = this.gitAuthService.getGitEnvironment(false)
 
-    return executeCommand(['git', '-C', fullPath, 'pull'], { env })
+    await this.setupSSHIfNeeded(repo.repoUrl, database)
+
+    try {
+      const env = this.getEnvironmentForRepo(repo, false)
+      return await executeCommand(['git', '-C', fullPath, 'pull'], { env })
+    } finally {
+      await this.cleanupSSHForRepo()
+    }
   }
 
   async getBranches(repoId: number, database: Database): Promise<GitBranch[]> {
@@ -529,7 +580,7 @@ export class GitService {
 
       if (branch.current && (!branch.ahead || !branch.behind)) {
         try {
-          const status = await this.getBranchStatusFromDb(repoId, database)
+          const status = await this.getBranchStatus(repoId, database)
           branch.ahead = status.ahead
           branch.behind = status.behind
         } catch {
@@ -616,7 +667,7 @@ export class GitService {
   }
 
   private parsePorcelainOutput(output: string): GitFileStatus[] {
-    const fileMap = new Map<string, GitFileStatus>()
+    const files: GitFileStatus[] = []
     const lines = output.split('\n').filter(line => line.length > 0)
 
     for (const line of lines) {
@@ -633,41 +684,32 @@ export class GitService {
         filePath = filePath.substring(arrowIndex + 4)
       }
 
-      const existing = fileMap.get(filePath)
-
       if (stagedStatus !== ' ' && stagedStatus !== '?') {
-        const fileStatus: GitFileStatus = {
+        files.push({
           path: filePath,
           status: this.parseStatusCode(stagedStatus),
           staged: true,
           ...(oldPath && { oldPath })
-        }
-        fileMap.set(filePath, fileStatus)
-        continue
+        })
       }
 
-      if (unstagedStatus !== ' ' && unstagedStatus !== '?' && !existing) {
-        const fileStatus: GitFileStatus = {
+      if (unstagedStatus === '?' && stagedStatus === '?') {
+        files.push({
+          path: filePath,
+          status: 'untracked',
+          staged: false
+        })
+      } else if (unstagedStatus !== ' ') {
+        files.push({
           path: filePath,
           status: this.parseStatusCode(unstagedStatus),
           staged: false,
           ...(oldPath && { oldPath })
-        }
-        fileMap.set(filePath, fileStatus)
-        continue
-      }
-
-      if ((stagedStatus === '?' || unstagedStatus === '?') && !existing) {
-        const fileStatus: GitFileStatus = {
-          path: filePath,
-          status: 'untracked',
-          staged: false
-        }
-        fileMap.set(filePath, fileStatus)
+        })
       }
     }
 
-    return Array.from(fileMap.values())
+    return files
   }
 
   private parseStatusCode(code: string): GitFileStatusType {
@@ -689,20 +731,26 @@ export class GitService {
     }
   }
 
-  private async getFileStatus(repoPath: string, filePath: string, env: Record<string, string>): Promise<{ status: string }> {
+  private async getFileStatus(repoPath: string, filePath: string, env: Record<string, string>): Promise<{ status: GitFileStatusType | 'clean' }> {
     try {
       const output = await executeCommand([
         'git', '-C', repoPath, 'status', '--porcelain', '--', filePath
       ], { env, silent: true })
 
       if (!output.trim()) {
-        return { status: 'untracked' }
+        return { status: 'clean' }
       }
 
-      const statusCode = output.trim().split(' ')[0]
-      return { status: statusCode || 'untracked' }
+      const parsed = this.parsePorcelainOutput(output)
+      const firstFile = parsed[0]
+
+      if (!firstFile) {
+        return { status: 'clean' }
+      }
+
+      return { status: firstFile.status }
     } catch {
-      return { status: 'untracked' }
+      return { status: 'clean' }
     }
   }
 
@@ -831,9 +879,5 @@ export class GitService {
 
     const args = ['git', '-C', fullPath, 'push', '--set-upstream', 'origin', branchName]
     return executeCommand(args, { env })
-  }
-
-  private async getBranchStatusFromDb(repoId: number, database: Database): Promise<{ ahead: number; behind: number }> {
-    return this.getBranchStatus(repoId, database)
   }
 }
