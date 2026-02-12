@@ -8,6 +8,7 @@ import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-err
 import { SettingsService } from '../settings'
 import type { Database } from 'bun:sqlite'
 import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType } from '../../types/git'
+import type { GitCredential } from '@opencode-manager/shared'
 import path from 'path'
 
 export class GitService {
@@ -198,7 +199,7 @@ export class GitService {
       const authEnv = this.gitAuthService.getGitEnvironment()
 
       const settings = this.settingsService.getSettings('default')
-      const gitCredentials = (settings.preferences.gitCredentials || []) as import('../../utils/git-auth').GitCredential[]
+      const gitCredentials = (settings.preferences.gitCredentials || []) as GitCredential[]
       const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
       const identityEnv = identity ? createGitIdentityEnv(identity) : {}
 

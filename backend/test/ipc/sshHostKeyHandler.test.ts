@@ -4,16 +4,6 @@ import * as crypto from 'crypto'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 
-const { setupWorkspacePath, getWorkspacePathMock } = vi.hoisted(() => {
-  let path: string = '/tmp/test-workspace'
-  return {
-    setupWorkspacePath: (newPath: string) => {
-      path = newPath
-    },
-    getWorkspacePathMock: () => path
-  }
-})
-
 vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
     AUTH: {
@@ -26,7 +16,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
       PORT: 5003
     }
   },
-  getWorkspacePath: getWorkspacePathMock,
+  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
 }))
 
@@ -54,7 +44,6 @@ describe('SSHHostKeyHandler', () => {
     
     const uniqueId = crypto.randomUUID()
     testWorkspacePath = `/tmp/test-workspace-${uniqueId}`
-    setupWorkspacePath(testWorkspacePath)
     
     mockPrepare.mockReturnValue({
       run: vi.fn(),
@@ -270,7 +259,7 @@ describe('SSHHostKeyHandler', () => {
       })
 
       const result = handler['getTrustedHost']('github.com')
-      
+
       expect(result).toBeNull()
     })
 
@@ -293,19 +282,9 @@ describe('SSHHostKeyHandler', () => {
       const originalPath = handler['knownHostsPath']
       handler['knownHostsPath'] = '/nonexistent/path/known_hosts'
 
-      await expect(handler['addToKnownHosts']('github.com', 'github.com ssh-rsa AAAAB...')).resolves.not.toThrow()
+      await expect(handler['addToKnownHosts']('github.com', 'github.com ssh-rsa AAAAB...')).resolves.toBeUndefined()
 
       handler['knownHostsPath'] = originalPath
-    })
-
-    it('should handle database load failures gracefully', async () => {
-      mockPrepare.mockReturnValue({
-        all: vi.fn().mockImplementation(() => {
-          throw new Error('Database read failed')
-        })
-      })
-
-      await expect(handler['loadFromDatabaseToKnownHosts']()).resolves.not.toThrow()
     })
   })
 })

@@ -6,12 +6,13 @@ export async function createRepo(
   localPath?: string,
   branch?: string,
   openCodeConfigName?: string,
-  useWorktree?: boolean
+  useWorktree?: boolean,
+  skipSSHVerification?: boolean
 ): Promise<Repo> {
   const response = await fetch(`${API_BASE_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repoUrl, localPath, branch, openCodeConfigName, useWorktree }),
+    body: JSON.stringify({ repoUrl, localPath, branch, openCodeConfigName, useWorktree, skipSSHVerification }),
   })
 
   if (!response.ok) {

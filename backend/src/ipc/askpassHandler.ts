@@ -3,7 +3,7 @@ import { fileURLToPath } from 'url'
 import type { IPCServer, IPCHandler } from './ipcServer'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
-import type { GitCredential } from '../utils/git-auth'
+import type { GitCredential } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 
 const __filename = fileURLToPath(import.meta.url)

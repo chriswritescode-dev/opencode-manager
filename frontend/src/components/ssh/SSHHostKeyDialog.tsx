@@ -12,8 +12,10 @@ import { Alert, AlertDescription } from '@/components/ui/alert'
 import { CopyButton } from '@/components/ui/copy-button'
 import { Shield, ShieldAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import type { SSHHostKeyRequest, SSHHostKeyResponse } from '@/api/types'
+import type { SSHHostKeyRequest } from '@/api/types'
 import { showToast } from '@/lib/toast'
+
+type SSHHostKeyResponse = 'accept' | 'reject'
 
 interface SSHHostKeyDialogProps {
   request: SSHHostKeyRequest | null
@@ -100,7 +102,7 @@ export function SSHHostKeyDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           {request.isKeyChanged && (
             <Alert variant="destructive">
               <AlertDescription className="text-sm">

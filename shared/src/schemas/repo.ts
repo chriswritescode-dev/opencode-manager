@@ -23,6 +23,7 @@ export const CreateRepoRequestSchema = z.object({
   branch: z.string().optional(),
   openCodeConfigName: z.string().optional(),
   useWorktree: z.boolean().optional(),
+  skipSSHVerification: z.boolean().optional(),
 }).refine(
   (data) => data.repoUrl || data.localPath,
   {

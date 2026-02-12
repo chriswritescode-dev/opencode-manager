@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import type { GitCredential } from '../../src/utils/git-auth'
+import type { GitCredential } from '@opencode-manager/shared'
 import type { IPCServer } from '../../src/ipc/ipcServer'
 import type { Database } from 'bun:sqlite'
 

@@ -1,14 +1,4 @@
-export interface GitCredential {
-  name: string
-  host: string
-  type: 'pat' | 'ssh'
-  token?: string
-  sshPrivateKey?: string
-  sshPrivateKeyEncrypted?: string
-  hasPassphrase?: boolean
-  username?: string
-  passphrase?: string
-}
+import type { GitCredential } from '@opencode-manager/shared'
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
   try {
@@ -38,6 +28,22 @@ export function getDefaultUsername(host: string): string {
 
 export function isSSHUrl(url: string): boolean {
   return url.startsWith('git@') || url.startsWith('ssh://')
+}
+
+export function normalizeSSHUrl(url: string): string {
+  if (url.startsWith('ssh://')) {
+    return url
+  }
+
+  const match = url.match(/^git@([^:]+):(\d{1,5})\/(.+)$/)
+  if (match) {
+    const [, host, port, path] = match
+    const portNum = parseInt(port!, 10)
+    if (portNum > 0 && portNum <= 65535) {
+      return `ssh://git@${host}:${port}/${path}`
+    }
+  }
+  return url
 }
 
 export function extractHostFromSSHUrl(url: string): string | null {

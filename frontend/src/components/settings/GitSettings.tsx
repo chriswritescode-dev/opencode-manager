@@ -238,12 +238,12 @@ export function GitSettings() {
                          <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
                            {cred.host}
                          </td>
-                         <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
-                           <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
-                             {cred.type === 'ssh' ? 'SSH' : 'PAT'}
-                           </span>
-                          </td>
-                          <td className="px-3 py-2">
+                        <td className="px-3 py-2 text-muted-foreground hidden sm:table-cell">
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
+                            {cred.type === 'ssh' ? 'SSH' : 'PAT'}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
                             <div className="flex items-center justify-end gap-1">
                               <Button
                                 type="button"

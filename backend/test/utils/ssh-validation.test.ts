@@ -1,6 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-
-const mockExecuteCommand = vi.fn()
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
@@ -18,8 +16,10 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace')
 }))
 
+let mockExecuteCommand: any
+
 vi.mock('../../src/utils/process', () => ({
-  executeCommand: mockExecuteCommand
+  executeCommand: vi.fn()
 }))
 
 vi.mock('fs', () => ({
@@ -30,6 +30,11 @@ vi.mock('fs', () => ({
 }))
 
 import { validateSSHPrivateKey } from '../../src/utils/ssh-validation'
+import { executeCommand } from '../../src/utils/process'
+
+beforeAll(() => {
+  mockExecuteCommand = executeCommand
+})
 
 describe('validateSSHPrivateKey', () => {
   beforeEach(() => {

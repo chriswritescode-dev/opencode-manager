@@ -2,11 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { logger } from '../utils/logger'
 import { GitAuthService } from '../services/git-auth'
-
-const SSHHostKeyResponseSchema = z.object({
-  requestId: z.string(),
-  response: z.enum(['accept', 'reject'])
-})
+import { SSHHostKeyResponseSchema } from '@opencode-manager/shared'
 
 interface SSHHostKeyResponse {
   success: boolean

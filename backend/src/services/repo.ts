@@ -6,7 +6,7 @@ import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from './git-auth'
-import { isGitHubHttpsUrl, isSSHUrl } from '../utils/git-auth'
+import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
 import path from 'path'
 import { parseSSHHost } from '../utils/ssh-key-manager'
 
@@ -302,13 +302,15 @@ export async function cloneRepo(
   gitAuthService: GitAuthService,
   repoUrl: string,
   branch?: string,
-  useWorktree: boolean = false
+  useWorktree: boolean = false,
+  skipSSHVerification: boolean = false
 ): Promise<Repo> {
-  const isSSH = isSSHUrl(repoUrl)
+  const effectiveUrl = normalizeSSHUrl(repoUrl)
+  const isSSH = isSSHUrl(effectiveUrl)
   const preserveSSH = isSSH
-  const hasSSHCredential = await gitAuthService.setupSSHForRepoUrl(repoUrl, database)
+  const hasSSHCredential = await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
 
-  const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(repoUrl, preserveSSH)
+  const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(effectiveUrl, preserveSSH)
   const baseRepoDirName = repoName
   const worktreeDirName = branch && useWorktree ? `${repoName}-${branch.replace(/[\\/]/g, '-')}` : repoName
   const localPath = worktreeDirName

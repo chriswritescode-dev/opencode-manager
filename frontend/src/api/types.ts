@@ -234,5 +234,3 @@ export interface SSHHostKeyRequest {
   timestamp: number
   action: 'verify'
 }
-
-export type SSHHostKeyResponse = 'accept' | 'reject'

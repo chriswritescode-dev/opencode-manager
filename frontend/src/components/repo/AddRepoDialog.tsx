@@ -16,14 +16,21 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   const [repoUrl, setRepoUrl] = useState('')
   const [localPath, setLocalPath] = useState('')
   const [branch, setBranch] = useState('')
+  const [skipSSHVerification, setSkipSSHVerification] = useState(false)
   const queryClient = useQueryClient()
+
+  const isSSHUrl = (url: string): boolean => {
+    return url.startsWith('git@') || url.startsWith('ssh://')
+  }
+
+  const showSkipSSHCheckbox = repoType === 'remote' && isSSHUrl(repoUrl)
 
   const mutation = useMutation({
     mutationFn: () => {
       if (repoType === 'local') {
         return createRepo(undefined, localPath, branch || undefined, undefined, false)
       } else {
-        return createRepo(repoUrl, undefined, branch || undefined, undefined, false)
+        return createRepo(repoUrl, undefined, branch || undefined, undefined, false, skipSSHVerification)
       }
     },
     onSuccess: () => {
@@ -32,6 +39,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
       setLocalPath('')
       setBranch('')
       setRepoType('remote')
+      setSkipSSHVerification(false)
       onOpenChange(false)
     },
   })
@@ -40,6 +48,13 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     e.preventDefault()
     if ((repoType === 'remote' && repoUrl) || (repoType === 'local' && localPath)) {
       mutation.mutate()
+    }
+  }
+
+  const handleRepoUrlChange = (value: string) => {
+    setRepoUrl(value)
+    if (!isSSHUrl(value)) {
+      setSkipSSHVerification(false)
     }
   }
 
@@ -88,7 +103,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
               <Input
                 placeholder="owner/repo or https://github.com/user/repo.git"
                 value={repoUrl}
-                onChange={(e) => setRepoUrl(e.target.value)}
+                onChange={(e) => handleRepoUrlChange(e.target.value)}
                 disabled={mutation.isPending}
                 className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
               />
@@ -136,7 +151,28 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
               }
             </p>
           </div>
-          
+
+          {showSkipSSHCheckbox && (
+            <div className="flex items-start space-x-2">
+              <input
+                type="checkbox"
+                id="skip-ssh-verification"
+                checked={skipSSHVerification}
+                onChange={(e) => setSkipSSHVerification(e.target.checked)}
+                disabled={mutation.isPending}
+                className="mt-1 h-4 w-4 rounded border-[#2a2a2a] bg-[#1a1a1a] text-blue-600 focus:ring-blue-600"
+              />
+              <div className="flex-1">
+                <label htmlFor="skip-ssh-verification" className="cursor-pointer text-sm text-white">
+                  Skip SSH host key verification
+                </label>
+                <p className="text-xs text-zinc-500">
+                  Auto-accept the SSH host key. Use for self-hosted or internal Git servers.
+                </p>
+              </div>
+            </div>
+          )}
+
           <Button 
             type="submit" 
             disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || mutation.isPending}

@@ -98,10 +98,29 @@ export class SSHHostKeyHandler implements IPCHandler {
     }
   }
 
+  async autoAcceptHostKey(repoUrl: string): Promise<void> {
+    const { host, port } = parseSSHHost(repoUrl)
+    const hostPort = normalizeHostPort(host, port)
+
+    const trustedHost = this.getTrustedHost(hostPort)
+    if (trustedHost) {
+      logger.info(`Host ${hostPort} already trusted, skipping auto-accept`)
+      return
+    }
+
+    const publicKey = await this.fetchHostPublicKey(host, port)
+    await this.addToKnownHosts(hostPort, publicKey)
+    this.saveTrustedHost(hostPort, publicKey)
+    logger.info(`Auto-accepted SSH host key for ${hostPort}`)
+  }
+
   private async fetchHostPublicKey(host: string, port?: string): Promise<string> {
     const portArgs = port ? ['-p', port] : []
-    const output = await executeCommand(['ssh-keyscan', '-t', 'ed25519,rsa,ecdsa', ...portArgs, host], { silent: true })
-
+    const result = await executeCommand(
+      ['ssh-keyscan', '-t', 'ed25519,rsa,ecdsa', ...portArgs, host],
+      { silent: true, ignoreExitCode: true }
+    )
+    const output = (result as { stdout: string }).stdout
     const bracketedHost = port && port !== '22' ? `[${host}]:${port}` : host
     const lines = output.trim().split('\n')
     for (const line of lines) {

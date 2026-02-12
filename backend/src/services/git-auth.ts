@@ -4,7 +4,8 @@ import { AskpassHandler } from '../ipc/askpassHandler'
 import { SSHHostKeyHandler } from '../ipc/sshHostKeyHandler'
 import { writeTemporarySSHKey, buildSSHCommand, buildSSHCommandWithKnownHosts, cleanupSSHKey, parseSSHHost } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
-import { isSSHUrl, extractHostFromSSHUrl, getSSHCredentialsForHost, type GitCredential } from '../utils/git-auth'
+import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl, getSSHCredentialsForHost } from '../utils/git-auth'
+import type { GitCredential } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
 
@@ -81,18 +82,19 @@ export class GitAuthService {
     }
   }
 
-  async setupSSHForRepoUrl(repoUrl: string | undefined, database: Database): Promise<boolean> {
+  async setupSSHForRepoUrl(repoUrl: string | undefined, database: Database, skipSSHVerification: boolean = false): Promise<boolean> {
     if (!repoUrl || !isSSHUrl(repoUrl)) {
       return false
     }
 
-    const sshHost = extractHostFromSSHUrl(repoUrl)
+    const normalizedUrl = normalizeSSHUrl(repoUrl)
+    const sshHost = extractHostFromSSHUrl(normalizedUrl)
     if (!sshHost) {
       logger.warn(`Could not extract SSH host from URL: ${repoUrl}`)
       return false
     }
 
-    const { port } = parseSSHHost(repoUrl)
+    const { port } = parseSSHHost(normalizedUrl)
     this.setSSHPort(port && port !== '22' ? port : null)
 
     const settingsService = new SettingsService(database)
@@ -109,10 +111,20 @@ export class GitAuthService {
       }
     }
 
-    const verified = await this.verifyHostKeyBeforeOperation(repoUrl)
-    if (!verified) {
-      await this.cleanupSSHKey()
-      throw new Error('SSH host key verification failed or was rejected by user')
+    if (skipSSHVerification) {
+      logger.info(`Skipping SSH host key verification for ${sshHost} (user requested)`)
+      try {
+        await this.autoAcceptHostKey(normalizedUrl)
+      } catch (error) {
+        await this.cleanupSSHKey()
+        throw new Error(`Failed to auto-accept SSH host key for ${sshHost}: ${(error as Error).message}`)
+      }
+    } else {
+      const verified = await this.verifyHostKeyBeforeOperation(normalizedUrl)
+      if (!verified) {
+        await this.cleanupSSHKey()
+        throw new Error('SSH host key verification failed or was rejected by user')
+      }
     }
 
     return sshCredentials.length > 0
@@ -123,6 +135,14 @@ export class GitAuthService {
       return true
     }
     return this.sshHostKeyHandler.verifyHostKeyBeforeOperation(repoUrl)
+  }
+
+  async autoAcceptHostKey(repoUrl: string): Promise<void> {
+    if (!this.sshHostKeyHandler) {
+      logger.warn('SSH host key handler not initialized, skipping auto-accept')
+      return
+    }
+    await this.sshHostKeyHandler.autoAcceptHostKey(repoUrl)
   }
 
   async cleanupSSHKey(): Promise<void> {

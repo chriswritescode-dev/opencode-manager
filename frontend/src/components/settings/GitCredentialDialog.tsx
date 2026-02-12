@@ -25,7 +25,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
     token: '',
     username: '',
     sshPrivateKey: '',
-    passphrase: '',
+    passphrase: ''
   })
   const [tokenEdited, setTokenEdited] = useState(false)
   const [isTesting, setIsTesting] = useState(false)

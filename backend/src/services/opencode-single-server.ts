@@ -1,7 +1,8 @@
 import { spawn, execSync } from 'child_process'
 import path from 'path'
 import { logger } from '../utils/logger'
-import { createGitEnv, createGitIdentityEnv, resolveGitIdentity, type GitCredential } from '../utils/git-auth'
+import { createGitEnv, createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
+import type { GitCredential } from '@opencode-manager/shared'
 import {
   buildSSHCommandWithKnownHosts,
   buildSSHCommandWithConfig,

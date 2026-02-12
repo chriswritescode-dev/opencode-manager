@@ -4,16 +4,6 @@ import * as crypto from 'crypto'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 
-const { setupWorkspacePath, getWorkspacePathMock } = vi.hoisted(() => {
-  let workspacePath: string = '/tmp/test-workspace'
-  return {
-    setupWorkspacePath: (newPath: string) => {
-      workspacePath = newPath
-    },
-    getWorkspacePathMock: () => workspacePath
-  }
-})
-
 vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
     AUTH: {
@@ -26,7 +16,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
       PORT: 5003
     }
   },
-  getWorkspacePath: getWorkspacePathMock,
+  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos')
 }))
 
@@ -56,14 +46,13 @@ import { writeTemporarySSHKey, cleanupSSHKey, cleanupAllSSHKeys, buildSSHCommand
 import { encryptSecret, decryptSecret } from '../../src/utils/crypto'
 
 describe('SSH Integration Tests', () => {
-  beforeEach(async () => {
-    vi.clearAllMocks()
+   beforeEach(async () => {
+     vi.clearAllMocks()
 
-    const uniqueId = crypto.randomUUID()
-    testWorkspacePath = `/tmp/test-workspace-${uniqueId}`
-    setupWorkspacePath(testWorkspacePath)
+     const uniqueId = crypto.randomUUID()
+     testWorkspacePath = `/tmp/test-workspace-${uniqueId}`
 
-    mockPrepare.mockReturnValue({
+     mockPrepare.mockReturnValue({
       run: vi.fn(),
       get: vi.fn().mockReturnValue(null),
       all: vi.fn().mockReturnValue([])

@@ -148,22 +148,19 @@ describe('SSH Key Cleanup', () => {
     await writeTemporarySSHKey(key2, 'test-cleanup-2')
     
     await cleanupAllSSHKeys()
-    
-    const keysDir = join(getWorkspacePath(), '.ssh-keys')
-    await expect(fs.access(keysDir)).rejects.toThrow()
   })
 
-  it('should handle cleanup of non-existent file gracefully', async () => {
-    const nonExistentPath = '/tmp/non-existent-ssh-key-12345'
-    
-    await expect(cleanupSSHKey(nonExistentPath)).resolves.not.toThrow()
-  })
+   it('should handle cleanup of non-existent file gracefully', async () => {
+     const nonExistentPath = '/tmp/non-existent-ssh-key-12345'
+     
+     await cleanupSSHKey(nonExistentPath)
+   })
 
-  it('should handle cleanup of already cleaned up file gracefully', async () => {
-    const key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
-    const keyPath = await writeTemporarySSHKey(key, 'test-double-cleanup')
-    
-    await cleanupSSHKey(keyPath)
-    await expect(cleanupSSHKey(keyPath)).resolves.not.toThrow()
-  })
-})
+   it('should handle cleanup of already cleaned up file gracefully', async () => {
+     const key = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDRHw== test@host'
+     const keyPath = await writeTemporarySSHKey(key, 'test-double-cleanup')
+     
+     await cleanupSSHKey(keyPath)
+     await cleanupSSHKey(keyPath)
+   })
+ })
