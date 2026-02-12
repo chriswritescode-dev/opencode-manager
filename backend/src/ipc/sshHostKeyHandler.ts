@@ -120,7 +120,7 @@ export class SSHHostKeyHandler implements IPCHandler {
       ['ssh-keyscan', '-t', 'ed25519,rsa,ecdsa', ...portArgs, host],
       { silent: true, ignoreExitCode: true }
     )
-    const output = (result as { stdout: string }).stdout
+    const output = (result as unknown as { stdout: string }).stdout
     const bracketedHost = port && port !== '22' ? `[${host}]:${port}` : host
     const lines = output.trim().split('\n')
     for (const line of lines) {

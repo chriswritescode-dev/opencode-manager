@@ -10,7 +10,10 @@ export const SSHHostKeyRequestSchema = z.object({
   isKeyChanged: z.boolean()
 })
 
-export const SSHHostKeyResponseSchema = z.enum(['accept', 'reject'])
+export const SSHHostKeyResponseSchema = z.object({
+  requestId: z.string(),
+  response: z.enum(['accept', 'reject'])
+})
 
 export const TrustedSSHHostSchema = z.object({
   id: z.number(),

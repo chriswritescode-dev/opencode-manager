@@ -625,6 +625,10 @@ describe('GitService', () => {
       const mockRepo = {
         id: 1,
         fullPath: '/path/to/repo',
+        localPath: '/path/to/repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: 123456,
       }
       getRepoByIdMock.mockReturnValue(mockRepo)
       executeCommandMock.mockResolvedValue('Everything up-to-date')
@@ -643,6 +647,10 @@ describe('GitService', () => {
       const mockRepo = {
         id: 1,
         fullPath: '/path/to/repo',
+        localPath: '/path/to/repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: 123456,
       }
       getRepoByIdMock.mockReturnValue(mockRepo)
       executeCommandMock.mockResolvedValueOnce('main\n').mockResolvedValueOnce('')
@@ -659,7 +667,14 @@ describe('GitService', () => {
 
   describe('fetch', () => {
     it('fetches from remote', async () => {
-      const mockRepo = { id: 1, fullPath: '/path/to/repo' }
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+        localPath: '/path/to/repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: 123456,
+      }
       getRepoByIdMock.mockReturnValue(mockRepo)
       executeCommandMock.mockResolvedValue('')
 
@@ -671,7 +686,14 @@ describe('GitService', () => {
 
   describe('pull', () => {
     it('pulls from remote', async () => {
-      const mockRepo = { id: 1, fullPath: '/path/to/repo' }
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+        localPath: '/path/to/repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: 123456,
+      }
       getRepoByIdMock.mockReturnValue(mockRepo)
       executeCommandMock.mockResolvedValue('')
 
