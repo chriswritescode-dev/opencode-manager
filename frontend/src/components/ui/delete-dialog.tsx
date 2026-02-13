@@ -26,7 +26,7 @@ export function DeleteDialog({
 }: DeleteDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-[90%] sm:max-w-sm '>
+      <DialogContent className='max-w-[90%] sm:max-w-sm'>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>

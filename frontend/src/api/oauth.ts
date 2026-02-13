@@ -3,7 +3,7 @@ import { fetchWrapper, FetchError } from "./fetchWrapper"
 
 export interface OAuthAuthorizeResponse {
   url: string
-  method: "auto" | "code"
+  method: "code"
   instructions: string
 }
 

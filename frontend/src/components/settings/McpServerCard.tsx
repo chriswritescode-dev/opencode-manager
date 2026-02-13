@@ -152,20 +152,20 @@ export function McpServerCard({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             {showAuthButton && onAuthenticate && (
-              <DropdownMenuItem onClick={() => onAuthenticate(serverId)}>
+              <DropdownMenuItem onSelect={() => setTimeout(() => onAuthenticate(serverId), 0)}>
                 <Key className="h-4 w-4 mr-2" />
                 Authenticate
               </DropdownMenuItem>
             )}
             {connectedWithOAuth && onAuthenticate && (
-              <DropdownMenuItem onClick={() => onAuthenticate(serverId)}>
+              <DropdownMenuItem onSelect={() => setTimeout(() => onAuthenticate(serverId), 0)}>
                 <RefreshCw className="h-4 w-4 mr-2" />
                 Re-authenticate
               </DropdownMenuItem>
             )}
             {connectedWithOAuth && onRemoveAuth && (
               <DropdownMenuItem 
-                onClick={() => onRemoveAuth(serverId)}
+                onSelect={() => setTimeout(() => onRemoveAuth(serverId), 0)}
                 disabled={isRemovingAuth}
               >
                 <Shield className="h-4 w-4 mr-2" />
@@ -174,7 +174,9 @@ export function McpServerCard({
             )}
             {(showAuthButton || connectedWithOAuth) && <DropdownMenuSeparator />}
             <DropdownMenuItem 
-              onClick={() => onDeleteServer(serverId, displayName)}
+              onSelect={() => {
+                setTimeout(() => onDeleteServer(serverId, displayName), 0)
+              }}
               className="text-red-600"
             >
               <Trash2 className="h-4 w-4 mr-2" />

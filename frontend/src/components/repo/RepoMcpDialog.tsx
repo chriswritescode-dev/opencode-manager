@@ -9,7 +9,8 @@ import { DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Loader2, XCircle, AlertCircle, Plug, Shield, MoreVertical, Key, RefreshCw } from 'lucide-react'
 import { McpOAuthDialog } from '@/components/settings/McpOAuthDialog'
 import { mcpApi, type McpStatus, type McpServerConfig, type McpAuthStartResponse } from '@/api/mcp'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { invalidateSessionCaches } from '@/lib/queryInvalidation'
 import { showToast } from '@/lib/toast'
 
 interface RepoMcpDialogProps {
@@ -22,6 +23,7 @@ interface RepoMcpDialogProps {
 }
 
 export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcpDialogProps) {
+  const queryClient = useQueryClient()
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
   const [removeAuthConfirmServer, setRemoveAuthConfirmServer] = useState<string | null>(null)
@@ -61,6 +63,7 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
     onSuccess: async () => {
       showToast.success('MCP server updated for this location')
       await fetchStatus()
+      invalidateSessionCaches(queryClient)
     },
     onError: (error) => {
       showToast.error(error instanceof Error ? error.message : 'Failed to update MCP server')
@@ -76,29 +79,50 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
       showToast.success('Authentication removed for this location')
       setRemoveAuthConfirmServer(null)
       await fetchStatus()
+      invalidateSessionCaches(queryClient)
     },
     onError: (error) => {
       showToast.error(error instanceof Error ? error.message : 'Failed to remove authentication')
     },
   })
 
-  const handleOAuthAutoAuth = async () => {
-    if (!authDialogServerId || !directory) return
-    await mcpApi.authenticateDirectory(authDialogServerId, directory)
-    await fetchStatus()
-    setAuthDialogServerId(null)
-  }
-
   const handleOAuthStartAuth = async (): Promise<McpAuthStartResponse> => {
     if (!authDialogServerId) throw new Error('No server ID')
-    return await mcpApi.startAuth(authDialogServerId)
+    const serverConfig = mcpServers[authDialogServerId]
+    if (!serverConfig?.url) throw new Error('Server URL not found')
+    const oauthConfig = typeof serverConfig.oauth === 'object' ? serverConfig.oauth : undefined
+    return await mcpApi.startAuth(
+      authDialogServerId,
+      serverConfig.url,
+      oauthConfig?.scope,
+      oauthConfig?.clientId,
+      oauthConfig?.clientSecret,
+      directory,
+    )
   }
 
   const handleOAuthCompleteAuth = async (code: string) => {
     if (!authDialogServerId) return
     await mcpApi.completeAuth(authDialogServerId, code)
     await fetchStatus()
+    invalidateSessionCaches(queryClient)
     setAuthDialogServerId(null)
+  }
+
+  const handleOAuthCheckStatus = async (): Promise<boolean> => {
+    if (!authDialogServerId || !directory) return false
+    const status = await mcpApi.getStatusFor(directory)
+    const serverStatus = status[authDialogServerId]
+    if (serverStatus?.status === 'connected') {
+      setLocalStatus(status)
+      return true
+    }
+    return false
+  }
+
+  const handleOAuthSuccess = () => {
+    fetchStatus()
+    invalidateSessionCaches(queryClient)
   }
   
   useEffect(() => {
@@ -308,9 +332,10 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
           open={!!authDialogServerId}
           onOpenChange={(o) => !o && setAuthDialogServerId(null)}
           serverName={authDialogServerId || ''}
-          onAutoAuth={handleOAuthAutoAuth}
           onStartAuth={handleOAuthStartAuth}
           onCompleteAuth={handleOAuthCompleteAuth}
+          onCheckStatus={handleOAuthCheckStatus}
+          onSuccess={handleOAuthSuccess}
           directory={directory}
         />
       </DialogContent>

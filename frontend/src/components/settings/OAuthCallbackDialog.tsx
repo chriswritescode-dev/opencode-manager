@@ -29,24 +29,6 @@ export function OAuthCallbackDialog({
   const [authCode, setAuthCode] = useState('')
   const [error, setError] = useState<string | null>(null)
 
-  const handleAutoCallback = async () => {
-    setIsLoading(true)
-    setLoadingMessage('Completing authentication...')
-    setError(null)
-
-    try {
-      setLoadingMessage('Restarting server with new credentials...')
-      await oauthApi.callback(providerId, { method: OAuthMethod.AUTO })
-      onSuccess()
-    } catch (err) {
-      setError(mapOAuthError(err, 'callback'))
-      console.error('OAuth callback error:', err)
-    } finally {
-      setIsLoading(false)
-      setLoadingMessage('')
-    }
-  }
-
   const handleCodeCallback = async () => {
     if (!authCode.trim()) {
       setError('Please enter the authorization code')
@@ -82,14 +64,11 @@ export function OAuthCallbackDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-card border-border max-w-lg z-[200]" overlayClassName="z-[200]">
+      <DialogContent className="bg-card border-border max-w-lg">
         <DialogHeader>
           <DialogTitle>Complete {providerName} Authentication</DialogTitle>
           <DialogDescription>
-            {authResponse.method === 'auto' 
-              ? 'Follow the instructions to complete authentication.'
-              : 'Enter the authorization code from the provider.'
-            }
+            Enter the authorization code from the provider.
           </DialogDescription>
         </DialogHeader>
 
@@ -100,86 +79,50 @@ export function OAuthCallbackDialog({
         )}
 
         <div className="space-y-4">
-          {authResponse.method === 'auto' ? (
-            <div className="space-y-3">
-              <div className="bg-muted p-3 rounded-md">
-                <p className="text-sm">{authResponse.instructions}</p>
-              </div>
-              
+          <div className="space-y-3">
+            <div className="bg-muted p-3 rounded-md">
+              <p className="text-sm mb-2">{authResponse.instructions}</p>
               <Button
                 onClick={handleOpenAuthUrl}
+                variant="outline"
+                size="sm"
                 className="w-full"
-                disabled={isLoading}
               >
                 <ExternalLink className="h-4 w-4 mr-2" />
                 Open Authorization Page
               </Button>
+            </div>
 
-              <Button
-                onClick={handleAutoCallback}
-                variant="outline"
-                className="w-full"
+            <div className="space-y-2">
+              <Label htmlFor="authCode">Authorization Code</Label>
+              <Input
+                id="authCode"
+                value={authCode}
+                onChange={(e) => setAuthCode(e.target.value)}
+                placeholder="Enter the authorization code..."
+                className="bg-background border-border"
                 disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {loadingMessage || 'Completing...'}
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    I Completed Authorization
-                  </>
-                )}
-              </Button>
+              />
             </div>
-          ) : (
-            <div className="space-y-3">
-              <div className="bg-muted p-3 rounded-md">
-                <p className="text-sm mb-2">{authResponse.instructions}</p>
-                <Button
-                  onClick={handleOpenAuthUrl}
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Open Authorization Page
-                </Button>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="authCode">Authorization Code</Label>
-                <Input
-                  id="authCode"
-                  value={authCode}
-                  onChange={(e) => setAuthCode(e.target.value)}
-                  placeholder="Enter the authorization code..."
-                  className="bg-background border-border"
-                  disabled={isLoading}
-                />
-              </div>
-
-              <Button
-                onClick={handleCodeCallback}
-                className="w-full"
-                disabled={isLoading || !authCode.trim()}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    {loadingMessage || 'Completing...'}
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Complete Authentication
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
+            <Button
+              onClick={handleCodeCallback}
+              className="w-full"
+              disabled={isLoading || !authCode.trim()}
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  {loadingMessage || 'Completing...'}
+                </>
+              ) : (
+                <>
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Complete Authentication
+                </>
+              )}
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

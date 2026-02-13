@@ -33,7 +33,14 @@ export interface AddMcpServerRequest {
 
 export interface McpAuthStartResponse {
   authorizationUrl: string
+  flowId: string
 }
+
+export type McpOAuthFlowStatus = 
+  | { status: 'pending' }
+  | { status: 'completed'; serverName: string }
+  | { status: 'failed'; error: string }
+  | { status: 'unknown' }
 
 export const mcpApi = {
   async getStatus(): Promise<McpStatusMap> {
@@ -79,13 +86,23 @@ export const mcpApi = {
     return response.json()
   },
 
-  async startAuth(name: string): Promise<McpAuthStartResponse> {
-    const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth`, {
+  async startAuth(name: string, serverUrl: string, scope?: string, clientId?: string, clientSecret?: string, directory?: string): Promise<McpAuthStartResponse> {
+    const response = await fetch(`${API_BASE}/api/mcp-oauth-proxy/start`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverName: name, serverUrl, scope, clientId, clientSecret, directory }),
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }))
       throw new Error(error.error || `Failed to start MCP auth: ${response.statusText}`)
+    }
+    return response.json()
+  },
+
+  async checkFlowStatus(flowId: string): Promise<McpOAuthFlowStatus> {
+    const response = await fetch(`${API_BASE}/api/mcp-oauth-proxy/status/${encodeURIComponent(flowId)}`)
+    if (!response.ok) {
+      return { status: 'unknown' }
     }
     return response.json()
   },
@@ -106,6 +123,8 @@ export const mcpApi = {
   async authenticate(name: string): Promise<McpStatus> {
     const response = await fetch(`${API_BASE}/api/opencode/mcp/${encodeURIComponent(name)}/auth/authenticate`, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
     })
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: response.statusText }))

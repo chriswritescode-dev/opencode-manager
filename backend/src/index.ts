@@ -19,6 +19,7 @@ import { createTitleRoutes } from './routes/title'
 import { createSSERoutes } from './routes/sse'
 import { createSSHRoutes } from './routes/ssh'
 import { createNotificationRoutes } from './routes/notifications'
+import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
 import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
@@ -27,7 +28,7 @@ import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } 
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { cleanupOrphanedDirectories } from './services/repo'
-import { proxyRequest } from './services/proxy'
+import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
 import { NotificationService } from './services/notification'
 import { logger } from './utils/logger'
 import { 
@@ -229,6 +230,7 @@ app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 
 app.route('/api/health', createHealthRoutes(db))
+app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(requireAuth))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
@@ -246,6 +248,18 @@ protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 
 app.route('/api', protectedApi)
+
+app.post('/api/opencode/mcp/:name/auth', requireAuth, async (c) => {
+  const serverName = c.req.param('name')
+  const directory = c.req.query('directory')
+  return proxyMcpAuthStart(serverName, directory)
+})
+
+app.post('/api/opencode/mcp/:name/auth/authenticate', requireAuth, async (c) => {
+  const serverName = c.req.param('name')
+  const directory = c.req.query('directory')
+  return proxyMcpAuthAuthenticate(serverName, directory)
+})
 
 app.all('/api/opencode/*', requireAuth, async (c) => {
   const request = c.req.raw

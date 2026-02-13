@@ -178,3 +178,66 @@ export async function proxyToOpenCodeWithDirectory(
     })
   }
 }
+
+export async function proxyMcpAuthStart(
+  serverName: string,
+  directory: string | undefined,
+): Promise<Response> {
+  const path = `/mcp/${encodeURIComponent(serverName)}/auth`
+  const url = new URL(`${OPENCODE_SERVER_URL}${path}`)
+  
+  if (directory) {
+    url.searchParams.set('directory', directory)
+  }
+  
+  try {
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    
+    const responseBody = await response.text()
+    return new Response(responseBody, {
+      status: response.status,
+      headers: { 'Content-Type': response.headers.get('Content-Type') || 'application/json' },
+    })
+  } catch (error) {
+    logger.error(`MCP auth start failed for ${serverName}:`, error)
+    return new Response(JSON.stringify({ error: 'MCP auth start failed' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+}
+
+export async function proxyMcpAuthAuthenticate(
+  serverName: string,
+  directory: string | undefined,
+): Promise<Response> {
+  const path = `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`
+  const url = new URL(`${OPENCODE_SERVER_URL}${path}`)
+  
+  if (directory) {
+    url.searchParams.set('directory', directory)
+  }
+  
+  try {
+    const response = await fetch(url.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    
+    const responseBody = await response.text()
+    return new Response(responseBody, {
+      status: response.status,
+      headers: { 'Content-Type': response.headers.get('Content-Type') || 'application/json' },
+    })
+  } catch (error) {
+    logger.error(`MCP auth authenticate failed for ${serverName}:`, error)
+    return new Response(JSON.stringify({ error: 'MCP auth authenticate failed' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+}
+

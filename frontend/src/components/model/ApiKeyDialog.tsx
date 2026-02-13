@@ -64,7 +64,7 @@ export function ApiKeyDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose} modal={false}>
-      <DialogContent className="sm:max-w-md z-[100]">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />

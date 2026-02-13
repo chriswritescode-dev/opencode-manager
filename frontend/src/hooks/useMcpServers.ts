@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { mcpApi } from '@/api/mcp'
-import type { McpStatusMap, McpServerConfig, McpStatus } from '@/api/mcp'
+import type { McpStatusMap, McpServerConfig } from '@/api/mcp'
 import { showToast as toast } from '@/lib/toast'
 
 export function useMcpServers() {
@@ -51,7 +51,8 @@ export function useMcpServers() {
   })
 
   const startAuthMutation = useMutation({
-    mutationFn: (name: string) => mcpApi.startAuth(name),
+    mutationFn: ({ name, serverUrl, scope, clientId, clientSecret, directory }: { name: string; serverUrl: string; scope?: string; clientId?: string; clientSecret?: string; directory?: string }) =>
+      mcpApi.startAuth(name, serverUrl, scope, clientId, clientSecret, directory),
     onError: (error: Error) => {
       toast.error(`Failed to start authentication: ${error.message}`)
     },
@@ -69,18 +70,6 @@ export function useMcpServers() {
     },
   })
 
-  const authenticateMutation = useMutation({
-    mutationFn: (name: string) => mcpApi.authenticate(name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
-      queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'opencode' && (query.queryKey[1] === 'sessions' || query.queryKey[1] === 'session' || query.queryKey[1] === 'messages') })
-      toast.success('Authentication completed')
-    },
-    onError: (error: Error) => {
-      toast.error(`Failed to authenticate: ${error.message}`)
-    },
-  })
-
   const removeAuthMutation = useMutation({
     mutationFn: (name: string) => mcpApi.removeAuth(name),
     onSuccess: () => {
@@ -92,16 +81,6 @@ export function useMcpServers() {
       toast.error(`Failed to remove authentication: ${error.message}`)
     },
   })
-
-  const toggleServer = async (name: string, currentStatus: McpStatus) => {
-    if (currentStatus.status === 'connected') {
-      return disconnectMutation.mutateAsync(name)
-    } else if (currentStatus.status === 'disabled') {
-      return connectMutation.mutateAsync(name)
-    } else if (currentStatus.status === 'needs_auth') {
-      return authenticateMutation.mutateAsync(name)
-    }
-  }
 
   return {
     status: statusQuery.data as McpStatusMap | undefined,
@@ -122,9 +101,6 @@ export function useMcpServers() {
     disconnectAsync: disconnectMutation.mutateAsync,
     isDisconnecting: disconnectMutation.isPending,
 
-    toggleServer,
-    isToggling: connectMutation.isPending || disconnectMutation.isPending || authenticateMutation.isPending,
-
     startAuth: startAuthMutation.mutate,
     startAuthAsync: startAuthMutation.mutateAsync,
     isStartingAuth: startAuthMutation.isPending,
@@ -132,10 +108,6 @@ export function useMcpServers() {
     completeAuth: completeAuthMutation.mutate,
     completeAuthAsync: completeAuthMutation.mutateAsync,
     isCompletingAuth: completeAuthMutation.isPending,
-
-    authenticate: authenticateMutation.mutate,
-    authenticateAsync: authenticateMutation.mutateAsync,
-    isAuthenticating: authenticateMutation.isPending,
 
     removeAuth: removeAuthMutation.mutate,
     removeAuthAsync: removeAuthMutation.mutateAsync,

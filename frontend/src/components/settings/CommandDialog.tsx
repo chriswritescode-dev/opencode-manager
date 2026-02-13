@@ -99,7 +99,7 @@ export function CommandDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 z-[200]" overlayClassName="z-[200]">
+      <DialogContent className="max-w-3xl max-h-[90vh] sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle>
             {editingCommand ? "Edit Command" : "Create Command"}

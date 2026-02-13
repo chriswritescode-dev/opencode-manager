@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Loader2, Plus, Trash2, Edit, Star, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -434,64 +434,66 @@ export function OpenCodeConfigManager() {
         </Card>
       ) : (
         <div className="flex flex-col gap-4 md:grid md:grid-cols-2 lg:grid-cols">
-          {configs.map((config) => (
-            <Card key={config.id}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <CardTitle className="text-base">{config.name}</CardTitle>
-                    {config.isDefault && (
-                      <Badge variant="default" className="">
-                        <Star className="h-4 w-4" />
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => downloadConfig(config)}
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => startEdit(config)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDefaultConfig(config)}
-                      disabled={config.isDefault || isUpdating}
-                    >
-                      {config.isDefault ? (
-                        <StarOff className="h-4 w-4" />
-                      ) : (
-                        <Star className="h-4 w-4" />
+          {configs
+            .sort((a, b) => {
+              if (a.isDefault) return -1
+              if (b.isDefault) return 1
+              return 0
+            })
+            .map((config) => (
+              <Card key={config.id} className={config.isDefault ? 'border-green-500' : ''}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <CardTitle className="text-base">{config.name}</CardTitle>
+                      {config.isDefault && (
+                        <Badge variant="default" className="text-green-500 bg-green-500/10">
+                          Current
+                        </Badge>
                       )}
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setDeleteConfirmConfig(config)}
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => downloadConfig(config)}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => startEdit(config)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDefaultConfig(config)}
+                        disabled={config.isDefault || isUpdating}
+                      >
+                        <StarOff className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setDeleteConfirmConfig(config)}
+                        className="text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-muted-foreground break-words">
-                  <p className="truncate">Updated: {new Date(config.updatedAt).toLocaleString()}</p>
-                  <p className="truncate">Created: {new Date(config.createdAt).toLocaleString()}</p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardHeader>
+                <CardContent>
+                  <div className="text-sm text-muted-foreground break-words">
+                    <p className="truncate">Updated: {new Date(config.updatedAt).toLocaleString()}</p>
+                    <p className="truncate">Created: {new Date(config.createdAt).toLocaleString()}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
         </div>
       )}
 

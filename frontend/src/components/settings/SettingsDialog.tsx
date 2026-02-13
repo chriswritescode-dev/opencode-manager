@@ -69,7 +69,7 @@ export function SettingsDialog() {
      <Dialog open={isOpen} modal={false}>
        <DialogContent 
          ref={contentRef}
-         className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col z-[100]"
+         className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col"
          style={swipeStyles}
          fullscreen
        >

@@ -12,6 +12,7 @@ import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 import type { McpServerConfig } from '@/api/mcp'
 import { mcpApi } from '@/api/mcp'
 import type { McpAuthStartResponse } from '@/api/mcp'
+import { showToast } from '@/lib/toast'
 
 interface McpManagerProps {
   config: {
@@ -38,15 +39,18 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
     refetch: refetchStatus,
     connect,
     disconnect,
-    authenticate,
-    removeAuth,
-    isRemovingAuth,
-    isToggling
+    removeAuthAsync,
+    isRemovingAuth
   } = useMcpServers()
 
   const deleteServerMutation = useMutation({
     mutationFn: async (serverId: string) => {
       if (!config) return
+      
+      const currentStatus = mcpStatus?.[serverId]
+      if (currentStatus?.status === 'connected') {
+        await disconnect(serverId)
+      }
       
       const currentMcp = (config.content?.mcp as Record<string, McpServerConfig>) || {}
       const { [serverId]: _, ...rest } = currentMcp
@@ -59,15 +63,19 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
       
       await onUpdate(updatedConfig)
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       invalidateConfigCaches(queryClient)
+      await refetchStatus()
       setDeleteConfirmServer(null)
+    },
+    onError: () => {
+      showToast.error('Failed to delete MCP server')
     },
   })
 
   const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> || {}
   
-  const isAnyOperationPending = deleteServerMutation.isPending || togglingServerId !== null || isToggling
+  const isAnyOperationPending = deleteServerMutation.isPending || togglingServerId !== null
 
   const handleToggleServer = async (serverId: string) => {
     const currentStatus = mcpStatus?.[serverId]
@@ -103,16 +111,18 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
     setAuthDialogServerId(serverId)
   }
 
-  const handleOAuthAutoAuth = async () => {
-    if (!authDialogServerId) return
-    await authenticate(authDialogServerId)
-    refetchStatus()
-    setAuthDialogServerId(null)
-  }
-
   const handleOAuthStartAuth = async (): Promise<McpAuthStartResponse> => {
     if (!authDialogServerId) throw new Error('No server ID')
-    return await mcpApi.startAuth(authDialogServerId)
+    const serverConfig = mcpServers[authDialogServerId]
+    if (!serverConfig?.url) throw new Error('Server URL not found')
+    const oauthConfig = typeof serverConfig.oauth === 'object' ? serverConfig.oauth : undefined
+    return await mcpApi.startAuth(
+      authDialogServerId,
+      serverConfig.url,
+      oauthConfig?.scope,
+      oauthConfig?.clientId,
+      oauthConfig?.clientSecret,
+    )
   }
 
   const handleOAuthCompleteAuth = async (code: string) => {
@@ -122,14 +132,30 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
     setAuthDialogServerId(null)
   }
 
+  const handleOAuthCheckStatus = async (): Promise<boolean> => {
+    if (!authDialogServerId) return false
+    const status = await mcpApi.getStatus()
+    const serverStatus = status[authDialogServerId]
+    if (serverStatus?.status === 'connected') {
+      refetchStatus()
+      return true
+    }
+    return false
+  }
+
+  const handleOAuthSuccess = () => {
+    refetchStatus()
+  }
+
   const handleRemoveAuth = (serverId: string) => {
     setRemoveAuthConfirmServer(serverId)
   }
 
-  const handleConfirmRemoveAuth = () => {
+  const handleConfirmRemoveAuth = async () => {
     if (removeAuthConfirmServer) {
-      removeAuth(removeAuthConfirmServer)
+      await removeAuthAsync(removeAuthConfirmServer)
       setRemoveAuthConfirmServer(null)
+      refetchStatus()
     }
   }
 
@@ -251,9 +277,10 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
         open={!!authDialogServerId}
         onOpenChange={(open) => !open && setAuthDialogServerId(null)}
         serverName={authDialogServerId || ''}
-        onAutoAuth={handleOAuthAutoAuth}
         onStartAuth={handleOAuthStartAuth}
         onCompleteAuth={handleOAuthCompleteAuth}
+        onCheckStatus={handleOAuthCheckStatus}
+        onSuccess={handleOAuthSuccess}
       />
 
       <DeleteDialog

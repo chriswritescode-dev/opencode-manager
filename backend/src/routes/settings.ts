@@ -125,6 +125,8 @@ const ConnectMcpDirectorySchema = z.object({
   directory: z.string().min(1),
 })
 
+const McpAuthDirectorySchema = ConnectMcpDirectorySchema
+
 const TestSSHConnectionSchema = z.object({
   host: z.string().min(1),
   sshPrivateKey: z.string().min(1),
@@ -1006,12 +1008,12 @@ export function createSettingsRoutes(db: Database) {
     try {
       const serverName = c.req.param('name')
       const body = await c.req.json()
-      const { directory } = ConnectMcpDirectorySchema.parse(body)
+      const { directory } = McpAuthDirectorySchema.parse(body)
       
       const response = await proxyToOpenCodeWithDirectory(
         `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
         'POST',
-        directory
+        directory,
       )
       
       if (!response.ok) {

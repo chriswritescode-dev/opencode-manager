@@ -199,7 +199,7 @@ export function Combobox({
       {isOpen && flatFilteredOptions.length > 0 && (
         <div
           ref={listRef}
-          className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-60 overflow-y-auto"
+          className="absolute z-[150] mt-1 w-full bg-popover border border-border rounded-md shadow-lg max-h-60 overflow-y-auto"
         >
           {Object.entries(groupedOptions).map(([group, groupOptions]) => (
             <div key={group || 'default'}>
@@ -237,7 +237,7 @@ export function Combobox({
       )}
 
       {isOpen && flatFilteredOptions.length === 0 && inputValue && allowCustomValue && (
-        <div className="absolute z-50 mt-1 w-full bg-popover border border-border rounded-md shadow-lg p-3">
+        <div className="absolute z-[150] mt-1 w-full bg-popover border border-border rounded-md shadow-lg p-3">
           <div className="text-sm text-muted-foreground">
             Press Enter to use "<span className="font-medium text-foreground">{inputValue}</span>"
           </div>
