@@ -75,6 +75,8 @@
     "vite": "^7.1.7",
     "vite-plugin-pwa": "^1.2.0",
     "vitest": "^3.2.4",
+    "workbox-core": "^7.4.0",
+    "workbox-window": "^7.4.0",
     "workbox-precaching": "^7.4.0"
   }
 }

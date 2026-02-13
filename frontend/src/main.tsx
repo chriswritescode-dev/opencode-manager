@@ -4,7 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import { registerServiceWorker } from './lib/serviceWorker'
 
-registerServiceWorker().catch(() => {})
+registerServiceWorker()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
