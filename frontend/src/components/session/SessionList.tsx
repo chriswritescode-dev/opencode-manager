@@ -27,6 +27,7 @@ export const SessionList = ({
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(
     new Set(),
   );
+  const [manageMode, setManageMode] = useState(false);
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
@@ -107,6 +108,17 @@ export const SessionList = ({
     setSelectedSessions(newSelected);
   };
 
+  const toggleManageMode = () => {
+    setManageMode((prev) => {
+      if (!prev) {
+        return true;
+      } else {
+        setSelectedSessions(new Set());
+        return false;
+      }
+    });
+  };
+
   const toggleSelectAll = () => {
     if (!filteredSessions || filteredSessions.length === 0) return;
     
@@ -150,6 +162,8 @@ export const SessionList = ({
           onToggleSelectAll={toggleSelectAll}
           onDelete={handleBulkDelete}
           onDeleteAll={handleDeleteAll}
+          manageMode={manageMode}
+          onToggleManageMode={toggleManageMode}
         />
       </div>
 
@@ -172,6 +186,7 @@ export const SessionList = ({
                       session={session}
                       isSelected={selectedSessions.has(session.id)}
                       isActive={activeSessionID === session.id}
+                      manageMode={manageMode}
                       onSelect={onSelectSession}
                       onToggleSelection={(selected) => {
                         toggleSessionSelection(session.id, selected);
@@ -191,6 +206,7 @@ export const SessionList = ({
                   session={session}
                   isSelected={selectedSessions.has(session.id)}
                   isActive={activeSessionID === session.id}
+                  manageMode={manageMode}
                   onSelect={onSelectSession}
                   onToggleSelection={(selected) => {
                     toggleSessionSelection(session.id, selected);
