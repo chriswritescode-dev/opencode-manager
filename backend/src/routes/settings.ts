@@ -278,6 +278,23 @@ export function createSettingsRoutes(db: Database) {
     }
   })
 
+  app.get('/opencode-configs/:name', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      const configName = c.req.param('name')
+      
+      const config = settingsService.getOpenCodeConfigByName(configName, userId)
+      if (!config) {
+        return c.json({ error: 'Config not found' }, 404)
+      }
+      
+      return c.json(config)
+    } catch (error) {
+      logger.error('Failed to get OpenCode config:', error)
+      return c.json({ error: 'Failed to get OpenCode config' }, 500)
+    }
+  })
+
   app.put('/opencode-configs/:name', async (c) => {
     try {
       const userId = c.req.query('userId') || 'default'

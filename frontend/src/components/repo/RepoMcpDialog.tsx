@@ -26,23 +26,25 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
   const queryClient = useQueryClient()
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
+  const [hasFetchedStatus, setHasFetchedStatus] = useState(false)
   const [removeAuthConfirmServer, setRemoveAuthConfirmServer] = useState<string | null>(null)
   const [authDialogServerId, setAuthDialogServerId] = useState<string | null>(null)
   
   const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> | undefined || {}
-  const serverIds = Object.keys(mcpServers)
+  const serverIds = Object.keys(localStatus)
   
   const fetchStatus = useCallback(async () => {
-    if (!directory || serverIds.length === 0) return
+    if (!directory) return
     
     setIsLoadingStatus(true)
     try {
       const status = await mcpApi.getStatusFor(directory)
       setLocalStatus(status)
+      setHasFetchedStatus(true)
     } finally {
       setIsLoadingStatus(false)
     }
-  }, [directory, serverIds.length])
+  }, [directory])
   
   const toggleMutation = useMutation({
     mutationFn: async ({ serverId, enable }: { serverId: string; enable: boolean }) => {
@@ -195,11 +197,11 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
         </DialogHeader>
 
         <div className="px-4 sm:px-6 py-3 sm:py-4 flex-1 overflow-y-auto min-h-0">
-          {serverIds.length === 0 ? (
+          {hasFetchedStatus && serverIds.length === 0 ? (
             <div className="text-center py-6 text-muted-foreground">
               <Plug className="w-10 h-10 mx-auto mb-3 opacity-50" />
-              <p className="text-sm">No MCP servers configured globally</p>
-              <p className="text-xs mt-1">Add them in Settings first</p>
+              <p className="text-sm">No MCP servers configured for this location</p>
+              <p className="text-xs mt-1">Add them in Settings or in the project's opencode.json</p>
             </div>
           ) : isLoadingStatus ? (
             <div className="flex items-center justify-center py-8">
@@ -214,9 +216,9 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
                 const isConnected = status?.status === 'connected'
                 const needsAuth = status?.status === 'needs_auth'
                 const failed = status?.status === 'failed'
-                const isRemote = serverConfig.type === 'remote'
-                const hasOAuthConfig = isRemote && !!serverConfig.oauth
-                const hasOAuthError = failed && isRemote && /oauth|auth.*state/i.test(status.error)
+                const isRemote = serverConfig?.type === 'remote'
+                const hasOAuthConfig = isRemote && !!serverConfig?.oauth
+                const hasOAuthError = failed && isRemote && !!status?.error && /oauth|auth.*state/i.test(status.error)
                 const isOAuthServer = hasOAuthConfig || hasOAuthError || (needsAuth && isRemote)
                 const connectedWithOAuth = isOAuthServer && isConnected
                 const showAuthButton = needsAuth || (isOAuthServer && failed)
@@ -239,7 +241,7 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
                         {getStatusBadge(status)}
                       </div>
                       <p className="text-xs text-muted-foreground truncate">
-                        {getDescription(serverConfig)}
+                        {serverConfig ? getDescription(serverConfig) : 'MCP server'}
                       </p>
                       {failed && status.status === 'failed' && (
                         <div className="flex items-center gap-1 mt-1 text-xs text-red-500">

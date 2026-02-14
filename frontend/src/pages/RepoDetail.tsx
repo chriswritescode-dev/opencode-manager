@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { getRepo, resetRepoPermissions } from "@/api/repos";
+import { settingsApi } from "@/api/settings";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
@@ -10,7 +11,7 @@ import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useSSE } from "@/hooks/useSSE";
-import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
+import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSwipeBack } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -58,13 +59,16 @@ export function RepoDetail() {
     enabled: !!repoId,
   });
 
+  const configName = repo?.openCodeConfigName || 'default'
   const { data: settings } = useQuery({
-    queryKey: ["opencode-config"],
+    queryKey: ["opencode-config", configName],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
-      if (!response.ok) throw new Error("Failed to fetch config");
-      return response.json();
+      if (configName === 'default') {
+        return settingsApi.getDefaultOpenCodeConfig()
+      }
+      return settingsApi.getOpenCodeConfigByName(configName)
     },
+    enabled: !!repo,
   });
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
@@ -244,7 +248,7 @@ export function RepoDetail() {
       <RepoMcpDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
-        config={settings}
+        config={settings ? { content: settings.content } : null}
         directory={repoDirectory}
       />
 

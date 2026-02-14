@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
+import { settingsApi } from "@/api/settings";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { X, VolumeX, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal } from "lucide-react";
@@ -15,7 +16,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating, useCreateSession } from "@/hooks/useOpenCode";
-import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
+import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
@@ -80,14 +81,17 @@ export function SessionDetail() {
     enabled: !!repoId,
   });
 
+  const configName = repo?.openCodeConfigName || 'default'
   const { data: settings } = useQuery({
-    queryKey: ["opencode-config"],
+    queryKey: ["opencode-config", configName],
     queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
-      if (!response.ok) throw new Error("Failed to fetch config");
-      return response.json();
+      if (configName === 'default') {
+        return settingsApi.getDefaultOpenCodeConfig()
+      }
+      return settingsApi.getOpenCodeConfigByName(configName)
     },
-  });
+    enabled: !!repo,
+  })
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
@@ -531,7 +535,7 @@ export function SessionDetail() {
       <RepoMcpDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
-        config={settings}
+        config={settings ? { content: settings.content } : null}
         directory={repoDirectory}
       />
 

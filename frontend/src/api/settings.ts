@@ -108,6 +108,17 @@ export const settingsApi = {
     }
   },
 
+  getOpenCodeConfigByName: async (configName: string, userId = 'default'): Promise<OpenCodeConfig | null> => {
+    try {
+      return fetchWrapper(
+        `${API_BASE_URL}/api/settings/opencode-configs/${encodeURIComponent(configName)}`,
+        { params: { userId } }
+      )
+    } catch {
+      return null
+    }
+  },
+
   restartOpenCodeServer: async (): Promise<{ success: boolean; message: string; details?: string }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-restart`, {
       method: 'POST',
