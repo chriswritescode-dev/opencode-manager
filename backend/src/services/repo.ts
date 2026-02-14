@@ -710,30 +710,6 @@ function normalizeRepoUrl(url: string, preserveSSH: boolean = false): { url: str
   }
 }
 
-export async function cleanupOrphanedDirectories(database: Database): Promise<void> {
-  try {
-    const reposPath = getReposPath()
-    await ensureDirectoryExists(reposPath)
-
-    const dirResult = await executeCommand(['ls', '-1'], reposPath).catch(() => '')
-    const directories = dirResult.split('\n').filter(d => d.trim())
-
-    if (directories.length === 0) {
-      return
-    }
-
-    const allRepos = db.listRepos(database)
-    const trackedPaths = new Set(allRepos.map(r => r.localPath.split('/').pop()))
-    const orphanedDirs = directories.filter(dir => !trackedPaths.has(dir))
-
-    for (const dir of orphanedDirs) {
-      await executeCommand(['rm', '-rf', dir], reposPath).catch(() => {})
-    }
-  } catch {
-    // Cleanup is best-effort
-  }
-}
-
 async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>): Promise<void> {
   const currentBranch = await safeGetCurrentBranch(baseRepoPath, env)
   if (currentBranch === branch) {
