@@ -3,7 +3,6 @@ import { Pencil } from 'lucide-react'
 import { MessagePart } from './MessagePart'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
-import { SessionTodoDisplay } from './SessionTodoDisplay'
 import { MessageError } from './MessageError'
 import type { MessageWithParts } from '@/api/types'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
@@ -165,9 +164,6 @@ const state = latestTodoPart.state
             key={msg.info.id}
             className="flex flex-col group"
           >
-            {msg.info.role === 'assistant' && streaming && (
-              <SessionTodoDisplay sessionID={sessionID} />
-            )}
             <div
               className={`w-full rounded-lg p-1.5 ${
                 msg.info.role === 'user'

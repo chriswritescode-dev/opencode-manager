@@ -6,11 +6,9 @@ import { usePermissions, useQuestions } from '@/contexts/EventContext'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
-import { TodoListDisplay } from './TodoListDisplay'
 import { getToolSpecificRender } from './FileToolRender'
 
 type ToolPart = components['schemas']['ToolPart']
-type Todo = components['schemas']['Todo']
 
 interface ToolCallPartProps {
   part: ToolPart
@@ -56,17 +54,6 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   }
 
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
-}
-
-function parseTodoOutput(output: string): Todo[] | null {
-  try {
-    const parsed = JSON.parse(output)
-    if (Array.isArray(parsed)) return parsed
-    if (parsed && Array.isArray(parsed.todos)) return parsed.todos
-    return null
-  } catch {
-    return null
-  }
 }
 
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
@@ -152,36 +139,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     }
   }
 
-  const getTodoData = () => {
-    if (part.tool !== 'todowrite' && part.tool !== 'todoread') {
-      return null
-    }
-
-    const state = part.state
-
-    if (state.status === 'completed') {
-      if (state.metadata?.todos && Array.isArray(state.metadata.todos)) {
-        return state.metadata.todos as Todo[]
-      }
-      if (state.output) {
-        const parsed = parseTodoOutput(state.output)
-        if (parsed) return parsed
-      }
-    }
-
-    if (state.status === 'running' && state.metadata?.todos && Array.isArray(state.metadata.todos)) {
-      return state.metadata.todos as Todo[]
-    }
-
-    if (state.input?.todos && Array.isArray(state.input.todos)) {
-      return state.input.todos as Todo[]
-    }
-
-    return null
-  }
-
   const previewText = getPreviewText()
-  const todoData = getTodoData()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
 
   if (isTodoTool) {
@@ -196,14 +154,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
     if (part.state.status === 'running') {
       return (
-        <div className="my-2">
-          <TodoListDisplay
-            todos={todoData || []}
-            title="Task List"
-            showCompleted={true}
-            scrollCurrentOnly={true}
-            isLoading={true}
-          />
+        <div className="my-2 text-sm text-muted-foreground flex items-center gap-2">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          <span>Updating task list...</span>
         </div>
       )
     }

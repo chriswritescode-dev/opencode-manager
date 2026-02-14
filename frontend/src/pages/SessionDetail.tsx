@@ -36,6 +36,7 @@ import { useQuestions } from "@/contexts/EventContext";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
+import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 
 const compareMessageIds = (id1: string, id2: string): number => {
   const num1 = parseInt(id1, 10)
@@ -403,6 +404,8 @@ export function SessionDetail() {
           </Header.MobileDropdown>
         </Header.Actions>
       </Header>
+
+      <SessionTodoDisplay sessionID={sessionId} />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28 overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">

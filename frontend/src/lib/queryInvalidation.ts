@@ -7,6 +7,7 @@ export function invalidateConfigCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['health'] })
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
   queryClient.invalidateQueries({ queryKey: ['providers'] })
+  queryClient.invalidateQueries({ queryKey: ['opencode', 'providers'] })
 }
 
 export function invalidateSettingsCaches(queryClient: QueryClient, userId = 'default') {
