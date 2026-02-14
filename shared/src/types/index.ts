@@ -80,3 +80,4 @@ export interface SuccessResponse {
 
 export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
 export type { GitCredential } from '../schemas/settings'
+export type { Skill, CreateSkillRequest, UpdateSkillRequest, SkillsListResponse } from '../schemas/skills'

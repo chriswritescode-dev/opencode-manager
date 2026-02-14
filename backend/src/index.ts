@@ -20,6 +20,7 @@ import { createSSERoutes } from './routes/sse'
 import { createSSHRoutes } from './routes/ssh'
 import { createNotificationRoutes } from './routes/notifications'
 import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
+import { createSkillsRoutes } from './routes/skills'
 import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
@@ -246,6 +247,7 @@ protectedApi.route('/generate-title', createTitleRoutes())
 protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
+protectedApi.route('/skills', createSkillsRoutes(db))
 
 app.route('/api', protectedApi)
 

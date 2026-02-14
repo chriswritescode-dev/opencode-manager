@@ -12,6 +12,7 @@ import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
+import { SkillsSection } from './SkillsSection'
 import { VersionSelectDialog } from './VersionSelectDialog'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -696,6 +697,11 @@ export function OpenCodeConfigManager() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Skills Section */}
+      <div className="border-t border-border pt-6">
+        <SkillsSection />
       </div>
 
       {/* Delete Confirmation Dialog */}
