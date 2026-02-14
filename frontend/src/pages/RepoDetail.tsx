@@ -26,6 +26,7 @@ import {
 import { Plug, FolderOpen, Plus, GitBranch, Loader2, GitCommitHorizontal, ShieldOff } from "lucide-react";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { showToast } from "@/lib/toast";
+import { invalidateConfigCaches } from "@/lib/queryInvalidation";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
@@ -266,6 +267,7 @@ export function RepoDetail() {
                 ...repo,
                 openCodeConfigName: configName,
               });
+              invalidateConfigCaches(queryClient);
             }}
           />
         )}
