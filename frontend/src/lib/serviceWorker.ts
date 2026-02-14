@@ -1,10 +1,8 @@
+import "../sw?worker";
+
 export function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) return;
-
-  navigator.serviceWorker
-    .register("/sw.js", { scope: "/", type: "module" })
-    .then((registration) => registration.update())
-    .catch(() => {});
+  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
 }
 
 export async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {

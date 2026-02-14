@@ -269,6 +269,15 @@ app.all('/api/opencode/*', requireAuth, async (c) => {
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
 
 if (isProduction) {
+  app.use('/*', async (c, next) => {
+    await next()
+    if (c.req.path === '/sw.js') {
+      c.res.headers.set('Cache-Control', 'no-cache, no-store, must-revalidate')
+      c.res.headers.set('Pragma', 'no-cache')
+      c.res.headers.set('Expires', '0')
+    }
+  })
+
   app.use('/*', serveStatic({ root: './frontend/dist' }))
   
   app.get('*', async (c) => {
