@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { useGitStatus, getApiErrorMessage } from '@/api/git'
+import { useGitStatus, GitError, getApiErrorMessage } from '@/api/git'
 
 import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
 import { CommitsTab } from './CommitsTab'
 import { BranchesTab } from './BranchesTab'
+import { GitErrorBanner } from './GitErrorBanner'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -23,7 +24,6 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
-import { showToast } from '@/lib/toast'
 
 interface SourceControlPanelProps {
   repoId: number
@@ -48,15 +48,26 @@ export function SourceControlPanel({
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
   const [selectedFile, setSelectedFile] = useState<{path: string, staged: boolean} | undefined>()
+  const [gitError, setGitError] = useState<{ summary: string; detail?: string } | null>(null)
   const { data: status } = useGitStatus(repoId)
-  const git = useGit(repoId)
   const isMobile = useMobile()
+
+  const handleGitError = (error: unknown) => {
+    if (error instanceof GitError) {
+      setGitError({ summary: error.message, detail: error.detail })
+    } else {
+      setGitError({ summary: getApiErrorMessage(error) })
+    }
+  }
+
+  const git = useGit(repoId, handleGitError)
+
   const handleGitAction = async (action: () => Promise<unknown>) => {
     try {
+      setGitError(null)
       await action()
-    } catch (error: unknown) {
-      const message = getApiErrorMessage(error)
-      showToast.error(message)
+    } catch {
+      // error already handled by useGit's onError -> handleGitError
     }
   }
 
@@ -138,6 +149,10 @@ export function SourceControlPanel({
         </div>
       </div>
 
+      {gitError && (
+        <GitErrorBanner error={gitError} onDismiss={() => setGitError(null)} />
+      )}
+
       <div className="flex border-b border-border flex-shrink-0">
         {tabs.map((tab) => {
           const Icon = tab.icon
@@ -175,6 +190,7 @@ export function SourceControlPanel({
               onFileSelect={(path, staged) => setSelectedFile({ path, staged })}
               selectedFile={selectedFile}
               isMobile={isMobile}
+              onError={handleGitError}
             />
           )}
           {activeTab === 'commits' && (

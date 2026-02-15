@@ -1,8 +1,9 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import * as db from '../db/queries'
 import { logger } from '../utils/logger'
-import { getErrorMessage } from '../utils/error-utils'
+import { parseGitError } from '../utils/git-errors'
 import { GitService } from '../services/git/GitService'
 import type { GitAuthService } from '../services/git-auth'
 import { SettingsService } from '../services/settings'
@@ -27,7 +28,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to get git status:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -63,7 +68,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(resultMap)
     } catch (error: unknown) {
       logger.error('Failed to get batch git status:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -87,7 +96,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(diff)
     } catch (error: unknown) {
       logger.error('Failed to get file diff:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -111,7 +124,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(diffResponse)
     } catch (error: unknown) {
       logger.error('Failed to get full file diff:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -130,7 +147,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to fetch git:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -149,7 +170,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to pull git:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -175,7 +200,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to commit git:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -197,7 +226,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to push git:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -223,7 +256,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to stage files:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -249,7 +286,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to unstage files:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -268,7 +309,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json({ commits })
     } catch (error: unknown) {
       logger.error('Failed to get git log:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -294,7 +339,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to reset to commit:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -313,7 +362,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json({ branches, status })
     } catch (error: unknown) {
       logger.error('Failed to get branches:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 

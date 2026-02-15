@@ -1,53 +1,41 @@
 import { useState } from 'react'
-import { useGitStatus, getApiErrorMessage } from '@/api/git'
+import { useGitStatus } from '@/api/git'
 import { useGit } from '@/hooks/useGit'
 import { GitFlatFileList } from './GitFlatFileList'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
-import { Loader2, GitCommit, FileText, AlertCircle, X } from 'lucide-react'
+import { Loader2, GitCommit, FileText, AlertCircle } from 'lucide-react'
 
 interface ChangesTabProps {
   repoId: number
   onFileSelect: (path: string, staged: boolean) => void
   selectedFile?: {path: string, staged: boolean}
   isMobile: boolean
+  onError?: (error: unknown) => void
 }
 
-export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: ChangesTabProps) {
+export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile, onError }: ChangesTabProps) {
   const { data: status, isLoading, error } = useGitStatus(repoId)
-  const git = useGit(repoId)
+  const git = useGit(repoId, onError)
   const [commitMessage, setCommitMessage] = useState('')
-  const [apiError, setApiError] = useState<string | null>(null)
 
   const stagedFiles = status?.files.filter(f => f.staged) || []
   const unstagedFiles = status?.files.filter(f => !f.staged) || []
   const canCommit = commitMessage.trim() && stagedFiles.length > 0 && !git.commit.isPending
 
-  const handleGitAction = async (action: () => Promise<unknown>) => {
-    try {
-      setApiError(null)
-      await action()
-    } catch (error: unknown) {
-      const message = getApiErrorMessage(error)
-      setApiError(message)
-    }
-  }
-
   const handleStage = (paths: string[]) => {
-    handleGitAction(() => git.stageFiles.mutateAsync(paths))
+    git.stageFiles.mutate(paths)
   }
 
   const handleUnstage = (paths: string[]) => {
-    handleGitAction(() => git.unstageFiles.mutateAsync(paths))
+    git.unstageFiles.mutate(paths)
   }
 
   const handleCommit = () => {
-    handleGitAction(async () => {
-      await git.commit.mutateAsync({ message: commitMessage.trim() })
-      setCommitMessage('')
-    })
+    git.commit.mutate({ message: commitMessage.trim() })
+    setCommitMessage('')
   }
 
   if (isLoading) {
@@ -73,16 +61,6 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
   if (isMobile && selectedFile) {
     return (
       <div className="flex flex-col h-full">
-        {apiError && (
-          <div className="mx-3 mt-3 p-2 rounded border bg-destructive/10 border-destructive/20 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-            <span className="text-sm text-destructive flex-1">{apiError}</span>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setApiError(null)}>
-              <X className="w-3 h-3" />
-            </Button>
-          </div>
-        )}
-
         <Tabs defaultValue="files" className="flex flex-col h-full">
           <TabsList className="flex-shrink-0">
             <TabsTrigger value="files">Files ({stagedFiles.length + unstagedFiles.length})</TabsTrigger>
@@ -164,16 +142,6 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile }: Cha
   } else {
     return (
       <div className="flex flex-col h-full">
-        {apiError && (
-          <div className="mx-3 mt-3 p-2 rounded border bg-destructive/10 border-destructive/20 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-destructive flex-shrink-0" />
-            <span className="text-sm text-destructive flex-1">{apiError}</span>
-            <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setApiError(null)}>
-              <X className="w-3 h-3" />
-            </Button>
-          </div>
-        )}
-
         <div className="flex-1 overflow-y-auto p-3 space-y-4">
           {status.hasChanges ? (
             <>

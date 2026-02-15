@@ -3,8 +3,16 @@ import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, 
 import { createBranch, switchBranch } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 
-export function useGit(repoId: number | undefined) {
+export function useGit(repoId: number | undefined, onError?: (error: unknown) => void) {
   const queryClient = useQueryClient()
+
+  const handleError = (error: unknown) => {
+    if (onError) {
+      onError(error)
+    } else {
+      showToast.error(getApiErrorMessage(error))
+    }
+  }
 
   const invalidateCache = (additionalKeys: string[] = []) => {
     if (!repoId) return
@@ -21,9 +29,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache()
       showToast.success('Fetch completed')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const pull = useMutation({
@@ -35,9 +41,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache()
       showToast.success('Pull completed')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const push = useMutation({
@@ -51,9 +55,7 @@ export function useGit(repoId: number | undefined) {
       keysToInvalidate.forEach(key => queryClient.invalidateQueries({ queryKey: [key, repoId] }))
       showToast.success('Push completed')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const commit = useMutation({
@@ -65,9 +67,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache()
       showToast.success('Commit created')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const stageFilesMutation = useMutation({
@@ -79,9 +79,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache()
       showToast.success('Files staged')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const unstageFilesMutation = useMutation({
@@ -93,9 +91,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache()
       showToast.success('Files unstaged')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const log = useMutation({
@@ -103,9 +99,7 @@ export function useGit(repoId: number | undefined) {
       if (!repoId) throw new Error('No repo ID')
       return fetchGitLog(repoId, limit)
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const diff = useMutation({
@@ -113,9 +107,7 @@ export function useGit(repoId: number | undefined) {
       if (!repoId) throw new Error('No repo ID')
       return fetchGitDiff(repoId, path)
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const createBranchMutation = useMutation({
@@ -127,9 +119,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache(['branches'])
       showToast.success('Branch created')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const switchBranchMutation = useMutation({
@@ -141,9 +131,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache(['branches'])
       showToast.success('Switched to branch')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const resetMutation = useMutation({
@@ -155,9 +143,7 @@ export function useGit(repoId: number | undefined) {
       invalidateCache()
       showToast.success('Reset to commit')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   return {

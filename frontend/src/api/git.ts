@@ -5,23 +5,26 @@ import type { GitStatusResponse, FileDiffResponse, GitCommit } from '@/types/git
 export class GitError extends Error {
   code?: string
   statusCode?: number
+  detail?: string
 
-  constructor(message: string, code?: string, statusCode?: number) {
+  constructor(message: string, code?: string, statusCode?: number, detail?: string) {
     super(message)
     this.name = 'GitError'
     this.code = code
     this.statusCode = statusCode
+    this.detail = detail
   }
 }
 
 interface ApiError {
   error: string
   code?: string
+  detail?: string
 }
 
 async function handleApiError(response: Response): Promise<never> {
   const data: ApiError = await response.json().catch(() => ({ error: 'An error occurred' }))
-  throw new GitError(data.error, data.code, response.status)
+  throw new GitError(data.error, data.code, response.status, data.detail)
 }
 
 export async function fetchGitStatus(repoId: number): Promise<GitStatusResponse> {
