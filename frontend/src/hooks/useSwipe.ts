@@ -62,7 +62,7 @@ export function useSwipe(options: SwipeOptions = {}) {
     const absDeltaX = Math.abs(deltaX)
     const absDeltaY = Math.abs(deltaY)
 
-    if (!state.directionLocked && absDeltaX > 10 || absDeltaY > 10) {
+    if (!state.directionLocked && (absDeltaX > 10 || absDeltaY > 10)) {
       if (absDeltaX > absDeltaY * directionRatio) {
         state.directionLocked = 'horizontal'
       } else {

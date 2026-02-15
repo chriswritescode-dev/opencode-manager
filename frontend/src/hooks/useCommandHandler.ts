@@ -88,7 +88,7 @@ export function useCommandHandler({
               }
             }
           } catch (error) {
-            console.error('Failed to create new session:', error)
+            showToast.error(`Failed to create new session: ${error instanceof Error ? error.message : 'Unknown error'}`)
           }
           break
           
@@ -147,7 +147,6 @@ export function useCommandHandler({
           })
       }
     } catch (error) {
-      console.error('Failed to execute command:', error)
       showToast.error(`Command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)
       setSessionStatus(sessionID, { type: 'idle' })
     } finally {

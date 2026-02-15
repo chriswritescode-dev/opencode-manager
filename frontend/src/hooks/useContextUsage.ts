@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useMessages } from './useOpenCode'
 import { useQuery } from '@tanstack/react-query'
 import { useModelSelection } from './useModelSelection'
+import { fetchWrapper } from '@/api/fetchWrapper'
 
 interface ContextUsage {
   totalTokens: number
@@ -33,11 +34,7 @@ interface ProvidersResponse {
 }
 
 async function fetchProviders(opcodeUrl: string): Promise<ProvidersResponse> {
-  const response = await fetch(`${opcodeUrl}/config/providers`)
-  if (!response.ok) {
-    throw new Error('Failed to fetch providers')
-  }
-  return response.json()
+  return fetchWrapper<ProvidersResponse>(`${opcodeUrl}/config/providers`)
 }
 
 export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string): ContextUsage => {
@@ -47,7 +44,10 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
 
   const { data: providersData } = useQuery({
     queryKey: ['providers', opcodeUrl],
-    queryFn: () => fetchProviders(opcodeUrl!),
+    queryFn: () => {
+      if (!opcodeUrl) throw new Error('opcodeUrl is required')
+      return fetchProviders(opcodeUrl)
+    },
     enabled: !!opcodeUrl,
     staleTime: 5 * 60 * 1000,
   })

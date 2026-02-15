@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useEffect, useCallback, useState } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { API_BASE_URL } from "../config";
+import { fetchWrapper } from "../api/fetchWrapper";
 import type {
   MessageWithParts,
   MessageListResponse,
@@ -225,28 +226,26 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         notifyTitleGeneratingListeners();
 
         try {
-          const response = await fetch(`${API_BASE_URL}/api/generate-title`, {
+          await fetchWrapper(`${API_BASE_URL}/api/generate-title`, {
             method: "POST",
             headers: { "Content-Type": "application/json", directory: directory || "" },
             body: JSON.stringify({ text: userPromptText, sessionID }),
           });
 
-          if (response.ok) {
-            hasInitializedRef.current.add(sessionID);
-            queryClient.invalidateQueries({
-              queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],
-            });
-            queryClient.invalidateQueries({
-              queryKey: ["opencode", "sessions", opcodeUrl, directory],
-            });
-          }
+          hasInitializedRef.current.add(sessionID);
+          queryClient.invalidateQueries({
+            queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],
+          });
+          queryClient.invalidateQueries({
+            queryKey: ["opencode", "sessions", opcodeUrl, directory],
+          });
         } finally {
           titleGeneratingSessionsState.delete(sessionID);
           notifyTitleGeneratingListeners();
         }
       }
-    } catch (error) {
-      console.error("Failed to generate session title:", error);
+    } catch {
+      // Silently fail - title generation is a background task
     }
   };
 

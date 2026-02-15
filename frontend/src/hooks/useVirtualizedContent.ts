@@ -121,13 +121,13 @@ export function useVirtualizedContent({
     const ranges: Array<{ startLine: number; endLine: number; content: string }> = []
 
     let rangeStart = sortedLineNums[0]
-    let rangeLines: string[] = [editedLines.get(rangeStart)!]
+    let rangeLines: string[] = [editedLines.get(rangeStart) ?? '']
     let lastLine = rangeStart
 
     for (let i = 1; i < sortedLineNums.length; i++) {
       const lineNum = sortedLineNums[i]
       if (lineNum === lastLine + 1) {
-        rangeLines.push(editedLines.get(lineNum)!)
+        rangeLines.push(editedLines.get(lineNum) ?? '')
         lastLine = lineNum
       } else {
         ranges.push({
@@ -136,7 +136,7 @@ export function useVirtualizedContent({
           content: rangeLines.join('\n'),
         })
         rangeStart = lineNum
-        rangeLines = [editedLines.get(lineNum)!]
+        rangeLines = [editedLines.get(lineNum) ?? '']
         lastLine = lineNum
       }
     }

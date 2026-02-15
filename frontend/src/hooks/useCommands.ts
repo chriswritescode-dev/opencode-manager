@@ -172,8 +172,7 @@ export function useCommands(opcodeUrl: string | null) {
           index === self.findIndex((c) => c.name === command.name)
         )
         setCommands(uniqueCommands)
-      } catch (err) {
-        console.error('Failed to fetch commands:', err)
+      } catch {
         setError('Failed to load commands')
         setCommands(BUILTIN_COMMANDS)
       } finally {

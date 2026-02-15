@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { fetchWrapper } from '@/api/fetchWrapper'
 
 export interface FileSearchResult {
   files: string[]
@@ -30,14 +31,11 @@ export function useFileSearch(
         params.append('directory', directory)
       }
       
-      const response = await fetch(
+      const data = await fetchWrapper<string[]>(
         `${opcodeUrl}/find/file?${params.toString()}`
       )
       
-      if (!response.ok) throw new Error('File search failed')
-      
-      const data = await response.json()
-      return data as string[]
+      return data
     },
     enabled: enabled && !!opcodeUrl && !!debouncedQuery,
     staleTime: 60000,

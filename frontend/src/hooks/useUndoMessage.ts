@@ -10,6 +10,10 @@ interface UseUndoMessageOptions {
   onSuccess?: (restoredPrompt: string) => void
 }
 
+interface UndoMessageContext {
+  previousMessages?: MessageListResponse
+}
+
 export function useUndoMessage({ 
   opcodeUrl, 
   sessionId, 
@@ -18,7 +22,7 @@ export function useUndoMessage({
 }: UseUndoMessageOptions) {
   const queryClient = useQueryClient()
 
-  return useMutation({
+  return useMutation<string, Error, { messageID: string; messageContent: string }, UndoMessageContext>({
     mutationFn: async ({ messageID, messageContent }: { messageID: string, messageContent: string }) => {
       if (!opcodeUrl) throw new Error('OpenCode URL not available')
       
@@ -43,13 +47,11 @@ export function useUndoMessage({
       
       return { previousMessages }
     },
-    onError: (error, _, context) => {
-      console.error('Failed to undo message:', error)
-      
-      if (context?.previousMessages) {
+    onError: (_error, _context) => {
+      if (_context?.previousMessages) {
         queryClient.setQueryData(
           ['opencode', 'messages', opcodeUrl, sessionId, directory],
-          context.previousMessages
+          _context.previousMessages
         )
       }
       

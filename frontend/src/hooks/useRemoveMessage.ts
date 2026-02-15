@@ -10,10 +10,14 @@ interface UseRemoveMessageOptions {
   directory?: string
 }
 
+interface RemoveMessageContext {
+  previousMessages?: MessageListResponse
+}
+
 export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveMessageOptions) {
   const queryClient = useQueryClient()
 
-  return useMutation({
+  return useMutation<unknown, Error, { messageID: string; partID?: string }, RemoveMessageContext>({
     mutationFn: async ({ messageID, partID }: { messageID: string, partID?: string }) => {
       if (!opcodeUrl) throw new Error('OpenCode URL not available')
       
@@ -37,13 +41,11 @@ export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveM
       
       return { previousMessages }
     },
-    onError: (error, _, context) => {
-      console.error('Failed to remove message:', error)
-      
-      if (context?.previousMessages) {
+    onError: (_error, _context) => {
+      if (_context?.previousMessages) {
         queryClient.setQueryData(
           ['opencode', 'messages', opcodeUrl, sessionId, directory],
-          context.previousMessages
+          _context.previousMessages
         )
       }
       
