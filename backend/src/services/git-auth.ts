@@ -16,10 +16,10 @@ export class GitAuthService {
   private sshPassphrase: string | null = null
   private sshPort: string | null = null
 
-  initialize(ipcServer: IPCServer | undefined, database: Database): void {
+  async initialize(ipcServer: IPCServer | undefined, database: Database): Promise<void> {
     this.askpassHandler = new AskpassHandler(ipcServer, database)
     this.sshHostKeyHandler = new SSHHostKeyHandler(database, 120_000)
-    this.sshHostKeyHandler.initialize()
+    await this.sshHostKeyHandler.initialize()
 
     if (ipcServer) {
       const handlerPath = 'ssh-host-key'

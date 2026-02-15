@@ -119,8 +119,8 @@ export class SSHHostKeyHandler implements IPCHandler {
     const result = await executeCommand(
       ['ssh-keyscan', '-t', 'ed25519,rsa,ecdsa', ...portArgs, host],
       { silent: true, ignoreExitCode: true }
-    )
-    const output = (result as unknown as { stdout: string }).stdout
+    ) as string | { exitCode: number; stdout: string; stderr: string }
+    const output = typeof result === 'string' ? result : result.stdout
     const bracketedHost = port && port !== '22' ? `[${host}]:${port}` : host
     const lines = output.trim().split('\n')
     for (const line of lines) {

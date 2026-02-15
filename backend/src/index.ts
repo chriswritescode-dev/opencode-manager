@@ -189,7 +189,7 @@ try {
   settingsService.initializeLastKnownGoodConfig()
 
   ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
-  gitAuthService.initialize(ipcServer, db)
+  await gitAuthService.initialize(ipcServer, db)
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
   opencodeServerManager.setDatabase(db)
@@ -340,7 +340,7 @@ const shutdown = async (signal: string) => {
     sseAggregator.shutdown()
     logger.info('SSE Aggregator stopped')
     if (ipcServer) {
-      ipcServer.dispose()
+      await ipcServer.dispose()
       logger.info('Git IPC server stopped')
     }
     await opencodeServerManager.stop()
