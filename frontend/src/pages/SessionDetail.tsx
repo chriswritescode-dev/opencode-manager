@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating, useCreateSession } from "@/hooks/useOpenCode";
-import { OPENCODE_API_ENDPOINT, API_BASE_URL } from "@/config";
+import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
@@ -78,15 +78,6 @@ export function SessionDetail() {
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
     enabled: !!repoId,
-  });
-
-  const { data: settings } = useQuery({
-    queryKey: ["opencode-config"],
-    queryFn: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/settings/opencode-configs/default`);
-      if (!response.ok) throw new Error("Failed to fetch config");
-      return response.json();
-    },
   });
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
@@ -531,7 +522,6 @@ export function SessionDetail() {
       <RepoMcpDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
-        config={settings}
         directory={repoDirectory}
       />
 
