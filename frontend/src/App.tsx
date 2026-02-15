@@ -1,6 +1,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider, Outlet } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
@@ -61,7 +62,18 @@ function PermissionDialogWrapper() {
 }
 
 function AppShell() {
+  const navigate = useNavigate()
   useTheme()
+
+  useEffect(() => {
+    const channel = new BroadcastChannel('notification-click')
+    channel.onmessage = (event: MessageEvent) => {
+      if (event.data?.url) {
+        navigate(event.data.url)
+      }
+    }
+    return () => channel.close()
+  }, [navigate])
 
   return (
     <AuthProvider>

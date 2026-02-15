@@ -167,8 +167,8 @@ export const SessionList = ({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
-        <div className="flex flex-col gap-2">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+        <div className="flex flex-col gap-4">
           {filteredSessions.length === 0 ? (
             <div className="text-sm text-muted-foreground text-center py-4">
               No sessions found

@@ -64,6 +64,8 @@ export const PushNotificationPayloadSchema = z.object({
       eventType: z.string(),
       sessionId: z.string().optional(),
       directory: z.string().optional(),
+      repoId: z.number().optional(),
+      repoName: z.string().optional(),
     })
     .optional(),
 });

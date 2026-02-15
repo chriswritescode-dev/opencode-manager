@@ -25,6 +25,8 @@ interface PushNotificationData {
     eventType: string;
     sessionId?: string;
     directory?: string;
+    repoId?: number;
+    repoName?: string;
   };
 }
 
@@ -65,9 +67,10 @@ self.addEventListener("notificationclick", (event) => {
       .then((clientList) => {
         for (const client of clientList) {
           if (new URL(client.url).origin === self.location.origin) {
-            (client as WindowClient).focus();
-            (client as WindowClient).navigate(url);
-            return;
+            const channel = new BroadcastChannel("notification-click");
+            channel.postMessage({ url });
+            channel.close();
+            return (client as WindowClient).focus();
           }
         }
         return self.clients.openWindow(url);

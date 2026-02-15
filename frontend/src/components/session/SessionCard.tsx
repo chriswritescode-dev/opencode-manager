@@ -1,10 +1,11 @@
-import { useState, useRef } from "react";
+import { useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { MiniScanner } from "@/components/ui/mini-scanner";
 import { Trash2, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
+import { useSwipe } from "@/hooks/useSwipe";
 
 interface SessionCardProps {
   session: Session;
@@ -25,57 +26,26 @@ export const SessionCard = ({
   onToggleSelection,
   onDelete,
 }: SessionCardProps) => {
-  const [swipeOffset, setSwipeOffset] = useState(0);
-  const [isSwipeOpen, setIsSwipeOpen] = useState(false);
-  const touchStartX = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const { bind, swipeOffset, isOpen, isSwipingBack, close, swipeStyles } = useSwipe();
 
-  const handleTouchStart = (e: React.TouchEvent) => {
-    touchStartX.current = e.touches[0].clientX;
-  };
-
-  const handleTouchMove = (e: React.TouchEvent) => {
-    if (touchStartX.current === null) return;
-    
-    const currentX = e.touches[0].clientX;
-    const diff = touchStartX.current - currentX;
-    
-    if (diff > 0) {
-      const newOffset = Math.min(diff, 80);
-      setSwipeOffset(newOffset);
-    } else if (diff < 0 && isSwipeOpen) {
-      const newOffset = Math.max(0, 80 + diff);
-      setSwipeOffset(newOffset);
+  useEffect(() => {
+    if (cardRef.current) {
+      return bind(cardRef.current);
     }
-  };
-
-  const handleTouchEnd = () => {
-    if (swipeOffset > 50) {
-      setIsSwipeOpen(true);
-      setSwipeOffset(80);
-    } else if (swipeOffset < 30) {
-      setIsSwipeOpen(false);
-      setSwipeOffset(0);
-    }
-    touchStartX.current = null;
-  };
-
-  const closeSwipe = () => {
-    setSwipeOffset(0);
-    setIsSwipeOpen(false);
-  };
+  }, [bind]);
 
   const handleDeleteClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     onDelete(e);
-    closeSwipe();
+    close();
   };
 
   return (
-    <div className="relative" onClick={closeSwipe}>
+    <div className="relative" onClick={close}>
       <div
         className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-red-600 flex items-center justify-center rounded-r-lg transition-opacity ${
-          swipeOffset > 20 || isSwipeOpen ? "opacity-100" : "opacity-0"
+          !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0"
         }`}
       >
         <button
@@ -85,17 +55,10 @@ export const SessionCard = ({
           <Trash2 className="w-5 h-5" />
         </button>
       </div>
-      <div
-        ref={cardRef}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        style={{ transform: `translateX(-${swipeOffset}px)` }}
-        className="transition-transform"
-      >
+      <div ref={cardRef} style={swipeStyles}>
         <Card
           className={`p-2 cursor-pointer transition-all overflow-hidden ${
-            isSwipeOpen
+            isOpen
               ? "rounded-none"
               : "rounded-r-lg"
           } ${
@@ -106,7 +69,7 @@ export const SessionCard = ({
                 : "bg-card border-border hover:bg-accent hover:border-border"
           } hover:shadow-lg`}
           onClick={() => {
-            if (!isSwipeOpen) {
+            if (!isOpen) {
               onSelect(session.id);
             }
           }}

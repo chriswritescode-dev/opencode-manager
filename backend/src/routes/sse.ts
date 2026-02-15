@@ -94,7 +94,7 @@ export function createSSERoutes() {
     if (!result.success) {
       return c.json({ success: false, error: 'Invalid request', details: result.error.issues }, 400)
     }
-    const success = sseAggregator.setClientVisibility(result.data.clientId, result.data.visible)
+    const success = sseAggregator.setClientVisibility(result.data.clientId, result.data.visible, result.data.activeSessionId ?? null)
     if (!success) {
       return c.json({ success: false, error: 'Client not found' }, 404)
     }

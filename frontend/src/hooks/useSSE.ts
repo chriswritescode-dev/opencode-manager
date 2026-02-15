@@ -43,6 +43,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const client = useOpenCodeClient(opcodeUrl, directory)
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
+  const sessionIdRef = useRef(currentSessionId)
+  sessionIdRef.current = currentSessionId
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isReconnecting, setIsReconnecting] = useState(false)
@@ -363,7 +365,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       if (connected) {
         setError(null)
         fetchInitialData()
-        sseManager.reportVisibility(document.visibilityState === 'visible')
+        sseManager.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {
         setError('Connection lost. Reconnecting...')
       }
@@ -378,7 +380,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
     }
 
     const handleVisibilityChange = () => {
-      sseManager.reportVisibility(document.visibilityState === 'visible')
+      sseManager.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -394,6 +396,12 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       directoryCleanup?.()
     }
   }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData])
+
+  useEffect(() => {
+    if (isConnected && document.visibilityState === 'visible') {
+      sseManager.reportVisibility(true, currentSessionId)
+    }
+  }, [currentSessionId, isConnected])
 
   return { isConnected, error, isReconnecting }
 }

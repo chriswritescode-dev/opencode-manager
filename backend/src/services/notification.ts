@@ -191,10 +191,6 @@ export class NotificationService {
     return rows.map((r) => r.user_id);
   }
 
-  private hasActiveSSEClients(): boolean {
-    return sseAggregator.hasVisibleClients();
-  }
-
   async handleSSEEvent(
     _directory: string,
     event: SSEEvent
@@ -202,7 +198,8 @@ export class NotificationService {
     const config = EVENT_CONFIG[event.type];
     if (!config) return;
 
-    if (this.hasActiveSSEClients()) return;
+    const sessionId = event.properties.sessionID as string | undefined;
+    if (sessionId && sseAggregator.isSessionBeingViewed(sessionId)) return;
 
     if (!this.isConfigured()) return;
 
@@ -216,27 +213,38 @@ export class NotificationService {
       if (!notifPrefs.enabled) continue;
       if (!notifPrefs.events[config.preferencesKey]) continue;
 
-      const sessionId = event.properties.sessionID as string | undefined;
-
       let notificationUrl = "/";
-      if (sessionId && _directory) {
+      let repoName = "";
+      let repoId: number | undefined;
+
+      if (_directory) {
         const reposBasePath = getReposPath();
         const localPath = path.relative(reposBasePath, _directory);
         const repo = getRepoByLocalPath(this.db, localPath);
-        
+
         if (repo) {
-          notificationUrl = `/repos/${repo.id}/sessions/${sessionId}`;
+          repoId = repo.id;
+          repoName = path.basename(repo.localPath);
+          if (sessionId) {
+            notificationUrl = `/repos/${repo.id}/sessions/${sessionId}`;
+          } else {
+            notificationUrl = `/repos/${repo.id}`;
+          }
         }
       }
 
+      const body = config.bodyFn(event.properties);
+
       const payload: PushNotificationPayload = {
-        title: config.title,
-        body: config.bodyFn(event.properties),
+        title: repoName ? `[${repoName.toUpperCase()}] ${config.title}` : config.title,
+        body: body,
         tag: `${event.type}-${sessionId ?? "global"}`,
         data: {
           eventType: event.type,
           sessionId,
           directory: _directory,
+          repoId,
+          repoName,
           url: notificationUrl,
         },
       };

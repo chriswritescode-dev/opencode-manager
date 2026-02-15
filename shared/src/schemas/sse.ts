@@ -8,6 +8,7 @@ export const SSESubscribeSchema = z.object({
 export const SSEVisibilitySchema = z.object({
   clientId: z.string().min(1),
   visible: z.boolean(),
+  activeSessionId: z.string().nullable().optional(),
 });
 
 export type SSESubscribeRequest = z.infer<typeof SSESubscribeSchema>;
