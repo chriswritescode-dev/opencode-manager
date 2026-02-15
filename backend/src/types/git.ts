@@ -31,6 +31,7 @@ export interface FileDiffResponse {
   additions: number
   deletions: number
   isBinary: boolean
+  truncated?: boolean
 }
 
 export interface GitDiffOptions {

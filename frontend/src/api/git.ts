@@ -63,6 +63,17 @@ export async function fetchFileDiff(repoId: number, path: string, includeStaged?
   return response.json()
 }
 
+export async function fetchCommitFileDiff(repoId: number, commitHash: string, path: string): Promise<FileDiffResponse> {
+  const params = new URLSearchParams({ path })
+  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${commitHash}/diff?${params}`)
+
+  if (!response.ok) {
+    await handleApiError(response)
+  }
+
+  return response.json()
+}
+
 export async function fetchGitDiff(repoId: number, path: string): Promise<{ diff: string }> {
   const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff?path=${encodeURIComponent(path)}`)
 
@@ -227,6 +238,14 @@ export function useFileDiff(repoId: number | undefined, path: string | undefined
     queryKey: ['fileDiff', repoId, path, includeStaged],
     queryFn: () => (repoId && path) ? fetchFileDiff(repoId, path, includeStaged) : Promise.reject(new Error('Missing params')),
     enabled: !!repoId && !!path,
+  })
+}
+
+export function useCommitFileDiff(repoId: number | undefined, commitHash: string | undefined, path: string | undefined) {
+  return useQuery({
+    queryKey: ['commitFileDiff', repoId, commitHash, path],
+    queryFn: () => (repoId && commitHash && path) ? fetchCommitFileDiff(repoId, commitHash, path) : Promise.reject(new Error('Missing params')),
+    enabled: !!repoId && !!commitHash && !!path,
   })
 }
 

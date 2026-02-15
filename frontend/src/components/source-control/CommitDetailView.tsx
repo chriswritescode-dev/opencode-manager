@@ -41,8 +41,13 @@ export function CommitDetailView({ repoId, commitHash, onBack, onFileSelect, sel
     path: f.path,
     status: f.status,
     staged: false,
-    oldPath: f.oldPath
+    oldPath: f.oldPath,
+    additions: f.additions,
+    deletions: f.deletions
   }))
+
+  const totalAdditions = commit.files.reduce((sum, f) => sum + (f.additions || 0), 0)
+  const totalDeletions = commit.files.reduce((sum, f) => sum + (f.deletions || 0), 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -75,12 +80,19 @@ export function CommitDetailView({ repoId, commitHash, onBack, onFileSelect, sel
             <div className="flex items-center gap-2 mb-3">
               <GitCommit className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm font-medium">Changed Files ({commit.files.length})</span>
+              {(totalAdditions > 0 || totalDeletions > 0) && (
+                <div className="flex items-center gap-1 text-xs">
+                  {totalAdditions > 0 && <span className="text-green-500">+{totalAdditions}</span>}
+                  {totalDeletions > 0 && <span className="text-red-500">-{totalDeletions}</span>}
+                </div>
+              )}
             </div>
             <GitFlatFileList
               files={commitFiles}
               staged={false}
-              onSelect={(path) => onFileSelect(path, false)}
+              onSelect={(path) => onFileSelect(path)}
               selectedFile={selectedFile}
+              readOnly={true}
             />
           </div>
         </div>
@@ -92,6 +104,7 @@ export function CommitDetailView({ repoId, commitHash, onBack, onFileSelect, sel
                 repoId={repoId}
                 filePath={selectedFile}
                 includeStaged={false}
+                commitHash={commitHash}
                 onBack={() => onFileSelect('')}
               />
             </div>

@@ -5,6 +5,8 @@ export interface GitFileStatus {
   status: GitFileStatusType
   staged: boolean
   oldPath?: string
+  additions?: number
+  deletions?: number
 }
 
 export interface GitCommit {

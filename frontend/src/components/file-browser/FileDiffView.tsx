@@ -1,4 +1,4 @@
-import { useFileDiff } from "@/api/git";
+import { useFileDiff, useCommitFileDiff } from "@/api/git";
 import {
   Loader2,
   FileText,
@@ -21,6 +21,7 @@ interface FileDiffViewProps {
   repoId: number;
   filePath: string;
   includeStaged?: boolean;
+  commitHash?: string;
   onBack?: () => void;
   onOpenFile?: (path: string, lineNumber?: number) => void;
   isMobile?: boolean;
@@ -215,11 +216,14 @@ export function FileDiffView({
   repoId,
   filePath,
   includeStaged,
+  commitHash,
   onBack,
   onOpenFile,
   isMobile = false,
 }: FileDiffViewProps) {
-  const { data: diffData, isLoading, error } = useFileDiff(repoId, filePath, includeStaged);
+  const workingDiff = useFileDiff(repoId, filePath, includeStaged);
+  const commitDiff = useCommitFileDiff(repoId, commitHash, filePath);
+  const { data: diffData, isLoading, error } = commitHash ? commitDiff : workingDiff;
 
   const fileName = filePath.split("/").pop() || filePath;
   const dirPath = filePath.includes("/")

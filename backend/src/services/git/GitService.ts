@@ -10,6 +10,7 @@ import type { Database } from 'bun:sqlite'
 import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
 import type { GitCredential } from '@opencode-manager/shared'
 import path from 'path'
+import fs from 'fs/promises'
 
 export class GitService {
   constructor(
@@ -283,15 +284,44 @@ export class GitService {
         return ''
       }
 
-      let args: string[]
       if (staged) {
-        args = ['git', '-C', repoPath, 'restore', '--staged', '--worktree', '--source', 'HEAD', '--', ...paths]
-      } else {
-        args = ['git', '-C', repoPath, 'checkout', '--', ...paths]
+        const args = ['git', '-C', repoPath, 'restore', '--staged', '--worktree', '--source', 'HEAD', '--', ...paths]
+        return await executeCommand(args, { env })
       }
 
-      const result = await executeCommand(args, { env })
-      return result
+      const statusOutput = await executeCommand(
+        ['git', '-C', repoPath, 'status', '--porcelain', '-u', '--', ...paths],
+        { env }
+      )
+
+      const untrackedPaths: string[] = []
+      const trackedPaths: string[] = []
+
+      for (const line of statusOutput.split('\n')) {
+        if (!line.trim()) continue
+        const statusCode = line.substring(0, 2)
+        const filePath = line.substring(3).trim()
+        
+        if (statusCode === '??') {
+          untrackedPaths.push(filePath)
+        } else {
+          trackedPaths.push(filePath)
+        }
+      }
+
+      const results: string[] = []
+
+      if (trackedPaths.length > 0) {
+        const args = ['git', '-C', repoPath, 'checkout', '--', ...trackedPaths]
+        results.push(await executeCommand(args, { env }))
+      }
+
+      for (const untrackedPath of untrackedPaths) {
+        const fullPath = path.join(repoPath, untrackedPath)
+        await fs.unlink(fullPath).catch(() => {})
+      }
+
+      return results.join('\n')
     } catch (error: unknown) {
       logger.error(`Failed to discard changes for repo ${repoId}:`, error)
       throw error
@@ -326,23 +356,28 @@ export class GitService {
       }
 
       const filesOutput = await executeCommand(
+        ['git', '-C', repoPath, 'show', '--name-status', '--format=', hash],
+        { env }
+      )
+
+      const numstatOutput = await executeCommand(
         ['git', '-C', repoPath, 'show', '--numstat', '--format=', hash],
         { env }
       )
 
       const files: CommitFile[] = []
       const lines = filesOutput.trim().split('\n')
+      const numstatLines = numstatOutput.trim().split('\n')
 
-      let currentFile: CommitFile | null = null
-      for (const line of lines) {
-        if (!line.trim()) continue
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        if (!line?.trim()) continue
         
         const parts = line.split('\t')
-        if (parts.length >= 3 && parts[0].match(/^[AMDRC]/) && parts[1] && parts[2]) {
-          if (currentFile) files.push(currentFile)
+        if (parts.length >= 2 && parts[0] && parts[0].match(/^[AMDRC]/)) {
           const statusCode = parts[0]
-          const fromPath = parts[1]
-          const toPath = parts[2]
+          const fromPath = parts[1] || ''
+          const toPath = parts[2] || parts[1] || ''
           const isRename = statusCode === 'R'
           const isCopy = statusCode === 'C'
           
@@ -355,19 +390,26 @@ export class GitService {
             case 'M': status = 'modified'; break
           }
           
-          currentFile = {
+          let additions = 0
+          let deletions = 0
+          const numstatLine = numstatLines[i]
+          if (numstatLine) {
+            const numstatParts = numstatLine.split('\t')
+            if (numstatParts.length >= 2 && numstatParts[0]?.match(/^\d+$/) && numstatParts[1]?.match(/^\d+$/)) {
+              additions = parseInt(numstatParts[0], 10)
+              deletions = parseInt(numstatParts[1], 10)
+            }
+          }
+          
+          files.push({
             path: toPath,
             status,
             oldPath: isRename || isCopy ? fromPath : undefined,
-            additions: 0,
-            deletions: 0
-          }
-        } else if (currentFile && parts.length === 2 && parts[0].match(/^\d+$/) && parts[1].match(/^\d+$/)) {
-          currentFile.additions = parseInt(parts[0], 10)
-          currentFile.deletions = parseInt(parts[1], 10)
+            additions,
+            deletions
+          })
         }
       }
-      if (currentFile) files.push(currentFile)
 
       return {
         hash: commitHash,
@@ -395,7 +437,7 @@ export class GitService {
       const env = this.gitAuthService.getGitEnvironment(true)
 
       const diff = await executeCommand(
-        ['git', '-C', repoPath, 'show', '--no-stat', '--format=', `${hash} -- ${filePath}`],
+        ['git', '-C', repoPath, 'show', '--format=', hash, '--', filePath],
         { env }
       )
 
@@ -806,6 +848,7 @@ export class GitService {
     let additions = 0
     let deletions = 0
     let isBinary = false
+    const MAX_DIFF_SIZE = 500 * 1024
 
     if (typeof diff === 'string') {
       if (diff.includes('Binary files') || diff.includes('GIT binary patch')) {
@@ -819,13 +862,21 @@ export class GitService {
       }
     }
 
+    let diffOutput = typeof diff === 'string' ? diff : ''
+    let truncated = false
+    if (diffOutput.length > MAX_DIFF_SIZE) {
+      diffOutput = diffOutput.substring(0, MAX_DIFF_SIZE) + '\n\n... (diff truncated due to size)'
+      truncated = true
+    }
+
     return {
       path: filePath || '',
       status: status as GitFileStatusType,
-      diff: typeof diff === 'string' ? diff : '',
+      diff: diffOutput,
       additions,
       deletions,
-      isBinary
+      isBinary,
+      truncated
     }
   }
 
