@@ -1,4 +1,4 @@
-import type { ContentPart, FileInfo, ImageAttachment } from '@/api/types'
+import type { ContentPart, FileAttachmentInfo, ImageAttachment } from '@/api/types'
 
 export const MENTION_PATTERN = /@([A-Za-z0-9_\-./]+)/g
 export const MENTION_TRIGGER_PATTERN = /(^|\s)@([A-Za-z0-9_\-./]*)$/
@@ -40,7 +40,7 @@ export function filterAgentsByQuery(agents: AgentInfo[], query: string): AgentIn
 
 export function parsePromptToParts(
   rawInput: string,
-  fileMap: Map<string, FileInfo>,
+  fileMap: Map<string, FileAttachmentInfo>,
   imageAttachments?: ImageAttachment[]
 ): ContentPart[] {
   const parts: ContentPart[] = []

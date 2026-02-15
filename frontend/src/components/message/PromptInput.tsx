@@ -25,7 +25,7 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 
 
 import type { components } from '@/api/opencode-types'
-import type { MessageWithParts, FileInfo, ImageAttachment } from '@/api/types'
+import type { MessageWithParts, FileAttachmentInfo, ImageAttachment } from '@/api/types'
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
 
@@ -82,7 +82,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const [isBashMode, setIsBashMode] = useState(false)
   const [showSuggestions, setShowSuggestions] = useState(false)
   const [suggestionQuery, setSuggestionQuery] = useState('')
-  const [attachedFiles, setAttachedFiles] = useState(new Map<string, FileInfo>())
+  const [attachedFiles, setAttachedFiles] = useState(new Map<string, FileAttachmentInfo>())
   const [imageAttachments, setImageAttachments] = useState<ImageAttachment[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [showMentionSuggestions, setShowMentionSuggestions] = useState(false)

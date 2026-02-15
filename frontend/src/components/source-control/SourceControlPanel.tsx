@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useGitStatus, GitError, getApiErrorMessage } from '@/api/git'
+import { FetchError } from '@opencode-manager/shared'
+import { useGitStatus, getApiErrorMessage } from '@/api/git'
 
 import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
@@ -53,8 +54,8 @@ export function SourceControlPanel({
   const isMobile = useMobile()
 
   const handleGitError = (error: unknown) => {
-    if (error instanceof GitError) {
-      setGitError({ summary: error.message, detail: error.detail })
+    if (error instanceof FetchError) {
+      setGitError({ summary: getApiErrorMessage(error), detail: error.detail })
     } else {
       setGitError({ summary: getApiErrorMessage(error) })
     }
