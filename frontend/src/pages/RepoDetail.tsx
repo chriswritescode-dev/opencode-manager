@@ -27,12 +27,13 @@ import { Plug, FolderOpen, Plus, GitBranch, Loader2, GitCommitHorizontal, Shield
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { showToast } from "@/lib/toast";
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
+import { getRepoDisplayName } from "@/lib/utils";
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const repoId = parseInt(id || "0");
+  const repoId = Number(id) || 0;
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [switchConfigOpen, setSwitchConfigOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
@@ -123,9 +124,7 @@ export function RepoDetail() {
     );
   }
 
-  const repoName = repo.repoUrl
-    ? repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
-    : repo.localPath || "Local Repository";
+  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath);
   const branchToDisplay = repo.currentBranch || repo.branch;
   const displayName = branchToDisplay ? `${repoName} (${branchToDisplay})` : repoName;
   const currentBranch = repo.currentBranch || repo.branch || "main";

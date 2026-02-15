@@ -18,6 +18,13 @@ export const MODAL_TRANSITION_MS = 300
  * Sanitizes markdown text for TTS playback by removing non-read-aloud symbols
  * Converts markdown into clean, readable text suitable for speech synthesis
  */
+export function getRepoDisplayName(repoUrl?: string | null, localPath?: string | null): string {
+  if (repoUrl) {
+    return repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
+  }
+  return localPath || "Repository"
+}
+
 export function sanitizeForTTS(text: string): string {
   if (!text) return ''
 

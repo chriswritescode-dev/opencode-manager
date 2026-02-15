@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Navigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
@@ -29,6 +29,7 @@ import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import { showToast } from "@/lib/toast";
+import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus } from "@/stores/sessionStatusStore";
@@ -48,7 +49,7 @@ const compareMessageIds = (id1: string, id2: string): number => {
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
-  const repoId = parseInt(id || "0");
+  const repoId = Number(id) || 0;
   const { preferences, updateSettings } = useSettings();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -283,11 +284,7 @@ export function SessionDetail() {
   
 
   if (!sessionId) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background text-muted-foreground">
-        Session not found
-      </div>
-    );
+    return <Navigate to="/" replace />;
   }
 
   if (!repo) {
@@ -331,7 +328,7 @@ export function SessionDetail() {
           <Header.EditableTitle
             value={session?.title || "Untitled Session"}
             onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-orange-600 dark:text-orange-400">{repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}</span>}
+            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
             generating={isTitleGenerating}
           />
         </div>
@@ -514,7 +511,7 @@ export function SessionDetail() {
         isOpen={fileBrowserOpen}
         onClose={handleFileBrowserClose}
         basePath={repo.localPath}
-        repoName={repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
         repoId={repoId}
         initialSelectedFile={selectedFilePath}
       />
@@ -530,7 +527,7 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoName={repo.repoUrl?.split("/").pop()?.replace(".git", "") || repo.localPath || "Repository"}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
       />
     </div>
   );
