@@ -69,10 +69,8 @@ export type PushSubscriptionRequest = z.infer<typeof PushSubscriptionRequestSche
 export type PushSubscriptionRecord = z.infer<typeof PushSubscriptionRecordSchema>
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>
 
-export interface ErrorResponse {
-  error: string
-  details?: unknown
-}
+export { FetchError } from './errors'
+export type { ApiErrorResponse, ApiErrorCode, GitErrorCode } from './errors'
 
 export interface SuccessResponse {
   success: boolean

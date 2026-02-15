@@ -9,6 +9,7 @@
     ".": "./src/index.ts",
     "./schemas": "./src/schemas/index.ts",
     "./types": "./src/types/index.ts",
+    "./types/errors": "./src/types/errors.ts",
     "./config": "./src/config/index.ts",
     "./config/defaults": "./src/config/defaults.ts",
     "./config/env": "./src/config/env.ts",
