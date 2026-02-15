@@ -1,6 +1,6 @@
 /* eslint-disable no-empty */
 import { promises as fs } from 'fs'
-import { execFileSync } from 'child_process'
+import { execFile } from 'child_process'
 import { randomBytes } from 'crypto'
 import { join } from 'path'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
@@ -58,7 +58,11 @@ export async function writeTemporarySSHKey(keyContent: string, identifier: strin
   const randomSuffix = randomBytes(8).toString('hex')
   const fileName = `key-${identifier}-${randomSuffix}`
   const keyPath = join(SSH_KEYS_DIR, fileName)
-  
+
+  if (!keyPath.startsWith(SSH_KEYS_DIR)) {
+    throw new Error('Invalid key path')
+  }
+
   await fs.writeFile(keyPath, keyContent.trim() + '\n', { mode: 0o600 })
   
   const isValid = await validateSSHKey(keyPath)
@@ -108,6 +112,10 @@ export async function writePersistentSSHKey(keyContent: string, identifier: stri
   const fileName = `persistent-${identifier}`
   const keyPath = join(SSH_KEYS_DIR, fileName)
 
+  if (!keyPath.startsWith(SSH_KEYS_DIR)) {
+    throw new Error('Invalid key path')
+  }
+
   await fs.writeFile(keyPath, keyContent.trim() + '\n', { mode: 0o600 })
 
   const isValid = await validateSSHKey(keyPath)
@@ -123,8 +131,13 @@ export function buildSSHCommandWithConfig(configPath: string, knownHostsPath: st
   return `ssh -T -F "${configPath}" -o UserKnownHostsFile="${knownHostsPath}" -o StrictHostKeyChecking=accept-new -o PasswordAuthentication=no`
 }
 
-export function stripKeyPassphrase(keyPath: string, passphrase: string): void {
-  execFileSync('ssh-keygen', ['-p', '-P', passphrase, '-N', '', '-f', keyPath], { stdio: 'ignore' })
+export async function stripKeyPassphrase(keyPath: string, passphrase: string): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    execFile('ssh-keygen', ['-p', '-P', passphrase, '-N', '', '-f', keyPath], (error: Error | null) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
 }
 
 export interface SSHConfigEntry {

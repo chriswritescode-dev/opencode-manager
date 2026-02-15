@@ -144,7 +144,7 @@ class OpenCodeServerManager {
 
           if (cred.passphrase) {
             const passphrase = decryptSecret(cred.passphrase)
-            stripKeyPassphrase(keyPath, passphrase)
+            await stripKeyPassphrase(keyPath, passphrase)
             logger.info(`Stripped passphrase from SSH key for ${cred.name} (${host}:${port})`)
           } else {
             logger.info(`Setup SSH key for ${cred.name} (${host}:${port}): ${keyPath}`)

@@ -145,13 +145,13 @@ export function getSSHCredentialsForHost(credentials: GitCredential[], host: str
     try {
       const parsedCredHost = new URL(credHost)
       const credHostname = parsedCredHost.hostname.toLowerCase()
-      const credPort = parsedCredHost.port || (parsedCredHost.protocol.includes('ssh') ? 22 : null)
+      const credPort = parsedCredHost.port || (parsedCredHost.protocol.includes('ssh') ? '22' : '')
       const normalizedCredHost = credPort ? `${credHostname}:${credPort}` : credHostname
-      
+
       const parsedTargetHost = new URL(`ssh://dummy@${targetHost}`)
       const targetHostname = parsedTargetHost.hostname.toLowerCase()
-      const targetPort = parsedTargetHost.port || 22
-      const normalizedTargetHost = targetPort !== '' ? `${targetHostname}:${targetPort}` : targetHostname
+      const targetPort = parsedTargetHost.port || '22'
+      const normalizedTargetHost = targetPort ? `${targetHostname}:${targetPort}` : targetHostname
       
       return normalizedCredHost === normalizedTargetHost
     } catch {
