@@ -41,7 +41,7 @@ export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveM
       
       return { previousMessages }
     },
-    onError: (_error, _context) => {
+    onError: (_error, _variables, _context: RemoveMessageContext | undefined) => {
       if (_context?.previousMessages) {
         queryClient.setQueryData(
           ['opencode', 'messages', opcodeUrl, sessionId, directory],

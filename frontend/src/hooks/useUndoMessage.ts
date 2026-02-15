@@ -47,7 +47,7 @@ export function useUndoMessage({
       
       return { previousMessages }
     },
-    onError: (_error, _context) => {
+    onError: (_error, _variables, _context: UndoMessageContext | undefined) => {
       if (_context?.previousMessages) {
         queryClient.setQueryData(
           ['opencode', 'messages', opcodeUrl, sessionId, directory],
