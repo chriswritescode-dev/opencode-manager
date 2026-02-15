@@ -66,7 +66,7 @@ export function runMigrations(db: Database): void {
         WHERE branch IS NOT NULL
       `)
     } catch (error) {
-      logger.debug('Index already exists or could not be created', error)
+      logger.warn('Index already exists or could not be created', error)
     }
     
     try {
@@ -75,7 +75,7 @@ export function runMigrations(db: Database): void {
         ON repos(local_path)
       `)
     } catch (error) {
-      logger.debug('Local path index already exists or could not be created', error)
+      logger.warn('Local path index already exists or could not be created', error)
     }
     
     const requiredColumns = [
@@ -111,7 +111,7 @@ export function runMigrations(db: Database): void {
       try {
         db.run(indexSql)
       } catch (error) {
-        logger.debug('Index already exists:', error)
+        logger.warn('Index already exists:', error)
       }
     }
     

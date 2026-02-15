@@ -158,22 +158,34 @@ function getRepoName(repo: Repo): string {
 
 export function updateRepoStatus(db: Database, id: number, cloneStatus: Repo['cloneStatus']): void {
   const stmt = db.prepare('UPDATE repos SET clone_status = ? WHERE id = ?')
-  stmt.run(cloneStatus, id)
+  const result = stmt.run(cloneStatus, id)
+  if (result.changes === 0) {
+    throw new Error(`Repository with id ${id} not found`)
+  }
 }
 
 export function updateRepoConfigName(db: Database, id: number, configName: string): void {
   const stmt = db.prepare('UPDATE repos SET opencode_config_name = ? WHERE id = ?')
-  stmt.run(configName, id)
+  const result = stmt.run(configName, id)
+  if (result.changes === 0) {
+    throw new Error(`Repository with id ${id} not found`)
+  }
 }
 
 export function updateLastPulled(db: Database, id: number): void {
   const stmt = db.prepare('UPDATE repos SET last_pulled = ? WHERE id = ?')
-  stmt.run(Date.now(), id)
+  const result = stmt.run(Date.now(), id)
+  if (result.changes === 0) {
+    throw new Error(`Repository with id ${id} not found`)
+  }
 }
 
 export function updateRepoBranch(db: Database, id: number, branch: string): void {
   const stmt = db.prepare('UPDATE repos SET branch = ? WHERE id = ?')
-  stmt.run(branch, id)
+  const result = stmt.run(branch, id)
+  if (result.changes === 0) {
+    throw new Error(`Repository with id ${id} not found`)
+  }
 }
 
 export function deleteRepo(db: Database, id: number): void {
