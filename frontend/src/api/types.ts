@@ -210,7 +210,7 @@ export type ContentPart =
   | { type: 'file', path: string, name: string }
   | { type: 'image', id: string, filename: string, mime: string, dataUrl: string }
 
-export interface FileInfo {
+export interface FileAttachmentInfo {
   path: string
   name: string
   mime?: string

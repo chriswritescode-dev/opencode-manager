@@ -29,7 +29,7 @@ export class OpenCodeClient {
     this.directory = directory
   }
 
-  private getParams(params?: Record<string, unknown>) {
+  private getParams(params?: Record<string, string>) {
     if (!this.directory) return params
     return { ...params, directory: this.directory }
   }

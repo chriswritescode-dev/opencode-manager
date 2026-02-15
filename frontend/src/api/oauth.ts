@@ -31,7 +31,7 @@ function handleApiError(error: unknown, context: string): never {
 export const oauthApi = {
   authorize: async (providerId: string, method: number): Promise<OAuthAuthorizeResponse> => {
     try {
-      return fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+      return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ method }),
@@ -43,7 +43,7 @@ export const oauthApi = {
 
   callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> => {
     try {
-      return fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
+      return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),

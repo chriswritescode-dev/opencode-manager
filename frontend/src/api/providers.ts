@@ -205,8 +205,8 @@ async function getProvidersFromOpenCodeServer(): Promise<{ providers: Provider[]
 
       return { providers, connected: response.connected || [] };
     }
-  } catch (error) {
-    console.warn("Failed to load providers from OpenCode server", error);
+  } catch {
+    // Silently return empty providers on failure - graceful degradation
   }
 
   return { providers: [], connected: [] };
@@ -258,8 +258,8 @@ async function getConfiguredProviders(connectedIds: Set<string>): Promise<Provid
     }
 
     return result;
-  } catch (error) {
-    console.warn("Failed to load configured providers", error);
+  } catch {
+    // Silently return empty providers on failure - graceful degradation
     return [];
   }
 }

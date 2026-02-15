@@ -1,4 +1,5 @@
 import type { Repo } from './types'
+import { FetchError, fetchWrapper, fetchWrapperText, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 
 export async function createRepo(
@@ -9,111 +10,57 @@ export async function createRepo(
   useWorktree?: boolean,
   skipSSHVerification?: boolean
 ): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoUrl, localPath, branch, openCodeConfigName, useWorktree, skipSSHVerification }),
   })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to create repo')
-  }
-
-  return response.json()
 }
 
 export async function listRepos(): Promise<Repo[]> {
-  const response = await fetch(`${API_BASE_URL}/api/repos`)
-
-  if (!response.ok) {
-    throw new Error('Failed to list repos')
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos`)
 }
 
 export async function getRepo(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}`)
-
-  if (!response.ok) {
-    throw new Error('Failed to get repo')
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`)
 }
 
 export async function deleteRepo(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}`, {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}`, {
     method: 'DELETE',
   })
-
-  if (!response.ok) {
-    throw new Error('Failed to delete repo')
-  }
 }
 
 export async function startServer(id: number, openCodeConfigName?: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/start`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/server/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ openCodeConfigName }),
   })
-
-  if (!response.ok) {
-    throw new Error('Failed to start server')
-  }
-
-  return response.json()
 }
 
 export async function stopServer(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/stop`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/server/stop`, {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    throw new Error('Failed to stop server')
-  }
-
-  return response.json()
 }
 
 export async function pullRepo(id: number): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/pull`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/pull`, {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    throw new Error('Failed to pull repo')
-  }
-
-  return response.json()
 }
 
 export async function getServerLogs(id: number): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/server/logs`)
-
-  if (!response.ok) {
-    throw new Error('Failed to get server logs')
-  }
-
-  return response.text()
+  return fetchWrapperText(`${API_BASE_URL}/api/repos/${id}/server/logs`)
 }
 
 export async function switchRepoConfig(id: number, configName: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/config/switch`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/config/switch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ configName }),
   })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to switch config')
-  }
-
-  return response.json()
 }
 
 export class GitAuthError extends Error {
@@ -126,21 +73,18 @@ export class GitAuthError extends Error {
 }
 
 export async function switchBranch(id: number, branch: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/switch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ branch }),
-  })
-
-  if (!response.ok) {
-    const error = await response.json()
-    if (error.code === 'AUTH_FAILED') {
-      throw new GitAuthError(error.error || 'Git authentication failed', error.code)
+  try {
+    return await fetchWrapper(`${API_BASE_URL}/api/repos/${id}/branch/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    })
+  } catch (error) {
+    if (error instanceof FetchError && error.code === 'AUTH_FAILED') {
+      throw new GitAuthError(error.message, error.code)
     }
-    throw new Error(error.error || 'Failed to switch branch')
+    throw error
   }
-
-  return response.json()
 }
 
 interface GitBranch {
@@ -154,31 +98,22 @@ interface GitBranch {
 }
 
 export async function listBranches(id: number): Promise<{ branches: GitBranch[], status: { ahead: number, behind: number } }> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/git/branches`)
-
-  if (!response.ok) {
-    throw new Error('Failed to list branches')
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/git/branches`)
 }
 
 export async function createBranch(id: number, branch: string): Promise<Repo> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/branch/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ branch }),
-  })
-
-  if (!response.ok) {
-    const error = await response.json()
-    if (error.code === 'AUTH_FAILED') {
-      throw new GitAuthError(error.error || 'Git authentication failed', error.code)
+  try {
+    return await fetchWrapper(`${API_BASE_URL}/api/repos/${id}/branch/create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch }),
+    })
+  } catch (error) {
+    if (error instanceof FetchError && error.code === 'AUTH_FAILED') {
+      throw new GitAuthError(error.message, error.code)
     }
-    throw new Error(error.error || 'Failed to create branch')
+    throw error
   }
-
-  return response.json()
 }
 
 export interface DownloadOptions {
@@ -192,14 +127,8 @@ export async function downloadRepo(id: number, repoName: string, options?: Downl
   if (options?.includePaths?.length) params.append('includePaths', options.includePaths.join(','))
 
   const url = `${API_BASE_URL}/api/repos/${id}/download${params.toString() ? '?' + params.toString() : ''}`
-  const response = await fetch(url)
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to download repo')
-  }
-
-  const blob = await response.blob()
+  
+  const blob = await fetchWrapperBlob(url)
   const urlObj = window.URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = urlObj
@@ -211,25 +140,15 @@ export async function downloadRepo(id: number, repoName: string, options?: Downl
 }
 
 export async function updateRepoOrder(order: number[]): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/order`, {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/order`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ order }),
   })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to update repo order')
-  }
 }
 
 export async function resetRepoPermissions(id: number): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${id}/reset-permissions`, {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}/reset-permissions`, {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    const error = await response.json()
-    throw new Error(error.error || 'Failed to reset permissions')
-  }
 }

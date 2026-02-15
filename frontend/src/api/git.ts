@@ -1,185 +1,90 @@
 import { useQuery } from '@tanstack/react-query'
+import { fetchWrapper, FetchError } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import type { GitStatusResponse, FileDiffResponse, GitCommit } from '@/types/git'
 
-export class GitError extends Error {
-  code?: string
-  statusCode?: number
-  detail?: string
-
-  constructor(message: string, code?: string, statusCode?: number, detail?: string) {
-    super(message)
-    this.name = 'GitError'
-    this.code = code
-    this.statusCode = statusCode
-    this.detail = detail
-  }
-}
-
-interface ApiError {
-  error: string
-  code?: string
-  detail?: string
-}
-
-async function handleApiError(response: Response): Promise<never> {
-  const data: ApiError = await response.json().catch(() => ({ error: 'An error occurred' }))
-  throw new GitError(data.error, data.code, response.status, data.detail)
-}
-
 export async function fetchGitStatus(repoId: number): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/status`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/status`)
 }
 
 export async function fetchReposGitStatus(repoIds: number[]): Promise<Map<number, GitStatusResponse>> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/git-status-batch`, {
+  const data = await fetchWrapper<Record<string, GitStatusResponse>>(`${API_BASE_URL}/api/repos/git-status-batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoIds })
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  const data = await response.json()
-  return new Map(Object.entries(data).map(([id, status]) => [Number(id), status as GitStatusResponse]))
+  return new Map(Object.entries(data).map(([id, status]) => [Number(id), status]))
 }
 
 export async function fetchFileDiff(repoId: number, path: string, includeStaged?: boolean): Promise<FileDiffResponse> {
-  const params = new URLSearchParams({ path })
-  if (includeStaged !== undefined) {
-    params.set('includeStaged', String(includeStaged))
-  }
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff-full?${params}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/diff-full`, {
+    params: { path, includeStaged },
+  })
 }
 
 export async function fetchGitDiff(repoId: number, path: string): Promise<{ diff: string }> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/diff?path=${encodeURIComponent(path)}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  const data = await response.json()
+  const data = await fetchWrapper<string>(`${API_BASE_URL}/api/repos/${repoId}/git/diff`, {
+    params: { path },
+  })
   return { diff: data }
 }
 
 export async function fetchGitLog(repoId: number, limit?: number): Promise<{ commits: GitCommit[] }> {
-  const params = limit ? `?limit=${limit}` : ''
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/log${params}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/log`, {
+    params: { limit },
+  })
 }
 
 export async function gitFetch(repoId: number): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/fetch`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/fetch`, {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitPull(repoId: number): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/pull`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/pull`, {
     method: 'POST',
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitPush(repoId: number, setUpstream: boolean = false): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/push`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/push`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ setUpstream }),
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitCommit(repoId: number, message: string, stagedPaths?: string[]): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/commit`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message, stagedPaths }),
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitStageFiles(repoId: number, paths: string[]): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/stage`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/stage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths }),
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/unstage`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/unstage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths }),
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitReset(repoId: number, commitHash: string): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/reset`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/reset`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ commitHash }),
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export function useGitStatus(repoId: number | undefined) {
@@ -230,7 +135,7 @@ function parseGitErrorMessage(message: string): string {
 }
 
 export function getApiErrorMessage(error: unknown): string {
-  if (error instanceof GitError) {
+  if (error instanceof FetchError) {
     if (error.code === 'AUTH_FAILED') {
       return 'Git authentication failed. Check your credentials in Settings.'
     }
@@ -240,6 +145,9 @@ export function getApiErrorMessage(error: unknown): string {
     if (error.code === 'NOT_FOUND') {
       return 'Repository or file not found.'
     }
+    if (error.statusCode === 401) return 'Git authentication failed. Check your credentials in Settings.'
+    if (error.statusCode === 409) return 'Merge conflict detected. Resolve conflicts before continuing.'
+    if (error.statusCode === 404) return 'Repository or file not found.'
     return parseGitErrorMessage(error.message)
   }
   if (error instanceof Error) {
@@ -249,9 +157,6 @@ export function getApiErrorMessage(error: unknown): string {
     return parseGitErrorMessage(error)
   }
   const err = error as { status?: number; message?: string; error?: string }
-  if (err?.status === 401) return 'Git authentication failed. Check your credentials in Settings.'
-  if (err?.status === 409) return 'Merge conflict detected. Resolve conflicts before continuing.'
-  if (err?.status === 404) return 'Repository or file not found.'
   const message = err?.message || err?.error || String(error) || 'An error occurred'
   return parseGitErrorMessage(message)
 }
