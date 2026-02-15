@@ -25,6 +25,7 @@ export function Login() {
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [oauthLoading, setOauthLoading] = useState<string | null>(null)
 
   const {
@@ -63,14 +64,14 @@ export function Login() {
 
   const handlePasskey = async () => {
     setError(null)
-    setIsSubmitting(true)
+    setIsPasskeyLoading(true)
     try {
       const result = await signInWithPasskey()
       if (result.error) {
         setError(result.error)
       }
     } finally {
-      setIsSubmitting(false)
+      setIsPasskeyLoading(false)
     }
   }
 
@@ -102,9 +103,9 @@ export function Login() {
               variant="outline"
               className="w-full border-border hover:bg-accent transition-all duration-200"
               onClick={handlePasskey}
-              disabled={isSubmitting}
+              disabled={isSubmitting || isPasskeyLoading}
             >
-              {isSubmitting ? (
+              {isPasskeyLoading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : (
                 <KeyRound className="mr-2 h-4 w-4" />
@@ -226,7 +227,7 @@ export function Login() {
                   <p className="text-sm text-destructive">{errors.password.message}</p>
                 )}
               </div>
-              <Button type="submit" className="w-full" disabled={isSubmitting}>
+              <Button type="submit" className="w-full" disabled={isSubmitting || isPasskeyLoading}>
                 {isSubmitting ? (
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 ) : (
