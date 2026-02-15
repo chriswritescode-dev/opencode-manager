@@ -18,9 +18,15 @@ export function createAuthMiddleware(auth: AuthInstance) {
       logger.debug(`Cookie names: ${cookieNames}`)
     }
     
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    })
+    let session
+    try {
+      session = await auth.api.getSession({
+        headers: c.req.raw.headers,
+      })
+    } catch (error) {
+      logger.error('Session lookup failed', { error })
+      return c.json({ error: 'Internal Server Error' }, 500)
+    }
 
     logger.debug(`Session result: ${session ? 'found' : 'not found'}`)
 
@@ -69,9 +75,15 @@ export function createAdminMiddleware(auth: AuthInstance) {
       user: Session['user']
     }
   }>(async (c, next) => {
-    const session = await auth.api.getSession({
-      headers: c.req.raw.headers,
-    })
+    let session
+    try {
+      session = await auth.api.getSession({
+        headers: c.req.raw.headers,
+      })
+    } catch (error) {
+      logger.error('Session lookup failed', { error })
+      return c.json({ error: 'Internal Server Error' }, 500)
+    }
 
     if (!session) {
       return c.json({ error: 'Unauthorized' }, 401)
