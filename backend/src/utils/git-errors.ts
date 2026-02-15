@@ -1,4 +1,7 @@
+import type { GitErrorCode } from '@opencode-manager/shared'
 import { getErrorMessage } from './error-utils'
+
+export type { GitErrorCode }
 
 export function isNoUpstreamError(error: Error): boolean {
   const patterns = [
@@ -14,23 +17,7 @@ export function parseBranchNameFromError(error: Error): string | null {
   return match?.[1]?.trim() ?? null
 }
 
-type GitErrorCode =
-  | 'AUTH_FAILED'
-  | 'REPO_NOT_FOUND'
-  | 'PERMISSION_DENIED'
-  | 'PUSH_REJECTED'
-  | 'MERGE_CONFLICT'
-  | 'NO_UPSTREAM'
-  | 'TIMEOUT'
-  | 'NOT_A_REPO'
-  | 'LOCK_FAILED'
-  | 'DETACHED_HEAD'
-  | 'BRANCH_EXISTS'
-  | 'BRANCH_NOT_FOUND'
-  | 'UNCOMMITTED_CHANGES'
-  | 'UNKNOWN'
-
-interface GitErrorInfo {
+export interface GitErrorInfo {
   code: GitErrorCode
   summary: string
   detail: string
