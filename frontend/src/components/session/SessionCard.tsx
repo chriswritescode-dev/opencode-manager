@@ -45,7 +45,7 @@ export const SessionCard = ({
     <div className="relative" onClick={close}>
       <div
         className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-red-600 flex items-center justify-center rounded-r-lg transition-opacity ${
-          !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0"
+          !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
         <button
