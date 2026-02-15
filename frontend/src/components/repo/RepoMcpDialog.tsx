@@ -16,21 +16,18 @@ import { showToast } from '@/lib/toast'
 interface RepoMcpDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  config: {
-    content: Record<string, unknown>
-  } | null
   directory: string | undefined
 }
 
-export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcpDialogProps) {
+export function RepoMcpDialog({ open, onOpenChange, directory }: RepoMcpDialogProps) {
   const queryClient = useQueryClient()
   const [localStatus, setLocalStatus] = useState<Record<string, McpStatus>>({})
+  const [mcpServers, setMcpServers] = useState<Record<string, McpServerConfig>>({})
   const [isLoadingStatus, setIsLoadingStatus] = useState(false)
   const [hasFetchedStatus, setHasFetchedStatus] = useState(false)
   const [removeAuthConfirmServer, setRemoveAuthConfirmServer] = useState<string | null>(null)
   const [authDialogServerId, setAuthDialogServerId] = useState<string | null>(null)
   
-  const mcpServers = config?.content?.mcp as Record<string, McpServerConfig> | undefined || {}
   const serverIds = Object.keys(localStatus)
   
   const fetchStatus = useCallback(async () => {
@@ -38,8 +35,12 @@ export function RepoMcpDialog({ open, onOpenChange, config, directory }: RepoMcp
     
     setIsLoadingStatus(true)
     try {
-      const status = await mcpApi.getStatusFor(directory)
+      const [status, config] = await Promise.all([
+        mcpApi.getStatusFor(directory),
+        mcpApi.getConfigForDirectory(directory),
+      ])
       setLocalStatus(status)
+      setMcpServers((config.mcp as Record<string, McpServerConfig>) || {})
       setHasFetchedStatus(true)
     } finally {
       setIsLoadingStatus(false)

@@ -152,6 +152,14 @@ export const mcpApi = {
     return response.json()
   },
 
+  async getConfigForDirectory(directory: string): Promise<Record<string, unknown>> {
+    const response = await fetch(`${API_BASE}/api/opencode/config?directory=${encodeURIComponent(directory)}`)
+    if (!response.ok) {
+      throw new Error(`Failed to get config for directory: ${response.statusText}`)
+    }
+    return response.json()
+  },
+
   async connectDirectory(name: string, directory: string): Promise<boolean> {
     const response = await fetch(`${API_BASE}/api/settings/mcp/${encodeURIComponent(name)}/connectdirectory`, {
       method: 'POST',

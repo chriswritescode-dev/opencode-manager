@@ -2,7 +2,6 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { getRepo, resetRepoPermissions } from "@/api/repos";
-import { settingsApi } from "@/api/settings";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
@@ -57,18 +56,6 @@ export function RepoDetail() {
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
     enabled: !!repoId,
-  });
-
-  const configName = repo?.openCodeConfigName || 'default'
-  const { data: settings } = useQuery({
-    queryKey: ["opencode-config", configName],
-    queryFn: async () => {
-      if (configName === 'default') {
-        return settingsApi.getDefaultOpenCodeConfig()
-      }
-      return settingsApi.getOpenCodeConfigByName(configName)
-    },
-    enabled: !!repo,
   });
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
@@ -248,7 +235,6 @@ export function RepoDetail() {
       <RepoMcpDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
-        config={settings ? { content: settings.content } : null}
         directory={repoDirectory}
       />
 
