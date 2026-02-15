@@ -40,7 +40,7 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
   
   const existing = repo.isLocal 
     ? getRepoByLocalPath(db, normalizedPath)
-    : getRepoByUrlAndBranch(db, repo.repoUrl!, repo.branch)
+    : getRepoByUrlAndBranch(db, repo.repoUrl, repo.branch)
   
   if (existing) {
     return existing
@@ -73,7 +73,7 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
     if (errorMessage.includes('UNIQUE constraint failed') || (error && typeof error === 'object' && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE')) {
       const conflictRepo = repo.isLocal 
         ? getRepoByLocalPath(db, normalizedPath)
-        : getRepoByUrlAndBranch(db, repo.repoUrl!, repo.branch)
+        : getRepoByUrlAndBranch(db, repo.repoUrl, repo.branch)
       
       if (conflictRepo) {
         return conflictRepo
