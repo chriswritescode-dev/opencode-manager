@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Loader2, User, KeyRound, LogOut, Plus, Trash2, AlertCircle, CheckCircle, Lock } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { passkey, changePassword } from '@/lib/auth-client'
@@ -28,6 +29,7 @@ export function AccountSettings() {
   const [success, setSuccess] = useState<string | null>(null)
   const [showChangePassword, setShowChangePassword] = useState(false)
   const [editingProfile, setEditingProfile] = useState(false)
+  const [deletePasskeyId, setDeletePasskeyId] = useState<string | null>(null)
 
   const { data: passkeys, isLoading: passkeysLoading } = useQuery({
     queryKey: ['passkeys'],
@@ -104,9 +106,18 @@ export function AccountSettings() {
   const handleDeletePasskey = (id: string) => {
     setError(null)
     setSuccess(null)
-    if (confirm('Are you sure you want to delete this passkey?')) {
-      deletePasskeyMutation.mutate(id)
+    setDeletePasskeyId(id)
+  }
+
+  const handleDeleteConfirm = () => {
+    if (deletePasskeyId) {
+      deletePasskeyMutation.mutate(deletePasskeyId)
+      setDeletePasskeyId(null)
     }
+  }
+
+  const handleDeleteCancel = () => {
+    setDeletePasskeyId(null)
   }
 
   const handleChangePassword = () => {
@@ -343,6 +354,16 @@ export function AccountSettings() {
           </Button>
         </CardContent>
       </Card>
+
+      <DeleteDialog
+        open={deletePasskeyId !== null}
+        onOpenChange={(open) => !open && setDeletePasskeyId(null)}
+        onConfirm={handleDeleteConfirm}
+        onCancel={handleDeleteCancel}
+        title="Delete Passkey"
+        description="Are you sure you want to delete this passkey? This action cannot be undone."
+        isDeleting={deletePasskeyMutation.isPending}
+      />
     </div>
   )
 }
