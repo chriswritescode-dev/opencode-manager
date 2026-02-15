@@ -1,5 +1,6 @@
 import path from 'path'
 import os from 'os'
+import { randomBytes } from 'crypto'
 import { DEFAULTS } from './defaults'
 
 try {
@@ -38,12 +39,7 @@ const resolveWorkspacePath = (): string => {
 const workspaceBasePath = resolveWorkspacePath()
 
 const generateDefaultSecret = (): string => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  let result = ''
-  for (let i = 0; i < 32; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length))
-  }
-  return result
+  return randomBytes(32).toString('base64').slice(0, 32)
 }
 
 export const ENV = {

@@ -6,7 +6,10 @@ const IV_LENGTH = 16
 const KEY_LENGTH = 32
 
 function deriveKey(): Buffer {
-  const secret = ENV.AUTH.SECRET || 'default-secret-do-not-use-in-production'
+  const secret = ENV.AUTH.SECRET
+  if (!secret) {
+    throw new Error('AUTH_SECRET must be configured for encryption')
+  }
   return scryptSync(secret, ENCRYPTION_KEY_SALT, KEY_LENGTH)
 }
 
