@@ -1,7 +1,11 @@
 import stripJsonComments from 'strip-json-comments'
 
 export function parseJsonc<T = unknown>(content: string): T {
-  return JSON.parse(stripJsonComments(content)) as T
+  try {
+    return JSON.parse(stripJsonComments(content)) as T
+  } catch (e) {
+    throw new Error(`Failed to parse JSONC: ${e instanceof Error ? e.message : String(e)}`)
+  }
 }
 
 export function hasJsoncComments(content: string): boolean {
