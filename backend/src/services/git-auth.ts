@@ -4,7 +4,7 @@ import { AskpassHandler } from '../ipc/askpassHandler'
 import { SSHHostKeyHandler } from '../ipc/sshHostKeyHandler'
 import { writeTemporarySSHKey, buildSSHCommand, buildSSHCommandWithKnownHosts, cleanupSSHKey, parseSSHHost } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
-import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl, getSSHCredentialsForHost, filterGitCredentials } from '../utils/git-auth'
+import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl, getSSHCredentialsForHost } from '../utils/git-auth'
 import type { GitCredential } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { SettingsService } from './settings'
@@ -99,7 +99,7 @@ export class GitAuthService {
 
     const settingsService = new SettingsService(database)
     const settings = settingsService.getSettings('default')
-    const gitCredentials = filterGitCredentials(settings.preferences.gitCredentials || [])
+    const gitCredentials = (settings.preferences.gitCredentials || []) as GitCredential[]
     const sshCredentials = getSSHCredentialsForHost(gitCredentials, sshHost)
 
     if (sshCredentials.length > 0 && sshCredentials[0]) {

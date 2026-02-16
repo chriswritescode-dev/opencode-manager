@@ -84,7 +84,6 @@ ENV WORKSPACE_PATH=/workspace
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
-COPY --from=deps --chown=node:node /app/backend/node_modules ./backend/node_modules
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY package.json pnpm-workspace.yaml ./
 

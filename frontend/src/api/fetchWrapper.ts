@@ -1,6 +1,4 @@
-
 import { handleApiError } from '@opencode-manager/shared'
-
 import { FetchError } from '@opencode-manager/shared'
 import type { ApiErrorResponse } from '@opencode-manager/shared'
 

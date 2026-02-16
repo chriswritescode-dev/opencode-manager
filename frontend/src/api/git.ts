@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchWrapper } from './fetchWrapper'
-import { FetchError } from '@opencode-manager/shared'
+import { fetchWrapper, FetchError } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import type { GitStatusResponse, FileDiffResponse, GitCommit, CommitDetails } from '@/types/git'
 
