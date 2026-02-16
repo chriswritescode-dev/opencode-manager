@@ -58,16 +58,6 @@ export async function fetchCommitDetails(repoId: number, hash: string): Promise<
   return response.json()
 }
 
-export async function fetchCommitDiff(repoId: number, hash: string, path: string): Promise<FileDiffResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${hash}/diff?path=${encodeURIComponent(path)}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
-}
-
 export async function gitFetch(repoId: number): Promise<GitStatusResponse> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/fetch`, {
     method: 'POST',

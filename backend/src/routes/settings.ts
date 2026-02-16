@@ -18,7 +18,6 @@ import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
-import type { GitCredential } from '../utils/git-auth'
 
 function compareVersions(v1: string, v2: string): number {
   const parts1 = v1.split('.').map(s => Number(s))

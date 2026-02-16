@@ -890,15 +890,8 @@ export class GitService {
   }
 
   private async isCommitUnpushed(repoPath: string, commitHash: string, env: Record<string, string>): Promise<boolean> {
-    try {
-      await executeCommand(
-        ['git', '-C', repoPath, 'merge-base', '--is-ancestor', commitHash, 'HEAD'],
-        { env, silent: true }
-      )
-      return false
-    } catch {
-      return true
-    }
+    const unpushedHashes = await this.getUnpushedCommitHashes(repoPath, env)
+    return unpushedHashes.has(commitHash)
   }
 
   private async getUnpushedCommitHashes(repoPath: string, env: Record<string, string>): Promise<Set<string>> {

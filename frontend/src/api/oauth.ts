@@ -1,6 +1,5 @@
 import { API_BASE_URL } from "@/config"
 import { fetchWrapper } from './fetchWrapper'
-import { handleApiError } from '@opencode-manager/shared'
 
 
 export interface OAuthAuthorizeResponse {
@@ -26,40 +25,25 @@ export interface ProviderAuthMethods {
 
 export const oauthApi = {
   authorize: async (providerId: string, method: number): Promise<OAuthAuthorizeResponse> => {
-    try {
-      return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ method }),
-      })
-    } catch (error) {
-      handleApiError(error, "OAuth authorization failed")
-    }
-    throw new Error('OAuth authorization failed')
+    return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method }),
+    })
   },
 
   callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> => {
-    try {
-      return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      })
-    } catch (error) {
-      handleApiError(error, "OAuth callback failed")
-    }
-    throw new Error('OAuth callback failed')
+    return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
   },
 
   getAuthMethods: async (): Promise<ProviderAuthMethods> => {
-    try {
-      const { providers, ...rest } = await fetchWrapper<{ providers?: ProviderAuthMethods } & ProviderAuthMethods>(
-        `${API_BASE_URL}/api/oauth/auth-methods`
-      )
-      return providers || rest
-    } catch (error) {
-      handleApiError(error, "Failed to get provider auth methods")
-    }
-    throw new Error('Failed to get provider auth methods')
+    const { providers, ...rest } = await fetchWrapper<{ providers?: ProviderAuthMethods } & ProviderAuthMethods>(
+      `${API_BASE_URL}/api/oauth/auth-methods`
+    )
+    return providers || rest
   },
 }

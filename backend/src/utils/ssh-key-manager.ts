@@ -209,7 +209,7 @@ export async function cleanupPersistentSSHKeys(): Promise<void> {
     const configPath = join(getWorkspacePath(), 'config', 'ssh_config')
     await fs.unlink(configPath)
   } catch {
-    // Ignore error - config file may not exist
+    logger.debug('SSH config file not found or could not be removed')
   }
 }
 
@@ -232,7 +232,7 @@ export function parseSSHHost(input: string): SSHConnectionInfo {
         port: parsed.port || defaultPort
       }
     } catch {
-      // URL parsing failed, continue with manual parsing
+      logger.debug('URL parsing failed, using manual parsing')
     }
   }
 
