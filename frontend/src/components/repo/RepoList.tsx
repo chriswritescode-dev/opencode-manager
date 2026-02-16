@@ -111,12 +111,15 @@ export function RepoList() {
     queryKey: ["reposGitStatus", repoIds],
     queryFn: () => fetchReposGitStatus(repoIds),
     enabled: repoIds.length > 0,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
   })
 
   const deleteMutation = useMutation({
     mutationFn: deleteRepo,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] })
+      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
       setDeleteDialogOpen(false)
       setRepoToDelete(null)
     },
@@ -128,6 +131,7 @@ export function RepoList() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] })
+      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
       setDeleteDialogOpen(false)
       setSelectedRepos(new Set())
     },
@@ -155,6 +159,7 @@ export function RepoList() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ["repos"] })
+      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
     },
   })
 

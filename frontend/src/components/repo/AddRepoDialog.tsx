@@ -35,6 +35,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repos'] })
+      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
       setRepoUrl('')
       setLocalPath('')
       setBranch('')

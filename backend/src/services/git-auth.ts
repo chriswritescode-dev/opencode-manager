@@ -170,6 +170,14 @@ export class GitAuthService {
       Object.assign(env, this.askpassHandler.getEnv())
     }
 
+    if (this.sshHostKeyHandler) {
+      const knownHostsPath = this.sshHostKeyHandler.getKnownHostsPath()
+      if (knownHostsPath) {
+        env.GIT_SSH_COMMAND = buildSSHCommandWithKnownHosts(knownHostsPath)
+        Object.assign(env, this.sshHostKeyHandler.getEnv())
+      }
+    }
+
     return env
   }
 }
