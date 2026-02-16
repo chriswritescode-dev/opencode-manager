@@ -7,6 +7,7 @@ interface UseAutoScrollOptions {
   containerRef?: React.RefObject<HTMLDivElement | null>
   messages?: Message[]
   sessionId?: string
+  contentVersion?: number
   onScrollStateChange?: (isScrolledUp: boolean) => void
 }
 
@@ -18,6 +19,7 @@ export function useAutoScroll({
   containerRef,
   messages,
   sessionId,
+  contentVersion,
   onScrollStateChange
 }: UseAutoScrollOptions): UseAutoScrollReturn {
   const lastMessageCountRef = useRef(0)
@@ -146,7 +148,7 @@ export function useAutoScroll({
     }
 
     scrollToBottom()
-  }, [messages, containerRef, scrollToBottom])
+  }, [messages, containerRef, scrollToBottom, contentVersion])
 
   return { scrollToBottom }
 }

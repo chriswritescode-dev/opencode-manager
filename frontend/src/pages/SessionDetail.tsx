@@ -28,7 +28,7 @@ import { useTTS } from "@/hooks/useTTS";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
-import { useMessageParts } from "@/stores/messagePartsStore";
+import { useMessageParts, usePartsVersion } from "@/stores/messagePartsStore";
 import type { MessageWithParts } from "@/api/types";
 import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
@@ -110,10 +110,13 @@ export function SessionDetail() {
     }))
   }, [messages])
 
+  const partsVersion = usePartsVersion()
+
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
     messages,
     sessionId,
+    contentVersion: partsVersion,
     onScrollStateChange: setShowScrollButton
   });
 
