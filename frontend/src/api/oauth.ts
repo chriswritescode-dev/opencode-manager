@@ -1,7 +1,6 @@
 import { API_BASE_URL } from "@/config"
 import { fetchWrapper } from './fetchWrapper'
 
-
 export interface OAuthAuthorizeResponse {
   url: string
   method: "code"
@@ -22,10 +21,9 @@ export interface ProviderAuthMethods {
   [providerId: string]: ProviderAuthMethod[]
 }
 
-
 export const oauthApi = {
   authorize: async (providerId: string, method: number): Promise<OAuthAuthorizeResponse> => {
-    return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
+    return fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/authorize`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ method }),
@@ -33,7 +31,7 @@ export const oauthApi = {
   },
 
   callback: async (providerId: string, request: OAuthCallbackRequest): Promise<boolean> => {
-    return await fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
+    return fetchWrapper(`${API_BASE_URL}/api/oauth/${providerId}/oauth/callback`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(request),

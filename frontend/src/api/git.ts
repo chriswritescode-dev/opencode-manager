@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchWrapper } from './fetchWrapper'
-import { handleApiError } from '@opencode-manager/shared'
 import { FetchError } from '@opencode-manager/shared'
 import { API_BASE_URL } from '@/config'
 import type { GitStatusResponse, FileDiffResponse, GitCommit, CommitDetails } from '@/types/git'
@@ -25,14 +24,9 @@ export async function fetchFileDiff(repoId: number, path: string, includeStaged?
 }
 
 export async function fetchCommitFileDiff(repoId: number, commitHash: string, path: string): Promise<FileDiffResponse> {
-  const params = new URLSearchParams({ path })
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${commitHash}/diff?${params}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${commitHash}/diff`, {
+    params: { path },
+  })
 }
 
 export async function fetchGitDiff(repoId: number, path: string): Promise<{ diff: string }> {
@@ -49,13 +43,7 @@ export async function fetchGitLog(repoId: number, limit?: number): Promise<{ com
 }
 
 export async function fetchCommitDetails(repoId: number, hash: string): Promise<CommitDetails> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${hash}`)
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${hash}`)
 }
 
 export async function gitFetch(repoId: number): Promise<GitStatusResponse> {
@@ -103,17 +91,11 @@ export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<
 }
 
 export async function gitDiscardFiles(repoId: number, paths: string[], staged: boolean): Promise<GitStatusResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/repos/${repoId}/git/discard`, {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/discard`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ paths, staged }),
   })
-
-  if (!response.ok) {
-    await handleApiError(response)
-  }
-
-  return response.json()
 }
 
 export async function gitReset(repoId: number, commitHash: string): Promise<GitStatusResponse> {

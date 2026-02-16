@@ -9,7 +9,6 @@ import { SettingsService } from '../settings'
 import type { Database } from 'bun:sqlite'
 import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
 import path from 'path'
-import fs from 'fs/promises'
 
 export class GitService {
   constructor(
@@ -315,9 +314,14 @@ export class GitService {
         results.push(await executeCommand(args, { env }))
       }
 
-      for (const untrackedPath of untrackedPaths) {
-        const fullPath = path.join(repoPath, untrackedPath)
-        await fs.unlink(fullPath).catch(() => {})
+      if (untrackedPaths.length > 0) {
+        try {
+          const args = ['git', '-C', repoPath, 'clean', '-fd', '--', ...untrackedPaths]
+          results.push(await executeCommand(args, { env }))
+        } catch (error: unknown) {
+          logger.error(`Failed to clean untracked files for repo ${repoId}:`, error)
+          throw error
+        }
       }
 
       return results.join('\n')
@@ -325,6 +329,89 @@ export class GitService {
       logger.error(`Failed to discard changes for repo ${repoId}:`, error)
       throw error
     }
+  }
+
+  private parseNumstatOutput(output: string): Map<string, { additions: number; deletions: number }> {
+    const map = new Map<string, { additions: number; deletions: number }>()
+    const lines = output.trim().split('\n')
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+
+      const parts = line.split('\t')
+      if (parts.length >= 3) {
+        const additions = parts[0]
+        const deletions = parts[1]
+        const filePath = parts.slice(2).join('\t')
+
+        if (
+          additions?.match(/^\d+$/) &&
+          deletions?.match(/^\d+$/) &&
+          filePath
+        ) {
+          map.set(filePath, {
+            additions: parseInt(additions, 10),
+            deletions: parseInt(deletions, 10)
+          })
+        }
+      }
+    }
+
+    return map
+  }
+
+  private parseCommitFiles(
+    output: string,
+    numstatMap: Map<string, { additions: number; deletions: number }>
+  ): CommitFile[] {
+    const files: CommitFile[] = []
+    const lines = output.trim().split('\n')
+
+    for (const line of lines) {
+      if (!line.trim()) continue
+
+      const parts = line.split('\t')
+      if (parts.length >= 2 && parts[0] && parts[0].match(/^[AMDRC]/)) {
+        const statusCode = parts[0]
+        const fromPath = parts[1] || ''
+        const toPath = parts[2] || parts[1] || ''
+        const isRename = statusCode === 'R'
+        const isCopy = statusCode === 'C'
+
+        let status: GitFileStatusType = 'modified'
+        switch (statusCode.charAt(0)) {
+          case 'A':
+            status = 'added'
+            break
+          case 'D':
+            status = 'deleted'
+            break
+          case 'R':
+            status = 'renamed'
+            break
+          case 'C':
+            status = 'copied'
+            break
+          case 'M':
+            status = 'modified'
+            break
+        }
+
+        const numstatData = numstatMap.get(toPath)
+        const additions = numstatData?.additions ?? 0
+        const deletions = numstatData?.deletions ?? 0
+
+        files.push({
+          path: toPath,
+          status,
+          oldPath: isRename || isCopy ? fromPath : undefined,
+          additions,
+          deletions
+        })
+      }
+    }
+
+    return files
   }
 
   async getCommitDetails(repoId: number, hash: string, database: Database): Promise<CommitDetails | null> {
@@ -364,51 +451,8 @@ export class GitService {
         { env }
       )
 
-      const files: CommitFile[] = []
-      const lines = filesOutput.trim().split('\n')
-      const numstatLines = numstatOutput.trim().split('\n')
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
-        if (!line?.trim()) continue
-        
-        const parts = line.split('\t')
-        if (parts.length >= 2 && parts[0] && parts[0].match(/^[AMDRC]/)) {
-          const statusCode = parts[0]
-          const fromPath = parts[1] || ''
-          const toPath = parts[2] || parts[1] || ''
-          const isRename = statusCode === 'R'
-          const isCopy = statusCode === 'C'
-          
-          let status: GitFileStatusType = 'modified'
-          switch (statusCode.charAt(0)) {
-            case 'A': status = 'added'; break
-            case 'D': status = 'deleted'; break
-            case 'R': status = 'renamed'; break
-            case 'C': status = 'copied'; break
-            case 'M': status = 'modified'; break
-          }
-          
-          let additions = 0
-          let deletions = 0
-          const numstatLine = numstatLines[i]
-          if (numstatLine) {
-            const numstatParts = numstatLine.split('\t')
-            if (numstatParts.length >= 2 && numstatParts[0]?.match(/^\d+$/) && numstatParts[1]?.match(/^\d+$/)) {
-              additions = parseInt(numstatParts[0], 10)
-              deletions = parseInt(numstatParts[1], 10)
-            }
-          }
-          
-          files.push({
-            path: toPath,
-            status,
-            oldPath: isRename || isCopy ? fromPath : undefined,
-            additions,
-            deletions
-          })
-        }
-      }
+      const numstatMap = this.parseNumstatOutput(numstatOutput)
+      const files = this.parseCommitFiles(filesOutput, numstatMap)
 
       return {
         hash: commitHash,

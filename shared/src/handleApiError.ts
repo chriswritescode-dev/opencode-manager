@@ -13,7 +13,7 @@ export async function handleApiError(errorOrResponse: unknown, context?: string)
     let code: string | undefined
     let detail: string | undefined
     try {
-      const data = await response.json() as ApiErrorResponse
+      const data = (await response.json()) as Partial<ApiErrorResponse>
       errorMsg = data.error || errorMsg
       code = data.code
       detail = data.detail
