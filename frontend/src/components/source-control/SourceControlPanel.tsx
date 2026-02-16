@@ -3,7 +3,6 @@ import { FetchError } from '@opencode-manager/shared'
 import { useGitStatus, getApiErrorMessage } from '@/api/git'
 
 import { useGit } from '@/hooks/useGit'
-import { useGitAction } from '@/hooks/useGitAction'
 import { ChangesTab } from './ChangesTab'
 import { CommitsTab } from './CommitsTab'
 import { BranchesTab } from './BranchesTab'
@@ -68,7 +67,15 @@ export function SourceControlPanel({
   }
 
   const git = useGit(repoId, handleGitError)
-  const handleGitAction = useGitAction(handleGitError)
+
+  const handleGitAction = async (action: () => Promise<unknown>) => {
+    try {
+      setGitError(null)
+      await action()
+    } catch {
+      // error already handled by useGit's onError -> handleGitError
+    }
+  }
 
   const handleSelectCommit = (hash: string) => {
     setSelectedCommit(hash)

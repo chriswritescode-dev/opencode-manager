@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useGitAction } from '@/hooks/useGitAction'
 import { useGitStatus } from '@/api/git'
 import { useGit } from '@/hooks/useGit'
 import { GitFlatFileList } from './GitFlatFileList'
@@ -21,7 +20,13 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile, onErr
   const { data: status, isLoading, error } = useGitStatus(repoId)
   const git = useGit(repoId, onError)
   const [commitMessage, setCommitMessage] = useState('')
-  const handleGitAction = useGitAction(onError)
+
+  const handleGitAction = async (action: () => Promise<unknown>) => {
+    try {
+      await action()
+    } catch {
+    }
+  }
 
   const stagedFiles = status?.files.filter(f => f.staged) || []
   const unstagedFiles = status?.files.filter(f => !f.staged) || []
