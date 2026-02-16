@@ -4,10 +4,9 @@ import { MessagePart } from './MessagePart'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { MessageError } from './MessageError'
-import type { Message, Part } from '@/api/types'
+import type { Message, Part, MessageWithParts } from '@/api/types'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
-import { useMessageParts, usePartsForMessage, usePartsVersion } from '@/stores/messagePartsStore'
 import type { components } from '@/api/opencode-types'
 import type { Todo } from '@/components/message/SessionTodoDisplay'
 import type { OpenCodeError } from '@/lib/opencode-errors'
@@ -24,7 +23,7 @@ interface MessageThreadProps {
   opcodeUrl: string
   sessionID: string
   directory?: string
-  messages?: Message[]
+  messages?: MessageWithParts[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   onUndoMessage?: (restoredPrompt: string) => void
@@ -48,12 +47,12 @@ const compareMessageIds = (id1: string, id2: string): number => {
 }
 
 const findLastMessageByRole = (
-  messages: Message[],
+  messages: MessageWithParts[],
   role: 'user' | 'assistant',
   predicate?: (msg: Message) => boolean
 ): string | undefined => {
   for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
+    const msg = messages[i].info
     if (msg.role === role && (!predicate || predicate(msg))) {
       return msg.id
     }
@@ -62,9 +61,9 @@ const findLastMessageByRole = (
 }
 
 interface MessageRowProps {
-  msg: Message
+  msgWithParts: MessageWithParts
   index: number
-  messages: Message[]
+  messages: MessageWithParts[]
   pendingAssistantId: string | undefined
   lastUserMessageId: string | undefined
   isSessionBusy: boolean
@@ -82,7 +81,7 @@ interface MessageRowProps {
 }
 
 const MessageRow = memo(function MessageRow({
-  msg,
+  msgWithParts,
   index,
   messages,
   pendingAssistantId,
@@ -100,13 +99,15 @@ const MessageRow = memo(function MessageRow({
   handleCancelEdit,
   model,
 }: MessageRowProps) {
-  const parts = usePartsForMessage(msg.id)
+  const msg = msgWithParts.info
+  const parts = msgWithParts.parts
   const streaming = isMessageStreaming(msg)
   const isQueued = msg.role === 'user' && pendingAssistantId && compareMessageIds(msg.id, pendingAssistantId) > 0
   const isLastUserMessage = msg.role === 'user' && msg.id === lastUserMessageId
   const messageTextContent = getMessageTextContent(parts)
 
-  const nextAssistantMessage = messages.slice(index + 1).find(m => m.role === 'assistant')
+  const nextAssistantMessage = messages.slice(index + 1).find(m => m.info.role === 'assistant')
+  const nextAssistantMsg = nextAssistantMessage?.info
   const isUserBeforeAssistant = msg.role === 'user' && nextAssistantMessage
   const canEditUserMessage = isLastUserMessage && isUserBeforeAssistant && !isSessionBusy
   const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
@@ -139,9 +140,9 @@ const MessageRow = memo(function MessageRow({
                 {new Date(msg.time.created).toLocaleTimeString()}
               </span>
             )}
-            {canEditUserMessage && nextAssistantMessage && (
+            {canEditUserMessage && nextAssistantMsg && (
               <button
-                onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMessage.id)}
+                onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMsg.id)}
                 className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                 title="Edit message"
               >
@@ -178,10 +179,10 @@ const MessageRow = memo(function MessageRow({
               onCancel={handleCancelEdit}
               model={model}
             />
-          ) : msg.role === 'user' && canEditUserMessage && nextAssistantMessage ? (
+          ) : msg.role === 'user' && canEditUserMessage && nextAssistantMsg ? (
             <ClickableUserMessage
               content={messageTextContent}
-              onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMessage.id)}
+              onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMsg.id)}
               isEditable={false}
             />
           ) : parts.length > 0 ? (
@@ -234,19 +235,11 @@ export const MessageThread = memo(function MessageThread({
 
   const isSessionBusy = !!pendingAssistantId || isSessionInRetry(sessionStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
-  const partsVersion = usePartsVersion()
 
   useEffect(() => {
     if (!messages || messages.length === 0) return
 
-    const partsMap = useMessageParts.getState().parts
-    const allParts: Part[] = []
-    for (const msg of messages) {
-      const msgParts = partsMap.get(msg.id)
-      if (msgParts) {
-        allParts.push(...msgParts)
-      }
-    }
+    const allParts = messages.flatMap(m => m.parts)
 
     const latestTodoPart = allParts
       .filter((part): part is components['schemas']['ToolPart'] => part.type === 'tool' && (part.tool === 'todowrite' || part.tool === 'todoread'))
@@ -281,7 +274,7 @@ export const MessageThread = memo(function MessageThread({
         setSessionTodos(sessionID, todos)
       }
     }
-  }, [messages, sessionID, setSessionTodos, partsVersion])
+  }, [messages, sessionID, setSessionTodos])
 
   const handleStartEditUserMessage = useCallback((userMessageId: string, assistantMessageId: string) => {
     setEditingUserMessageId(userMessageId)
@@ -303,10 +296,10 @@ export const MessageThread = memo(function MessageThread({
 
   return (
     <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
-      {messages.map((msg, index) => (
+      {messages.map((msgWithParts, index) => (
         <MessageRow
-          key={msg.id}
-          msg={msg}
+          key={msgWithParts.info.id}
+          msgWithParts={msgWithParts}
           index={index}
           messages={messages}
           pendingAssistantId={pendingAssistantId}

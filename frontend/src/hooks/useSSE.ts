@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
-import type { SSEEvent, Message } from '@/api/types'
+import type { SSEEvent, MessageWithParts } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
-import { useMessageParts } from '@/stores/messagePartsStore'
 import { sseManager, subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib/sseManager'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
+import { createPartsBatcher } from '@/lib/partsBatcher'
 
 const handleRestartServer = async () => {
   showToast.loading('Reloading OpenCode configuration...', {
@@ -51,10 +51,22 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const [isReconnecting, setIsReconnecting] = useState(false)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
-  const setPart = useMessageParts((state) => state.setPart)
-  const removePart = useMessageParts((state) => state.removePart)
-  const clearMessage = useMessageParts((state) => state.clearMessage)
-  const setParts = useMessageParts((state) => state.setParts)
+  const batcherRef = useRef<ReturnType<typeof createPartsBatcher> | null>(null)
+
+  useEffect(() => {
+    if (!opcodeUrl) {
+      batcherRef.current?.destroy()
+      batcherRef.current = null
+      return
+    }
+
+    batcherRef.current = createPartsBatcher(queryClient, opcodeUrl, directory)
+
+    return () => {
+      batcherRef.current?.destroy()
+      batcherRef.current = null
+    }
+  }, [queryClient, opcodeUrl, directory])
 
   const handleSSEEvent = useCallback((event: SSEEvent) => {
     switch (event.type) {
@@ -87,7 +99,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       case 'messagev2.part.updated': {
         if (!('part' in event.properties)) break
         const { part } = event.properties
-        setPart(part.messageID, part)
+        batcherRef.current?.queuePartUpdate(part.sessionID, part)
         break
       }
 
@@ -104,25 +116,25 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         }
         
         const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
-        const currentData = queryClient.getQueryData<Message[]>(messagesQueryKey)
+        const currentData = queryClient.getQueryData<MessageWithParts[]>(messagesQueryKey)
         if (!currentData) {
           queryClient.invalidateQueries({ queryKey: messagesQueryKey })
           return
         }
         
-        const messageExists = currentData.some(msg => msg.id === info.id)
+        const messageExists = currentData.some(msgWithParts => msgWithParts.info.id === info.id)
         
         if (!messageExists) {
           const filteredData = info.role === 'user' 
-            ? currentData.filter(msg => !msg.id.startsWith('optimistic_'))
+            ? currentData.filter(msgWithParts => !msgWithParts.info.id.startsWith('optimistic_'))
             : currentData
-          queryClient.setQueryData(messagesQueryKey, [...filteredData, info])
+          queryClient.setQueryData(messagesQueryKey, [...filteredData, { info, parts: [] }])
           return
         }
         
-        const updated = currentData.map(msg => {
-          if (msg.id !== info.id) return msg
-          return { ...info }
+        const updated = currentData.map(msgWithParts => {
+          if (msgWithParts.info.id !== info.id) return msgWithParts
+          return { ...msgWithParts, info: { ...info } }
         })
         
         queryClient.setQueryData(messagesQueryKey, updated)
@@ -135,14 +147,13 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         
         const { sessionID, messageID } = event.properties
         
-        queryClient.setQueryData<Message[]>(
+        queryClient.setQueryData<MessageWithParts[]>(
           ['opencode', 'messages', opcodeUrl, sessionID, directory],
           (old) => {
             if (!old) return old
-            return old.filter(msg => msg.id !== messageID)
+            return old.filter(msgWithParts => msgWithParts.info.id !== messageID)
           }
         )
-        clearMessage(messageID)
         break
       }
 
@@ -150,9 +161,9 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       case 'messagev2.part.removed': {
         if (!('sessionID' in event.properties && 'messageID' in event.properties && 'partID' in event.properties)) break
         
-        const { messageID, partID } = event.properties
+        const { sessionID, messageID, partID } = event.properties
         
-        removePart(messageID, partID)
+        batcherRef.current?.queuePartRemoval(sessionID, messageID, partID)
         break
       }
 
@@ -176,29 +187,20 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         
         setSessionStatus(sessionID, { type: 'idle' })
         
+        batcherRef.current?.flush()
+        
         const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
-        const currentData = queryClient.getQueryData<Message[]>(messagesQueryKey)
+        const currentData = queryClient.getQueryData<MessageWithParts[]>(messagesQueryKey)
         if (!currentData) break
         
         const now = Date.now()
-        const updated = currentData.map(msg => {
-          if (msg.role !== 'assistant') return msg
+        const updated = currentData.map(msgWithParts => {
+          const msg = msgWithParts.info
+          if (msg.role !== 'assistant') return msgWithParts
           
-          if ('completed' in msg.time && msg.time.completed) return msg
+          if ('completed' in msg.time && msg.time.completed) return msgWithParts
           
-          return {
-            ...msg,
-            time: { ...msg.time, completed: now }
-          }
-        })
-        
-        queryClient.setQueryData(messagesQueryKey, updated)
-        
-        const partsStore = useMessageParts.getState()
-        for (const [messageID, parts] of partsStore.parts) {
-          if (!parts.some(p => p.sessionID === sessionID)) continue
-          
-          const updatedParts = parts.map(part => {
+          const updatedParts = msgWithParts.parts.map(part => {
             if (part.type !== 'tool') return part
             if (part.state.status !== 'running' && part.state.status !== 'pending') return part
             return {
@@ -217,10 +219,17 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
             }
           })
           
-          setParts(messageID, updatedParts)
-        }
+          return {
+            ...msgWithParts,
+            info: {
+              ...msg,
+              time: { ...msg.time, completed: now }
+            },
+            parts: updatedParts
+          }
+        })
         
-        queryClient.invalidateQueries({ queryKey: messagesQueryKey })
+        queryClient.setQueryData(messagesQueryKey, updated)
         break
       }
 
@@ -286,7 +295,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       default:
         break
     }
-  }, [queryClient, opcodeUrl, directory, setSessionStatus, setSessionTodos, setPart, removePart, clearMessage, setParts, currentSessionId])
+  }, [queryClient, opcodeUrl, directory, setSessionStatus, setSessionTodos, currentSessionId])
 
   const fetchInitialData = useCallback(async () => {
     if (!client || !mountedRef.current) return

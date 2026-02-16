@@ -28,13 +28,12 @@ import { useTTS } from "@/hooks/useTTS";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
-import { useMessageParts, usePartsVersion } from "@/stores/messagePartsStore";
 import type { MessageWithParts } from "@/api/types";
 import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { createOpenCodeClient } from "@/api/opencode";
-import { useSessionStatus } from "@/stores/sessionStatusStore";
+import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import { useQuestions } from "@/contexts/EventContext";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
@@ -98,25 +97,18 @@ export function SessionDetail() {
     if (!rawMessages) return undefined
     const revertMessageID = session?.revert?.messageID
     if (!revertMessageID) return rawMessages
-    return rawMessages.filter(msg => compareMessageIds(msg.id, revertMessageID) < 0)
+    return rawMessages.filter(msgWithParts => compareMessageIds(msgWithParts.info.id, revertMessageID) < 0)
   }, [rawMessages, session?.revert?.messageID]);
 
   const getMessagesWithParts = useCallback((): MessageWithParts[] | undefined => {
-    if (!messages) return undefined
-    const partsMap = useMessageParts.getState().parts
-    return messages.map(msg => ({
-      info: msg,
-      parts: partsMap.get(msg.id) || []
-    }))
+    return messages
   }, [messages])
-
-  const partsVersion = usePartsVersion()
 
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
-    messages,
+    messages: messages?.map(m => m.info),
     sessionId,
-    contentVersion: partsVersion,
+    contentVersion: messages?.reduce((sum, m) => sum + m.parts.length, 0) ?? 0,
     onScrollStateChange: setShowScrollButton
   });
 
@@ -131,6 +123,16 @@ export function SessionDetail() {
   const { isPlaying, stop } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion } = useQuestions();
+
+  const sessionStatus = useSessionStatusForSession(sessionId);
+  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry';
+  const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
+  const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
+  const hasActiveStream = hasIncompleteMessages && isSessionActive;
+
+  const handleShowModelsDialog = useCallback(() => setModelDialogOpen(true), []);
+  const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
+  const handleShowHelpDialog = useCallback(() => openSettings(), [openSettings]);
 
   const handleNewSession = useCallback(async () => {
     try {
@@ -480,12 +482,11 @@ export function SessionDetail() {
                 sessionID={sessionId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton}
+                hasActiveStream={hasActiveStream}
                 onScrollToBottom={scrollToBottom}
-                onShowModelsDialog={() => setModelDialogOpen(true)}
-                onShowSessionsDialog={() => setSessionsDialogOpen(true)}
-                onShowHelpDialog={() => {
-                  openSettings()
-                }}
+                onShowModelsDialog={handleShowModelsDialog}
+                onShowSessionsDialog={handleShowSessionsDialog}
+                onShowHelpDialog={handleShowHelpDialog}
                 onToggleDetails={handleToggleDetails}
                 onExportSession={handleExportSession}
                 onPromptChange={setHasPromptContent}
