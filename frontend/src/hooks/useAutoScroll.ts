@@ -1,18 +1,11 @@
 import { useRef, useEffect, useCallback } from 'react'
+import type { Message } from '@/api/types'
 
 const SCROLL_LOCK_MS = 300
 
-interface MessageInfo {
-  role: string
-}
-
-interface Message {
-  info: MessageInfo
-}
-
-interface UseAutoScrollOptions<T extends Message> {
+interface UseAutoScrollOptions {
   containerRef?: React.RefObject<HTMLDivElement | null>
-  messages?: T[]
+  messages?: Message[]
   sessionId?: string
   onScrollStateChange?: (isScrolledUp: boolean) => void
 }
@@ -21,12 +14,12 @@ interface UseAutoScrollReturn {
   scrollToBottom: () => void
 }
 
-export function useAutoScroll<T extends Message>({
+export function useAutoScroll({
   containerRef,
   messages,
   sessionId,
   onScrollStateChange
-}: UseAutoScrollOptions<T>): UseAutoScrollReturn {
+}: UseAutoScrollOptions): UseAutoScrollReturn {
   const lastMessageCountRef = useRef(0)
   const hasInitialScrolledRef = useRef(false)
   const userScrolledAtRef = useRef(0)
@@ -139,7 +132,7 @@ export function useAutoScroll<T extends Message>({
 
     if (currentCount > prevCount) {
       const newMessage = messages[currentCount - 1]
-      if (newMessage?.info.role === 'user') {
+      if (newMessage?.role === 'user') {
         scrollToBottom()
         return
       }

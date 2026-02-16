@@ -25,7 +25,7 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 
 
 import type { components } from '@/api/opencode-types'
-import type { MessageWithParts, FileAttachmentInfo, ImageAttachment } from '@/api/types'
+import type { Message, FileAttachmentInfo, ImageAttachment } from '@/api/types'
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
 
@@ -715,12 +715,12 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
   }
 
-  const isMessageIncomplete = (msg: MessageWithParts): boolean => {
-    if (msg.info.role !== 'assistant') return false
-    return !('completed' in msg.info.time && msg.info.time.completed)
+  const isMessageIncomplete = (msg: Message): boolean => {
+    if (msg.role !== 'assistant') return false
+    return !('completed' in msg.time && msg.time.completed)
   }
 
-  const lastAssistantMessage = messages?.filter(msg => msg.info.role === 'assistant').at(-1)
+  const lastAssistantMessage = messages?.filter(msg => msg.role === 'assistant').at(-1)
   const hasIncompleteMessages = lastAssistantMessage ? isMessageIncomplete(lastAssistantMessage) : false
 
   const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)

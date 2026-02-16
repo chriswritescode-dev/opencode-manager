@@ -9,9 +9,30 @@ import { showToast } from '@/lib/toast'
 import { subscribeToSSE, addSSEDirectory, ensureSSEConnected } from '@/lib/sseManager'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
+import { useMessageParts } from '@/stores/messagePartsStore'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
+
+function optimisticallyErrorToolPart(messageID: string, callID: string, errorMessage: string) {
+  const store = useMessageParts.getState()
+  const parts = store.parts.get(messageID)
+  const target = parts?.find(p => p.type === 'tool' && p.callID === callID)
+  if (target && target.type === 'tool' && target.state.status === 'running') {
+    store.setPart(messageID, {
+      ...target,
+      state: {
+        status: 'error' as const,
+        input: target.state.input,
+        error: errorMessage,
+        time: {
+          start: target.state.time.start,
+          end: Date.now(),
+        },
+      },
+    })
+  }
+}
 
 interface SSHHostKeyState {
   request: SSHHostKeyRequest | null
@@ -181,9 +202,16 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
     const client = getClient(sessionID)
     if (!client) throw new Error('No client found for session')
+
+    if (response === 'reject') {
+      const permission = (permissionsBySession[sessionID] ?? []).find(p => p.id === permissionID)
+      if (permission?.tool) {
+        optimisticallyErrorToolPart(permission.tool.messageID, permission.tool.callID, 'Permission denied')
+      }
+    }
+
     await client.respondToPermission(sessionID, permissionID, response)
-    removePermission(permissionID, sessionID)
-  }, [getClient, removePermission])
+  }, [getClient, permissionsBySession])
 
   const replyToQuestion = useCallback(async (requestID: string, answers: string[][]) => {
     const connected = await ensureSSEConnected()
@@ -196,8 +224,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const client = getClient(question.sessionID)
     if (!client) throw new Error('No client found for session')
     await client.replyToQuestion(requestID, answers)
-    removeQuestion(requestID, question.sessionID)
-  }, [getClient, removeQuestion, questionsBySession])
+  }, [getClient, questionsBySession])
 
   const rejectQuestion = useCallback(async (requestID: string) => {
     const connected = await ensureSSEConnected()
@@ -209,9 +236,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
     if (!client) throw new Error('No client found for session')
+
+    if (question.tool) {
+      optimisticallyErrorToolPart(question.tool.messageID, question.tool.callID, 'Question rejected')
+    }
+
     await client.rejectQuestion(requestID)
-    removeQuestion(requestID, question.sessionID)
-  }, [getClient, removeQuestion, questionsBySession])
+  }, [getClient, questionsBySession])
 
   const getPermissionForCallID = useCallback((callID: string, sessionID: string): PermissionRequest | null => {
     const perms = permissionsBySession[sessionID] ?? []

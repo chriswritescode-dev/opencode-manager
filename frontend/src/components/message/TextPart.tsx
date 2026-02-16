@@ -190,11 +190,7 @@ export function TextPart({ part }: TextPartProps) {
   }, [part.text])
 
   if (!part.text || part.text.trim() === '') {
-    return (
-      <div className="text-muted-foreground italic text-sm">
-        [Empty message content]
-      </div>
-    )
+    return null  
   }
 
   return (

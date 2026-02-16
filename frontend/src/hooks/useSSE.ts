@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
-import type { SSEEvent, MessageListResponse } from '@/api/types'
+import type { SSEEvent, Message } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
+import { useMessageParts } from '@/stores/messagePartsStore'
 import { sseManager, subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib/sseManager'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 
@@ -50,6 +51,10 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const [isReconnecting, setIsReconnecting] = useState(false)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
+  const setPart = useMessageParts((state) => state.setPart)
+  const removePart = useMessageParts((state) => state.removePart)
+  const clearMessage = useMessageParts((state) => state.clearMessage)
+  const setParts = useMessageParts((state) => state.setParts)
 
   const handleSSEEvent = useCallback((event: SSEEvent) => {
     switch (event.type) {
@@ -81,38 +86,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       case 'message.part.updated':
       case 'messagev2.part.updated': {
         if (!('part' in event.properties)) break
-        
         const { part } = event.properties
-        const sessionID = part.sessionID
-        const messageID = part.messageID
-        
-        const currentData = queryClient.getQueryData<MessageListResponse>(['opencode', 'messages', opcodeUrl, sessionID, directory])
-        if (!currentData) return
-        
-        const messageExists = currentData.some(msg => msg.info.id === messageID)
-        if (!messageExists) return
-        
-        const updated = currentData.map(msg => {
-          if (msg.info.id !== messageID) return msg
-          
-          const existingPartIndex = msg.parts.findIndex(p => p.id === part.id)
-          
-          if (existingPartIndex >= 0) {
-            const newParts = [...msg.parts]
-            newParts[existingPartIndex] = { ...part }
-            return { 
-              info: { ...msg.info }, 
-              parts: newParts 
-            }
-          } else {
-            return { 
-              info: { ...msg.info }, 
-              parts: [...msg.parts, { ...part }] 
-            }
-          }
-        })
-        
-        queryClient.setQueryData(['opencode', 'messages', opcodeUrl, sessionID, directory], updated)
+        setPart(part.messageID, part)
         break
       }
 
@@ -129,28 +104,25 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         }
         
         const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
-        const currentData = queryClient.getQueryData<MessageListResponse>(messagesQueryKey)
+        const currentData = queryClient.getQueryData<Message[]>(messagesQueryKey)
         if (!currentData) {
           queryClient.invalidateQueries({ queryKey: messagesQueryKey })
           return
         }
         
-        const messageExists = currentData.some(msg => msg.info.id === info.id)
+        const messageExists = currentData.some(msg => msg.id === info.id)
         
         if (!messageExists) {
           const filteredData = info.role === 'user' 
-            ? currentData.filter(msg => !msg.info.id.startsWith('optimistic_'))
+            ? currentData.filter(msg => !msg.id.startsWith('optimistic_'))
             : currentData
-          queryClient.setQueryData(messagesQueryKey, [...filteredData, { info, parts: [] }])
+          queryClient.setQueryData(messagesQueryKey, [...filteredData, info])
           return
         }
         
         const updated = currentData.map(msg => {
-          if (msg.info.id !== info.id) return msg
-          return { 
-            info: { ...info }, 
-            parts: [...msg.parts] 
-          }
+          if (msg.id !== info.id) return msg
+          return { ...info }
         })
         
         queryClient.setQueryData(messagesQueryKey, updated)
@@ -163,13 +135,14 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         
         const { sessionID, messageID } = event.properties
         
-        queryClient.setQueryData<MessageListResponse>(
+        queryClient.setQueryData<Message[]>(
           ['opencode', 'messages', opcodeUrl, sessionID, directory],
           (old) => {
             if (!old) return old
-            return old.filter(msg => msg.info.id !== messageID)
+            return old.filter(msg => msg.id !== messageID)
           }
         )
+        clearMessage(messageID)
         break
       }
 
@@ -177,22 +150,9 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       case 'messagev2.part.removed': {
         if (!('sessionID' in event.properties && 'messageID' in event.properties && 'partID' in event.properties)) break
         
-        const { sessionID, messageID, partID } = event.properties
+        const { messageID, partID } = event.properties
         
-        queryClient.setQueryData<MessageListResponse>(
-          ['opencode', 'messages', opcodeUrl, sessionID, directory],
-          (old) => {
-            if (!old) return old
-            
-            return old.map(msg => {
-              if (msg.info.id !== messageID) return msg
-              return {
-                ...msg,
-                parts: msg.parts.filter(p => p.id !== partID)
-              }
-            })
-          }
-        )
+        removePart(messageID, partID)
         break
       }
 
@@ -217,14 +177,28 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         setSessionStatus(sessionID, { type: 'idle' })
         
         const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
-        const currentData = queryClient.getQueryData<MessageListResponse>(messagesQueryKey)
+        const currentData = queryClient.getQueryData<Message[]>(messagesQueryKey)
         if (!currentData) break
         
         const now = Date.now()
         const updated = currentData.map(msg => {
-          if (msg.info.role !== 'assistant') return msg
+          if (msg.role !== 'assistant') return msg
           
-          const updatedParts = msg.parts.map(part => {
+          if ('completed' in msg.time && msg.time.completed) return msg
+          
+          return {
+            ...msg,
+            time: { ...msg.time, completed: now }
+          }
+        })
+        
+        queryClient.setQueryData(messagesQueryKey, updated)
+        
+        const partsStore = useMessageParts.getState()
+        for (const [messageID, parts] of partsStore.parts) {
+          if (!parts.some(p => p.sessionID === sessionID)) continue
+          
+          const updatedParts = parts.map(part => {
             if (part.type !== 'tool') return part
             if (part.state.status !== 'running' && part.state.status !== 'pending') return part
             return {
@@ -243,20 +217,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
             }
           })
           
-          const msgUpdated = updatedParts !== msg.parts
-          if ('completed' in msg.info.time && msg.info.time.completed && !msgUpdated) return msg
-          
-          return {
-            ...msg,
-            info: {
-              ...msg.info,
-              time: { ...msg.info.time, completed: now }
-            },
-            parts: updatedParts
-          }
-        })
-        
-        queryClient.setQueryData(messagesQueryKey, updated)
+          setParts(messageID, updatedParts)
+        }
         
         queryClient.invalidateQueries({ queryKey: messagesQueryKey })
         break
@@ -324,7 +286,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       default:
         break
     }
-  }, [queryClient, opcodeUrl, directory, setSessionStatus, setSessionTodos, currentSessionId])
+  }, [queryClient, opcodeUrl, directory, setSessionStatus, setSessionTodos, setPart, removePart, clearMessage, setParts, currentSessionId])
 
   const fetchInitialData = useCallback(async () => {
     if (!client || !mountedRef.current) return

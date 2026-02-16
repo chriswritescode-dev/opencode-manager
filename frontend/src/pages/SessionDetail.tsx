@@ -28,6 +28,8 @@ import { useTTS } from "@/hooks/useTTS";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
+import { useMessageParts } from "@/stores/messagePartsStore";
+import type { MessageWithParts } from "@/api/types";
 import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
@@ -96,8 +98,17 @@ export function SessionDetail() {
     if (!rawMessages) return undefined
     const revertMessageID = session?.revert?.messageID
     if (!revertMessageID) return rawMessages
-    return rawMessages.filter(msg => compareMessageIds(msg.info.id, revertMessageID) < 0)
+    return rawMessages.filter(msg => compareMessageIds(msg.id, revertMessageID) < 0)
   }, [rawMessages, session?.revert?.messageID]);
+
+  const getMessagesWithParts = useCallback((): MessageWithParts[] | undefined => {
+    if (!messages) return undefined
+    const partsMap = useMessageParts.getState().parts
+    return messages.map(msg => ({
+      info: msg,
+      parts: partsMap.get(msg.id) || []
+    }))
+  }, [messages])
 
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
@@ -261,15 +272,16 @@ export function SessionDetail() {
   }, [preferences?.expandToolCalls, updateSettings]);
 
   const handleExportSession = useCallback(() => {
-    if (!messages || !session) {
+    const data = getMessagesWithParts()
+    if (!data || !session) {
       showToast.error('No session data to export')
       return
     }
     
-    const { filename, content } = exportSession(messages, session)
+    const { filename, content } = exportSession(data, session)
     downloadMarkdown(content, filename)
     showToast.success(`Exported to ${filename}`)
-  }, [messages, session]);
+  }, [getMessagesWithParts, session]);
 
   const handleUndoMessage = useCallback((restoredPrompt: string) => {
     promptInputRef.current?.setPromptValue(restoredPrompt)

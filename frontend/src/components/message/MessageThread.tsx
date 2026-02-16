@@ -4,15 +4,16 @@ import { MessagePart } from './MessagePart'
 import { UserMessageActionButtons } from './UserMessageActionButtons'
 import { EditableUserMessage, ClickableUserMessage } from './EditableUserMessage'
 import { MessageError } from './MessageError'
-import type { MessageWithParts } from '@/api/types'
+import type { Message, Part } from '@/api/types'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
+import { useMessageParts, usePartsForMessage, usePartsVersion } from '@/stores/messagePartsStore'
 import type { components } from '@/api/opencode-types'
 import type { Todo } from '@/components/message/SessionTodoDisplay'
 import type { OpenCodeError } from '@/lib/opencode-errors'
 
-function getMessageTextContent(msg: MessageWithParts): string {
-  return msg.parts
+function getMessageTextContent(parts: Part[]): string {
+  return parts
     .filter(p => p.type === 'text')
     .map(p => p.text || '')
     .join('\n\n')
@@ -23,16 +24,16 @@ interface MessageThreadProps {
   opcodeUrl: string
   sessionID: string
   directory?: string
-  messages?: MessageWithParts[]
+  messages?: Message[]
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   onUndoMessage?: (restoredPrompt: string) => void
   model?: string
 }
 
-const isMessageStreaming = (msg: MessageWithParts): boolean => {
-  if (msg.info.role !== 'assistant') return false
-  return !('completed' in msg.info.time && msg.info.time.completed)
+const isMessageStreaming = (msg: Message): boolean => {
+  if (msg.role !== 'assistant') return false
+  return !('completed' in msg.time && msg.time.completed)
 }
 
 function isSessionInRetry(sessionStatus: { type?: string }): boolean {
@@ -47,18 +48,165 @@ const compareMessageIds = (id1: string, id2: string): number => {
 }
 
 const findLastMessageByRole = (
-  messages: MessageWithParts[],
+  messages: Message[],
   role: 'user' | 'assistant',
-  predicate?: (msg: MessageWithParts) => boolean
+  predicate?: (msg: Message) => boolean
 ): string | undefined => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.info.role === role && (!predicate || predicate(msg))) {
-      return msg.info.id
+    if (msg.role === role && (!predicate || predicate(msg))) {
+      return msg.id
     }
   }
   return undefined
 }
+
+interface MessageRowProps {
+  msg: Message
+  index: number
+  messages: Message[]
+  pendingAssistantId: string | undefined
+  lastUserMessageId: string | undefined
+  isSessionBusy: boolean
+  onUndoMessage?: (restoredPrompt: string) => void
+  editingUserMessageId: string | null
+  editingForAssistantId: string | null
+  opcodeUrl: string
+  sessionID: string
+  directory?: string
+  onFileClick?: (filePath: string, lineNumber?: number) => void
+  onChildSessionClick?: (sessionId: string) => void
+  handleStartEditUserMessage: (userMessageId: string, assistantMessageId: string) => void
+  handleCancelEdit: () => void
+  model?: string
+}
+
+const MessageRow = memo(function MessageRow({
+  msg,
+  index,
+  messages,
+  pendingAssistantId,
+  lastUserMessageId,
+  isSessionBusy,
+  onUndoMessage,
+  editingUserMessageId,
+  editingForAssistantId,
+  opcodeUrl,
+  sessionID,
+  directory,
+  onFileClick,
+  onChildSessionClick,
+  handleStartEditUserMessage,
+  handleCancelEdit,
+  model,
+}: MessageRowProps) {
+  const parts = usePartsForMessage(msg.id)
+  const streaming = isMessageStreaming(msg)
+  const isQueued = msg.role === 'user' && pendingAssistantId && compareMessageIds(msg.id, pendingAssistantId) > 0
+  const isLastUserMessage = msg.role === 'user' && msg.id === lastUserMessageId
+  const messageTextContent = getMessageTextContent(parts)
+
+  const nextAssistantMessage = messages.slice(index + 1).find(m => m.role === 'assistant')
+  const isUserBeforeAssistant = msg.role === 'user' && nextAssistantMessage
+  const canEditUserMessage = isLastUserMessage && isUserBeforeAssistant && !isSessionBusy
+  const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
+
+  const isEditingThisMessage = editingUserMessageId === msg.id
+
+  return (
+    <div
+      key={msg.id}
+      className="flex flex-col group"
+    >
+      <div
+        className={`w-full rounded-lg p-1.5 ${
+          msg.role === 'user'
+            ? isQueued 
+              ? 'bg-amber-500/10 border border-amber-500/30'
+              : isEditingThisMessage
+                ? 'bg-blue-600/30 border border-blue-600/50'
+                : 'bg-blue-600/20 border border-blue-600/30'
+            : 'bg-card/50 border border-border'
+        } ${streaming ? 'animate-pulse-subtle' : ''}`}
+      >
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-medium text-muted-foreground">
+              {msg.role === 'user' ? 'You' : (msg.role === 'assistant' && 'modelID' in msg ? msg.modelID : 'Assistant')}
+            </span>
+            {msg.time && (
+              <span className="text-xs text-muted-foreground">
+                {new Date(msg.time.created).toLocaleTimeString()}
+              </span>
+            )}
+            {canEditUserMessage && nextAssistantMessage && (
+              <button
+                onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMessage.id)}
+                className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+                title="Edit message"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {isQueued && (
+              <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
+                QUEUED
+              </span>
+            )}
+          </div>
+          
+          {msg.role === 'user' && canUndoUserMessage && (
+            <UserMessageActionButtons
+              opcodeUrl={opcodeUrl}
+              sessionId={sessionID}
+              directory={directory}
+              userMessageId={msg.id}
+              userMessageContent={messageTextContent}
+              onUndo={onUndoMessage}
+            />
+          )}
+        </div>
+        
+        <div className="space-y-2">
+          {msg.role === 'user' && isEditingThisMessage && editingForAssistantId ? (
+            <EditableUserMessage
+              opcodeUrl={opcodeUrl}
+              sessionId={sessionID}
+              directory={directory}
+              content={messageTextContent}
+              assistantMessageId={editingForAssistantId}
+              onCancel={handleCancelEdit}
+              model={model}
+            />
+          ) : msg.role === 'user' && canEditUserMessage && nextAssistantMessage ? (
+            <ClickableUserMessage
+              content={messageTextContent}
+              onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMessage.id)}
+              isEditable={false}
+            />
+          ) : parts.length > 0 ? (
+            parts.map((part: Part, partIndex: number) => (
+              <div key={`${msg.id}-${part.id}-${partIndex}`}>
+                <MessagePart
+                  part={part}
+                  role={msg.role}
+                  allParts={parts}
+                  partIndex={partIndex}
+                  onFileClick={onFileClick}
+                  onChildSessionClick={onChildSessionClick}
+                  messageTextContent={msg.role === 'assistant' ? messageTextContent : undefined}
+                />
+              </div>
+            ))
+          ) : null}
+          {msg.role === 'assistant' && 'error' in msg && msg.error && (
+            <MessageError error={msg.error as OpenCodeError} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+})
 
 export const MessageThread = memo(function MessageThread({ 
   opcodeUrl, 
@@ -86,12 +234,21 @@ export const MessageThread = memo(function MessageThread({
 
   const isSessionBusy = !!pendingAssistantId || isSessionInRetry(sessionStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
+  const partsVersion = usePartsVersion()
 
   useEffect(() => {
     if (!messages || messages.length === 0) return
 
-    const latestTodoPart = messages
-      .flatMap(msg => msg.parts)
+    const partsMap = useMessageParts.getState().parts
+    const allParts: Part[] = []
+    for (const msg of messages) {
+      const msgParts = partsMap.get(msg.id)
+      if (msgParts) {
+        allParts.push(...msgParts)
+      }
+    }
+
+    const latestTodoPart = allParts
       .filter((part): part is components['schemas']['ToolPart'] => part.type === 'tool' && (part.tool === 'todowrite' || part.tool === 'todoread'))
       .filter(part => part.state.status === 'completed' && 'time' in part.state)
       .sort((a, b) => {
@@ -102,8 +259,8 @@ export const MessageThread = memo(function MessageThread({
         return bEndTime - aEndTime
       })[0]
 
-if (latestTodoPart) {
-const state = latestTodoPart.state
+    if (latestTodoPart) {
+      const state = latestTodoPart.state
       let todos: Todo[] = []
 
       if ('metadata' in state && state.metadata?.todos && Array.isArray(state.metadata.todos)) {
@@ -124,7 +281,7 @@ const state = latestTodoPart.state
         setSessionTodos(sessionID, todos)
       }
     }
-  }, [messages, sessionID, setSessionTodos])
+  }, [messages, sessionID, setSessionTodos, partsVersion])
 
   const handleStartEditUserMessage = useCallback((userMessageId: string, assistantMessageId: string) => {
     setEditingUserMessageId(userMessageId)
@@ -146,113 +303,28 @@ const state = latestTodoPart.state
 
   return (
     <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
-      {messages.map((msg, index) => {
-        const streaming = isMessageStreaming(msg)
-        const isQueued = msg.info.role === 'user' && pendingAssistantId && compareMessageIds(msg.info.id, pendingAssistantId) > 0
-        const isLastUserMessage = msg.info.role === 'user' && msg.info.id === lastUserMessageId
-        const messageTextContent = getMessageTextContent(msg)
-
-        const nextAssistantMessage = messages.slice(index + 1).find(m => m.info.role === 'assistant')
-        const isUserBeforeAssistant = msg.info.role === 'user' && nextAssistantMessage
-        const canEditUserMessage = isLastUserMessage && isUserBeforeAssistant && !isSessionBusy
-        const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
-
-        const isEditingThisMessage = editingUserMessageId === msg.info.id
-
-        return (
-          <div
-            key={msg.info.id}
-            className="flex flex-col group"
-          >
-            <div
-              className={`w-full rounded-lg p-1.5 ${
-                msg.info.role === 'user'
-                  ? isQueued 
-                    ? 'bg-amber-500/10 border border-amber-500/30'
-                    : isEditingThisMessage
-                      ? 'bg-blue-600/30 border border-blue-600/50'
-                      : 'bg-blue-600/20 border border-blue-600/30'
-                  : 'bg-card/50 border border-border'
-              } ${streaming ? 'animate-pulse-subtle' : ''}`}
-            >
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {msg.info.role === 'user' ? 'You' : (msg.info.role === 'assistant' && 'modelID' in msg.info ? msg.info.modelID : 'Assistant')}
-                  </span>
-                  {msg.info.time && (
-                    <span className="text-xs text-muted-foreground">
-                      {new Date(msg.info.time.created).toLocaleTimeString()}
-                    </span>
-                  )}
-                  {canEditUserMessage && nextAssistantMessage && (
-                    <button
-                      onClick={() => handleStartEditUserMessage(msg.info.id, nextAssistantMessage.info.id)}
-                      className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                      title="Edit message"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                  {isQueued && (
-                    <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
-                      QUEUED
-                    </span>
-                  )}
-                </div>
-                
-                {msg.info.role === 'user' && canUndoUserMessage && (
-                  <UserMessageActionButtons
-                    opcodeUrl={opcodeUrl}
-                    sessionId={sessionID}
-                    directory={directory}
-                    userMessageId={msg.info.id}
-                    userMessageContent={messageTextContent}
-                    onUndo={onUndoMessage}
-                  />
-                )}
-              </div>
-              
-              <div className="space-y-2">
-                {msg.info.role === 'user' && isEditingThisMessage && editingForAssistantId ? (
-                  <EditableUserMessage
-                    opcodeUrl={opcodeUrl}
-                    sessionId={sessionID}
-                    directory={directory}
-                    content={messageTextContent}
-                    assistantMessageId={editingForAssistantId}
-                    onCancel={handleCancelEdit}
-                    model={model}
-                  />
-                ) : msg.info.role === 'user' && canEditUserMessage && nextAssistantMessage ? (
-                  <ClickableUserMessage
-                    content={messageTextContent}
-                    onClick={() => handleStartEditUserMessage(msg.info.id, nextAssistantMessage.info.id)}
-                    isEditable={false}
-                  />
-                ) : (
-                  msg.parts.map((part, partIndex) => (
-                    <div key={`${msg.info.id}-${part.id}-${partIndex}`}>
-                      <MessagePart
-                        part={part}
-                        role={msg.info.role}
-                        allParts={msg.parts}
-                        partIndex={partIndex}
-                        onFileClick={onFileClick}
-                        onChildSessionClick={onChildSessionClick}
-                        messageTextContent={msg.info.role === 'assistant' ? messageTextContent : undefined}
-                      />
-                    </div>
-                  ))
-                )}
-                {msg.info.role === 'assistant' && 'error' in msg.info && msg.info.error && (
-                  <MessageError error={msg.info.error as OpenCodeError} />
-                )}
-              </div>
-            </div>
-          </div>
-        )
-      })}
+      {messages.map((msg, index) => (
+        <MessageRow
+          key={msg.id}
+          msg={msg}
+          index={index}
+          messages={messages}
+          pendingAssistantId={pendingAssistantId}
+          lastUserMessageId={lastUserMessageId}
+          isSessionBusy={isSessionBusy}
+          onUndoMessage={onUndoMessage}
+          editingUserMessageId={editingUserMessageId}
+          editingForAssistantId={editingForAssistantId}
+          opcodeUrl={opcodeUrl}
+          sessionID={sessionID}
+          directory={directory}
+          onFileClick={onFileClick}
+          onChildSessionClick={onChildSessionClick}
+          handleStartEditUserMessage={handleStartEditUserMessage}
+          handleCancelEdit={handleCancelEdit}
+          model={model}
+        />
+      ))}
     </div>
   )
 })

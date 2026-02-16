@@ -24,8 +24,8 @@ export function useSessionAgent(
 
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
-      if (msg.info.role === 'user') {
-        const userInfo = msg.info as UserMessage
+      if (msg.role === 'user') {
+        const userInfo = msg as UserMessage
         return {
           agent: userInfo.agent || DEFAULT_AGENT,
           model: userInfo.model,
@@ -43,7 +43,7 @@ export function useSessionAgent(
 }
 
 export function getSessionAgentFromMessages(
-  messages: Array<{ info: { role: string; agent?: string } }> | undefined
+  messages: Array<{ role: string; agent?: string }> | undefined
 ): string {
   if (!messages || messages.length === 0) {
     return DEFAULT_AGENT
@@ -51,8 +51,8 @@ export function getSessionAgentFromMessages(
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.info.role === 'user' && 'agent' in msg.info) {
-      return (msg.info.agent as string) || DEFAULT_AGENT
+    if (msg.role === 'user' && 'agent' in msg) {
+      return (msg.agent as string) || DEFAULT_AGENT
     }
   }
 
