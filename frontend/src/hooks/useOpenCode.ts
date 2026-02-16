@@ -7,12 +7,12 @@ import type {
   Message,
   Part,
   ContentPart,
+  MessageWithParts,
 } from "../api/types";
 import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
-import { useMessageParts } from "@/stores/messagePartsStore";
 import { ensureSSEConnected, reconnectSSE } from "../lib/sseManager";
 
 const titleGeneratingSessionsState = new Set<string>();
@@ -86,8 +86,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     queryKey: ["opencode", "messages", opcodeUrl, sessionID, directory],
     queryFn: async () => {
       const response = await client!.listMessages(sessionID!)
-      useMessageParts.getState().initFromMessages(response)
-      return response.map(m => m.info) as Message[]
+      return response as MessageWithParts[]
     },
     enabled: !!client && !!sessionID,
     refetchOnMount: 'always',
@@ -298,11 +297,14 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
       await queryClient.cancelQueries({ queryKey: messagesQueryKey });
 
-      queryClient.setQueryData<Message[]>(
+      const optimisticMessageWithParts: MessageWithParts = {
+        info: userMessageInfo,
+        parts: userMessageParts,
+      }
+      queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey,
-        (old) => [...(old || []), userMessageInfo],
+        (old) => [...(old || []), optimisticMessageWithParts],
       );
-      useMessageParts.getState().setParts(optimisticUserID, userMessageParts);
 
       const requestData: SendPromptRequest = {
         parts: parts?.map((part) =>
@@ -369,9 +371,9 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       }
       
       setSessionStatus(sessionID, { type: "idle" });
-      queryClient.setQueryData<Message[]>(
+      queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey,
-        (old) => old?.filter((msg) => !msg.id.startsWith("optimistic_")),
+        (old) => old?.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_")),
       );
       
       const parsed = parseNetworkError(error);
@@ -385,24 +387,22 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       const { optimisticUserID, userPromptText, response } = data;
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
 
-      queryClient.setQueryData<Message[]>(
+      queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey,
         (old) => {
           if (!old) return old;
-          const withoutOptimistic = old.filter((msg) => msg.id !== optimisticUserID);
+          const withoutOptimistic = old.filter((msgWithParts) => msgWithParts.info.id !== optimisticUserID);
           
-          const existingIdx = withoutOptimistic.findIndex(m => m.id === response.info.id);
+          const existingIdx = withoutOptimistic.findIndex(m => m.info.id === response.info.id);
           if (existingIdx >= 0) {
             const updated = [...withoutOptimistic];
-            updated[existingIdx] = response.info;
+            updated[existingIdx] = { info: response.info, parts: response.parts };
             return updated;
           }
           
-          return [...withoutOptimistic, response.info];
+          return [...withoutOptimistic, { info: response.info, parts: response.parts }];
         },
       );
-
-      useMessageParts.getState().setParts(response.info.id, response.parts);
 
       setSessionStatus(sessionID, { type: "idle" });
 
@@ -432,55 +432,55 @@ export const useAbortSession = (
     const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
     const now = Date.now();
     
-    queryClient.setQueryData<Message[]>(queryKey, (old) => {
+    queryClient.setQueryData<MessageWithParts[]>(queryKey, (old) => {
       if (!old) return old;
       
-      return old.map(msg => {
+      return old.map(msgWithParts => {
+        const msg = msgWithParts.info;
+        let updatedParts = msgWithParts.parts;
+        
         if (msg.role === "assistant") {
           const assistantInfo = msg as AssistantMessage;
           if (!assistantInfo.time.completed) {
+            updatedParts = updatedParts.map(part => {
+              if (part.type !== "tool") return part;
+              if (part.state.status !== "running" && part.state.status !== "pending") return part;
+              return {
+                ...part,
+                state: {
+                  ...part.state,
+                  status: "completed" as const,
+                  output: part.state.status === "running" ? "[Session aborted]" : "[Tool was pending when session aborted]",
+                  title: part.state.status === "running" ? (part.state as { title?: string }).title || "" : "",
+                  metadata: (part.state as { metadata?: Record<string, unknown> }).metadata || {},
+                  time: {
+                    start: (part.state as { time?: { start: number } }).time?.start || now,
+                    end: now
+                  }
+                }
+              };
+            });
+            
             return {
-              ...assistantInfo,
-              time: {
-                ...assistantInfo.time,
-                completed: now
+              ...msgWithParts,
+              info: {
+                ...assistantInfo,
+                time: {
+                  ...assistantInfo.time,
+                  completed: now
+                },
+                error: {
+                  name: "MessageAbortedError" as const,
+                  data: { message: "Session aborted" }
+                }
               },
-              error: {
-                name: "MessageAbortedError" as const,
-                data: { message: "Session aborted" }
-              }
+              parts: updatedParts
             };
           }
         }
-        return msg;
+        return msgWithParts;
       });
     });
-
-    const partsStore = useMessageParts.getState();
-    for (const [messageID, parts] of partsStore.parts) {
-      if (!parts.some(p => p.sessionID === targetSessionID)) continue;
-      
-      const updatedParts = parts.map(part => {
-        if (part.type !== "tool") return part;
-        if (part.state.status !== "running" && part.state.status !== "pending") return part;
-        return {
-          ...part,
-          state: {
-            ...part.state,
-            status: "completed" as const,
-            output: part.state.status === "running" ? "[Session aborted]" : "[Tool was pending when session aborted]",
-            title: part.state.status === "running" ? (part.state as { title?: string }).title || "" : "",
-            metadata: (part.state as { metadata?: Record<string, unknown> }).metadata || {},
-            time: {
-              start: (part.state as { time?: { start: number } }).time?.start || now,
-              end: now
-            }
-          }
-        };
-      });
-      
-      useMessageParts.getState().setParts(messageID, updatedParts);
-    }
   }, [queryClient, opcodeUrl, directory]);
 
   const stopRetrying = useCallback(() => {
@@ -493,11 +493,11 @@ export const useAbortSession = (
 
   const isSessionComplete = useCallback((targetSessionID: string) => {
     const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
-    const messages = queryClient.getQueryData<Message[]>(queryKey);
+    const messages = queryClient.getQueryData<MessageWithParts[]>(queryKey);
     
-    const hasActiveStream = messages?.some(msg => {
-      if (msg.role !== "assistant") return false;
-      const assistantInfo = msg as AssistantMessage;
+    const hasActiveStream = messages?.some(msgWithParts => {
+      if (msgWithParts.info.role !== "assistant") return false;
+      const assistantInfo = msgWithParts.info as AssistantMessage;
       return !assistantInfo.time.completed;
     });
 
@@ -595,11 +595,14 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
       await queryClient.cancelQueries({ queryKey: messagesQueryKey });
 
-      queryClient.setQueryData<Message[]>(
+      const optimisticMessageWithParts: MessageWithParts = {
+        info: userMessageInfo,
+        parts: userMessageParts,
+      }
+      queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey,
-        (old) => [...(old || []), userMessageInfo],
+        (old) => [...(old || []), optimisticMessageWithParts],
       );
-      useMessageParts.getState().setParts(optimisticUserID, userMessageParts);
 
       const response = await client.sendShell(sessionID, {
         command,
@@ -611,11 +614,11 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
     onError: (_, variables) => {
       const { sessionID } = variables;
       setSessionStatus(sessionID, { type: "idle" });
-      queryClient.setQueryData<Message[]>(
+      queryClient.setQueryData<MessageWithParts[]>(
         ["opencode", "messages", opcodeUrl, sessionID, directory],
         (old) => {
           if (!old) return old;
-          return old.filter((msg) => !msg.id.startsWith("optimistic_"));
+          return old.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_"));
         },
       );
     },
@@ -623,11 +626,11 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       const { sessionID } = variables;
       const { optimisticUserID } = data;
 
-      queryClient.setQueryData<Message[]>(
+      queryClient.setQueryData<MessageWithParts[]>(
         ["opencode", "messages", opcodeUrl, sessionID, directory],
         (old) => {
           if (!old) return old;
-          return old.filter((msg) => msg.id !== optimisticUserID);
+          return old.filter((msgWithParts) => msgWithParts.info.id !== optimisticUserID);
         },
       );
 

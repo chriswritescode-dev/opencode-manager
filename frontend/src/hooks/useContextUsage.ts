@@ -55,11 +55,12 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
   return useMemo(() => {
     const currentModel = modelString || null
 
-    const assistantMessages = messages?.filter(msg => msg.role === 'assistant') || []
+    const assistantMessages = messages?.filter(msg => msg.info.role === 'assistant') || []
     let latestAssistantMessage = assistantMessages[assistantMessages.length - 1]
     
-    if (latestAssistantMessage?.role === 'assistant') {
-      const tokens = latestAssistantMessage.tokens.input + latestAssistantMessage.tokens.output + latestAssistantMessage.tokens.reasoning + (latestAssistantMessage.tokens.cache?.read || 0)
+    if (latestAssistantMessage?.info.role === 'assistant') {
+      const msgInfo = latestAssistantMessage.info as { tokens?: { input: number; output: number; reasoning: number; cache?: { read: number } } }
+      const tokens = (msgInfo.tokens?.input ?? 0) + (msgInfo.tokens?.output ?? 0) + (msgInfo.tokens?.reasoning ?? 0) + (msgInfo.tokens?.cache?.read ?? 0)
       if (tokens === 0 && assistantMessages.length > 1) {
         latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
       }
@@ -88,8 +89,9 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
     }
     
     let totalTokens = 0
-    if (latestAssistantMessage?.role === 'assistant') {
-      totalTokens = latestAssistantMessage.tokens.input + latestAssistantMessage.tokens.output + latestAssistantMessage.tokens.reasoning + (latestAssistantMessage.tokens.cache?.read || 0)
+    if (latestAssistantMessage?.info.role === 'assistant') {
+      const msgInfo = latestAssistantMessage.info as { tokens?: { input: number; output: number; reasoning: number; cache?: { read: number } } }
+      totalTokens = (msgInfo.tokens?.input ?? 0) + (msgInfo.tokens?.output ?? 0) + (msgInfo.tokens?.reasoning ?? 0) + (msgInfo.tokens?.cache?.read ?? 0)
     }
 
     const usagePercentage = contextLimit ? (totalTokens / contextLimit) * 100 : null

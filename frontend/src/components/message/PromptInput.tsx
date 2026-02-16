@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, type KeyboardEvent } from 'react'
-import { useSendPrompt, useAbortSession, useMessages, useSendShell, useAgents } from '@/hooks/useOpenCode'
+import { useState, useRef, useEffect, useMemo, useImperativeHandle, forwardRef, memo, type KeyboardEvent } from 'react'
+import { useSendPrompt, useAbortSession, useSendShell, useAgents } from '@/hooks/useOpenCode'
 import { useCommands } from '@/hooks/useCommands'
 import { useCommandHandler } from '@/hooks/useCommandHandler'
 import { useFileSearch } from '@/hooks/useFileSearch'
@@ -10,7 +10,7 @@ import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
 import { useMobile } from '@/hooks/useMobile'
-import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
+
 import { usePermissions } from '@/contexts/EventContext'
 import { ChevronDown, Upload, X, Mic, MicOff } from 'lucide-react'
 
@@ -25,7 +25,7 @@ import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQu
 
 
 import type { components } from '@/api/opencode-types'
-import type { Message, FileAttachmentInfo, ImageAttachment } from '@/api/types'
+import type { FileAttachmentInfo, ImageAttachment } from '@/api/types'
 
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic", "image/heif"]
 
@@ -55,6 +55,7 @@ interface PromptInputProps {
   sessionID: string
   disabled?: boolean
   showScrollButton?: boolean
+  hasActiveStream?: boolean
   onScrollToBottom?: () => void
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
@@ -64,12 +65,13 @@ interface PromptInputProps {
   onPromptChange?: (hasContent: boolean) => void
 }
 
-export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
+export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   opcodeUrl,
   directory,
   sessionID, 
   disabled,
   showScrollButton,
+  hasActiveStream = false,
   onScrollToBottom,
   onShowSessionsDialog,
   onShowModelsDialog,
@@ -137,7 +139,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
-  const { data: messages } = useMessages(opcodeUrl, sessionID, directory)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
     opcodeUrl,
@@ -184,7 +185,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(funct
   }, [agents, searchResults, mentionQuery])
   
 
-  const { addUserBashCommand } = useUserBash()
+  const addUserBashCommand = useUserBash((s) => s.addUserBashCommand)
 
   const handleSubmit = () => {
     if (disabled) return
@@ -715,14 +716,6 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
   }
 
-  const isMessageIncomplete = (msg: Message): boolean => {
-    if (msg.role !== 'assistant') return false
-    return !('completed' in msg.time && msg.time.completed)
-  }
-
-  const lastAssistantMessage = messages?.filter(msg => msg.role === 'assistant').at(-1)
-  const hasIncompleteMessages = lastAssistantMessage ? isMessageIncomplete(lastAssistantMessage) : false
-
   const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
   const currentMode = localMode ?? sessionAgent.agent
 
@@ -733,10 +726,7 @@ const { model, modelString } = useModelSelection(opcodeUrl, directory)
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(opcodeUrl, directory)
-  const sessionStatus = useSessionStatusForSession(sessionID)
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry'
-  const hasActiveStream = hasIncompleteMessages && isSessionActive
-  const showStopButton = isSessionActive && hasIncompleteMessages
+  const showStopButton = hasActiveStream
   const hideSecondaryButtons = isMobile && hasActiveStream
 
   
@@ -969,4 +959,4 @@ return (
       />
     </div>
   )
-})
+}))

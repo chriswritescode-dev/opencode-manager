@@ -1,8 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
 import { showToast } from '@/lib/toast'
-import type { Message } from '@/api/types'
-import { useMessageParts } from '@/stores/messagePartsStore'
+import type { MessageWithParts } from '@/api/types'
 
 interface UseUndoMessageOptions {
   opcodeUrl: string | null
@@ -12,7 +11,7 @@ interface UseUndoMessageOptions {
 }
 
 interface UndoMessageContext {
-  previousMessages?: Message[]
+  previousMessages?: MessageWithParts[]
 }
 
 export function useUndoMessage({ 
@@ -22,7 +21,6 @@ export function useUndoMessage({
   onSuccess 
 }: UseUndoMessageOptions) {
   const queryClient = useQueryClient()
-  const clearMessage = useMessageParts((state) => state.clearMessage)
 
   return useMutation<string, Error, { messageID: string; messageContent: string }, UndoMessageContext>({
     mutationFn: async ({ messageID, messageContent }: { messageID: string, messageContent: string }) => {
@@ -37,17 +35,15 @@ export function useUndoMessage({
       
       await queryClient.cancelQueries({ queryKey })
       
-      const previousMessages = queryClient.getQueryData<Message[]>(queryKey)
+      const previousMessages = queryClient.getQueryData<MessageWithParts[]>(queryKey)
       
       if (previousMessages) {
-        const messageIndex = previousMessages.findIndex(m => m.id === messageID)
+        const messageIndex = previousMessages.findIndex(m => m.info.id === messageID)
         if (messageIndex !== -1) {
           const newMessages = previousMessages.slice(0, messageIndex)
           queryClient.setQueryData(queryKey, newMessages)
         }
       }
-      
-      clearMessage(messageID)
       
       return { previousMessages }
     },
