@@ -4,6 +4,7 @@ import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
 import os from 'os'
 import path from 'path'
+import { readFile } from 'fs/promises'
 import { initializeDatabase } from './db/schema'
 import { createRepoRoutes } from './routes/repos'
 import { createIPCServer, type IPCServer } from './ipc/ipcServer'
@@ -13,6 +14,17 @@ import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
+
+async function getAppVersion(): Promise<string> {
+  try {
+    const packageUrl = new URL('../../package.json', import.meta.url)
+    const packageJsonRaw = await readFile(packageUrl, 'utf-8')
+    const packageJson = JSON.parse(packageJsonRaw) as { version?: string }
+    return packageJson.version ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
 import { createTitleRoutes } from './routes/title'
@@ -225,12 +237,12 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 
-app.route('/api/health', createHealthRoutes(db))
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(requireAuth))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
+protectedApi.route('/health', createHealthRoutes(db))
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService))
 protectedApi.route('/settings', createSettingsRoutes(db))
 protectedApi.route('/files', createFileRoutes())
@@ -287,10 +299,11 @@ if (isProduction) {
     return c.html(html)
   })
 } else {
-  app.get('/', (c) => {
+  app.get('/', async (c) => {
+    const version = await getAppVersion()
     return c.json({
       name: 'OpenCode WebUI',
-      version: '2.0.0',
+      version,
       status: 'running',
       endpoints: {
         health: '/api/health',

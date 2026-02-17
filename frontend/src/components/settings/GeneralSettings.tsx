@@ -1,4 +1,5 @@
 import { useSettings } from '@/hooks/useSettings'
+import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { Loader2 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -6,6 +7,7 @@ import { Switch } from '@/components/ui/switch'
 
 export function GeneralSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
+  const { data: versionInfo, isLoading: isVersionLoading } = useVersionCheck()
 
   if (isLoading) {
     return (
@@ -20,6 +22,31 @@ export function GeneralSettings() {
       <h2 className="text-lg font-semibold text-foreground mb-6">General Preferences</h2>
 
       <div className="space-y-6">
+        <div className="flex items-center justify-center gap-3 py-3">
+          <span className="text-sm text-muted-foreground">OpenCode Manager</span>
+          {isVersionLoading ? (
+            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+          ) : versionInfo?.currentVersion ? (
+            <>
+              <span className="text-sm font-mono bg-muted px-2 py-0.5 rounded">
+                {versionInfo.currentVersion}
+              </span>
+              {versionInfo.updateAvailable && versionInfo.latestVersion && (
+                <a
+                  href={versionInfo.releaseUrl ?? ''}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs font-medium text-green-500 hover:text-green-400 transition-colors"
+                >
+                  v{versionInfo.latestVersion} available
+                </a>
+              )}
+            </>
+          ) : (
+            <span className="text-sm text-muted-foreground">unknown</span>
+          )}
+        </div>
+
         <div className="space-y-2">
           <Label htmlFor="theme">Theme</Label>
           <Select

@@ -10,6 +10,7 @@ import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
 import { SettingsDialog } from './components/settings/SettingsDialog'
+import { VersionNotifier } from './components/VersionNotifier'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -82,6 +83,7 @@ function AppShell() {
         <PermissionDialogWrapper />
         <SSHHostKeyDialogWrapper />
         <SettingsDialog />
+        <VersionNotifier />
         <Toaster
           position="bottom-right"
           expand={false}
