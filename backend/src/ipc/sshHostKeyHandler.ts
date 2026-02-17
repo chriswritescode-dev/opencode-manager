@@ -34,7 +34,6 @@ export class SSHHostKeyHandler implements IPCHandler {
     this.timeoutMs = timeoutMs
     const configDir = path.join(getWorkspacePath(), 'config')
     this.knownHostsPath = path.join(configDir, 'known_hosts')
-    this.ensureKnownHostsFile()
     logger.info(`SSHHostKeyHandler initialized with timeout=${timeoutMs}ms, known_hosts=${this.knownHostsPath}`)
   }
 

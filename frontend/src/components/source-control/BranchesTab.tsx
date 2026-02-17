@@ -38,6 +38,7 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
     onSuccess: (updatedRepo) => {
       queryClient.setQueryData(['repo', repoId], updatedRepo)
       queryClient.invalidateQueries({ queryKey: ['repos'] })
+      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
       queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
       refetch()
       showToast.success(`Switched to branch: ${updatedRepo.currentBranch}`)
@@ -55,6 +56,7 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
     mutationFn: (branch: string) => createRepo(repoUrl || undefined, undefined, branch, undefined, true),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['repos'] })
+      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
       setNewBranchName('')
       setIsCreating(false)
       setUseWorktree(false)

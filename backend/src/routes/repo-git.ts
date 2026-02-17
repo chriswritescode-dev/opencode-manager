@@ -45,17 +45,25 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
         return c.json({ error: 'repoIds must be an array of numbers' }, 400)
       }
 
-      const statuses = await Promise.all(
-        repoIds.map(async (id) => {
-          try {
-            const status = await git.getStatus(id, database)
-            return [id, status]
-          } catch (error: unknown) {
-            logger.error(`Failed to get git status for repo ${id}:`, error)
-            return null
-          }
-        })
-      )
+      const BATCH_CONCURRENCY = 3
+      const results: Array<[number, GitStatusResponse] | null> = []
+      for (let i = 0; i < repoIds.length; i += BATCH_CONCURRENCY) {
+        const batch = repoIds.slice(i, i + BATCH_CONCURRENCY)
+        const batchResults = await Promise.all(
+          batch.map(async (id) => {
+            try {
+              const status = await git.getStatus(id, database)
+              return [id, status] as [number, GitStatusResponse]
+            } catch (error: unknown) {
+              logger.error(`Failed to get git status for repo ${id}:`, error)
+              return null
+            }
+          })
+        )
+        results.push(...batchResults)
+      }
+
+      const statuses = results
 
       const resultMap: Record<number, GitStatusResponse> = {}
       for (const entry of statuses) {
@@ -64,6 +72,7 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
           resultMap[id] = status
         }
       }
+
 
       return c.json(resultMap)
     } catch (error: unknown) {

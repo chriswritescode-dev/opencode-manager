@@ -206,4 +206,16 @@ export const settingsApi = {
       body: JSON.stringify({ content }),
     })
   },
+
+  getVersionInfo: async (): Promise<VersionInfo> => {
+    return fetchWrapper(`${API_BASE_URL}/api/health/version`)
+  },
+}
+
+export interface VersionInfo {
+  currentVersion: string | null
+  latestVersion: string | null
+  updateAvailable: boolean
+  releaseUrl: string | null
+  releaseName: string | null
 }
