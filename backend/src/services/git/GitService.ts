@@ -11,7 +11,6 @@ import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusR
 import type { GitCredential } from '@opencode-manager/shared'
 import path from 'path'
 
-
 export class GitService {
   constructor(
     private gitAuthService: GitAuthService,
