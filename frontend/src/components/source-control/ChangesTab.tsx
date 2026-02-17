@@ -21,13 +21,6 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile, onErr
   const git = useGit(repoId, onError)
   const [commitMessage, setCommitMessage] = useState('')
 
-  const handleGitAction = async (action: () => Promise<unknown>) => {
-    try {
-      await action()
-    } catch {
-    }
-  }
-
   const stagedFiles = status?.files.filter(f => f.staged) || []
   const unstagedFiles = status?.files.filter(f => !f.staged) || []
   const canCommit = commitMessage.trim() && stagedFiles.length > 0 && !git.commit.isPending
@@ -41,7 +34,7 @@ export function ChangesTab({ repoId, onFileSelect, selectedFile, isMobile, onErr
   }
 
   const handleDiscard = (paths: string[], staged: boolean) => {
-    handleGitAction(() => git.discardFiles.mutateAsync({ paths, staged }))
+    git.discardFiles.mutate({ paths, staged })
   }
 
   const handleCommit = () => {

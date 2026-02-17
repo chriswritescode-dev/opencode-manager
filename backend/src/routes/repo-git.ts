@@ -4,7 +4,6 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import * as db from '../db/queries'
 import { logger } from '../utils/logger'
 import { parseGitError } from '../utils/git-errors'
-import { getErrorMessage } from '../utils/error-utils'
 import { GitService } from '../services/git/GitService'
 import type { GitAuthService } from '../services/git-auth'
 import { SettingsService } from '../services/settings'
@@ -326,7 +325,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to discard changes:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -353,7 +356,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(commitDetails)
     } catch (error: unknown) {
       logger.error('Failed to get commit details:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 
@@ -380,7 +387,11 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       return c.json(diff)
     } catch (error: unknown) {
       logger.error('Failed to get commit diff:', error)
-      return c.json({ error: getErrorMessage(error) }, 500)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
     }
   })
 

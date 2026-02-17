@@ -101,11 +101,8 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: () => {
       invalidateCache()
-      showToast.success('Changes discarded')
     },
-    onError: (error) => {
-      showToast.error(getApiErrorMessage(error))
-    },
+    onError: handleError,
   })
 
   const log = useMutation({

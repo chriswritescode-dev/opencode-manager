@@ -109,7 +109,7 @@ export function CommitDetailView({ repoId, commitHash, onBack, onFileSelect, sel
               />
             </div>
           ) : (
-            <div className="flex items-center justify-center h-full text-muted-foreground">
+            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
               <FileText className="w-8 h-8 mb-2 opacity-50" />
               <p className="text-sm">Select a file to view changes</p>
             </div>

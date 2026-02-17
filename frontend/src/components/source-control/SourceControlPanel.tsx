@@ -225,7 +225,7 @@ export function SourceControlPanel({
           )}
 
           {currentView === 'commit-detail' && selectedCommit && (
-            <div className="flex-1 overflow-hidden flex-col">
+            <div className="flex flex-1 overflow-hidden flex-col">
               <CommitDetailView
                 repoId={repoId}
                 commitHash={selectedCommit}
