@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import * as fs from 'fs/promises'
-import { join } from 'path'
 import { parseSSHHost, normalizeHostPort, parseHostPort, writeTemporarySSHKey, cleanupSSHKey, cleanupAllSSHKeys } from '../../src/utils/ssh-key-manager'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 describe('SSH Host Parsing', () => {
   it('should parse git@host:path format', () => {

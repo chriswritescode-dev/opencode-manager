@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
   ENV: {
