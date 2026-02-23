@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchWrapper, FetchError } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { GitStatusResponse, FileDiffResponse, GitCommit } from '@/types/git'
+import type { GitStatusResponse, FileDiffResponse, GitCommit, CommitDetails } from '@/types/git'
 
 export async function fetchGitStatus(repoId: number): Promise<GitStatusResponse> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/status`)
@@ -22,6 +22,12 @@ export async function fetchFileDiff(repoId: number, path: string, includeStaged?
   })
 }
 
+export async function fetchCommitFileDiff(repoId: number, commitHash: string, path: string): Promise<FileDiffResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${commitHash}/diff`, {
+    params: { path },
+  })
+}
+
 export async function fetchGitDiff(repoId: number, path: string): Promise<{ diff: string }> {
   const data = await fetchWrapper<string>(`${API_BASE_URL}/api/repos/${repoId}/git/diff`, {
     params: { path },
@@ -33,6 +39,10 @@ export async function fetchGitLog(repoId: number, limit?: number): Promise<{ com
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/log`, {
     params: { limit },
   })
+}
+
+export async function fetchCommitDetails(repoId: number, hash: string): Promise<CommitDetails> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/commit/${hash}`)
 }
 
 export async function gitFetch(repoId: number): Promise<GitStatusResponse> {
@@ -79,6 +89,14 @@ export async function gitUnstageFiles(repoId: number, paths: string[]): Promise<
   })
 }
 
+export async function gitDiscardFiles(repoId: number, paths: string[], staged: boolean): Promise<GitStatusResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/discard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths, staged }),
+  })
+}
+
 export async function gitReset(repoId: number, commitHash: string): Promise<GitStatusResponse> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/reset`, {
     method: 'POST',
@@ -104,11 +122,27 @@ export function useFileDiff(repoId: number | undefined, path: string | undefined
   })
 }
 
+export function useCommitFileDiff(repoId: number | undefined, commitHash: string | undefined, path: string | undefined) {
+  return useQuery({
+    queryKey: ['commitFileDiff', repoId, commitHash, path],
+    queryFn: () => (repoId && commitHash && path) ? fetchCommitFileDiff(repoId, commitHash, path) : Promise.reject(new Error('Missing params')),
+    enabled: !!repoId && !!commitHash && !!path,
+  })
+}
+
 export function useGitLog(repoId: number | undefined, limit?: number) {
   return useQuery({
     queryKey: ['gitLog', repoId, limit],
     queryFn: () => repoId ? fetchGitLog(repoId, limit) : Promise.reject(new Error('No repo ID')),
     enabled: !!repoId,
+  })
+}
+
+export function useCommitDetails(repoId: number | undefined, hash: string | undefined) {
+  return useQuery({
+    queryKey: ['commitDetails', repoId, hash],
+    queryFn: () => (repoId && hash) ? fetchCommitDetails(repoId, hash) : Promise.reject(new Error('Missing params')),
+    enabled: !!repoId && !!hash,
   })
 }
 

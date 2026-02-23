@@ -303,6 +303,98 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
     }
   })
 
+  app.post('/:id/git/discard', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = db.getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const body = await c.req.json()
+      const { paths, staged } = body
+
+      if (!paths || !Array.isArray(paths)) {
+        return c.json({ error: 'paths is required and must be an array' }, 400)
+      }
+
+      await git.discardChanges(id, paths, staged ?? false, database)
+
+      const status = await git.getStatus(id, database)
+      return c.json(status)
+    } catch (error: unknown) {
+      logger.error('Failed to discard changes:', error)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
+    }
+  })
+
+  app.get('/:id/git/commit/:hash', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const hash = c.req.param('hash')
+      const repo = db.getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      if (!hash) {
+        return c.json({ error: 'hash is required' }, 400)
+      }
+
+      const commitDetails = await git.getCommitDetails(id, hash, database)
+
+      if (!commitDetails) {
+        return c.json({ error: 'Commit not found' }, 404)
+      }
+
+      return c.json(commitDetails)
+    } catch (error: unknown) {
+      logger.error('Failed to get commit details:', error)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
+    }
+  })
+
+  app.get('/:id/git/commit/:hash/diff', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const hash = c.req.param('hash')
+      const filePath = c.req.query('path')
+      const repo = db.getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      if (!hash) {
+        return c.json({ error: 'hash is required' }, 400)
+      }
+
+      if (!filePath) {
+        return c.json({ error: 'path query parameter is required' }, 400)
+      }
+
+      const diff = await git.getCommitDiff(id, hash, filePath, database)
+      return c.json(diff)
+    } catch (error: unknown) {
+      logger.error('Failed to get commit diff:', error)
+      const gitError = parseGitError(error)
+      return c.json(
+        { error: gitError.summary, detail: gitError.detail, code: gitError.code },
+        gitError.statusCode as ContentfulStatusCode
+      )
+    }
+  })
+
   app.get('/:id/git/log', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))

@@ -29,6 +29,7 @@ vi.mock('../../../src/utils/git-auth', () => ({
   resolveGitIdentity: vi.fn().mockResolvedValue(null),
   createGitIdentityEnv: vi.fn().mockReturnValue({}),
   createSilentGitEnv: vi.fn(),
+  filterGitCredentials: vi.fn().mockReturnValue([]),
 }))
 
 vi.mock('../../../src/utils/git-errors', () => ({
@@ -773,6 +774,626 @@ describe('GitService', () => {
         { env: expect.any(Object) }
       )
       expect(result).toBe("Switched to branch 'main'")
+    })
+  })
+
+  describe('discardChanges', () => {
+    it('discards staged changes using restore --staged --worktree', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('Changes discarded')
+
+      const result = await service.discardChanges(1, ['file.ts', 'dir/file2.ts'], true, database)
+
+      expect(getRepoByIdMock).toHaveBeenCalledWith(database, 1)
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'restore', '--staged', '--worktree', '--source', 'HEAD', '--', 'file.ts', 'dir/file2.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(result).toBe('Changes discarded')
+    })
+
+    it('discards unstaged tracked changes using checkout', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('status')) {
+          return Promise.resolve('M  file.ts\n')
+        }
+        if (args.includes('checkout')) {
+          return Promise.resolve('Updated 1 path')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.discardChanges(1, ['file.ts'], false, database)
+
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'status', '--porcelain', '-u', '--', 'file.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'checkout', '--', 'file.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(result).toBe('Updated 1 path')
+    })
+
+    it('removes unstaged untracked files using git clean', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('status')) {
+          return Promise.resolve('?? untracked.ts\n')
+        }
+        if (args.includes('clean')) {
+          return Promise.resolve('Removed untracked.ts')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.discardChanges(1, ['untracked.ts'], false, database)
+
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'clean', '-fd', '--', 'untracked.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(result).toContain('Removed untracked.ts')
+    })
+
+    it('handles mixed tracked and untracked files', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('status')) {
+          return Promise.resolve('M  modified.ts\n?? untracked.ts\n')
+        }
+        if (args.includes('checkout')) {
+          return Promise.resolve('Updated 1 path')
+        }
+        if (args.includes('clean')) {
+          return Promise.resolve('Removed untracked.ts')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.discardChanges(1, ['modified.ts', 'untracked.ts'], false, database)
+
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'checkout', '--', 'modified.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'clean', '-fd', '--', 'untracked.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(result).toContain('Updated 1 path')
+      expect(result).toContain('Removed untracked.ts')
+    })
+
+    it('returns early when no paths provided', async () => {
+      const result = await service.discardChanges(1, [], false, database)
+
+      expect(executeCommandMock).not.toHaveBeenCalled()
+      expect(result).toBe('')
+    })
+
+    it('throws error when repository not found', async () => {
+      getRepoByIdMock.mockReturnValue(null)
+
+      await expect(service.discardChanges(1, ['file.ts'], false, database)).rejects.toThrow('Repository not found')
+    })
+
+    it('logs and throws error on git command failure', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      const error = new Error('Permission denied')
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('status')) {
+          return Promise.resolve('M  file.ts\n')
+        }
+        if (args.includes('checkout')) {
+          return Promise.reject(error)
+        }
+        return Promise.resolve('')
+      })
+
+      await expect(service.discardChanges(1, ['file.ts'], false, database)).rejects.toThrow()
+    })
+
+    it('handles directories in untracked clean operation', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('status')) {
+          return Promise.resolve('?? dir/\n')
+        }
+        if (args.includes('clean')) {
+          return Promise.resolve('Removing dir/')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.discardChanges(1, ['dir/'], false, database)
+
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', mockRepo.fullPath, 'clean', '-fd', '--', 'dir/'],
+        { env: expect.any(Object) }
+      )
+      expect(result).toContain('Removing dir/')
+    })
+  })
+
+  describe('getCommitDetails', () => {
+    it('returns full commit details with files', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('log') && !args.includes('--not')) {
+          return Promise.resolve('abc123\x00John Doe\x00john@example.com\x001609459200\x00Initial commit')
+        }
+        if (args.includes('show') && args.includes('--name-status')) {
+          return Promise.resolve('A\tfile1.ts\nM\tfile2.ts\nD\tfile3.ts\n')
+        }
+        if (args.includes('show') && args.includes('--numstat')) {
+          return Promise.resolve('10\t5\tfile1.ts\n20\t15\tfile2.ts\n0\t30\tfile3.ts\n')
+        }
+        if (args.includes('--not') && args.includes('--remotes')) {
+          return Promise.resolve('')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.getCommitDetails(1, 'abc123', database)
+
+      expect(result).not.toBeNull()
+      expect(result?.hash).toBe('abc123')
+      expect(result?.authorName).toBe('John Doe')
+      expect(result?.authorEmail).toBe('john@example.com')
+      expect(result?.date).toBe('1609459200')
+      expect(result?.message).toBe('Initial commit')
+      expect(result?.files).toHaveLength(3)
+      expect(result?.files[0]).toEqual({
+        path: 'file1.ts',
+        status: 'added',
+        additions: 10,
+        deletions: 5
+      })
+      expect(result?.files[1]).toEqual({
+        path: 'file2.ts',
+        status: 'modified',
+        additions: 20,
+        deletions: 15
+      })
+      expect(result?.files[2]).toEqual({
+        path: 'file3.ts',
+        status: 'deleted',
+        oldPath: undefined,
+        additions: 0,
+        deletions: 30
+      })
+    })
+
+    it('handles renamed files in commit details', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('log') && !args.includes('--not')) {
+          return Promise.resolve('abc123\x00John Doe\x00john@example.com\x001609459200\x00Rename file')
+        }
+        if (args.includes('show') && args.includes('--name-status')) {
+          return Promise.resolve('R\told.ts\tnew.ts\n')
+        }
+        if (args.includes('show') && args.includes('--numstat')) {
+          return Promise.resolve('0\t0\tnew.ts\n')
+        }
+        if (args.includes('--not') && args.includes('--remotes')) {
+          return Promise.resolve('')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.getCommitDetails(1, 'abc123', database)
+
+      expect(result?.files).toHaveLength(1)
+      expect(result?.files[0]).toEqual({
+        path: 'new.ts',
+        status: 'renamed',
+        oldPath: 'old.ts',
+        additions: 0,
+        deletions: 0
+      })
+    })
+
+    it('handles copied files in commit details', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('log') && !args.includes('--not')) {
+          return Promise.resolve('abc123\x00John Doe\x00john@example.com\x001609459200\x00Copy file')
+        }
+        if (args.includes('show') && args.includes('--name-status')) {
+          return Promise.resolve('C\toriginal.ts\tcopy.ts\n')
+        }
+        if (args.includes('show') && args.includes('--numstat')) {
+          return Promise.resolve('0\t0\tcopy.ts\n')
+        }
+        if (args.includes('--not') && args.includes('--remotes')) {
+          return Promise.resolve('')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.getCommitDetails(1, 'abc123', database)
+
+      expect(result?.files).toHaveLength(1)
+      expect(result?.files[0]).toEqual({
+        path: 'copy.ts',
+        status: 'copied',
+        oldPath: 'original.ts',
+        additions: 0,
+        deletions: 0
+      })
+    })
+
+    it('returns empty files array for empty commit', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('log') && !args.includes('--not')) {
+          return Promise.resolve('abc123\x00John Doe\x00john@example.com\x001609459200\x00Empty commit')
+        }
+        if (args.includes('show') && args.includes('--name-status')) {
+          return Promise.resolve('')
+        }
+        if (args.includes('show') && args.includes('--numstat')) {
+          return Promise.resolve('')
+        }
+        if (args.includes('--not') && args.includes('--remotes')) {
+          return Promise.resolve('')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.getCommitDetails(1, 'abc123', database)
+
+      expect(result?.files).toHaveLength(0)
+    })
+
+    it('returns null when commit hash not found', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('')
+
+      const result = await service.getCommitDetails(1, 'nonexistent', database)
+
+      expect(result).toBeNull()
+    })
+
+    it('throws error when repository not found', async () => {
+      getRepoByIdMock.mockReturnValue(null)
+
+      await expect(service.getCommitDetails(1, 'abc123', database)).rejects.toThrow('Repository not found')
+    })
+
+    it('marks unpushed commits correctly', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('log') && !args.includes('--not')) {
+          return Promise.resolve('abc123\x00John Doe\x00john@example.com\x001609459200\x00Local commit')
+        }
+        if (args.includes('show') && args.includes('--name-status')) {
+          return Promise.resolve('M\tfile.ts\n')
+        }
+        if (args.includes('show') && args.includes('--numstat')) {
+          return Promise.resolve('1\t1\tfile.ts\n')
+        }
+        if (args.includes('--not') && args.includes('--remotes')) {
+          return Promise.resolve('abc123\n')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.getCommitDetails(1, 'abc123', database)
+
+      expect(result?.unpushed).toBe(true)
+    })
+
+    it('handles commit message with pipes correctly', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockImplementation((args) => {
+        if (args.includes('log') && !args.includes('--not')) {
+          return Promise.resolve('abc123\x00John Doe\x00john@example.com\x001609459200\x00Fix: merge|conflict|handling')
+        }
+        if (args.includes('show') && args.includes('--name-status')) {
+          return Promise.resolve('')
+        }
+        if (args.includes('show') && args.includes('--numstat')) {
+          return Promise.resolve('')
+        }
+        if (args.includes('--not') && args.includes('--remotes')) {
+          return Promise.resolve('')
+        }
+        return Promise.resolve('')
+      })
+
+      const result = await service.getCommitDetails(1, 'abc123', database)
+
+      expect(result?.message).toBe('Fix: merge|conflict|handling')
+    })
+
+    it('throws error on git command failure', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      const error = new Error('Git error')
+      executeCommandMock.mockRejectedValue(error)
+
+      await expect(service.getCommitDetails(1, 'abc123', database)).rejects.toThrow('Failed to get commit details')
+    })
+  })
+
+  describe('getCommitDiff', () => {
+    it('returns diff for specific file in commit', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      const diffOutput = `diff --git a/file.ts b/file.ts
+index abc123..def456 100644
+--- a/file.ts
++++ b/file.ts
+@@ -1,3 +1,4 @@
++new line
+ existing line 1
+ existing line 2
+ existing line 3`
+      executeCommandMock.mockResolvedValue(diffOutput)
+
+      const result = await service.getCommitDiff(1, 'abc123', 'file.ts', database)
+
+      expect(getRepoByIdMock).toHaveBeenCalledWith(database, 1)
+      expect(executeCommandMock).toHaveBeenCalledWith(
+        ['git', '-C', expect.stringContaining('/path/to/repo'), 'show', '--format=', 'abc123', '--', 'file.ts'],
+        { env: expect.any(Object) }
+      )
+      expect(result.path).toBe('file.ts')
+      expect(result.status).toBe('modified')
+      expect(result.diff).toContain('new line')
+      expect(result.additions).toBe(1)
+      expect(result.deletions).toBe(0)
+      expect(result.isBinary).toBe(false)
+    })
+
+    it('detects binary files', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValue('Binary files a/image.png and b/image.png differ')
+
+      const result = await service.getCommitDiff(1, 'abc123', 'image.png', database)
+
+      expect(result.isBinary).toBe(true)
+      expect(result.diff).toContain('Binary files')
+    })
+
+    it('throws error when repository not found', async () => {
+      getRepoByIdMock.mockReturnValue(null)
+
+      await expect(service.getCommitDiff(1, 'abc123', 'file.ts', database)).rejects.toThrow('Repository not found')
+    })
+
+    it('handles deleted files in commit', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      const diffOutput = `diff --git a/deleted.ts b/deleted.ts
+deleted file mode 100644
+index abc123..0000000
+--- a/deleted.ts
++++ /dev/null
+@@ -1,3 +0,0 @@
+-line 1
+-line 2
+-line 3`
+      executeCommandMock.mockResolvedValue(diffOutput)
+
+      const result = await service.getCommitDiff(1, 'abc123', 'deleted.ts', database)
+
+      expect(result.deletions).toBe(3)
+      expect(result.additions).toBe(0)
+    })
+
+    it('throws error on git command failure', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      const error = new Error('Fatal error')
+      executeCommandMock.mockRejectedValue(error)
+
+      await expect(service.getCommitDiff(1, 'abc123', 'file.ts', database)).rejects.toThrow('Failed to get commit diff')
+    })
+  })
+
+  describe('parseDiffOutput', () => {
+    it('parses small diff and counts additions/deletions', () => {
+      const diffOutput = `diff --git a/file.ts b/file.ts
+index abc123..def456 100644
+--- a/file.ts
++++ b/file.ts
+@@ -1,3 +1,4 @@
++added line
+ existing line 1
+ existing line 2
+-removed line
+ existing line 3`
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'file.ts')
+
+      expect(result).toEqual({
+        path: 'file.ts',
+        status: 'modified',
+        diff: diffOutput,
+        additions: 1,
+        deletions: 1,
+        isBinary: false,
+        truncated: false
+      })
+    })
+
+    it('detects binary files correctly', () => {
+      const diffOutput = 'GIT binary patch\nliteral 1234\nzcmeAS@N?(olHy`uVBq!ia0vp0{ow;2j9U=!1jd#uLplI'
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'binary.bin')
+
+      expect(result.isBinary).toBe(true)
+    })
+
+    it('detects "Binary files" indicator', () => {
+      const diffOutput = 'Binary files a/image.png and b/image.png differ'
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'image.png')
+
+      expect(result.isBinary).toBe(true)
+    })
+
+    it('truncates diff when exceeding MAX_DIFF_SIZE (500KB)', () => {
+      const largeContent = '+' + 'x'.repeat(500 * 1024 + 1000)
+      const diffOutput = `diff --git a/large.ts b/large.ts\n${largeContent}`
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'large.ts')
+
+      expect(result.truncated).toBe(true)
+      expect(result.diff.length).toBe(500 * 1024 + '\n\n... (diff truncated due to size)'.length)
+      expect(result.diff).toContain('... (diff truncated due to size)')
+    })
+
+    it('does not truncate diff under MAX_DIFF_SIZE', () => {
+      const diffOutput = '+' + 'x'.repeat(100 * 1024)
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'file.ts')
+
+      expect(result.truncated).toBe(false)
+      expect(result.diff.length).toBeLessThan(500 * 1024)
+    })
+
+    it('handles empty diff', () => {
+      const diffOutput = ''
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'file.ts')
+
+      expect(result).toEqual({
+        path: 'file.ts',
+        status: 'modified',
+        diff: '',
+        additions: 0,
+        deletions: 0,
+        isBinary: false,
+        truncated: false
+      })
+    })
+
+    it('correctly counts multiple additions and deletions', () => {
+      const diffOutput = `diff --git a/file.ts b/file.ts
+@@ -1,5 +1,7 @@
++added 1
+ context
++added 2
+-removed 1
+ context
++added 3
+-removed 2
+-removed 3`
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'file.ts')
+
+      expect(result.additions).toBe(3)
+      expect(result.deletions).toBe(3)
+    })
+
+    it('ignores diff headers (+++/---) when counting', () => {
+      const diffOutput = `diff --git a/file.ts b/file.ts
+--- a/file.ts
++++ b/file.ts
+@@ -1,1 +1,2 @@
++added`
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'file.ts')
+
+      expect(result.additions).toBe(1)
+      expect(result.deletions).toBe(0)
+    })
+
+    it('handles different status types in parseDiffOutput', () => {
+      const diffOutput = '+new line'
+
+      const resultAdded = (service as any).parseDiffOutput(diffOutput, 'added', 'new.ts')
+      const resultDeleted = (service as any).parseDiffOutput(diffOutput, 'deleted', 'old.ts')
+      const resultRenamed = (service as any).parseDiffOutput(diffOutput, 'renamed', 'moved.ts')
+
+      expect(resultAdded.status).toBe('added')
+      expect(resultDeleted.status).toBe('deleted')
+      expect(resultRenamed.status).toBe('renamed')
+    })
+
+    it('handles diff with large change counts at truncation', () => {
+      const addedLines = '+' + 'x'.repeat(501 * 1024)
+      const diffOutput = `diff --git a/file.ts b/file.ts\n${addedLines}`
+
+      const result = (service as any).parseDiffOutput(diffOutput, 'modified', 'file.ts')
+
+      expect(result.truncated).toBe(true)
+      expect(result.diff).toContain('... (diff truncated due to size)')
     })
   })
 })
