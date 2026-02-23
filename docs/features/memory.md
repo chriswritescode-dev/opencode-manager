@@ -1,6 +1,12 @@
-# Memory Plugin
+# Memory Plugin (Optional)
 
-`@opencode-manager/memory` is an OpenCode plugin that stores and recalls project knowledge across sessions using vector embeddings and semantic search.
+`@opencode-manager/memory` is an **optional** OpenCode plugin that stores and recalls project knowledge across sessions using vector embeddings and semantic search.
+
+!!! note "Not Required"
+    This plugin is entirely optional. OpenCode Manager works fully without it — install it only if you want persistent project knowledge and semantic search capabilities.
+
+!!! tip "Works with Standalone OpenCode"
+    This plugin can also be used with standalone OpenCode installations outside of OpenCode Manager. Simply install the package and add it to your `opencode.json` plugins array.
 
 ## Installation
 
