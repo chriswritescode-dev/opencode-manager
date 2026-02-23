@@ -30,6 +30,7 @@
 ```bash
 git clone https://github.com/chriswritescode-dev/opencode-manager.git
 cd opencode-manager
+cp .env.example .env
 docker-compose up -d
 # Open http://localhost:5003
 ```
@@ -70,8 +71,8 @@ ADMIN_EMAIL=admin@example.com
 ADMIN_PASSWORD=your-secure-password
 
 # For LAN/remote access
-AUTH_TRUSTED_ORIGINS=http://localhost:5003
-AUTH_SECURE_COOKIES=false  # Required when not using HTTPS
+AUTH_TRUSTED_ORIGINS=http://localhost:5003,https://yourl33tdomain.com
+AUTH_SECURE_COOKIES=false  # Set to true when using HTTPS
 ```
 
 For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see the [Configuration Guide](https://chriswritescode-dev.github.io/opencode-manager/configuration/environment/).
