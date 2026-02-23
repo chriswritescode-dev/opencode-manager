@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import { getRepo, resetRepoPermissions } from "@/api/repos";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getRepo } from "@/api/repos";
+import { settingsApi } from "@/api/settings";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
@@ -15,20 +16,11 @@ import { useSwipeBack } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Plug, FolderOpen, Plus, GitBranch, Loader2, GitCommitHorizontal, ShieldOff } from "lucide-react";
+import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2 } from "lucide-react";
+import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
-import { showToast } from "@/lib/toast";
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
 import { getRepoDisplayName } from "@/lib/utils";
-
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -59,6 +51,12 @@ export function RepoDetail() {
     enabled: !!repoId,
   });
 
+  const { data: memoryPluginStatus } = useQuery({
+    queryKey: ["memory-plugin-status"],
+    queryFn: () => settingsApi.getMemoryPluginStatus(),
+    staleTime: 60000,
+  });
+
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
   const repoDirectory = repo?.fullPath;
@@ -66,18 +64,6 @@ export function RepoDetail() {
   useSSE(opcodeUrl, repoDirectory);
 
   const createSessionMutation = useCreateSession(opcodeUrl, repoDirectory);
-
-  const resetPermissionsMutation = useMutation({
-    mutationFn: () => resetRepoPermissions(repoId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, repoDirectory] });
-      showToast.success("Permissions reset successfully");
-      setResetPermissionsOpen(false);
-    },
-    onError: () => {
-      showToast.error("Failed to reset permissions");
-    },
-  });
 
   const handleCreateSession = async (options?: {
     agentSlug?: string;
@@ -187,7 +173,23 @@ export function RepoDetail() {
           <ShieldOff className="w-4 h-4 sm:mr-2" />
           <span className="hidden sm:inline">Reset Permissions</span>
         </Button>
+        {memoryPluginStatus?.memoryPluginEnabled && (
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/repos/${repoId}/memories`)}
+            size="sm"
+            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+          >
+            <Brain className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Memory</span>
+          </Button>
+        )}
         <Header.MobileDropdown>
+          {memoryPluginStatus?.memoryPluginEnabled && (
+            <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/memories`)}>
+              <Brain className="w-4 h-4 mr-2" /> Memory
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
             <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
           </DropdownMenuItem>
@@ -261,40 +263,12 @@ export function RepoDetail() {
           />
         )}
 
-      <Dialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Reset Permissions</DialogTitle>
-            <DialogDescription>
-              This will clear all "Allow Always" permissions for this repository.
-              You will be prompted again for permission when opencode needs to perform actions like running commands or editing files.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setResetPermissionsOpen(false)}
-              disabled={resetPermissionsMutation.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => resetPermissionsMutation.mutate()}
-              disabled={resetPermissionsMutation.isPending}
-            >
-              {resetPermissionsMutation.isPending ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Resetting...
-                </>
-              ) : (
-                "Reset Permissions"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ResetPermissionsDialog
+        open={resetPermissionsOpen}
+        onOpenChange={setResetPermissionsOpen}
+        repoId={repoId}
+        repoDirectory={repoDirectory}
+      />
     </div>
   );
 }

@@ -51,6 +51,16 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 [Learn more →](mcp.md)
 
+### Memory Plugin
+
+- **Semantic Search** - Store and retrieve project knowledge using vector embeddings
+- **Memory Scopes** - Categorize as convention, decision, or context
+- **Planning State** - Track objectives, phases, and progress across compactions
+- **Automatic Extraction** - Durable knowledge extracted after session compaction
+- **Compaction Awareness** - Injects project memories and planning state into compaction context
+
+[Learn more →](memory.md)
+
 ### Text-to-Speech
 
 - **Browser TTS** - Built-in Web Speech API support

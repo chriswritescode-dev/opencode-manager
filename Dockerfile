@@ -41,6 +41,7 @@ COPY --chown=node:node package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY --chown=node:node shared/package.json ./shared/
 COPY --chown=node:node backend/package.json ./backend/
 COPY --chown=node:node frontend/package.json ./frontend/
+COPY --chown=node:node packages/memory ./packages/memory/
 
 RUN pnpm install --frozen-lockfile
 
@@ -52,8 +53,10 @@ COPY backend ./backend
 COPY frontend/src ./frontend/src
 COPY frontend/public ./frontend/public
 COPY frontend/index.html frontend/vite.config.ts frontend/tsconfig*.json frontend/components.json frontend/eslint.config.js ./frontend/
+COPY packages/memory ./packages/memory
 
 RUN pnpm --filter frontend build
+RUN pnpm --filter @opencode-manager/memory build
 
 FROM base AS runner
 
@@ -80,6 +83,7 @@ ENV PORT=5003
 ENV OPENCODE_SERVER_PORT=5551
 ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
+ENV NODE_PATH=/opt/opencode-plugins/node_modules
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
@@ -89,6 +93,16 @@ COPY package.json pnpm-workspace.yaml ./
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
     ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
+
+COPY --from=builder /app/packages/memory /opt/opencode-plugins/src
+
+RUN cd /opt/opencode-plugins/src && npm install
+
+RUN mkdir -p /opt/opencode-plugins/node_modules/@opencode-manager/memory && \
+    cp -r /opt/opencode-plugins/src/dist/* /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
+    cp /opt/opencode-plugins/src/package.json /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
+    cp /opt/opencode-plugins/src/config.json /opt/opencode-plugins/node_modules/@opencode-manager/memory/config.json 2>/dev/null || true && \
+    cp -r /opt/opencode-plugins/src/node_modules/* /opt/opencode-plugins/node_modules/ 2>/dev/null || true
 
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh

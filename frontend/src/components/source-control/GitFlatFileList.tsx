@@ -12,11 +12,7 @@ interface GitFlatFileListProps {
   onSelect: (path: string, staged: boolean) => void
   onStage?: (paths: string[]) => void
   onUnstage?: (paths: string[]) => void
-  onDiscard?: (paths: string[], staged: boolean) => void
   selectedFile?: string
-  readOnly?: boolean
-  totalAdditions?: number
-  totalDeletions?: number
 }
 
 interface GroupedFiles {
@@ -32,11 +28,7 @@ export function GitFlatFileList({
   onSelect,
   onStage,
   onUnstage,
-  onDiscard,
   selectedFile,
-  readOnly = false,
-  totalAdditions,
-  totalDeletions,
 }: GitFlatFileListProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<GitFileStatusType>>(new Set())
 
@@ -91,13 +83,6 @@ export function GitFlatFileList({
     }
   }
 
-  const handleDiscardAll = (e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (onDiscard) {
-      onDiscard(filteredFiles.map(f => f.path), staged)
-    }
-  }
-
   if (filteredFiles.length === 0) {
     return null
   }
@@ -108,44 +93,24 @@ export function GitFlatFileList({
         <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           {staged ? 'Staged Changes' : 'Changes'} ({filteredFiles.length})
         </span>
-        {(totalAdditions !== undefined && totalAdditions > 0 || totalDeletions !== undefined && totalDeletions > 0) && (
-          <div className="flex items-center gap-1 text-xs">
-            {totalAdditions !== undefined && totalAdditions > 0 && <span className="text-green-500">+{totalAdditions}</span>}
-            {totalDeletions !== undefined && totalDeletions > 0 && <span className="text-red-500">-{totalDeletions}</span>}
-          </div>
-        )}
-        {!readOnly && (
-          <div className="flex items-center gap-1">
-            {onDiscard && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-6 px-2 text-xs text-rose-500 hover:text-rose-600"
-                onClick={handleDiscardAll}
-              >
-                Discard All
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              onClick={staged ? handleUnstageAll : handleStageAll}
-            >
-              {staged ? (
-                <>
-                  <Minus className="w-3 h-3 mr-1" />
-                  Unstage All
-                </>
-              ) : (
-                <>
-                  <Plus className="w-3 h-3 mr-1" />
-                  Stage All
-                </>
-              )}
-            </Button>
-          </div>
-        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          onClick={staged ? handleUnstageAll : handleStageAll}
+        >
+          {staged ? (
+            <>
+              <Minus className="w-3 h-3 mr-1" />
+              Unstage All
+            </>
+          ) : (
+            <>
+              <Plus className="w-3 h-3 mr-1" />
+              Stage All
+            </>
+          )}
+        </Button>
       </div>
 
       {groupedFiles.map(({ status, files: groupFiles }) => {
@@ -178,9 +143,8 @@ export function GitFlatFileList({
                     file={file}
                     isSelected={selectedFile === file.path}
                     onSelect={onSelect}
-                    onStage={readOnly ? undefined : handleStageFile}
-                    onUnstage={readOnly ? undefined : handleUnstageFile}
-                    onDiscard={readOnly ? undefined : onDiscard ? ((path: string, staged: boolean) => onDiscard([path], staged)) : undefined}
+                    onStage={handleStageFile}
+                    onUnstage={handleUnstageFile}
                   />
                 ))}
               </div>

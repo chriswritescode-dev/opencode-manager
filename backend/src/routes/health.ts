@@ -2,24 +2,10 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { readFile } from 'fs/promises'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import { compareVersions } from '../utils/version-utils'
 
 const GITHUB_REPO_OWNER = 'chriswritescode-dev'
 const GITHUB_REPO_NAME = 'opencode-manager'
-
-function compareVersions(a: string, b: string): number {
-  const cleanA = a.replace(/^v/, '')
-  const cleanB = b.replace(/^v/, '')
-  const partsA = cleanA.split('.').map(Number)
-  const partsB = cleanB.split('.').map(Number)
-  
-  for (let i = 0; i < Math.max(partsA.length, partsB.length); i++) {
-    const partA = partsA[i] ?? 0
-    const partB = partsB[i] ?? 0
-    if (partA > partB) return 1
-    if (partA < partB) return -1
-  }
-  return 0
-}
 
 interface CachedRelease {
   tagName: string

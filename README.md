@@ -76,6 +76,7 @@ On first launch, you'll be prompted to create an admin account. That's it!
 - **OAuth Support** - Secure OAuth login for Anthropic and GitHub Copilot
 - **Custom Agents** - Create agents with custom system prompts and tool permissions
 - **MCP Servers** - Add local or remote MCP servers with pre-built templates
+- **Memory Plugin** - Persistent project knowledge with semantic search, planning state, and compaction awareness
 
 ### Mobile & PWA
 - **Mobile-First Design** - Responsive UI optimized for mobile

@@ -31,6 +31,7 @@ import { createTitleRoutes } from './routes/title'
 import { createSSERoutes } from './routes/sse'
 import { createSSHRoutes } from './routes/ssh'
 import { createNotificationRoutes } from './routes/notifications'
+import { createMemoryRoutes } from './routes/memory'
 import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
 import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
@@ -41,6 +42,7 @@ import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
 import { NotificationService } from './services/notification'
+
 import { logger } from './utils/logger'
 import { 
   getWorkspacePath, 
@@ -254,6 +256,7 @@ protectedApi.route('/generate-title', createTitleRoutes())
 protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
+protectedApi.route('/memory', createMemoryRoutes(db))
 
 app.route('/api', protectedApi)
 

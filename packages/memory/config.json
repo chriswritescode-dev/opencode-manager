@@ -1,0 +1,20 @@
+{
+  "embedding": {
+    "provider": "local",
+    "model": "all-MiniLM-L6-v2",
+    "dimensions": 384,
+    "baseUrl": "",
+    "apiKey": ""
+  },
+  "dedupThreshold": 0.25,
+  "logging": {
+    "enabled": false,
+    "file": ""
+  },
+  "compaction": {
+    "customPrompt": true,
+    "inlinePlanning": true,
+    "maxContextTokens": 4000,
+    "snapshotToKV": true
+  }
+}

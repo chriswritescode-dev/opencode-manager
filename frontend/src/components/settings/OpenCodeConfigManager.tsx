@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { cn } from '@/lib/utils'
 import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -13,6 +14,7 @@ import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
 import { VersionSelectDialog } from './VersionSelectDialog'
+import { MemoryPluginConfig } from './MemoryPluginConfig'
 import { settingsApi } from '@/api/settings'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
@@ -183,7 +185,8 @@ export function OpenCodeConfigManager() {
       }
 
       const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
-      if (restartServer || agentsChanged) {
+      const pluginsChanged = JSON.stringify(previousContent?.plugin) !== JSON.stringify(newContent.plugin)
+      if (restartServer || agentsChanged || pluginsChanged) {
         showToast.loading('Reloading server...', { id: 'update-restart' })
         try {
           await reloadConfigMutation.mutateAsync()
@@ -328,10 +331,10 @@ export function OpenCodeConfigManager() {
   return (
     <div className="space-y-6 overflow-y-auto">
       {health && (
-        <Card className={isUnhealthy ? 'border-destructive' : ''}>
+        <Card className={cn('bg-transparent border-transparent', isUnhealthy && 'border-destructive')}>
           <CardContent className="p-3">
-            <div className="flex flex-col sm:flex-row sm:items-center items-center gap-3">
-              <div className="flex items-center gap-2 flex-wrap justify-center sm:justify-start">
+            <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">
+              <div className="flex items-center gap-2 flex-wrap justify-center ">
                 <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
                 <p className="font-medium text-sm sm:text-base">
                   Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
@@ -418,8 +421,32 @@ export function OpenCodeConfigManager() {
             </div>
           </CardContent>
         </Card>
-      )}
-      <CreateConfigDialog
+       )}
+
+        <MemoryPluginConfig 
+           memoryPluginEnabled={configs.find(c => c.isDefault)?.content?.plugin?.includes('@opencode-manager/memory') ?? false}
+           onToggle={async (enabled) => {
+             const defaultConfig = configs.find(c => c.isDefault)
+             if (!defaultConfig) return
+             
+             const currentPlugins = defaultConfig.content?.plugin ?? []
+             const memoryPlugin = '@opencode-manager/memory'
+             const newPlugins = enabled
+               ? currentPlugins.includes(memoryPlugin)
+                 ? currentPlugins
+                 : [...currentPlugins, memoryPlugin]
+               : currentPlugins.filter(p => p !== memoryPlugin)
+             
+             await updateConfigContent(defaultConfig.name, {
+               ...defaultConfig.content,
+               plugin: newPlugins.length > 0 ? newPlugins : undefined
+             }, true)
+             
+             queryClient.invalidateQueries({ queryKey: ['memory-plugin-status'] })
+           }}
+         />
+        
+        <CreateConfigDialog
         isOpen={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
         onCreate={createConfig}
@@ -446,7 +473,7 @@ export function OpenCodeConfigManager() {
               return 0
             })
             .map((config) => (
-              <Card key={config.id} className={config.isDefault ? 'border-green-500' : ''}>
+              <Card key={config.id} className={cn('border-transparent', config.isDefault && 'border-green-500')}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 flex-wrap">

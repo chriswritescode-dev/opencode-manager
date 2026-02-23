@@ -59,41 +59,34 @@ export function CommitsTab({ repoId, onSelectCommit }: CommitsTabProps) {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-x-hidden">
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        {data.commits.map((commit) => (
-          <button
-            key={commit.hash}
-            className="flex items-start gap-3 px-3 py-2 text-left hover:bg-accent/50 transition-colors border-b border-border last:border-0"
-            onClick={() => onSelectCommit?.(commit.hash)}
-          >
-            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center mt-0.5">
-              <GitCommit className="w-4 h-4 text-muted-foreground" />
+    <div className="flex flex-col h-full overflow-y-auto">
+      {data.commits.map((commit) => (
+        <button
+          key={commit.hash}
+          className="flex items-start gap-3 px-3 py-2 text-left hover:bg-accent/50 transition-colors border-b border-border last:border-0"
+          onClick={() => onSelectCommit?.(commit.hash)}
+        >
+          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-accent flex items-center justify-center mt-0.5">
+            <GitCommit className="w-4 h-4 text-muted-foreground" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium truncate">{commit.message}</p>
+            <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
+              <span className="font-mono">{commit.hash.substring(0, 7)}</span>
+              <span>·</span>
+              <span className="truncate">{commit.authorName}</span>
+              <span>·</span>
+              <span className="flex-shrink-0">{formatRelativeTime(commit.date)}</span>
+              {commit.unpushed && (
+                <span className={cn('flex items-center gap-0.5 px-1 rounded', GIT_UI_COLORS.unpushed)}>
+                  <ArrowUp className="w-3 h-3" />
+                  Local
+                </span>
+              )}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium line-clamp-2">{commit.message}</p>
-              <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground overflow-hidden">
-                <span className="font-mono">{commit.hash.substring(0, 7)}</span>
-                <span>·</span>
-                <span className="truncate">{commit.authorName}</span>
-                <span>·</span>
-                <span className="flex-shrink-0">{formatRelativeTime(commit.date)}</span>
-                {commit.unpushed && (
-                  <span className={cn('flex items-center gap-0.5 px-1 rounded', GIT_UI_COLORS.unpushed)}>
-                    <ArrowUp className="w-3 h-3" />
-                    Local
-                  </span>
-                )}
-                {!commit.unpushed && (
-                  <span className={cn('flex items-center gap-0.5 px-1 rounded', GIT_UI_COLORS.pushed)}>
-                    Remote
-                  </span>
-                )}
-              </div>
-            </div>
-          </button>
-        ))}
-      </div>
+          </div>
+        </button>
+      ))}
     </div>
   )
 }

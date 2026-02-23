@@ -6,7 +6,6 @@ import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
 import { CommitsTab } from './CommitsTab'
 import { BranchesTab } from './BranchesTab'
-import { CommitDetailView } from './CommitDetailView'
 import { GitErrorBanner } from './GitErrorBanner'
 import { FileDiffView } from '@/components/file-browser/FileDiffView'
 import { Button } from '@/components/ui/button'
@@ -38,7 +37,6 @@ interface SourceControlPanelProps {
 }
 
 type Tab = 'changes' | 'commits' | 'branches'
-type View = 'default' | 'commit-detail'
 
 export function SourceControlPanel({
   repoId,
@@ -51,9 +49,6 @@ export function SourceControlPanel({
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
   const [selectedFile, setSelectedFile] = useState<{path: string, staged: boolean} | undefined>()
-  const [currentView, setCurrentView] = useState<View>('default')
-  const [selectedCommit, setSelectedCommit] = useState<string | undefined>()
-  const [selectedCommitFile, setSelectedCommitFile] = useState<string | undefined>()
   const [gitError, setGitError] = useState<{ summary: string; detail?: string } | null>(null)
   const { data: status } = useGitStatus(repoId)
   const isMobile = useMobile()
@@ -77,18 +72,6 @@ export function SourceControlPanel({
     }
   }
 
-  const handleSelectCommit = (hash: string) => {
-    setSelectedCommit(hash)
-    setCurrentView('commit-detail')
-  }
-
-  const handleBackToCommits = () => {
-    setSelectedCommit(undefined)
-    setSelectedCommitFile(undefined)
-    setCurrentView('default')
-    setActiveTab('commits')
-  }
-
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'changes', label: 'Changes', icon: FileCode },
     { id: 'commits', label: 'Commits', icon: History },
@@ -99,7 +82,7 @@ export function SourceControlPanel({
   const stagedCount = status?.files.filter(f => f.staged).length || 0
 
   const content = (
-    <div className="flex flex-col h-full gap-0">
+    <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 py-2 border-b border-border flex-shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
@@ -171,79 +154,69 @@ export function SourceControlPanel({
         <GitErrorBanner error={gitError} onDismiss={() => setGitError(null)} />
       )}
 
-      {!((currentView === 'commit-detail' && selectedCommitFile) || (isMobile && selectedFile && activeTab === 'changes')) && (
-        <div className="flex border-b border-border flex-shrink-0">
-          {tabs.map((tab) => {
-            const Icon = tab.icon
-            return (
-              <button
-                key={tab.id}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-2 text-sm transition-colors border-b-2 -mb-px',
-                  activeTab === tab.id
-                    ? 'border-primary text-foreground'
-                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
-                )}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-                {tab.id === 'changes' && changesCount > 0 && (
-                  <span className="text-xs px-1.5 py-0.5 rounded-full bg-accent">
-                    {stagedCount > 0 ? `${stagedCount}/${changesCount}` : changesCount}
-                  </span>
-                )}
-              </button>
-            )
-          })}
-        </div>
-      )}
+      <div className="flex border-b border-border flex-shrink-0">
+        {tabs.map((tab) => {
+          const Icon = tab.icon
+          return (
+            <button
+              key={tab.id}
+              className={cn(
+                'flex items-center gap-1.5 px-3 py-2 text-sm transition-colors border-b-2 -mb-px',
+                activeTab === tab.id
+                  ? 'border-primary text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
+              )}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <Icon className="w-4 h-4" />
+              <span>{tab.label}</span>
+              {tab.id === 'changes' && changesCount > 0 && (
+                <span className="text-xs px-1.5 py-0.5 rounded-full bg-accent">
+                  {stagedCount > 0 ? `${stagedCount}/${changesCount}` : changesCount}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
 
-      <div className={cn('flex-1 min-h-0', isMobile ? 'flex flex-col gap-0' : 'flex')}>
+      <div className={cn('flex-1 min-h-0', isMobile ? 'flex flex-col' : 'flex')}>
         <div className={cn(
-          'overflow-hidden min-h-0 h-full flex flex-col',
-          isMobile 
-            ? 'flex-1' 
-            : currentView === 'commit-detail' 
-              ? 'flex-1' 
-              : selectedFile 
-                ? 'w-[35%] border-r border-border' 
-                : 'flex-1'
+          'overflow-hidden',
+          isMobile ? 'flex-1' : selectedFile ? 'w-[35%] border-r border-border' : 'flex-1'
         )}>
           {activeTab === 'changes' && (
             <ChangesTab
               repoId={repoId}
               onFileSelect={(path, staged) => setSelectedFile({ path, staged })}
-              onClearFileSelection={() => setSelectedFile(undefined)}
               selectedFile={selectedFile}
               isMobile={isMobile}
               onError={handleGitError}
             />
           )}
-          {activeTab === 'commits' && currentView === 'default' && (
-            <CommitsTab repoId={repoId} onSelectCommit={handleSelectCommit} />
+          {activeTab === 'commits' && (
+            <CommitsTab repoId={repoId} />
           )}
-          {activeTab === 'branches' && currentView === 'default' && (
+          {activeTab === 'branches' && (
             <BranchesTab repoId={repoId} currentBranch={currentBranch} repoUrl={repoUrl} isRepoWorktree={isRepoWorktree} />
-          )}
-
-          {currentView === 'commit-detail' && selectedCommit && (
-            <div className="flex flex-1 min-h-0 overflow-hidden flex-col">
-              <CommitDetailView
-                repoId={repoId}
-                commitHash={selectedCommit}
-                onBack={handleBackToCommits}
-                onFileSelect={setSelectedCommitFile}
-                selectedFile={selectedCommitFile}
-              />
-            </div>
           )}
         </div>
 
-        {selectedFile && !isMobile && currentView === 'default' && (
+        {selectedFile && !isMobile && (
           <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+              <span className="text-sm font-medium truncate">{selectedFile.path}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 w-6 p-0"
+                onClick={() => setSelectedFile(undefined)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
             <div className="flex-1 overflow-auto">
-              <FileDiffView repoId={repoId} filePath={selectedFile.path} includeStaged={selectedFile.staged} onClose={() => setSelectedFile(undefined)} />
+              <FileDiffView repoId={repoId} filePath={selectedFile.path} includeStaged={selectedFile.staged} />
             </div>
           </div>
         )}
@@ -257,12 +230,12 @@ export function SourceControlPanel({
         mobileFullscreen
         hideCloseButton={isMobile}
         className={cn(
-          'p-0 flex flex-col bg-card border-border gap-0',
-          isMobile ? 'h-full' : 'w-[90vw] sm:max-w-6xl h-[90vh] sm:pb-0'
+          'p-0 flex flex-col bg-card border-border',
+          isMobile ? 'h-full' : 'w-[90vw] sm:max-w-6xl h-[90vh]'
         )}
       >
         <DialogHeader className={cn(
-          'px-4 py-2 border-b border-border flex-shrink-0',
+          'px-4 py-3 border-b border-border flex-shrink-0',
           isMobile && 'relative'
         )}>
           <DialogTitle className="flex items-center gap-2">
@@ -280,7 +253,7 @@ export function SourceControlPanel({
             </Button>
           )}
         </DialogHeader>
-        <div className="flex-1 overflow-hidden pb-0">
+        <div className="flex-1 overflow-hidden">
           {content}
         </div>
       </DialogContent>

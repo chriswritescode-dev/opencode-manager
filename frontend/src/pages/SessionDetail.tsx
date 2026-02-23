@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
-import { X, VolumeX, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal } from "lucide-react";
+import { X, VolumeX, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
@@ -32,6 +32,7 @@ import type { MessageWithParts } from "@/api/types";
 import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
+import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import { useQuestions } from "@/contexts/EventContext";
@@ -60,6 +61,7 @@ export function SessionDetail() {
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [sourceControlOpen, setSourceControlOpen] = useState(false);
+  const [resetPermissionsOpen, setResetPermissionsOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
@@ -390,6 +392,24 @@ export function SessionDetail() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => navigate(`/repos/${repoId}/memories`)}
+            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+          >
+            <Brain className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Memory</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setResetPermissionsOpen(true)}
+            className="hidden lg:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+          >
+            <ShieldOff className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Reset Permissions</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={openSettings}
             className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
           >
@@ -397,14 +417,20 @@ export function SessionDetail() {
             <span className="hidden sm:inline">Settings</span>
           </Button>
           <Header.MobileDropdown>
-            <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
-              <Plug className="w-4 h-4 mr-2" /> MCP
+            <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/memories`)}>
+              <Brain className="w-4 h-4 mr-2" /> Memory
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
               <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
+              <Plug className="w-4 h-4 mr-2" /> MCP
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
               <FolderOpen className="w-4 h-4 mr-2" /> Files
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setResetPermissionsOpen(true)}>
+              <ShieldOff className="w-4 h-4 mr-2" /> Reset Permissions
             </DropdownMenuItem>
           </Header.MobileDropdown>
         </Header.Actions>
@@ -544,6 +570,13 @@ export function SessionDetail() {
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
         repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+      />
+
+      <ResetPermissionsDialog
+        open={resetPermissionsOpen}
+        onOpenChange={setResetPermissionsOpen}
+        repoId={repoId}
+        repoDirectory={repoDirectory}
       />
     </div>
   );

@@ -9,6 +9,7 @@ import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
 import path from 'path'
 import { parseSSHHost } from '../utils/ssh-key-manager'
+import { getErrorMessage } from '../utils/error-utils'
 
 const GIT_CLONE_TIMEOUT = 300000
 
@@ -36,29 +37,6 @@ function enhanceCloneError(error: unknown, repoUrl: string, originalMessage: str
   }
   
   return error instanceof Error ? error : new Error(originalMessage)
-}
-
-interface ErrorWithMessage {
-  message: string
-}
-
-function isErrorWithMessage(error: unknown): error is ErrorWithMessage {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'message' in error &&
-    typeof (error as ErrorWithMessage).message === 'string'
-  )
-}
-
-function getErrorMessage(error: unknown): string {
-  if (isErrorWithMessage(error)) {
-    return error.message
-  }
-  if (error instanceof Error) {
-    return error.message
-  }
-  return String(error)
 }
 
 async function hasCommits(repoPath: string, env: Record<string, string>): Promise<boolean> {
@@ -197,7 +175,7 @@ export async function initLocalRepo(
         throw new Error(`Directory exists but is not a valid Git repository. Please provide either a Git repository path or a simple directory name to create a new empty repository.`)
       }
     } catch (error: unknown) {
-      if (isErrorWithMessage(error) && getErrorMessage(error).includes('No such file or directory')) {
+      if (getErrorMessage(error).includes('No such file or directory')) {
         throw error
       }
       throw new Error(`Failed to process absolute path '${normalizedInputPath}': ${getErrorMessage(error)}`)
@@ -393,12 +371,12 @@ export async function cloneRepo(
       try {
         await executeCommand(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
       } catch (error: unknown) {
-        if (isErrorWithMessage(error) && getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
+        if (getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        if (branch && isErrorWithMessage(error) && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
+        if (branch && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
           try {
             await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
@@ -496,12 +474,12 @@ export async function cloneRepo(
         
         await executeCommand(cloneCmd, { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
       } catch (error: unknown) {
-        if (isErrorWithMessage(error) && getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
+        if (getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
           logger.error(`Clone failed: directory still exists after cleanup attempt`)
           throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
         }
         
-        if (branch && isErrorWithMessage(error) && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
+        if (branch && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
           logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
           try {
             await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })

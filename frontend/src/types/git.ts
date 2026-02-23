@@ -5,8 +5,6 @@ export interface GitFileStatus {
   status: GitFileStatusType
   staged: boolean
   oldPath?: string
-  additions?: number
-  deletions?: number
 }
 
 export interface GitCommit {
@@ -16,18 +14,6 @@ export interface GitCommit {
   date: string
   message: string
   unpushed?: boolean
-}
-
-export interface CommitFile {
-  path: string
-  status: GitFileStatusType
-  oldPath?: string
-  additions: number
-  deletions: number
-}
-
-export interface CommitDetails extends GitCommit {
-  files: CommitFile[]
 }
 
 export interface GitStatusResponse {

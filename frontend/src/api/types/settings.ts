@@ -19,12 +19,6 @@ export interface CustomCommand {
   promptTemplate: string
 }
 
-export interface CustomAgent {
-  name: string
-  description: string
-  config: Record<string, unknown>
-}
-
 export interface GitCredential {
   name: string
   host: string
@@ -55,13 +49,13 @@ export interface UserPreferences {
   directShortcuts?: string[]
   keyboardShortcuts: Record<string, string>
   customCommands: CustomCommand[]
-  customAgents: CustomAgent[]
   gitCredentials?: GitCredential[]
   gitIdentity?: GitIdentity
   tts?: TTSConfig
   stt?: STTConfig
   notifications?: NotificationPreferences
   repoOrder?: number[]
+  memoryDedupThreshold?: number
 }
 
 export interface SettingsResponse {

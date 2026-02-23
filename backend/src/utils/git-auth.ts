@@ -103,10 +103,6 @@ export function createGitEnv(credentials: GitCredential[]): Record<string, strin
   return env
 }
 
-export function createGitHubGitEnv(gitToken: string): Record<string, string> {
-  return createGitEnv([{ name: 'GitHub', host: 'https://github.com/', token: gitToken, type: 'pat' }])
-}
-
 export function findGitHubCredential(credentials: GitCredential[]): GitCredential | null {
   if (!credentials || credentials.length === 0) return null
 

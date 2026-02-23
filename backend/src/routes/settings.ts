@@ -18,19 +18,7 @@ import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
-
-function compareVersions(v1: string, v2: string): number {
-  const parts1 = v1.split('.').map(s => Number(s))
-  const parts2 = v2.split('.').map(s => Number(s))
-
-  for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-    const p1 = parts1[i] || 0
-    const p2 = parts2[i] || 0
-    if (p1 > p2) return 1
-    if (p1 < p2) return -1
-  }
-  return 0
-}
+import { compareVersions } from '../utils/version-utils'
 
 function getOpenCodeInstallMethod(): string {
   const homePath = process.env.HOME || ''
@@ -153,6 +141,19 @@ export function createSettingsRoutes(db: Database) {
     } catch (error) {
       logger.error('Failed to get settings:', error)
       return c.json({ error: 'Failed to get settings' }, 500)
+    }
+  })
+
+  app.get('/memory-plugin-status', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      const configs = settingsService.getOpenCodeConfigs(userId)
+      const defaultConfig = configs.configs.find((cfg: { isDefault: boolean }) => cfg.isDefault)
+      const isEnabled = defaultConfig?.content?.plugin?.includes('@opencode-manager/memory') ?? false
+      return c.json({ memoryPluginEnabled: isEnabled })
+    } catch (error) {
+      logger.error('Failed to get memory plugin status:', error)
+      return c.json({ error: 'Failed to get memory plugin status' }, 500)
     }
   })
 

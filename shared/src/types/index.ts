@@ -4,7 +4,6 @@ import {
   SettingsResponseSchema,
   UpdateSettingsRequestSchema,
   CustomCommandSchema,
-  CustomAgentSchema,
   OpenCodeConfigSchema,
   OpenCodeConfigMetadataSchema,
   CreateOpenCodeConfigRequestSchema,
@@ -41,7 +40,6 @@ export type UserPreferences = z.infer<typeof UserPreferencesSchema>
 export type SettingsResponse = z.infer<typeof SettingsResponseSchema>
 export type UpdateSettingsRequest = z.infer<typeof UpdateSettingsRequestSchema>
 export type CustomCommand = z.infer<typeof CustomCommandSchema>
-export type CustomAgent = z.infer<typeof CustomAgentSchema>
 export type OpenCodeConfig = z.infer<typeof OpenCodeConfigMetadataSchema>
 export type OpenCodeConfigInput = z.infer<typeof OpenCodeConfigSchema>
 export type CreateOpenCodeConfigRequest = z.infer<typeof CreateOpenCodeConfigRequestSchema>
@@ -78,3 +76,15 @@ export interface SuccessResponse {
 
 export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
 export type { GitCredential } from '../schemas/settings'
+
+export type {
+  Memory,
+  MemoryScope,
+  CreateMemoryRequest,
+  UpdateMemoryRequest,
+  MemoryStats,
+  EmbeddingProviderType,
+  EmbeddingConfig,
+  LoggingConfig,
+  PluginConfig,
+} from '../schemas/memory'

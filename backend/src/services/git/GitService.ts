@@ -7,7 +7,7 @@ import { resolveGitIdentity, createGitIdentityEnv, isSSHUrl } from '../../utils/
 import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
 import { SettingsService } from '../settings'
 import type { Database } from 'bun:sqlite'
-import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
+import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType } from '../../types/git'
 import type { GitCredential } from '@opencode-manager/shared'
 import path from 'path'
 
@@ -267,252 +267,6 @@ export class GitService {
       logger.error(`Failed to unstage files for repo ${repoId}:`, error)
       throw error
     }
-  }
-
-  async discardChanges(repoId: number, paths: string[], staged: boolean, database: Database): Promise<string> {
-    try {
-      const repo = getRepoById(database, repoId)
-      if (!repo) {
-        throw new Error(`Repository not found`)
-      }
-
-      const repoPath = repo.fullPath
-      const env = this.gitAuthService.getGitEnvironment()
-
-      if (paths.length === 0) {
-        return ''
-      }
-
-      if (staged) {
-        const args = ['git', '-C', repoPath, 'restore', '--staged', '--worktree', '--source', 'HEAD', '--', ...paths]
-        return await executeCommand(args, { env })
-      }
-
-      const statusOutput = await executeCommand(
-        ['git', '-C', repoPath, 'status', '--porcelain', '-u', '--', ...paths],
-        { env }
-      )
-
-      const untrackedPaths: string[] = []
-      const trackedPaths: string[] = []
-
-      for (const line of statusOutput.split('\n')) {
-        if (!line.trim()) continue
-        const statusCode = line.substring(0, 2)
-        const filePath = line.substring(3).trim()
-        
-        if (statusCode === '??') {
-          untrackedPaths.push(filePath)
-        } else {
-          trackedPaths.push(filePath)
-        }
-      }
-
-      const results: string[] = []
-
-      if (trackedPaths.length > 0) {
-        const args = ['git', '-C', repoPath, 'checkout', '--', ...trackedPaths]
-        results.push(await executeCommand(args, { env }))
-      }
-
-      if (untrackedPaths.length > 0) {
-        try {
-          const args = ['git', '-C', repoPath, 'clean', '-fd', '--', ...untrackedPaths]
-          results.push(await executeCommand(args, { env }))
-        } catch (error: unknown) {
-          logger.error(`Failed to clean untracked files for repo ${repoId}:`, error)
-          throw error
-        }
-      }
-
-      return results.join('\n')
-    } catch (error: unknown) {
-      logger.error(`Failed to discard changes for repo ${repoId}:`, error)
-      throw error
-    }
-  }
-
-  private normalizeRenamePath(path: string): string {
-    const renamePattern = /\{[^=]+=>\s*([^}]+)\}/
-    let normalized = path
-    while (renamePattern.test(normalized)) {
-      normalized = normalized.replace(renamePattern, '$1')
-    }
-    return normalized.trim()
-  }
-
-  private parseNumstatOutput(output: string): Map<string, { additions: number; deletions: number }> {
-    const map = new Map<string, { additions: number; deletions: number }>()
-    const lines = output.trim().split('\n')
-
-    for (const line of lines) {
-      if (!line.trim()) continue
-
-      const parts = line.split('\t')
-      if (parts.length >= 3) {
-        const additions = parts[0]
-        const deletions = parts[1]
-        const filePath = parts.slice(2).join('\t')
-        const normalizedPath = this.normalizeRenamePath(filePath)
-
-        if (
-          additions?.match(/^\d+$/) &&
-          deletions?.match(/^\d+$/) &&
-          normalizedPath
-        ) {
-          map.set(normalizedPath, {
-            additions: parseInt(additions, 10),
-            deletions: parseInt(deletions, 10)
-          })
-        }
-      }
-    }
-
-    return map
-  }
-
-  private parseCommitFiles(
-    output: string,
-    numstatMap: Map<string, { additions: number; deletions: number }>
-  ): CommitFile[] {
-    const files: CommitFile[] = []
-    const lines = output.trim().split('\n')
-
-    for (const line of lines) {
-      if (!line.trim()) continue
-
-      const parts = line.split('\t')
-      if (parts.length >= 2 && parts[0] && parts[0].match(/^[AMDRC]/)) {
-        const statusCode = parts[0]
-        const fromPath = parts[1] || ''
-        const toPath = parts[2] || parts[1] || ''
-        const isRename = statusCode.startsWith('R')
-        const isCopy = statusCode.startsWith('C')
-
-        let status: GitFileStatusType = 'modified'
-        switch (statusCode.charAt(0)) {
-          case 'A':
-            status = 'added'
-            break
-          case 'D':
-            status = 'deleted'
-            break
-          case 'R':
-            status = 'renamed'
-            break
-          case 'C':
-            status = 'copied'
-            break
-          case 'M':
-            status = 'modified'
-            break
-        }
-
-        const numstatData = numstatMap.get(toPath)
-        const additions = numstatData?.additions ?? 0
-        const deletions = numstatData?.deletions ?? 0
-
-        files.push({
-          path: toPath,
-          status,
-          oldPath: isRename || isCopy ? fromPath : undefined,
-          additions,
-          deletions
-        })
-      }
-    }
-
-    return files
-  }
-
-  async getCommitDetails(repoId: number, hash: string, database: Database): Promise<CommitDetails | null> {
-    try {
-      const repo = getRepoById(database, repoId)
-      if (!repo) {
-        throw new Error(`Repository not found: ${repoId}`)
-      }
-
-      const repoPath = path.resolve(repo.fullPath)
-      const env = this.gitAuthService.getGitEnvironment(true)
-
-      const commitOutput = await executeCommand(
-        ['git', '-C', repoPath, 'log', '-1', '--format=%H%x00%an%x00%ae%x00%at%x00%B', hash],
-        { env }
-      )
-
-      if (!commitOutput.trim()) {
-        return null
-      }
-
-      const parts = commitOutput.trim().split('\0')
-      const [commitHash, authorName, authorEmail, timestamp, message] = parts
-
-      if (!commitHash) {
-        return null
-      }
-
-      const filesOutput = await executeCommand(
-        ['git', '-C', repoPath, 'show', '-M', '--name-status', '--format=', hash],
-        { env }
-      )
-
-      const numstatOutput = await executeCommand(
-        ['git', '-C', repoPath, 'show', '-M', '--numstat', '--format=', hash],
-        { env }
-      )
-
-      const numstatMap = this.parseNumstatOutput(numstatOutput)
-      const files = this.parseCommitFiles(filesOutput, numstatMap)
-
-      return {
-        hash: commitHash,
-        authorName: authorName || '',
-        authorEmail: authorEmail || '',
-        date: timestamp || '',
-        message: message || '',
-        unpushed: await this.isCommitUnpushed(repoPath, commitHash, env),
-        files
-      }
-    } catch (error: unknown) {
-      logger.error(`Failed to get commit details for repo ${repoId}:`, error)
-      throw new Error(`Failed to get commit details: ${getErrorMessage(error)}`)
-    }
-  }
-
-  async getCommitDiff(repoId: number, hash: string, filePath: string, database: Database): Promise<FileDiffResponse> {
-    try {
-      const repo = getRepoById(database, repoId)
-      if (!repo) {
-        throw new Error(`Repository not found: ${repoId}`)
-      }
-
-      const repoPath = path.resolve(repo.fullPath)
-      const env = this.gitAuthService.getGitEnvironment(true)
-
-      const diff = await executeCommand(
-        ['git', '-C', repoPath, 'show', '--format=', hash, '--', filePath],
-        { env }
-      )
-
-      const status = this.detectDiffStatus(diff)
-      return this.parseDiffOutput(diff, status, filePath)
-    } catch (error: unknown) {
-      logger.error(`Failed to get commit diff for repo ${repoId}:`, error)
-      throw new Error(`Failed to get commit diff: ${getErrorMessage(error)}`)
-    }
-  }
-
-  private detectDiffStatus(diff: string): GitFileStatusType {
-    if (diff.includes('new file mode')) {
-      return 'added'
-    }
-    if (diff.includes('deleted file mode')) {
-      return 'deleted'
-    }
-    if (diff.includes('rename from') || diff.includes('rename to')) {
-      return 'renamed'
-    }
-    return 'modified'
   }
 
   private async setupSSHIfNeeded(repoUrl: string | undefined, database: Database): Promise<void> {
@@ -915,7 +669,6 @@ export class GitService {
     let additions = 0
     let deletions = 0
     let isBinary = false
-    const MAX_DIFF_SIZE = 500 * 1024
 
     if (typeof diff === 'string') {
       if (diff.includes('Binary files') || diff.includes('GIT binary patch')) {
@@ -929,21 +682,13 @@ export class GitService {
       }
     }
 
-    let diffOutput = typeof diff === 'string' ? diff : ''
-    let truncated = false
-    if (diffOutput.length > MAX_DIFF_SIZE) {
-      diffOutput = diffOutput.substring(0, MAX_DIFF_SIZE) + '\n\n... (diff truncated due to size)'
-      truncated = true
-    }
-
     return {
       path: filePath || '',
       status: status as GitFileStatusType,
-      diff: diffOutput,
+      diff: typeof diff === 'string' ? diff : '',
       additions,
       deletions,
-      isBinary,
-      truncated
+      isBinary
     }
   }
 
@@ -954,11 +699,6 @@ export class GitService {
     } catch {
       return false
     }
-  }
-
-  private async isCommitUnpushed(repoPath: string, commitHash: string, env: Record<string, string>): Promise<boolean> {
-    const unpushedHashes = await this.getUnpushedCommitHashes(repoPath, env)
-    return unpushedHashes.has(commitHash)
   }
 
   private async getUnpushedCommitHashes(repoPath: string, env: Record<string, string>): Promise<Set<string>> {

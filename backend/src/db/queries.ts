@@ -94,13 +94,6 @@ export function getRepoById(db: Database, id: number): Repo | null {
   return row ? rowToRepo(row) : null
 }
 
-export function getRepoByUrl(db: Database, repoUrl: string): Repo | null {
-  const stmt = db.prepare('SELECT * FROM repos WHERE repo_url = ?')
-  const row = stmt.get(repoUrl) as RepoRow | undefined
-  
-  return row ? rowToRepo(row) : null
-}
-
 export function getRepoByUrlAndBranch(db: Database, repoUrl: string, branch?: string): Repo | null {
   const query = branch 
     ? 'SELECT * FROM repos WHERE repo_url = ? AND branch = ?'

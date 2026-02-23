@@ -1,0 +1,58 @@
+{
+  "name": "@opencode-manager/memory",
+  "version": "0.0.4",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "config.json",
+    "scripts",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chriswritescode-dev/opencode-manager.git"
+  },
+  "author": "Chris Scott",
+  "description": "AI-powered memory management plugin for OpenCode - semantic search and persistent knowledge storage",
+  "keywords": [
+    "opencode",
+    "memory",
+    "semantic-search",
+    "vector-embeddings",
+    "ai-agent",
+    "plugin"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/chriswritescode-dev/opencode-manager#readme",
+  "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
+    "@opencode-ai/plugin": "^1.2.9",
+    "sqlite-vec": "0.1.7-alpha.2"
+  },
+  "optionalDependencies": {
+    "sqlite-vec-darwin-arm64": "0.1.7-alpha.2",
+    "sqlite-vec-darwin-x64": "0.1.7-alpha.2",
+    "sqlite-vec-linux-arm64": "0.1.7-alpha.2",
+    "sqlite-vec-linux-x64": "0.1.7-alpha.2",
+    "sqlite-vec-windows-x64": "0.1.7-alpha.2"
+  },
+  "devDependencies": {
+    "bun-types": "latest",
+    "typescript": "^5.7.3"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "postinstall": "node scripts/download-models.js",
+    "prepublishOnly": "pnpm build",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  }
+}

@@ -31,7 +31,6 @@ export interface FileDiffResponse {
   additions: number
   deletions: number
   isBinary: boolean
-  truncated?: boolean
 }
 
 export interface GitDiffOptions {
@@ -48,16 +47,4 @@ export interface GitBranch {
   ahead?: number
   behind?: number
   isWorktree?: boolean
-}
-
-export interface CommitFile {
-  path: string
-  status: GitFileStatusType
-  oldPath?: string
-  additions: number
-  deletions: number
-}
-
-export interface CommitDetails extends GitCommit {
-  files: CommitFile[]
 }

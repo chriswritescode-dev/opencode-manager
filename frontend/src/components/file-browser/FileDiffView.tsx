@@ -1,4 +1,4 @@
-import { useFileDiff, useCommitFileDiff } from "@/api/git";
+import { useFileDiff } from "@/api/git";
 import {
   Loader2,
   FileText,
@@ -10,7 +10,6 @@ import {
   Minus,
   ArrowLeft,
   ExternalLink,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -22,9 +21,7 @@ interface FileDiffViewProps {
   repoId: number;
   filePath: string;
   includeStaged?: boolean;
-  commitHash?: string;
   onBack?: () => void;
-  onClose?: () => void;
   onOpenFile?: (path: string, lineNumber?: number) => void;
   isMobile?: boolean;
 }
@@ -139,7 +136,7 @@ function DiffLineComponent({
 }) {
   if (line.type === "header") {
     return (
-      <div className="px-4 py-1 bg-muted/50 text-muted-foreground text-xs font-mono break-all border-b border-border/30">
+      <div className="px-4 py-1 bg-muted/50 text-muted-foreground text-xs font-mono truncate border-b border-border/30">
         {line.content}
       </div>
     );
@@ -147,7 +144,7 @@ function DiffLineComponent({
 
   if (line.type === "hunk") {
     return (
-      <div className="px-4 py-1 bg-accent/20 text-accent-foreground text-xs font-mono break-all border-b border-border/20">
+      <div className="px-4 py-1 bg-accent/20 text-accent-foreground text-xs font-mono border-b border-border/20">
         {line.content}
       </div>
     );
@@ -173,7 +170,7 @@ function DiffLineComponent({
   return (
     <div
       className={cn(
-        "flex font-mono text-sm border-l-2 transition-colors min-w-0",
+        "flex font-mono text-sm border-l-2 transition-colors",
         bgClass,
         line.type === "add" && "border-l-emerald-500",
         line.type === "remove" && "border-l-rose-500",
@@ -204,7 +201,7 @@ function DiffLineComponent({
       </div>
       <pre
         className={cn(
-          "flex-1 min-w-0 px-2 py-0.5 whitespace-pre-wrap break-words overflow-hidden",
+          "flex-1 px-2 py-0.5 whitespace-pre-wrap break-words",
           textClass,
         )}
       >
@@ -218,15 +215,11 @@ export function FileDiffView({
   repoId,
   filePath,
   includeStaged,
-  commitHash,
   onBack,
-  onClose,
   onOpenFile,
   isMobile = false,
 }: FileDiffViewProps) {
-  const workingDiff = useFileDiff(repoId, filePath, includeStaged);
-  const commitDiff = useCommitFileDiff(repoId, commitHash, filePath);
-  const { data: diffData, isLoading, error } = commitHash ? commitDiff : workingDiff;
+  const { data: diffData, isLoading, error } = useFileDiff(repoId, filePath, includeStaged);
 
   const fileName = filePath.split("/").pop() || filePath;
   const dirPath = filePath.includes("/")
@@ -266,7 +259,7 @@ export function FileDiffView({
   const diffLines = diffData.diff ? parseDiff(diffData.diff) : [];
 
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden">
+    <div className="flex flex-col h-full bg-background">
       <div
         className={cn(
           "flex items-center gap-2 px-3 py-2 border-b border-border flex-shrink-0",
@@ -338,20 +331,10 @@ export function FileDiffView({
               className="flex-shrink-0"
             />
           )}
-          {onClose && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 p-0 flex-shrink-0"
-              onClick={onClose}
-            >
-              <X className="w-4 h-4" />
-            </Button>
-          )}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden min-h-0">
+      <div className="flex-1 overflow-y-auto min-h-0">
         {diffData.isBinary ? (
           <div className="flex items-center justify-center h-full text-muted-foreground bg-muted/20">
             <p className="text-sm">Binary file - cannot display diff</p>

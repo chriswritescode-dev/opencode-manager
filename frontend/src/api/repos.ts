@@ -1,5 +1,5 @@
 import type { Repo } from './types'
-import { FetchError, fetchWrapper, fetchWrapperText, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
+import { FetchError, fetchWrapper, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 
 export async function createRepo(
@@ -49,10 +49,6 @@ export async function pullRepo(id: number): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/pull`, {
     method: 'POST',
   })
-}
-
-export async function getServerLogs(id: number): Promise<string> {
-  return fetchWrapperText(`${API_BASE_URL}/api/repos/${id}/server/logs`)
 }
 
 export async function switchRepoConfig(id: number, configName: string): Promise<Repo> {

@@ -210,6 +210,10 @@ export const settingsApi = {
   getVersionInfo: async (): Promise<VersionInfo> => {
     return fetchWrapper(`${API_BASE_URL}/api/health/version`)
   },
+
+  getMemoryPluginStatus: async (): Promise<{ memoryPluginEnabled: boolean }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/memory-plugin-status`)
+  },
 }
 
 export interface VersionInfo {

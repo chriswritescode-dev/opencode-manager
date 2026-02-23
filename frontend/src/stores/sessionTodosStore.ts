@@ -46,9 +46,3 @@ export const useSessionTodosForSession = (sessionID: string | undefined): Todo[]
   )
   return todos || []
 }
-
-export const useHasSessionTodos = (sessionID: string | undefined): boolean => {
-  return useSessionTodos((state) => 
-    sessionID ? (state.todos.get(sessionID)?.length ?? 0) > 0 : false
-  )
-}

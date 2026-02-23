@@ -53,6 +53,7 @@ export const ENV = {
   OPENCODE: {
     PORT: getEnvNumber('OPENCODE_SERVER_PORT', DEFAULTS.OPENCODE.PORT),
     HOST: getEnvString('OPENCODE_HOST', DEFAULTS.OPENCODE.HOST),
+    API_URL: process.env.OPENCODE_MANAGER_API_URL ?? `http://127.0.0.1:${DEFAULTS.SERVER.PORT}`,
   },
 
   DATABASE: {
@@ -106,12 +107,23 @@ export const ENV = {
     PASSKEY_RP_NAME: getEnvString('PASSKEY_RP_NAME', 'OpenCode Manager'),
     PASSKEY_ORIGIN: getEnvString('PASSKEY_ORIGIN', 'http://localhost:5003'),
   },
+
+  REDIS: {
+    URL: getEnvString('REDIS_URL', ''),
+    PASSWORD: process.env.REDIS_PASSWORD ?? '',
+    DB: getEnvNumber('REDIS_DB', 0),
+  },
 } as const
 
 export const getWorkspacePath = () => ENV.WORKSPACE.BASE_PATH
 export const getReposPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.REPOS_DIR)
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
+export const getPluginSourcePath = () => {
+  const envPath = process.env.OPENCODE_PLUGIN_PATH
+  if (envPath) return path.resolve(envPath)
+  return path.resolve('packages/memory/src/index.ts')
+}
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')
 export const getAuthPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.AUTH_FILE)
 export const getDatabasePath = () => ENV.DATABASE.PATH

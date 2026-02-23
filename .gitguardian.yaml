@@ -17,8 +17,6 @@ paths-ignore:
   - '**/*.spec.tsx'
   - 'temp/**'
   - '**/*.md'
-  - '**/test/**'
-  - '**/__tests__/**'
 
 # Specific files to ignore
 files-ignore:
