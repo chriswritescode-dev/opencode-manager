@@ -14,7 +14,7 @@
         <img src="https://img.shields.io/github/stars/chriswritescode-dev/opencode-manager?label=Stars" alt="Stars" />
     </a>
     <a href="https://github.com/chriswritescode-dev/opencode-manager/releases/latest">
-        <img src="https://img.shields.io/github/v/release/chriswritescode-dev/opencode-manager?label=Release" alt="Latest Release" />
+        <img src="https://img.shields.io/github/v/release/chriswritescode-dev/opencode-manager" alt="Latest Release" />
     </a>
     <a href="https://github.com/chriswritescode-dev/opencode-manager/pulls">
         <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs Welcome" />
