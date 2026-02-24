@@ -2,6 +2,7 @@ import type { Plugin, PluginInput, Hooks } from '@opencode-ai/plugin'
 import { tool } from '@opencode-ai/plugin'
 import { agents } from './agents'
 import { createConfigHandler } from './config'
+import { VERSION } from './version'
 import {
   createSessionHooks,
   createKeywordHooks,
@@ -9,19 +10,19 @@ import {
   ACTIVATION_CONTEXT,
 } from './hooks'
 import { join } from 'path'
-import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery } from './storage'
+import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery, getTableDimensions, recreateVecTable } from './storage'
 import type { MemoryService } from './services/memory'
 import { createVecService } from './storage/vec'
-import { createEmbeddingProvider, checkServerHealth, isServerRunning } from './embedding'
+import { createEmbeddingProvider, checkServerHealth, isServerRunning, killEmbeddingServer } from './embedding'
 import { createMemoryService } from './services/memory'
 import { createSessionStateService } from './services/session-state'
 import { createEmbeddingSyncService } from './services/embedding-sync'
 import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
 import { createLogger } from './utils/logger'
+import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig, HealthStatus, Logger, PlanningState } from './types'
 import type { EmbeddingProvider } from './embedding'
-import type { Database } from 'bun:sqlite'
 import { createNoopVecService } from './storage/vec'
 
 
@@ -108,7 +109,8 @@ function formatHealthStatus(status: HealthStatus, provider: EmbeddingProvider): 
   const embeddingStatus: 'ok' | 'error' = operational ? 'ok' : 'error'
 
   const lines: string[] = [
-    `Memory Plugin Health: ${overallStatus.toUpperCase()}`,
+    `Memory Plugin v${VERSION}`,
+    `Status: ${overallStatus.toUpperCase()}`,
     '',
     `Embedding: ${embeddingStatus}`,
     `  Provider: ${provider.name} (${provider.dimensions}d)`,
@@ -150,11 +152,19 @@ async function executeHealthCheck(
   return formatHealthStatus(status, provider)
 }
 
+interface DimensionMismatchState {
+  detected: boolean
+  expected: number | null
+  actual: number | null
+}
+
 async function executeReindex(
   memoryService: MemoryService,
   db: Database,
   config: PluginConfig,
   provider: EmbeddingProvider,
+  dataDir: string,
+  mismatchState: DimensionMismatchState,
 ): Promise<string> {
   const configuredModel = config.embedding.model
   const configuredDimensions = config.embedding.dimensions ?? provider.dimensions
@@ -170,11 +180,24 @@ async function executeReindex(
     return 'Reindex failed: embedding provider is not operational. Check your API key and model configuration.'
   }
 
+  const tableResult = getTableDimensions(db)
+  if (tableResult.exists && tableResult.dimensions !== configuredDimensions) {
+    recreateVecTable(db, configuredDimensions)
+    const newVec = await createVecService(db, dataDir, configuredDimensions)
+    memoryService.setVecService(newVec)
+  }
+
   const result = await memoryService.reindex()
 
   if (result.success > 0 || result.total === 0) {
     const metadata = createMetadataQuery(db)
     metadata.setEmbeddingModel(configuredModel, configuredDimensions)
+  }
+
+  if (result.failed === 0) {
+    mismatchState.detected = false
+    mismatchState.expected = null
+    mismatchState.actual = null
   }
 
   const lines: string[] = [
@@ -248,6 +271,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
     provider.warmup()
 
     const dataDir = config.dataDir ?? resolveDataDir()
+    
+    if (config.embedding.provider !== 'local') {
+      killEmbeddingServer(dataDir).catch(() => {})
+    }
+    
     const db = initializeDatabase(dataDir)
     const dimensions = config.embedding.dimensions ?? provider.dimensions
 
@@ -267,6 +295,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       memoryService.setDedupThreshold(config.dedupThreshold)
     }
 
+    const mismatchState: DimensionMismatchState = {
+      detected: false,
+      expected: null,
+      actual: null,
+    }
+
     const initPromise = createVecService(db, dataDir, dimensions)
       .then(async (vec) => {
         memoryService.setVecService(vec)
@@ -277,6 +311,16 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         }
 
         logger.log('Vec service initialized')
+
+        const tableResult = getTableDimensions(db)
+        if (tableResult.exists && tableResult.dimensions !== dimensions) {
+          mismatchState.detected = true
+          mismatchState.expected = dimensions
+          mismatchState.actual = tableResult.dimensions
+          memoryService.setVecService(createNoopVecService())
+          logger.log(`Dimension mismatch detected: config=${dimensions}, table=${tableResult.dimensions ?? 'unknown'}`)
+          return
+        }
 
         const embeddingSync = createEmbeddingSyncService(memoryService, logger)
         await embeddingSync.start().catch((err: unknown) => {
@@ -295,6 +339,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
     const paramsHooks = createParamsHooks(keywordHooks)
 
     const scopeEnum = z.enum(['convention', 'decision', 'context'])
+
+    function withDimensionWarning(result: string): string {
+      if (!mismatchState.detected) return result
+      return `${result}\n\n---\nWarning: Embedding dimension mismatch detected (config: ${mismatchState.expected}d, database: ${mismatchState.actual}d). Semantic search is disabled.\n- If you changed your embedding model intentionally, run memory-health with action "reindex" to rebuild embeddings.\n- If this was accidental, revert your embedding config to match the existing model.`
+    }
 
     let cleaned = false
     const cleanup = async () => {
@@ -343,13 +392,13 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
             logger.log(`memory-read: returned ${results.length} results`)
             if (results.length === 0) {
-              return 'No memories found.'
+              return withDimensionWarning('No memories found.')
             }
 
             const formatted = results.map(
               (m: any) => `[${m.id}] (${m.scope}) - Created ${new Date(m.createdAt).toISOString().split('T')[0]}\n${m.content}`
             )
-            return `Found ${results.length} memories:\n\n${formatted.join('\n\n')}`
+            return withDimensionWarning(`Found ${results.length} memories:\n\n${formatted.join('\n\n')}`)
           },
         }),
         'memory-write': tool({
@@ -369,7 +418,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             })
 
             logger.log(`memory-write: created id=${result.id}, deduplicated=${result.deduplicated}`)
-            return `Memory stored (ID: #${result.id}, scope: ${args.scope}).${result.deduplicated ? ' (matched existing memory)' : ''}`
+            return withDimensionWarning(`Memory stored (ID: #${result.id}, scope: ${args.scope}).${result.deduplicated ? ' (matched existing memory)' : ''}`)
           },
         }),
         'memory-edit': tool({
@@ -386,7 +435,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             const memory = memoryService.getById(args.id)
             if (!memory) {
               logger.log(`memory-edit: id=${args.id} not found`)
-              return `Memory #${args.id} not found.`
+              return withDimensionWarning(`Memory #${args.id} not found.`)
             }
             
             await memoryService.update(args.id, {
@@ -395,7 +444,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             })
             
             logger.log(`memory-edit: updated id=${args.id}`)
-            return `Updated memory #${args.id} (scope: ${args.scope ?? memory.scope}).`
+            return withDimensionWarning(`Updated memory #${args.id} (scope: ${args.scope ?? memory.scope}).`)
           },
         }),
         'memory-delete': tool({
@@ -404,31 +453,32 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             id: z.number().describe('The memory ID to delete'),
           },
           execute: async (args) => {
+            await initPromise
             const id = args.id
             logger.log(`memory-delete: id=${id}`)
 
             const memory = memoryService.getById(id)
             if (!memory) {
               logger.log(`memory-delete: id=${id} not found`)
-              return `Memory #${id} not found.`
+              return withDimensionWarning(`Memory #${id} not found.`)
             }
 
             await memoryService.delete(id)
             logger.log(`memory-delete: deleted id=${id}`)
-            return `Deleted memory #${id}: "${memory.content.substring(0, 50)}..." (${memory.scope})`
+            return withDimensionWarning(`Deleted memory #${id}: "${memory.content.substring(0, 50)}..." (${memory.scope})`)
           },
         }),
         'memory-health': tool({
-          description: 'Check memory plugin health or trigger a reindex of all embeddings. Use action "check" (default) to view status, or "reindex" to regenerate all embeddings when model has changed or embeddings are missing.',
+          description: 'Check memory plugin health or trigger a reindex of all embeddings. Use action "check" (default) to view status, or "reindex" to regenerate all embeddings when model has changed or embeddings are missing. Always report the plugin version from the output. Never run reindex unless the user explicitly asks for it.',
           args: {
             action: z.enum(['check', 'reindex']).optional().default('check').describe('Action to perform: "check" for health status, "reindex" to regenerate embeddings'),
           },
           execute: async (args) => {
             await initPromise
             if (args.action === 'reindex') {
-              return executeReindex(memoryService, db, config, provider)
+              return executeReindex(memoryService, db, config, provider, dataDir, mismatchState)
             }
-            return executeHealthCheck(db, config, provider, dataDir)
+            return withDimensionWarning(await executeHealthCheck(db, config, provider, dataDir))
           },
         }),
         'memory-planning-update': tool({

@@ -6,7 +6,7 @@ import { LocalEmbeddingProvider } from './local'
 import { SharedEmbeddingClient } from './client'
 import { resolveDataDir } from '../storage/database'
 import type { CacheService } from '../cache/types'
-export { checkServerHealth, isServerRunning } from './shared'
+export { checkServerHealth, isServerRunning, killEmbeddingServer } from './shared'
 
 export type { EmbeddingProvider } from './types'
 
