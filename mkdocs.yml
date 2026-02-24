@@ -9,18 +9,7 @@ theme:
     - scheme: slate
       primary: blue grey
       accent: cyan
-      toggle:
-        icon: material/brightness-7
-        name: Switch to light mode
-    - scheme: default
-      primary: blue grey
-      accent: cyan
-      toggle:
-        icon: material/brightness-4
-        name: Switch to dark mode
   features:
-    - navigation.sections
-    - navigation.expand
     - navigation.top
     - navigation.tracking
     - navigation.tabs
@@ -43,6 +32,7 @@ nav:
     - File Browser: features/files.md
     - Chat & Sessions: features/chat.md
     - AI Configuration: features/ai-config.md
+    - Memory Plugin: features/memory.md
     - MCP Servers: features/mcp.md
     - Text-to-Speech: features/tts.md
     - Speech-to-Text: features/stt.md
