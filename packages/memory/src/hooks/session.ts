@@ -52,11 +52,21 @@ function formatEventProperties(props?: Record<string, unknown>): string {
   }
 }
 
-function buildSubtaskPrompt(sessionId: string, compactionSummary: string): string {
-  return `Review the following compaction summary and extract any project knowledge worth preserving across sessions.
+function buildSubtaskPrompt(
+  sessionId: string,
+  compactionSummary: string,
+  planningState: PlanningState | null
+): string {
+  const planningSection = planningState
+    ? `## Current Planning State\n\n${formatPlanningState(planningState) ?? '(no details)'}\n\n---\n`
+    : ''
 
----
+  return `Review the following and extract any project knowledge worth preserving across sessions.
+
+${planningSection}## Compaction Summary
+
 ${compactionSummary}
+
 ---
 
 For each item found, store it with the appropriate scope:
@@ -109,6 +119,11 @@ export function createSessionHooks(
 
     logger.log(`Post-compaction: fetched compaction summary (${compactionSummary.length} chars)`)
 
+    const planningState = sessionStateService.getPlanningState(sessionId)
+    if (planningState) {
+      logger.log(`Post-compaction: fetched planning state for session ${sessionId}`)
+    }
+
     await ctx.client.session.prompt({
       path: { id: sessionId },
       body: {
@@ -117,7 +132,7 @@ export function createSessionHooks(
             type: 'subtask',
             agent: 'Memory',
             description: 'Memory extraction after compaction',
-            prompt: buildSubtaskPrompt(sessionId, compactionSummary),
+            prompt: buildSubtaskPrompt(sessionId, compactionSummary, planningState),
           },
         ],
       },

@@ -1,10 +1,8 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
-import { createKeywordHooks } from '../src/hooks/keyword'
-import { createParamsHooks } from '../src/hooks/params'
 import { createSessionHooks } from '../src/hooks/session'
 import type { MemoryService } from '../src/services/memory'
 import type { SessionStateService } from '../src/services/session-state'
-import type { Logger, Memory, MemoryScope } from '../src/types'
+import type { Logger, Memory, MemoryScope, PlanningState } from '../src/types'
 import type { PluginInput } from '@opencode-ai/plugin'
 
 const TEST_PROJECT_ID = 'test-project-id'
@@ -19,6 +17,12 @@ const mockSessionStateService = {
   getCompactionSnapshot: () => null,
   setCompactionSnapshot: () => {},
 } as unknown as SessionStateService
+
+const createMockSessionStateServiceWithPlanning = (planningState: PlanningState | null): SessionStateService => ({
+  getPlanningState: () => planningState,
+  getCompactionSnapshot: () => null,
+  setCompactionSnapshot: () => {},
+} as unknown as SessionStateService)
 
 const mockPromptAsync = async () => {}
 
@@ -103,226 +107,6 @@ const mockMemories: Memory[] = [
   },
 ]
 
-describe('KeywordHooks', () => {
-  test('Keyword hook detects "remember this" and sets activation flag', async () => {
-    const hooks = createKeywordHooks(mockLogger)
-
-    const input = {
-      sessionID: 'test-session',
-    }
-
-    const output = {
-      message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Remember this: we use PostgreSQL for the database' },
-      ],
-    }
-
-    await hooks.onMessage(input, output)
-
-    expect(hooks.isActivated('test-session')).toBe(true)
-  })
-
-  test('Keyword hook detects "do you know about" pattern', async () => {
-    const hooks = createKeywordHooks(mockLogger)
-
-    const input = {
-      sessionID: 'test-session',
-    }
-
-    const output = {
-      message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'What do you know about the authentication system?' },
-      ],
-    }
-
-    await hooks.onMessage(input, output)
-
-    expect(hooks.isActivated('test-session')).toBe(true)
-  })
-
-  test('Keyword hook detects "project memory" pattern', async () => {
-    const hooks = createKeywordHooks(mockLogger)
-
-    const input = {
-      sessionID: 'test-session',
-    }
-
-    const output = {
-      message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Check the project memory for API conventions' },
-      ],
-    }
-
-    await hooks.onMessage(input, output)
-
-    expect(hooks.isActivated('test-session')).toBe(true)
-  })
-
-  test('Keyword hook does not trigger for normal messages', async () => {
-    const hooks = createKeywordHooks(mockLogger)
-
-    const input = {
-      sessionID: 'test-session',
-    }
-
-    const output = {
-      message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Hello, how are you?' },
-      ],
-    }
-
-    await hooks.onMessage(input, output)
-
-    expect(hooks.isActivated('test-session')).toBe(false)
-  })
-
-  test('Keyword hook only triggers once per session', async () => {
-    const hooks = createKeywordHooks(mockLogger)
-
-    const input1 = {
-      sessionID: 'test-session',
-    }
-
-    const output1 = {
-      message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Remember this: use ESLint' },
-      ],
-    }
-
-    await hooks.onMessage(input1, output1)
-    expect(hooks.isActivated('test-session')).toBe(true)
-
-    const input2 = {
-      sessionID: 'test-session',
-    }
-
-    const output2 = {
-      message: { id: 'msg-2', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p2', sessionID: 'test-session', messageID: 'msg-2', type: 'text', text: 'Remember: use Prettier' },
-      ],
-    }
-
-    await hooks.onMessage(input2, output2)
-    expect(hooks.isActivated('test-session')).toBe(true)
-  })
-
-  test('Keyword hook detects mode patterns', async () => {
-    const hooks = createKeywordHooks(mockLogger)
-
-    const input = {
-      sessionID: 'test-session',
-    }
-
-    const output = {
-      message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-      parts: [
-        { id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Brainstorm some ideas for the UI' },
-      ],
-    }
-
-    await hooks.onMessage(input, output)
-
-    expect(hooks.getMode('test-session')).toBe('creative')
-  })
-})
-
-describe('ParamsHooks', () => {
-  test('Params hook adjusts temperature for creative mode', async () => {
-    const keywordHooks = createKeywordHooks(mockLogger)
-    const hooks = createParamsHooks(keywordHooks)
-
-    keywordHooks.onMessage(
-      { sessionID: 'test-session' },
-      {
-        message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-        parts: [{ id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Brainstorm some ideas' }],
-      }
-    )
-
-    const input = {
-      sessionID: 'test-session',
-      agent: 'test',
-    }
-
-    const output: { temperature?: number; options?: Record<string, any> } = {}
-
-    await hooks.onParams(input, output)
-
-    expect(output.temperature).toBe(0.8)
-  })
-
-  test('Params hook adjusts thinking for deepThink mode', async () => {
-    const keywordHooks = createKeywordHooks(mockLogger)
-    const hooks = createParamsHooks(keywordHooks)
-
-    keywordHooks.onMessage(
-      { sessionID: 'test-session' },
-      {
-        message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-        parts: [{ id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Think hard about this' }],
-      }
-    )
-
-    const input = {
-      sessionID: 'test-session',
-      agent: 'test',
-    }
-
-    const output: { options?: { thinking?: { budgetTokens?: number } } } = {}
-
-    await hooks.onParams(input, output)
-
-    expect(output.options?.thinking?.budgetTokens).toBe(32000)
-  })
-
-  test('Params hook adjusts maxSteps for thorough mode', async () => {
-    const keywordHooks = createKeywordHooks(mockLogger)
-    const hooks = createParamsHooks(keywordHooks)
-
-    keywordHooks.onMessage(
-      { sessionID: 'test-session' },
-      {
-        message: { id: 'msg-1', sessionID: 'test-session', role: 'user' },
-        parts: [{ id: 'p1', sessionID: 'test-session', messageID: 'msg-1', type: 'text', text: 'Go deep and be thorough' }],
-      }
-    )
-
-    const input = {
-      sessionID: 'test-session',
-      agent: 'test',
-    }
-
-    const output: { options?: { maxSteps?: number } } = {}
-
-    await hooks.onParams(input, output)
-
-    expect(output.options?.maxSteps).toBe(50)
-  })
-
-  test('Params hook does not adjust for normal messages', async () => {
-    const keywordHooks = createKeywordHooks(mockLogger)
-    const hooks = createParamsHooks(keywordHooks)
-
-    const input = {
-      sessionID: 'test-session',
-      agent: 'test',
-    }
-
-    const output: { temperature?: number; options?: Record<string, any> } = {}
-
-    await hooks.onParams(input, output)
-
-    expect(output.temperature).toBeUndefined()
-    expect(output.options).toBeUndefined()
-  })
-})
-
 describe('SessionHooks', () => {
   test('Session compacting hook includes memory sections in context', async () => {
     const memoryService = createMockMemoryService(mockMemories)
@@ -398,7 +182,6 @@ describe('SessionHooks', () => {
             return { data: { parts: [{ type: 'text', text: 'Done' }] } }
           },
           promptAsync: async () => {},
-          todo: async () => ({ data: [] }),
         },
         app: {
           log: () => {},
@@ -432,8 +215,79 @@ describe('SessionHooks', () => {
     expect(call.body.parts.length).toBe(1)
   })
 
-  test('session.compacted with active todos includes resume instruction', async () => {
+  test('session.compacted includes planning state in subtask prompt when available', async () => {
     let promptCall: unknown = null
+
+    const planningState: PlanningState = {
+      objective: 'Refactor memory extraction flow',
+      current: 'Updating buildSubtaskPrompt to accept planning state',
+      next: 'Run tests and verify behavior',
+      phases: [
+        { title: 'Update buildSubtaskPrompt', status: 'completed', notes: 'Added planningState parameter' },
+        { title: 'Update runPostCompactionFlow', status: 'in_progress', notes: 'Fetching from KV store' },
+        { title: 'Add tests', status: 'pending' },
+      ],
+      findings: ['SubtaskPart keeps session busy'],
+      errors: [],
+    }
+
+    const customMockPluginInput: PluginInput = {
+      client: {
+        session: {
+          messages: async () => ({
+            data: [
+              { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Compaction summary here' }] },
+            ],
+          }),
+          create: async () => ({ data: { id: 'unused' } }),
+          prompt: async (call: unknown) => {
+            promptCall = call
+            return { data: { parts: [{ type: 'text', text: 'Done' }] } }
+          },
+          promptAsync: async () => {},
+        },
+        app: {
+          log: () => {},
+        },
+      },
+      project: { id: TEST_PROJECT_ID, worktree: '/test' },
+      directory: '/test',
+      worktree: '/test',
+      serverUrl: new URL('http://localhost:5551'),
+    } as unknown as PluginInput
+
+    const memoryService = createMockMemoryService([])
+    const sessionStateWithPlanning = createMockSessionStateServiceWithPlanning(planningState)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, sessionStateWithPlanning, mockLogger, customMockPluginInput)
+
+    await hooks.onEvent({
+      event: { type: 'session.compacted', properties: { sessionId: 'test-session-planning' } },
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(promptCall).not.toBeNull()
+    const call = promptCall as any
+    const subtask = call.body.parts[0]
+
+    expect(subtask.prompt).toContain('Current Planning State')
+    expect(subtask.prompt).toContain('Refactor memory extraction flow')
+    expect(subtask.prompt).toContain('Updating buildSubtaskPrompt')
+    expect(subtask.prompt).toContain('[x] Update buildSubtaskPrompt')
+    expect(subtask.prompt).toContain('[~] Update runPostCompactionFlow')
+  })
+
+  test('session.compacted with active planning includes resume instruction', async () => {
+    let promptCall: unknown = null
+
+    const planningState: PlanningState = {
+      objective: 'Complete the refactor',
+      current: 'Running tests',
+      next: 'Commit changes',
+      phases: [
+        { title: 'Phase 1', status: 'completed' },
+        { title: 'Phase 2', status: 'in_progress', notes: 'Almost done' },
+      ],
+    }
 
     const customMockPluginInput: PluginInput = {
       client: {
@@ -449,12 +303,6 @@ describe('SessionHooks', () => {
             return { data: { parts: [{ type: 'text', text: 'Done' }] } }
           },
           promptAsync: async () => {},
-          todo: async () => ({
-            data: [
-              { status: 'completed', content: 'Done task', priority: 'high', id: '1' },
-              { status: 'in_progress', content: 'Active task', priority: 'high', id: '2' },
-            ],
-          }),
         },
         app: {
           log: () => {},
@@ -467,7 +315,8 @@ describe('SessionHooks', () => {
     } as unknown as PluginInput
 
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
+    const sessionStateWithPlanning = createMockSessionStateServiceWithPlanning(planningState)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, sessionStateWithPlanning, mockLogger, customMockPluginInput)
 
     await hooks.onEvent({
       event: { type: 'session.compacted', properties: { sessionId: 'test-session-active' } },
@@ -494,7 +343,6 @@ describe('SessionHooks', () => {
             return { data: { parts: [] } }
           },
           promptAsync: async () => {},
-          todo: async () => ({ data: [] }),
         },
         app: {
           log: () => {},
@@ -534,7 +382,6 @@ describe('SessionHooks', () => {
             return { data: { parts: [] } }
           },
           promptAsync: async () => {},
-          todo: async () => ({ data: [] }),
         },
         app: {
           log: () => {},
