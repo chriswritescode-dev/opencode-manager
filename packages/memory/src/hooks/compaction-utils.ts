@@ -1,5 +1,15 @@
 import type { PlanningState } from '../types'
 
+interface PromptResponsePart {
+  type: string
+  text?: string
+}
+
+interface SessionMessage {
+  info: { role: string }
+  parts: PromptResponsePart[]
+}
+
 export function buildCustomCompactionPrompt(): string {
   return `You are generating a continuation context for a coding session with persistent
 project memory. Your summary will be the ONLY context after compaction.
@@ -31,7 +41,7 @@ Preserve everything needed for seamless continuation.
 [What should happen immediately after compaction]
 
 ## Rules
-- Use specific file paths, phase names - NOT vague references
+- Use specific file paths.
 - State what tools returned, not just that they were called
 - Prefer completeness over brevity - this is the agent's entire working memory`
 }
@@ -102,6 +112,18 @@ export function formatCompactionDiagnostics(stats: {
   if (parts.length === 0) return ''
 
   return `> **Compaction preserved:** ${parts.join(', ')} (~${stats.tokensInjected} tokens injected)`
+}
+
+export function extractCompactionSummary(messages: SessionMessage[]): string | null {
+  const reversed = [...messages].reverse()
+  for (const msg of reversed) {
+    if (msg.info.role !== 'assistant') continue
+    const textParts = msg.parts
+      .filter((p): p is PromptResponsePart & { text: string } => p.type === 'text' && typeof p.text === 'string')
+      .map(p => p.text)
+    if (textParts.length > 0) return textParts.join('\n')
+  }
+  return null
 }
 
 export function estimateTokens(text: string): number {

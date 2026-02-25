@@ -8,6 +8,7 @@ import {
   formatCompactionDiagnostics,
   estimateTokens,
   trimToTokenBudget,
+  extractCompactionSummary,
 } from './compaction-utils'
 
 export interface SessionHooks {
@@ -51,22 +52,25 @@ function formatEventProperties(props?: Record<string, unknown>): string {
   }
 }
 
-function buildExtractionPrompt(sessionId: string): string {
-  return `[COMPACTION COMPLETE]
+function buildSubtaskPrompt(sessionId: string, compactionSummary: string): string {
+  return `Review the following compaction summary and extract any project knowledge worth preserving across sessions.
 
-The compaction summary above is now in your context window.
+---
+${compactionSummary}
+---
 
-Review the compaction summary and extract any project knowledge worth preserving across sessions. For each item found, use memory-write to store it with the appropriate scope:
-
+For each item found, store it with the appropriate scope:
 - convention: coding style rules, naming patterns, workflow preferences
 - decision: architectural choices with their rationale
 - context: project structure, key file locations, domain knowledge, known issues
 
-Also extract any planning state (phases, objectives, progress, blockers) from the compaction summary. If found, use memory-planning-update with sessionID "${sessionId}" to store it. This creates continuity across compactions.
+Also extract any planning state (phases, objectives, progress, blockers). If found, use memory-planning-update with sessionID "${sessionId}" to store it.
 
-Be selective — only store knowledge that will be useful in future sessions. Skip ephemeral task details and session-specific notes.
+Be selective — only store knowledge useful in future sessions. Check for duplicates before writing (use memory-read to search first). 
 
-Check for duplicates before writing (use memory-read to search). If a similar memory already exists, skip it.`
+End your response with:
+1. A brief summary of what was stored
+2. Whether there was active work in progress (in-progress todos, pending tasks, or incomplete planning phases). If so, tell the main agent to review the planning state and todo list and continue where it left off.`
 }
 
 const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
@@ -86,6 +90,41 @@ export function createSessionHooks(
 ): SessionHooks {
   const initializedSessions = new Set<string>()
   const compactionConfig = { ...DEFAULT_COMPACTION_CONFIG, ...config }
+
+  async function runPostCompactionFlow(sessionId: string): Promise<void> {
+    const messagesResult = await ctx.client.session.messages({
+      path: { id: sessionId },
+      query: { limit: 4 },
+    })
+
+    const messages = messagesResult.data as unknown as Array<{
+      info: { role: string }
+      parts: Array<{ type: string; text?: string }>
+    }>
+    const compactionSummary = extractCompactionSummary(messages ?? [])
+    if (!compactionSummary) {
+      logger.log(`Post-compaction: no summary found in session ${sessionId}, skipping extraction`)
+      return
+    }
+
+    logger.log(`Post-compaction: fetched compaction summary (${compactionSummary.length} chars)`)
+
+    await ctx.client.session.prompt({
+      path: { id: sessionId },
+      body: {
+        parts: [
+          {
+            type: 'subtask',
+            agent: 'Memory',
+            description: 'Memory extraction after compaction',
+            prompt: buildSubtaskPrompt(sessionId, compactionSummary),
+          },
+        ],
+      },
+    })
+
+    logger.log(`Post-compaction: extraction and resumption complete for session ${sessionId}`)
+  }
 
   return {
     async onMessage(input, _output) {
@@ -111,16 +150,10 @@ export function createSessionHooks(
         return
       }
 
-      logger.log(`Session compacted for project ${projectId} - extraction handled by Memory agent`)
+      logger.log(`Session compacted for project ${projectId} - starting isolated extraction`)
 
-      ctx.client.session.promptAsync({
-        path: { id: sessionId },
-        body: {
-          agent: 'Memory',
-          parts: [{ type: 'text', text: buildExtractionPrompt(sessionId) }],
-        },
-      }).catch((err) => {
-        logger.error(`Failed to invoke memory extraction: ${err}`)
+      runPostCompactionFlow(sessionId).catch((err) => {
+        logger.error(`Post-compaction flow failed: ${err}`)
       })
     },
     async onCompacting(input: CompactingInput, output: CompactingOutput) {

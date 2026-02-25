@@ -5,6 +5,7 @@ import {
   formatCompactionDiagnostics,
   estimateTokens,
   trimToTokenBudget,
+  extractCompactionSummary,
 } from '../src/hooks/compaction-utils'
 import type { PlanningState } from '../src/types'
 
@@ -166,3 +167,54 @@ describe('trimToTokenBudget', () => {
     expect(result).toContain('...')
   })
 })
+
+describe('extractCompactionSummary', () => {
+  test('extracts text from last assistant message', () => {
+    const messages = [
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'User message' }] },
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Compaction summary here' }] },
+    ]
+    const result = extractCompactionSummary(messages)
+    expect(result).toBe('Compaction summary here')
+  })
+
+  test('returns null when no assistant messages', () => {
+    const messages = [
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'User message' }] },
+    ]
+    const result = extractCompactionSummary(messages)
+    expect(result).toBeNull()
+  })
+
+  test('returns null for empty messages', () => {
+    expect(extractCompactionSummary([])).toBeNull()
+  })
+
+  test('concatenates multiple text parts', () => {
+    const messages = [
+      {
+        info: { role: 'assistant' },
+        parts: [
+          { type: 'text', text: 'Part 1' },
+          { type: 'tool', text: undefined },
+          { type: 'text', text: 'Part 2' },
+        ],
+      },
+    ]
+    const result = extractCompactionSummary(messages)
+    expect(result).toBe('Part 1\nPart 2')
+  })
+
+  test('picks the last assistant message when multiple exist', () => {
+    const messages = [
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Old summary' }] },
+      { info: { role: 'user' }, parts: [{ type: 'text', text: 'User msg' }] },
+      { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Latest summary' }] },
+    ]
+    const result = extractCompactionSummary(messages)
+    expect(result).toBe('Latest summary')
+  })
+})
+
+
+

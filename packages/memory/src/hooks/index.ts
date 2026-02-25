@@ -7,4 +7,5 @@ export {
   formatCompactionDiagnostics,
   estimateTokens,
   trimToTokenBudget,
+  extractCompactionSummary,
 } from './compaction-utils'

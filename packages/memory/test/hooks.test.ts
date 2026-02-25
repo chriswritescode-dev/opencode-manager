@@ -25,8 +25,15 @@ const mockPromptAsync = async () => {}
 const mockPluginInput: PluginInput = {
   client: {
     session: {
-      prompt: async () => {},
+      prompt: async () => ({ data: { parts: [{ type: 'text', text: 'Extracted memories' }] } }),
       promptAsync: mockPromptAsync,
+      messages: async () => ({
+        data: [
+          { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Compaction summary text' }] },
+        ],
+      }),
+      create: async () => ({ data: { id: 'child-session-id' } }),
+      todo: async () => ({ data: [] }),
     },
     app: {
       log: () => {},
@@ -374,16 +381,24 @@ describe('SessionHooks', () => {
     expect(true).toBe(true)
   })
 
-  test('session.compacted event triggers promptAsync on the session with agent Memory', async () => {
-    let capturedCall: unknown = null
-    
+  test('session.compacted sends extraction prompt to main session via prompt()', async () => {
+    let promptCall: unknown = null
+
     const customMockPluginInput: PluginInput = {
       client: {
         session: {
-          prompt: async () => {},
-          promptAsync: async (call) => {
-            capturedCall = call as typeof capturedCall
+          messages: async () => ({
+            data: [
+              { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Compaction summary content' }] },
+            ],
+          }),
+          create: async () => ({ data: { id: 'unused' } }),
+          prompt: async (call: unknown) => {
+            promptCall = call
+            return { data: { parts: [{ type: 'text', text: 'Done' }] } }
           },
+          promptAsync: async () => {},
+          todo: async () => ({ data: [] }),
         },
         app: {
           log: () => {},
@@ -398,33 +413,48 @@ describe('SessionHooks', () => {
     const memoryService = createMockMemoryService([])
     const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
 
-    const input = {
-      event: {
-        type: 'session.compacted',
-        properties: { sessionId: 'test-session-123' },
-      },
-    }
+    await hooks.onEvent({
+      event: { type: 'session.compacted', properties: { sessionId: 'test-session-123' } },
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
 
-    await hooks.onEvent(input)
+    expect(promptCall).not.toBeNull()
+    const call = promptCall as any
+    expect(call.path.id).toBe('test-session-123')
 
-    expect(capturedCall).not.toBeNull()
-    expect((capturedCall as any).path.id).toBe('test-session-123')
-    expect((capturedCall as any).body.agent).toBe('Memory')
-    expect((capturedCall as any).body.parts[0]?.type).toBe('text')
-    expect((capturedCall as any).body.parts[0]?.text).toContain('COMPACTION COMPLETE')
-    expect((capturedCall as any).body.parts[0]?.text).toContain('sessionID "test-session-123"')
+    const subtask = call.body.parts[0]
+    expect(subtask.type).toBe('subtask')
+    expect(subtask.agent).toBe('Memory')
+    expect(subtask.description).toBe('Memory extraction after compaction')
+    expect(subtask.prompt).toContain('Compaction summary content')
+    expect(subtask.prompt).toContain('sessionID "test-session-123"')
+    expect(subtask.prompt).toContain('active work in progress')
+    expect(call.body.parts.length).toBe(1)
   })
 
-  test('session.compacted with missing sessionId does NOT call promptAsync', async () => {
-    let promptAsyncCalled = false
-    
+  test('session.compacted with active todos includes resume instruction', async () => {
+    let promptCall: unknown = null
+
     const customMockPluginInput: PluginInput = {
       client: {
         session: {
-          prompt: async () => {},
-          promptAsync: async () => {
-            promptAsyncCalled = true
+          messages: async () => ({
+            data: [
+              { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Summary' }] },
+            ],
+          }),
+          create: async () => ({ data: { id: 'unused' } }),
+          prompt: async (call: unknown) => {
+            promptCall = call
+            return { data: { parts: [{ type: 'text', text: 'Done' }] } }
           },
+          promptAsync: async () => {},
+          todo: async () => ({
+            data: [
+              { status: 'completed', content: 'Done task', priority: 'high', id: '1' },
+              { status: 'in_progress', content: 'Active task', priority: 'high', id: '2' },
+            ],
+          }),
         },
         app: {
           log: () => {},
@@ -439,15 +469,91 @@ describe('SessionHooks', () => {
     const memoryService = createMockMemoryService([])
     const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
 
-    const input = {
-      event: {
-        type: 'session.compacted',
-        properties: {},
+    await hooks.onEvent({
+      event: { type: 'session.compacted', properties: { sessionId: 'test-session-active' } },
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(promptCall).not.toBeNull()
+    const call = promptCall as any
+    expect(call.path.id).toBe('test-session-active')
+    expect(call.body.parts[0]?.type).toBe('subtask')
+    expect(call.body.parts[0]?.prompt).toContain('continue where it left off')
+  })
+
+  test('session.compacted with missing sessionId does NOT trigger flow', async () => {
+    let promptCalled = false
+
+    const customMockPluginInput: PluginInput = {
+      client: {
+        session: {
+          messages: async () => ({ data: [] }),
+          create: async () => ({ data: { id: 'unused' } }),
+          prompt: async () => {
+            promptCalled = true
+            return { data: { parts: [] } }
+          },
+          promptAsync: async () => {},
+          todo: async () => ({ data: [] }),
+        },
+        app: {
+          log: () => {},
+        },
       },
-    }
+      project: { id: TEST_PROJECT_ID, worktree: '/test' },
+      directory: '/test',
+      worktree: '/test',
+      serverUrl: new URL('http://localhost:5551'),
+    } as unknown as PluginInput
 
-    await hooks.onEvent(input)
+    const memoryService = createMockMemoryService([])
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
 
-    expect(promptAsyncCalled).toBe(false)
+    await hooks.onEvent({
+      event: { type: 'session.compacted', properties: {} },
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(promptCalled).toBe(false)
+  })
+
+  test('session.compacted skips extraction when no compaction summary found', async () => {
+    let promptCalled = false
+
+    const customMockPluginInput: PluginInput = {
+      client: {
+        session: {
+          messages: async () => ({
+            data: [
+              { info: { role: 'user' }, parts: [{ type: 'text', text: 'User only' }] },
+            ],
+          }),
+          create: async () => ({ data: { id: 'unused' } }),
+          prompt: async () => {
+            promptCalled = true
+            return { data: { parts: [] } }
+          },
+          promptAsync: async () => {},
+          todo: async () => ({ data: [] }),
+        },
+        app: {
+          log: () => {},
+        },
+      },
+      project: { id: TEST_PROJECT_ID, worktree: '/test' },
+      directory: '/test',
+      worktree: '/test',
+      serverUrl: new URL('http://localhost:5551'),
+    } as unknown as PluginInput
+
+    const memoryService = createMockMemoryService([])
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
+
+    await hooks.onEvent({
+      event: { type: 'session.compacted', properties: { sessionId: 'test-no-summary' } },
+    })
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(promptCalled).toBe(false)
   })
 })
