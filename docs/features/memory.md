@@ -242,7 +242,7 @@ When deduplication triggers, the existing memory's ID is returned instead of cre
 
 ## Tools
 
-The plugin registers seven tools that the AI agent can call:
+The plugin registers eight tools that the AI agent can call:
 
 ### memory-read
 
@@ -338,6 +338,17 @@ Retrieve the current planning state for a session.
 
 Returns a formatted view of the planning state including objective, current phase, phases with status icons (`[x]` completed, `[~]` in progress, `[ ]` pending), findings, and errors.
 
+### memory-plan-execute
+
+Create a new Code session and send an implementation plan as the first prompt. Designed to be called by the Architect agent after the user approves a plan.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `plan` | string | Yes | The full implementation plan to send to the Code agent |
+| `title` | string | Yes | Short title for the session (shown in session list, max 60 chars) |
+
+Creates a new session via the OpenCode API, then sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
+
 ---
 
 ## Planning State
@@ -368,11 +379,13 @@ The plugin registers three agents that are configured into OpenCode:
 
 The Code agent's system prompt instructs it to:
 
-- Check memory before modifying unfamiliar code areas
-- Store architectural decisions and discovered patterns
-- Use the Memory subagent for complex retrieval tasks
-- Use the Review subagent for convention-aware code review
-- Follow a before/during/after workflow for memory integration
+- Check memory before modifying unfamiliar code areas or making architectural decisions
+- Store durable knowledge with rationale (not just "we use X" but "we use X because Y")
+- Use the @Memory subagent for complex memory operations (multi-query research, contradiction resolution, bulk curation)
+- Check for duplicates with `memory-read` before writing new memories
+- Update stale memories with `memory-edit` rather than creating duplicates
+
+The Code agent does not have access to `memory-plan-execute` — only the Architect agent can create implementation sessions.
 
 ### Memory Agent (subagent)
 
@@ -387,17 +400,28 @@ The Memory agent handles:
 - Contradiction detection between overlapping memories
 - Curation: merging duplicates, archiving outdated entries
 - Planning state management after compaction events
-- Post-compaction knowledge extraction (invoked automatically)
+- Post-compaction knowledge extraction (invoked automatically via SubtaskPart)
 
-### Memory Review Agent (subagent)
+The Memory agent receives planning state directly in its subtask prompt — it does NOT call `memory-planning-get`. This eliminates an extra LLM round-trip and makes extraction deterministic.
 
-- **Display name:** `Memory Review`
-- **Mode:** `subagent`
+The Memory agent does not have access to `memory-plan-execute`.
+
+### Architect Agent (primary)
+
+- **Display name:** `Architect`
+- **Mode:** `primary` (user-switchable agent, not a subagent)
 - **Temperature:** 0.0 (deterministic)
-- **Excluded tools:** `write`, `edit`, `apply_patch` (read-only)
-- **Role:** Convention-aware code review
+- **Permission:** Read-only — cannot edit any files (`edit: { '*': 'deny' }`)
+- **Role:** Memory-aware planning agent
 
-The Review agent checks code against stored conventions and decisions, providing structured findings at Critical/Warning/Suggestion levels with specific file and line references.
+The Architect agent follows a Research → Design → Plan → Execute workflow:
+
+1. **Research** — Reads relevant files, searches the codebase, checks memory for conventions and decisions
+2. **Design** — Considers approaches, weighs tradeoffs, asks clarifying questions
+3. **Plan** — Presents a structured plan with objectives, phases, decisions, conventions, and key context
+4. **Execute** — When the user approves, calls `memory-plan-execute` to create a new Code session with the full plan
+
+The Architect is the only agent with access to the `memory-plan-execute` tool. Plans must be fully self-contained since the Code agent receiving them has no access to the Architect's conversation.
 
 ### Built-in Agent Enhancements
 
@@ -410,6 +434,12 @@ The plugin also modifies built-in OpenCode agents:
 
 The default agent is set to `Code`.
 
+!!! note "Removed Features"
+    The following features were removed in a recent refactor:
+    - Keyword activation (regex-based detection of "remember this", "recall", etc.)
+    - LLM parameter adjustment based on detected modes (temperature, thinking budget, maxSteps)
+    - `resumeAfterCompaction` config option
+
 ---
 
 ## Hooks
@@ -419,20 +449,15 @@ The plugin registers several hooks into OpenCode's lifecycle:
 ### chat.message
 
 - Tracks session initialization (first message per session)
-- Detects keyword patterns in user messages for memory activation
-
-### experimental.chat.system.transform
-
-When keyword activation is detected (e.g., "remember this", "project memory", "recall"), injects a system message informing the AI about available memory tools.
 
 ### event
 
-Listens for `session.compacted` events and triggers automatic knowledge extraction by prompting the Memory agent to:
-
-1. Review the compaction summary
-2. Extract durable knowledge using `memory-write`
-3. Extract planning state using `memory-planning-update`
-4. Check for duplicates before storing
+Listens for `session.compacted` events and triggers automatic knowledge extraction:
+1. Fetches the last 4 messages from the session to get the compaction summary
+2. Retrieves planning state directly from session state service
+3. Sends a synchronous prompt() call with a SubtaskPart to run the Memory agent
+4. Memory agent receives planning state directly in the subtask prompt (no memory-planning-get call needed)
+5. Extraction runs within the main session's prompt loop, keeping session busy
 
 ### experimental.session.compacting
 
@@ -451,23 +476,6 @@ The core compaction hook that fires when a session is about to be compacted. It 
 6. **Snapshot storage** — Saves a pre-compaction snapshot (planning state, branch, timestamp) to session state for the next compaction cycle
 
 7. **Diagnostics** — Appends a summary line showing how many planning phases, conventions, decisions, and tokens were injected
-
----
-
-## Keyword Activation
-
-The plugin detects natural language cues in user messages and activates memory features:
-
-| Pattern | Effect |
-|---------|--------|
-| "remember this/that" | Activates memory context injection |
-| "recall" | Activates memory context injection |
-| "what do you know about" | Activates memory context injection |
-| "project memory" | Activates memory context injection |
-| "do you remember" | Activates memory context injection |
-| "stored memory" / "from memory" | Activates memory context injection |
-
-When activated, a system message is injected into the session informing the AI about available memory tools and scopes. Activation is per-session and sticky — once triggered, it remains active for the session.
 
 ---
 
