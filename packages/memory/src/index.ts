@@ -3,12 +3,7 @@ import { tool } from '@opencode-ai/plugin'
 import { agents } from './agents'
 import { createConfigHandler } from './config'
 import { VERSION } from './version'
-import {
-  createSessionHooks,
-  createKeywordHooks,
-  createParamsHooks,
-  ACTIVATION_CONTEXT,
-} from './hooks'
+import { createSessionHooks } from './hooks'
 import { join } from 'path'
 import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery, getTableDimensions, recreateVecTable } from './storage'
 import type { MemoryService } from './services/memory'
@@ -257,7 +252,7 @@ async function autoValidateOnLoad(
 
 export function createMemoryPlugin(config: PluginConfig): Plugin {
   return async (input: PluginInput): Promise<Hooks> => {
-    const { directory, project } = input
+    const { directory, project, client } = input
     const projectId = project.id
 
     const loggingConfig = config.logging
@@ -335,8 +330,6 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
     const compactionConfig: CompactionConfig | undefined = config.compaction
     const sessionHooks = createSessionHooks(projectId, memoryService, sessionStateService, logger, input, compactionConfig)
-    const keywordHooks = createKeywordHooks(logger)
-    const paramsHooks = createParamsHooks(keywordHooks)
 
     const scopeEnum = z.enum(['convention', 'decision', 'context'])
 
@@ -576,21 +569,50 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             return sections.join('\n') || 'Planning state exists but is empty'
           },
         }),
+        'memory-plan-execute': tool({
+          description: 'Create a new Code session and send the plan as the first prompt. Call this after the user approves the plan.',
+          args: {
+            plan: z.string().describe('The full implementation plan to send to the Code agent'),
+            title: z.string().describe('Short title for the session (shown in session list)'),
+          },
+          execute: async (args) => {
+            await initPromise
+            logger.log(`memory-plan-execute: creating session titled "${args.title}"`)
+
+            const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
+
+            const createResult = await client.session.create({
+              body: { title: sessionTitle },
+            })
+
+            if (createResult.error || !createResult.data) {
+              logger.error(`memory-plan-execute: failed to create session`, createResult.error)
+              return 'Failed to create new session.'
+            }
+
+            const newSessionId = createResult.data.id
+            logger.log(`memory-plan-execute: created session=${newSessionId}`)
+
+            const promptResult = await client.session.promptAsync({
+              path: { id: newSessionId },
+              body: {
+                parts: [{ type: 'text' as const, text: args.plan }],
+                agent: 'Code',
+              },
+            })
+
+            if (promptResult.error) {
+              logger.error(`memory-plan-execute: failed to prompt session`, promptResult.error)
+              return `Session created (${newSessionId}) but failed to send plan. Switch to it and paste the plan manually.`
+            }
+
+            logger.log(`memory-plan-execute: prompted session=${newSessionId}`)
+            return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
+          },
+        }),
       },
       config: createConfigHandler(agents),
-      'chat.message': async (input, output) => {
-        await keywordHooks.onMessage(input, output)
-        await sessionHooks.onMessage(input, output)
-      },
-      'chat.params': paramsHooks.onParams,
-      'experimental.chat.system.transform': async (input, output) => {
-        const transformInput = input as { sessionID?: string }
-        const transformOutput = output as { system: string[] }
-        const sessionId = transformInput.sessionID
-        if (!sessionId) return
-        if (!keywordHooks.isActivated(sessionId)) return
-        transformOutput.system.push(ACTIVATION_CONTEXT)
-      },
+      'chat.message': sessionHooks.onMessage,
       event: async (input) => {
         const eventInput = input as { event: { type: string; properties?: Record<string, unknown> } }
         if (eventInput.event?.type === 'server.instance.disposed') {

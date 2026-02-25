@@ -68,6 +68,7 @@ function createAgentConfigs(agents: Record<AgentRole, AgentDefinition>): Record<
       ...(agent.temperature !== undefined ? { temperature: agent.temperature } : {}),
       ...(agent.maxSteps !== undefined ? { maxSteps: agent.maxSteps } : {}),
       ...(agent.hidden ? { hidden: agent.hidden } : {}),
+      ...(agent.permission ? { permission: agent.permission } : {}),
     }
   }
 

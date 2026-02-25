@@ -151,7 +151,6 @@ describe('createMemoryPlugin', () => {
 
     expect(hooks.config).toBeDefined()
     expect(hooks['chat.message']).toBeDefined()
-    expect(hooks['chat.params']).toBeDefined()
     expect(hooks.event).toBeDefined()
     expect(hooks['experimental.session.compacting']).toBeDefined()
   })

@@ -116,3 +116,22 @@ export interface HealthStatus {
   needsReindex: boolean
   overallStatus: 'ok' | 'degraded' | 'error'
 }
+
+export type ExportFormat = 'json' | 'markdown'
+
+export interface ExportOptions {
+  format?: ExportFormat
+  output?: string
+  projectId?: string
+  scope?: MemoryScope
+  limit?: number
+  offset?: number
+  dbPath?: string
+}
+
+export interface ImportOptions {
+  format?: ExportFormat
+  projectId: string
+  force?: boolean
+  dbPath?: string
+}
