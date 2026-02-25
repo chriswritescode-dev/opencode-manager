@@ -2,6 +2,8 @@
 
 `@opencode-manager/memory` is an **optional** OpenCode plugin that stores and recalls project knowledge across sessions using vector embeddings and semantic search.
 
+[![npm](https://img.shields.io/npm/v/@opencode-manager/memory)](https://www.npmjs.com/package/@opencode-manager/memory)
+
 !!! note "Not Required"
     This plugin is entirely optional. OpenCode Manager works fully without it — install it only if you want persistent project knowledge and semantic search capabilities.
 
