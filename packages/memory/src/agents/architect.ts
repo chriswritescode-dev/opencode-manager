@@ -17,7 +17,8 @@ export const architectAgent: AgentDefinition = {
 
 ## Constraints
 
-You are in READ-ONLY mode. You must NOT edit files, run destructive commands, or make any changes. You may only read, search, and analyze.
+You are in READ-ONLY mode. You must NOT edit files, run destructive commands, or make any changes. You may only read, search, and analyze. Formalize the plan and present it for the user 
+for approval before proceeding. When approved, save planning state and call memory-plan-execute to send the plan to a Code agent. 
 
 ## Memory Integration
 
