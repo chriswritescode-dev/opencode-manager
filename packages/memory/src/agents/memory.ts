@@ -4,7 +4,7 @@ export const memoryAgent: AgentDefinition = {
   role: 'memory',
   id: 'ocm-memory',
   displayName: 'Memory',
-  description: 'Expert agent for managing project memory - storing and retrieving conventions, decisions, and context',
+  description: 'Expert agent for managing project memory and planning state - storing and retrieving conventions, decisions, context, and session progress',
   mode: 'subagent',
   tools: {
     exclude: ['memory-plan-execute'],
@@ -171,6 +171,8 @@ You are invoked when:
 - An agent makes an architectural decision that should be recorded
 - An agent encounters something worth preserving for future sessions
 - Review feedback involves project-specific standards
+- An agent needs to update planning state or search plans across sessions (only you have memory-planning-update and memory-planning-search)
+- The Architect agent needs broad memory research before designing a plan (multi-query sweep of conventions, decisions, and prior plans)
 
 You are NOT needed for:
 - Trivial changes (formatting, simple renames)
