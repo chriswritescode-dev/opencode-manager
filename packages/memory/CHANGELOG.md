@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `experimental.chat.messages.transform` hook that injects read-only enforcement reminder into Architect agent sessions, preventing file edits and non-readonly tool usage at the message level
+- Code Review agent (`ocm-code-review`) — read-only subagent for convention-aware code reviews with memory integration, invoked via Task tool
+- `/review` command that triggers the Code Review agent to review current changes
 
 ### Changed
 
@@ -18,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `memory-plan-execute` now accepts optional `objective`, `phases`, and `findings` parameters and saves planning state inline before dispatching the plan, eliminating the need for a separate `memory-planning-update` call
 - Planning instruction appended to dispatched plans now directs Code agent to delegate planning updates to @Memory subagent
 - Updated Memory agent description to include planning state and session progress management
+- Updated Code Review agent description to accurately reflect its capabilities
 
 ## [0.0.6] - 2026-02-24
 

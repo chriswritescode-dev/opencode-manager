@@ -30,13 +30,16 @@ Planning state differs from memories: it stores temporary session data (objectiv
 
 ## Agents
 
-The plugin bundles three agents that integrate with the memory system:
+The plugin bundles four agents that integrate with the memory system:
 
 | Agent | ID | Mode | Description |
 |-------|----|------|-------------|
 | **Code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @Memory subagent. |
 | **Architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @Memory for broad knowledge retrieval, designs implementation plans, then hands off to Code via `memory-plan-execute`. |
 | **Memory** | `ocm-memory` | subagent | Expert agent for managing project memory and planning state. Handles post-compaction memory extraction, contradiction resolution, planning state updates, and cross-session plan searches. |
+| **Code Review** | `ocm-code-review` | subagent | Read-only code reviewer with access to project memory for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
+
+The Code Review agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
 
 The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which saves planning state and creates a new Code session with the full plan as context. Code and Architect agents delegate `memory-planning-update` and `memory-planning-search` to the Memory subagent.
 
