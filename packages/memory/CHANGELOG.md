@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.9] - 2026-02-27
+
+### Added
+
+- `experimental.chat.messages.transform` hook that injects read-only enforcement reminder into Architect agent sessions, preventing file edits and non-readonly tool usage at the message level
+
+### Changed
+
+- Restricted `memory-planning-update` and `memory-planning-search` tools to Memory subagent only — Code and Architect agents now delegate planning operations via @Memory Task tool
+- Overhauled Code and Architect agent system prompts with tone/style guidelines, tool usage policies, task management instructions, and planning state delegation patterns
+- `memory-plan-execute` now accepts optional `objective`, `phases`, and `findings` parameters and saves planning state inline before dispatching the plan, eliminating the need for a separate `memory-planning-update` call
+- Planning instruction appended to dispatched plans now directs Code agent to delegate planning updates to @Memory subagent
+- Updated Memory agent description to include planning state and session progress management
+
 ## [0.0.6] - 2026-02-24
 
 ### Added
