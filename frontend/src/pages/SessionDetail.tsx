@@ -23,7 +23,8 @@ import { useModelSelection } from "@/hooks/useModelSelection";
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
-import { useSwipeBack } from "@/hooks/useMobile";
+import { useSwipeBack, useMobile } from "@/hooks/useMobile";
+import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
@@ -73,7 +74,11 @@ export function SessionDetail() {
   const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
     enabled: !fileBrowserOpen && !modelDialogOpen && !sessionsDialogOpen,
   });
-  
+
+  const isMobile = useMobile();
+  const { keyboardHeight } = useVisualViewport();
+  const inputBottomOffset = isMobile ? keyboardHeight : 0;
+
   useEffect(() => {
     return bindSwipe(pageRef.current);
   }, [bindSwipe]);
@@ -456,7 +461,10 @@ export function SessionDetail() {
           ) : null}
         </div>
         {opcodeUrl && repoDirectory && !isEditingMessage && (
-          <div className="absolute bottom-0 left-0 right-0 flex justify-center">
+          <div
+            className="absolute left-0 right-0 flex justify-center"
+            style={{ bottom: inputBottomOffset }}
+          >
             <div className="relative w-[94%] md:max-w-4xl">
               {hasPromptContent && (
                 <button
