@@ -58,11 +58,16 @@ export function MentionSuggestions({
   return (
     <div
       ref={listRef}
-      className="absolute bottom-full left-0 right-0 mb-2 z-50 bg-background border border-border rounded-lg shadow-xl max-h-[30vh] md:max-h-[40vh] lg:max-h-[50vh] overflow-y-auto"
+      className="absolute bottom-full left-0 right-0 mb-2 z-50 bg-background border border-border rounded-lg shadow-xl max-h-48 md:max-h-[40vh] lg:max-h-[50vh] overflow-y-auto"
     >
       {items.map((item, idx) => (
         <button
           key={`${item.type}-${item.value}`}
+          onMouseDown={(e) => e.preventDefault()}
+          onTouchEnd={(e) => {
+            e.preventDefault()
+            onSelect(item)
+          }}
           onClick={() => onSelect(item)}
           className={`w-full px-3 py-2 text-left transition-colors flex items-start gap-2 ${
             idx === selectedIndex
