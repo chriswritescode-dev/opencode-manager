@@ -13,6 +13,15 @@ const ENHANCED_BUILTIN_AGENTS: Record<string, { tools: Record<string, boolean> }
   },
 }
 
+const PLUGIN_COMMANDS: Record<string, { template: string; description: string; agent: string; subtask: boolean }> = {
+  review: {
+    description: 'Run a code review on current changes',
+    agent: 'Code Review',
+    subtask: true,
+    template: 'Review the current code changes. $ARGUMENTS',
+  },
+}
+
 export function createConfigHandler(agents: Record<AgentRole, AgentDefinition>) {
   return async (config: Record<string, unknown>) => {
     const agentConfigs = createAgentConfigs(agents)
@@ -45,6 +54,17 @@ export function createConfigHandler(agents: Record<AgentRole, AgentDefinition>) 
 
     config.agent = mergedAgents
     config.default_agent = 'Code'
+
+    const userCommands = config.command as Record<string, unknown> | undefined
+    const mergedCommands: Record<string, unknown> = { ...PLUGIN_COMMANDS }
+
+    if (userCommands) {
+      for (const [name, userCommand] of Object.entries(userCommands)) {
+        mergedCommands[name] = userCommand
+      }
+    }
+
+    config.command = mergedCommands
   }
 }
 
