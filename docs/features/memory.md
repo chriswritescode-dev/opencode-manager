@@ -384,7 +384,7 @@ The plugin injects active planning state into compaction context so task progres
 
 ## Agents
 
-The plugin registers three agents that are configured into OpenCode:
+The plugin registers four agents that are configured into OpenCode:
 
 ### Code Agent (primary)
 
@@ -444,6 +444,19 @@ The Architect is the only agent with access to the `memory-plan-execute` tool. P
 When `memory-plan-execute` runs, it automatically appends a planning instruction to the plan telling the Code agent to update the Architect session's planning state as it progresses through phases. It also updates the Architect session's planning state to reflect that the plan has been dispatched.
 
 The Architect agent does not have direct access to `memory-planning-update` or `memory-planning-search`. It delegates broad memory research to the @Memory subagent and reads its own session's planning state via `memory-planning-get`.
+
+### Code Review Agent (subagent)
+
+- **Display name:** `Code Review`
+- **Mode:** `subagent`
+- **Temperature:** 0.0 (deterministic)
+- **Role:** Convention-aware code reviewer with memory access
+
+The Code Review agent is a read-only subagent invoked by other agents via the Task tool to review diffs, commits, branches, or PRs. It checks changes against stored project conventions and decisions, then returns a structured review summary with issues (bug/warning/suggestion) and observations.
+
+The agent can read memory (`memory-read`) and planning state (`memory-planning-get`, `memory-planning-search`, `memory-planning-update`) but cannot write, edit, or delete memories. It also cannot execute plans — `memory-plan-execute`, `memory-write`, `memory-edit`, and `memory-delete` are excluded.
+
+The `/review` slash command triggers this agent as a subtask with the template: "Review the current code changes."
 
 ### Built-in Agent Enhancements
 
