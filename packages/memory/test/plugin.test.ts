@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { createMemoryPlugin } from '../src/index'
 import { mkdirSync, rmSync, existsSync } from 'fs'
 import type { PluginConfig } from '../src/types'
+import type { PluginInput } from '@opencode-ai/plugin'
 
 const TEST_DIR = '/tmp/opencode-manager-memory-test-' + Date.now()
 
@@ -407,5 +408,114 @@ describe('PluginConfig', () => {
     }
 
     expect(config.dataDir).toBe('/custom/path/memory')
+  })
+})
+
+describe('messages.transform hook', () => {
+  let testDir: string
+  let hooks: Record<string, Function> & { getCleanup?: () => Promise<void> }
+
+  beforeEach(async () => {
+    testDir = TEST_DIR + '-transform-' + Math.random().toString(36).slice(2)
+    mkdirSync(testDir, { recursive: true })
+
+    const config: PluginConfig = {
+      embedding: {
+        provider: 'openai',
+        model: 'text-embedding-3-small',
+        dimensions: 1536,
+        apiKey: 'test-key',
+      },
+      dataDir: testDir,
+    }
+
+    const factory = createMemoryPlugin(config)
+    hooks = await factory({
+      client: {
+        session: {
+          prompt: async () => ({ data: { parts: [{ type: 'text', text: 'ok' }] } }),
+          promptAsync: async () => {},
+          messages: async () => ({ data: [] }),
+          create: async () => ({ data: { id: 'test-session' } }),
+          todo: async () => ({ data: [] }),
+        },
+        app: { log: () => {} },
+      },
+      project: { id: TEST_PROJECT_ID, worktree: testDir },
+      directory: testDir,
+      worktree: testDir,
+      serverUrl: new URL('http://localhost:5551'),
+    } as unknown as PluginInput) as any
+  })
+
+  afterEach(async () => {
+    if (hooks?.getCleanup) {
+      await hooks.getCleanup()
+    }
+    if (existsSync(testDir)) {
+      rmSync(testDir, { recursive: true, force: true })
+    }
+  })
+
+  test('injects system-reminder for Architect agent messages', async () => {
+    const output = {
+      messages: [
+        { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'hello' }] },
+        { info: { role: 'user', agent: 'Architect' }, parts: [{ type: 'text', text: 'plan this' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+
+    const userMsg = output.messages[1]
+    expect(userMsg.parts).toHaveLength(2)
+    expect(userMsg.parts[1]).toMatchObject({
+      type: 'text',
+      synthetic: true,
+    })
+    const text = userMsg.parts[1].text as string
+    expect(text).toContain('system-reminder')
+    expect(text).toContain('MUST NOT make any file edits')
+    expect(text).not.toContain('memory-planning-update')
+    expect(text).not.toContain('memory-planning-search')
+  })
+
+  test('does NOT inject for non-Architect agents', async () => {
+    const output = {
+      messages: [
+        { info: { role: 'user', agent: 'Code' }, parts: [{ type: 'text', text: 'do something' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+
+    expect(output.messages[0].parts).toHaveLength(1)
+  })
+
+  test('does NOT inject when no user message exists', async () => {
+    const output = {
+      messages: [
+        { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'response' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+
+    expect(output.messages[0].parts).toHaveLength(1)
+  })
+
+  test('targets the LAST user message in the array', async () => {
+    const output = {
+      messages: [
+        { info: { role: 'user', agent: 'Code' }, parts: [{ type: 'text', text: 'first' }] },
+        { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'response' }] },
+        { info: { role: 'user', agent: 'Architect' }, parts: [{ type: 'text', text: 'second' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+
+    expect(output.messages[0].parts).toHaveLength(1)
+    expect(output.messages[2].parts).toHaveLength(2)
   })
 })

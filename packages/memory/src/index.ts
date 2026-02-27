@@ -604,10 +604,17 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           },
         }),
         'memory-plan-execute': tool({
-          description: 'Create a new Code session and send the plan as the first prompt. Call this after the user approves the plan.',
+          description: 'Create a new Code session, save planning state, and send the plan as the first prompt. Call this after the user approves the plan.',
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
+            objective: z.string().optional().describe('Short description of what we are building'),
+            phases: z.array(z.object({
+              title: z.string(),
+              status: z.string(),
+              notes: z.string().optional(),
+            })).optional().describe('Phases from the plan, each with status "pending"'),
+            findings: z.array(z.string()).optional().describe('Key architectural decisions discovered during research'),
           },
           execute: async (args, context) => {
             await initPromise
@@ -627,7 +634,17 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             const newSessionId = createResult.data.id
             logger.log(`memory-plan-execute: created session=${newSessionId}`)
 
-            const planningInstruction = `\n\n---\n\nWhen you complete each phase, update the planning state using memory-planning-update with sessionID "${context.sessionID}". Update phase statuses as you progress (pending → in_progress → completed). Set current to describe what you're working on. When all work is done, set current to "Completed".`
+            const planningState: PlanningState = {
+              ...(args.objective && { objective: args.objective }),
+              current: `Plan approved, sending to Code agent`,
+              ...(args.phases && { phases: args.phases }),
+              ...(args.findings && { findings: args.findings }),
+              active: true,
+            }
+            sessionStateService.setPlanningState(context.sessionID, projectId, planningState)
+            logger.log(`memory-plan-execute: saved planning state for session=${context.sessionID}`)
+
+            const planningInstruction = `\n\n---\n\nWhen you complete each phase, delegate to the @Memory subagent via the Task tool to update planning state. Tell it to call memory-planning-update with sessionID "${context.sessionID}". Update phase statuses as you progress (pending → in_progress → completed). Set current to describe what you're working on. When all work is done, set current to "Completed".`
 
             const promptResult = await client.session.promptAsync({
               path: { id: newSessionId },
@@ -644,14 +661,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
             logger.log(`memory-plan-execute: prompted session=${newSessionId}`)
 
-            const existingState = sessionStateService.getPlanningState(context.sessionID, projectId)
-            if (existingState) {
-              sessionStateService.setPlanningState(context.sessionID, projectId, {
-                ...existingState,
-                current: `Plan sent to execution session ${newSessionId}`,
-              })
-              logger.log(`memory-plan-execute: updated planning state for source session=${context.sessionID}`)
-            }
+            const currentState = sessionStateService.getPlanningState(context.sessionID, projectId)
+            sessionStateService.setPlanningState(context.sessionID, projectId, {
+              ...(currentState ?? planningState),
+              current: `Plan sent to execution session ${newSessionId}`,
+            })
+            logger.log(`memory-plan-execute: updated planning state for source session=${context.sessionID}`)
 
             return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
           },
@@ -673,6 +688,30 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           input as { sessionID: string; branch?: string },
           output as { context: string[]; prompt?: string }
         )
+      },
+      'experimental.chat.messages.transform': async (
+        _input: Record<string, never>,
+        output: { messages: Array<{ info: { role: string; agent?: string }; parts: Array<Record<string, unknown>> }> }
+      ) => {
+        const messages = output.messages
+        let userMessage: typeof messages[number] | undefined
+        for (let i = messages.length - 1; i >= 0; i--) {
+          if (messages[i].info.role === 'user') {
+            userMessage = messages[i]
+            break
+          }
+        }
+        if (!userMessage || userMessage.info.agent !== agents.architect.displayName) return
+
+        userMessage.parts.push({
+          type: 'text',
+          text: `<system-reminder>
+Plan mode is active. You MUST NOT make any file edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
+
+You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-health, memory-planning-get, memory-plan-execute).
+</system-reminder>`,
+          synthetic: true,
+        })
       },
     } as Hooks & { getCleanup: () => Promise<void> }
   }
