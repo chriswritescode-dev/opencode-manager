@@ -1,10 +1,11 @@
-import { useMemo, useRef } from 'react'
+import { useMemo, useRef, useEffect } from 'react'
 import { useMessages } from './useOpenCode'
+import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import type { components } from '@/api/opencode-types'
 
 type UserMessage = components['schemas']['UserMessage']
 
-const DEFAULT_AGENT = 'plan'
+const DEFAULT_AGENT = 'build'
 
 interface SessionAgentResult {
   agent: string
@@ -17,56 +18,102 @@ export function useSessionAgent(
   sessionID: string | undefined,
   directory?: string
 ) {
-  const { data: messages } = useMessages(opcodeUrl, sessionID, directory)
+  const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
+  const storedAgent = useSessionAgentStore((s) => s.agents[sessionID ?? ''] ?? null)
+  const setAgent = useSessionAgentStore((s) => s.setAgent)
   const prevRef = useRef<SessionAgentResult>({ agent: DEFAULT_AGENT, model: undefined, variant: undefined })
 
-  return useMemo(() => {
-    let agent = DEFAULT_AGENT
-    let model: { providerID: string; modelID: string } | undefined
-    let variant: string | undefined
+  const result = useMemo(() => {
+    if (storedAgent) {
+      let model: { providerID: string; modelID: string } | undefined
+      let variant: string | undefined
 
-    if (messages && messages.length > 0) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msgWithParts = messages[i]
-        if (msgWithParts.info.role === 'user') {
-          const userInfo = msgWithParts.info as UserMessage
-          agent = userInfo.agent || DEFAULT_AGENT
-          model = userInfo.model
-          variant = userInfo.variant
-          break
+      if (messages && messages.length > 0) {
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const msgWithParts = messages[i]
+          if (msgWithParts.info.role === 'user') {
+            const userInfo = msgWithParts.info as UserMessage
+            model = userInfo.model
+            variant = userInfo.variant
+            break
+          }
+        }
+      }
+
+      const prev = prevRef.current
+      if (
+        prev.agent === storedAgent &&
+        prev.variant === variant &&
+        prev.model?.providerID === model?.providerID &&
+        prev.model?.modelID === model?.modelID
+      ) {
+        return prev
+      }
+
+      const next: SessionAgentResult = { agent: storedAgent, model, variant }
+      prevRef.current = next
+      return next
+    }
+
+    if (messagesLoading) {
+      return { agent: DEFAULT_AGENT, model: undefined, variant: undefined }
+    }
+
+    if (!messages || messages.length === 0) {
+      return { agent: DEFAULT_AGENT, model: undefined, variant: undefined }
+    }
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msgWithParts = messages[i]
+      if (msgWithParts.info.role === 'user') {
+        const userInfo = msgWithParts.info as UserMessage
+        if (userInfo.agent) {
+          const prev = prevRef.current
+          if (
+            prev.agent === userInfo.agent &&
+            prev.variant === userInfo.variant &&
+            prev.model?.providerID === userInfo.model?.providerID &&
+            prev.model?.modelID === userInfo.model?.modelID
+          ) {
+            return prev
+          }
+
+          const next: SessionAgentResult = {
+            agent: userInfo.agent,
+            model: userInfo.model,
+            variant: userInfo.variant,
+          }
+          prevRef.current = next
+          return next
         }
       }
     }
 
-    const prev = prevRef.current
-    if (
-      prev.agent === agent &&
-      prev.variant === variant &&
-      prev.model?.providerID === model?.providerID &&
-      prev.model?.modelID === model?.modelID
-    ) {
-      return prev
-    }
+    return { agent: DEFAULT_AGENT, model: undefined, variant: undefined }
+  }, [messages, messagesLoading, storedAgent])
 
-    const next: SessionAgentResult = { agent, model, variant }
-    prevRef.current = next
-    return next
-  }, [messages])
+  useEffect(() => {
+    if (result.agent && sessionID) {
+      setAgent(sessionID, result.agent)
+    }
+  }, [result.agent, sessionID, setAgent])
+
+  return result
 }
 
 export function getSessionAgentFromMessages(
   messages: Array<{ role: string; agent?: string }> | undefined
-): string {
+): string | undefined {
   if (!messages || messages.length === 0) {
-    return DEFAULT_AGENT
+    return undefined
   }
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
-    if (msg.role === 'user' && 'agent' in msg) {
-      return (msg.agent as string) || DEFAULT_AGENT
+    if (msg.role === 'user' && 'agent' in msg && msg.agent) {
+      return msg.agent
     }
   }
 
-  return DEFAULT_AGENT
+  return undefined
 }
