@@ -284,6 +284,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         if (textareaRef.current) {
           textareaRef.current.focus()
           textareaRef.current.setSelectionRange(cleanedTemplate.length, cleanedTemplate.length)
+          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
         }
       }, 0)
     } else {
@@ -302,6 +303,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
             const newCursorPos = beforeCommand.length + command.name.length + 2
             textareaRef.current.focus()
             textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+            textareaRef.current.scrollTop = textareaRef.current.scrollHeight
           }
         }, 0)
       }
@@ -324,6 +326,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           const newCursorPos = beforeMention.length + item.value.length + 2
           textareaRef.current.focus()
           textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
         }
       }, 0)
     } else {
@@ -351,6 +354,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           const newCursorPos = beforeMention.length + filename.length + 2
           textareaRef.current.focus()
           textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
         }
       }, 0)
     }
