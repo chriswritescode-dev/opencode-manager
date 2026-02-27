@@ -7,6 +7,9 @@ export const codeAgent: AgentDefinition = {
   description: 'Primary coding agent with awareness of project memory and conventions',
   mode: 'primary',
   color: '#3b82f6',
+  permission: {
+    question: 'allow',
+  },
   tools: {
     exclude: ['memory-plan-execute', 'memory-planning-update', 'memory-planning-search'],
   },

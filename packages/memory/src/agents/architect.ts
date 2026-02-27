@@ -9,6 +9,7 @@ export const architectAgent: AgentDefinition = {
   color: '#ef4444',
   temperature: 0.0,
   permission: {
+    question: 'allow',
     edit: {
       '*': 'deny',
     },
