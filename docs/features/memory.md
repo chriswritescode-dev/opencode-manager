@@ -358,8 +358,11 @@ Create a new Code session and send an implementation plan as the first prompt. D
 |-----------|------|----------|-------------|
 | `plan` | string | Yes | The full implementation plan to send to the Code agent |
 | `title` | string | Yes | Short title for the session (shown in session list, max 60 chars) |
+| `objective` | string | No | Short description of what we're building |
+| `phases` | array | No | Phase list from the plan: `[{title, status, notes?}]` |
+| `findings` | array | No | Key architectural decisions discovered during research |
 
-Creates a new session via the OpenCode API, then sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
+Saves planning state (objective, phases, findings) for the Architect session, creates a new session via the OpenCode API, then sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
 
 ---
 
@@ -397,7 +400,9 @@ The Code agent's system prompt instructs it to:
 - Check for duplicates with `memory-read` before writing new memories
 - Update stale memories with `memory-edit` rather than creating duplicates
 
-The Code agent does not have access to `memory-plan-execute` — only the Architect agent can create implementation sessions.
+Code and Architect agents do not have direct access to `memory-planning-update` or `memory-planning-search` — these tools are exclusive to the Memory subagent. To update planning state or search across sessions, the Code agent delegates to @Memory via the Task tool.
+
+The Code agent does not have access to `memory-plan-execute`, `memory-planning-update`, or `memory-planning-search`. It delegates planning operations to the @Memory subagent and can only read its own session's planning state via `memory-planning-get`.
 
 ### Memory Agent (subagent)
 
@@ -413,6 +418,7 @@ The Memory agent handles:
 - Curation: merging duplicates, archiving outdated entries
 - Planning state management after compaction events
 - Post-compaction knowledge extraction (invoked automatically via SubtaskPart)
+- Planning state management: updating phase progress, searching plans across sessions (exclusive access to `memory-planning-update` and `memory-planning-search`)
 
 The Memory agent receives planning state directly in its subtask prompt — it does NOT call `memory-planning-get`. This eliminates an extra LLM round-trip and makes extraction deterministic.
 
@@ -431,11 +437,13 @@ The Architect agent follows a Research → Design → Plan → Execute workflow:
 1. **Research** — Reads relevant files, searches the codebase, checks memory for conventions and decisions
 2. **Design** — Considers approaches, weighs tradeoffs, asks clarifying questions
 3. **Plan** — Presents a structured plan with objectives, phases, decisions, conventions, and key context
-4. **Execute** — When the user approves, first calls `memory-planning-update` to save the planning state (objective, phases, findings), then calls `memory-plan-execute` to create a new Code session with the full plan
+4. **Execute** — When the user approves, calls `memory-plan-execute` with the plan, objective, phases, and findings. Planning state is saved automatically before the plan is dispatched to the Code agent.
 
 The Architect is the only agent with access to the `memory-plan-execute` tool. Plans must be fully self-contained since the Code agent receiving them has no access to the Architect's conversation.
 
 When `memory-plan-execute` runs, it automatically appends a planning instruction to the plan telling the Code agent to update the Architect session's planning state as it progresses through phases. It also updates the Architect session's planning state to reflect that the plan has been dispatched.
+
+The Architect agent does not have direct access to `memory-planning-update` or `memory-planning-search`. It delegates broad memory research to the @Memory subagent and reads its own session's planning state via `memory-planning-get`.
 
 ### Built-in Agent Enhancements
 
@@ -490,6 +498,15 @@ The core compaction hook that fires when a session is about to be compacted. It 
 6. **Snapshot storage** — Saves a pre-compaction snapshot (planning state, branch, timestamp) to session state for the next compaction cycle
 
 7. **Diagnostics** — Appends a summary line showing how many planning phases, conventions, decisions, and tokens were injected
+
+### experimental.chat.messages.transform
+
+Injects a read-only enforcement reminder into user messages when the Architect agent is active:
+
+1. Scans messages to find the last user message
+2. If the message is addressed to the Architect agent, appends a synthetic `<system-reminder>` part
+3. The reminder instructs the agent that plan mode is active and it must not make file edits or run non-readonly tools
+4. This provides message-level enforcement on top of the agent's `edit: { '*': 'deny' }` permission config
 
 ---
 

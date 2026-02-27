@@ -24,7 +24,7 @@ Memory management plugin for OpenCode that enables semantic search and persisten
 | `memory-health` | Health check or full reindex of the memory store |
 | `memory-planning-update` | Update session planning state (phases, objectives, progress) |
 | `memory-planning-get` | Get the current planning state for a session |
-| `memory-plan-execute` | Create a new Code session and send an approved plan as the first prompt |
+| `memory-plan-execute` | Create a new Code session, save planning state, and send an approved plan as the first prompt |
 
 Planning state differs from memories: it stores temporary session data (objectives, phase progress, findings, errors) with a 7-day TTL, while memories are persisted indefinitely and retrieved via semantic search.
 
@@ -34,11 +34,11 @@ The plugin bundles three agents that integrate with the memory system:
 
 | Agent | ID | Mode | Description |
 |-------|----|------|-------------|
-| **Code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. |
-| **Architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, checks memory for conventions and decisions, designs implementation plans, then hands off to Code via `memory-plan-execute`. |
-| **Memory** | `ocm-memory` | subagent | Expert agent for storing, retrieving, and curating project knowledge. Handles post-compaction memory extraction and contradiction resolution. |
+| **Code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @Memory subagent. |
+| **Architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @Memory for broad knowledge retrieval, designs implementation plans, then hands off to Code via `memory-plan-execute`. |
+| **Memory** | `ocm-memory` | subagent | Expert agent for managing project memory and planning state. Handles post-compaction memory extraction, contradiction resolution, planning state updates, and cross-session plan searches. |
 
-The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied). After the user approves a plan, it calls `memory-plan-execute` to create a new Code session with the full plan as context.
+The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which saves planning state and creates a new Code session with the full plan as context. Code and Architect agents delegate `memory-planning-update` and `memory-planning-search` to the Memory subagent.
 
 ## CLI
 
