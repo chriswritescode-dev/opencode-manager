@@ -393,7 +393,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
                         })
                       }}
                       options={executionModelOptions}
-                      placeholder="anthropic/claude-sonnet-4-20250514"
+                      placeholder="default model"
                       allowCustomValue
                       showClear
                     />
