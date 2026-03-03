@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { cn } from '@/lib/utils'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 
 export interface ComboboxOption {
   value: string
@@ -17,6 +17,7 @@ interface ComboboxProps {
   disabled?: boolean
   className?: string
   allowCustomValue?: boolean
+  showClear?: boolean
 }
 
 export function Combobox({
@@ -27,6 +28,7 @@ export function Combobox({
   disabled = false,
   className,
   allowCustomValue = true,
+  showClear = false,
 }: ComboboxProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [inputValue, setInputValue] = useState(() => {
@@ -181,6 +183,22 @@ export function Combobox({
             'pr-8'
           )}
         />
+        {showClear && value && (
+          <button
+            type="button"
+            onClick={() => {
+              if (!disabled) {
+                onChange('')
+                setInputValue('')
+                inputRef.current?.focus()
+              }
+            }}
+            className="absolute right-7 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            tabIndex={-1}
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {
@@ -189,7 +207,10 @@ export function Combobox({
               inputRef.current?.focus()
             }
           }}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          className={cn(
+            'absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground',
+            showClear && value ? 'right-1' : 'right-2'
+          )}
           tabIndex={-1}
         >
           <ChevronDown className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-180')} />

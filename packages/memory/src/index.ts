@@ -250,6 +250,16 @@ async function autoValidateOnLoad(
   logger.log(`Auto-validate: reindex complete (total=${result.total}, success=${result.success}, failed=${result.failed})`)
 }
 
+function parseModelString(modelStr?: string): { providerID: string; modelID: string } | undefined {
+  if (!modelStr) return undefined
+  const slashIndex = modelStr.indexOf('/')
+  if (slashIndex <= 0 || slashIndex === modelStr.length - 1) return undefined
+  return {
+    providerID: modelStr.substring(0, slashIndex),
+    modelID: modelStr.substring(slashIndex + 1),
+  }
+}
+
 export function createMemoryPlugin(config: PluginConfig): Plugin {
   return async (input: PluginInput): Promise<Hooks> => {
     const { directory, project, client } = input
@@ -646,11 +656,14 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
             const planningInstruction = `\n\n---\n\nWhen you complete each phase, delegate to the @Memory subagent via the Task tool to update planning state. Tell it to call memory-planning-update with sessionID "${context.sessionID}". Update phase statuses as you progress (pending → in_progress → completed). Set current to describe what you're working on. When all work is done, set current to "Completed".`
 
+            const executionModel = parseModelString(config.executionModel)
+
             const promptResult = await client.session.promptAsync({
               path: { id: newSessionId },
               body: {
                 parts: [{ type: 'text' as const, text: args.plan + planningInstruction }],
                 agent: 'Code',
+                ...(executionModel && { model: executionModel }),
               },
             })
 
@@ -668,7 +681,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             })
             logger.log(`memory-plan-execute: updated planning state for source session=${context.sessionID}`)
 
-            return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
+            const modelInfo = executionModel ? `${executionModel.providerID}/${executionModel.modelID}` : 'default'
+            return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\nModel: ${modelInfo}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
           },
         }),
       },

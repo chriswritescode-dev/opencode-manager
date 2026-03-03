@@ -1,6 +1,6 @@
 {
   "name": "@opencode-manager/memory",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,6 +16,9 @@
     "scripts",
     "README.md"
   ],
+  "bin": {
+    "ocm-mem": "./dist/cli/index.js"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/chriswritescode-dev/opencode-manager.git"
@@ -53,6 +56,7 @@
     "postinstall": "node scripts/download-models.js",
     "prepublishOnly": "pnpm build",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cli": "bun src/cli/index.ts"
   }
 }

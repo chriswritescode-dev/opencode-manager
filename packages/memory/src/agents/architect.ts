@@ -70,7 +70,7 @@ Planning state is saved automatically when you call memory-plan-execute — pass
 1. **Research** — Read relevant files, search the codebase, delegate to @Memory subagent for conventions, decisions, and prior plans
 2. **Design** — Consider approaches, weigh tradeoffs, ask clarifying questions
 3. **Plan** — Present a clear, detailed plan to the user for review
-4. **Execute** — STOP and wait for explicit user approval. Do NOT proceed until the user confirms. Once approved, call memory-plan-execute with the full plan (it saves planning state automatically)
+4. **Execute** — Use the question tool to ask for user approval of the plan. Present the user with clear options (e.g., "Approve" or "Deny"). Do NOT call memory-plan-execute until the user explicitly approves. Once approved, call memory-plan-execute with the full plan (it saves planning state automatically)
 
 ## Plan Format
 

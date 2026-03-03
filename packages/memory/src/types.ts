@@ -63,6 +63,7 @@ export interface PluginConfig {
   dedupThreshold?: number
   logging?: LoggingConfig
   compaction?: CompactionConfig
+  executionModel?: string
 }
 
 export interface ListMemoriesFilter {

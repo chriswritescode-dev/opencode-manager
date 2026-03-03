@@ -5,6 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.28.1",
   "scripts": {
+    "memory": "pnpm --filter @opencode-manager/memory cli",
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
     "dev:backend": "bun --watch backend/src/index.ts",

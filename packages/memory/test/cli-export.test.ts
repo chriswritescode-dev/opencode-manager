@@ -72,12 +72,12 @@ describe('CLI Export - formatAsJson', () => {
   })
 
   test('exports formatAsJson function', async () => {
-    const { formatAsJson } = await import('../src/cli/export.ts')
+    const { formatAsJson } = await import('../src/cli/commands/export.ts')
     expect(typeof formatAsJson).toBe('function')
   })
 
   test('formatAsJson converts memories to valid JSON', async () => {
-    const { formatAsJson } = await import('../src/cli/export.ts')
+    const { formatAsJson } = await import('../src/cli/commands/export.ts')
 
     const memories: PluginMemory[] = [
       {
@@ -103,7 +103,7 @@ describe('CLI Export - formatAsJson', () => {
   })
 
   test('formatAsJson handles empty array', async () => {
-    const { formatAsJson } = await import('../src/cli/export.ts')
+    const { formatAsJson } = await import('../src/cli/commands/export.ts')
 
     const jsonOutput = formatAsJson([])
     const parsed = JSON.parse(jsonOutput)
@@ -126,12 +126,12 @@ describe('CLI Export - formatAsMarkdown', () => {
   })
 
   test('exports formatAsMarkdown function', async () => {
-    const { formatAsMarkdown } = await import('../src/cli/export.ts')
+    const { formatAsMarkdown } = await import('../src/cli/commands/export.ts')
     expect(typeof formatAsMarkdown).toBe('function')
   })
 
   test('formatAsMarkdown generates markdown with sections by scope', async () => {
-    const { formatAsMarkdown } = await import('../src/cli/export.ts')
+    const { formatAsMarkdown } = await import('../src/cli/commands/export.ts')
 
     const memories: PluginMemory[] = [
       {
@@ -168,7 +168,7 @@ describe('CLI Export - formatAsMarkdown', () => {
   })
 
   test('formatAsMarkdown groups memories by scope', async () => {
-    const { formatAsMarkdown } = await import('../src/cli/export.ts')
+    const { formatAsMarkdown } = await import('../src/cli/commands/export.ts')
 
     const db = createTestDb(tempDir)
     insertTestMemories(db, TEST_PROJECT_ID)
@@ -211,7 +211,7 @@ describe('CLI Export - formatAsMarkdown', () => {
   })
 
   test('formatAsMarkdown only includes scopes with memories', async () => {
-    const { formatAsMarkdown } = await import('../src/cli/export.ts')
+    const { formatAsMarkdown } = await import('../src/cli/commands/export.ts')
 
     const memories: PluginMemory[] = [
       {
@@ -249,12 +249,12 @@ describe('CLI Export - parseJsonImport', () => {
   })
 
   test('exports parseJsonImport function', async () => {
-    const { parseJsonImport } = await import('../src/cli/export.ts')
+    const { parseJsonImport } = await import('../src/cli/commands/import.ts')
     expect(typeof parseJsonImport).toBe('function')
   })
 
   test('parseJsonImport parses valid JSON array', async () => {
-    const { parseJsonImport } = await import('../src/cli/export.ts')
+    const { parseJsonImport } = await import('../src/cli/commands/import.ts')
 
     const input = [
       {
@@ -279,7 +279,7 @@ describe('CLI Export - parseJsonImport', () => {
   })
 
   test('parseJsonImport uses default values for missing fields', async () => {
-    const { parseJsonImport } = await import('../src/cli/export.ts')
+    const { parseJsonImport } = await import('../src/cli/commands/import.ts')
 
     const input = [
       {
@@ -296,13 +296,13 @@ describe('CLI Export - parseJsonImport', () => {
   })
 
   test('parseJsonImport throws on invalid JSON', async () => {
-    const { parseJsonImport } = await import('../src/cli/export.ts')
+    const { parseJsonImport } = await import('../src/cli/commands/import.ts')
 
     expect(() => parseJsonImport('not valid json', TEST_PROJECT_ID)).toThrow()
   })
 
   test('parseJsonImport throws when input is not an array', async () => {
-    const { parseJsonImport } = await import('../src/cli/export.ts')
+    const { parseJsonImport } = await import('../src/cli/commands/import.ts')
 
     expect(() => parseJsonImport('{"invalid": "object"}', TEST_PROJECT_ID)).toThrow()
     expect(() => parseJsonImport('{}', TEST_PROJECT_ID)).toThrow()
@@ -323,12 +323,12 @@ describe('CLI Export - parseMarkdownImport', () => {
   })
 
   test('exports parseMarkdownImport function', async () => {
-    const { parseMarkdownImport } = await import('../src/cli/export.ts')
+    const { parseMarkdownImport } = await import('../src/cli/commands/import.ts')
     expect(typeof parseMarkdownImport).toBe('function')
   })
 
   test('parseMarkdownImport parses scoped sections', async () => {
-    const { parseMarkdownImport } = await import('../src/cli/export.ts')
+    const { parseMarkdownImport } = await import('../src/cli/commands/import.ts')
 
     const markdownContent = `# Memory Export
 
@@ -353,7 +353,7 @@ Adopted Prettier for formatting
   })
 
   test('parseMarkdownImport falls back to parsing any content', async () => {
-    const { parseMarkdownImport } = await import('../src/cli/export.ts')
+    const { parseMarkdownImport } = await import('../src/cli/commands/import.ts')
 
     const markdownContent = `# My Memories
 
@@ -381,7 +381,7 @@ describe('CLI Export - database integration', () => {
   })
 
   test('can query memories from database', async () => {
-    const { formatAsJson } = await import('../src/cli/export.ts')
+    const { formatAsJson } = await import('../src/cli/commands/export.ts')
 
     const db = createTestDb(tempDir)
     insertTestMemories(db, TEST_PROJECT_ID)
@@ -404,7 +404,7 @@ describe('CLI Export - database integration', () => {
   })
 
   test('can filter by scope', async () => {
-    const { formatAsJson } = await import('../src/cli/export.ts')
+    const { formatAsJson } = await import('../src/cli/commands/export.ts')
 
     const db = createTestDb(tempDir)
     insertTestMemories(db, TEST_PROJECT_ID)

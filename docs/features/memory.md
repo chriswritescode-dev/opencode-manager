@@ -61,7 +61,8 @@ The file is only created if it does not already exist. The config is validated o
     "inlinePlanning": true,
     "maxContextTokens": 4000,
     "snapshotToKV": true
-  }
+  },
+  "executionModel": ""
 }
 ```
 
@@ -105,6 +106,7 @@ Set `baseUrl` to point at any OpenAI-compatible self-hosted service (vLLM, Ollam
 | `compaction.inlinePlanning` | Include planning state in compaction context | `true` |
 | `compaction.maxContextTokens` | Max tokens for injected memory context | `4000` |
 | `compaction.snapshotToKV` | Save pre-compaction snapshot for recovery | `true` |
+| `executionModel` | Model override for plan execution sessions (`provider/model`). Falls back to OpenCode's default model. | — |
 
 ---
 
@@ -363,6 +365,8 @@ Create a new Code session and send an implementation plan as the first prompt. D
 | `findings` | array | No | Key architectural decisions discovered during research |
 
 Saves planning state (objective, phases, findings) for the Architect session, creates a new session via the OpenCode API, then sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
+
+The model used for the new Code session is determined by `executionModel` in the plugin config (format: `provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). If not set, OpenCode's default model resolution is used — typically the `model` field from `opencode.json`.
 
 ---
 

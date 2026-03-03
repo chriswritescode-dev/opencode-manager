@@ -143,7 +143,8 @@ You can edit this file to customize settings. The file is created only if it doe
     "inlinePlanning": true,
     "maxContextTokens": 4000,
     "snapshotToKV": true
-  }
+  },
+  "executionModel": ""
 }
 ```
 
@@ -186,6 +187,9 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 - `compaction.inlinePlanning` - Inject planning state (phases, objectives, progress) into compaction context (default: `true`)
 - `compaction.maxContextTokens` - Token budget for injected memory context with priority-based trimming (default: `4000`)
 - `compaction.snapshotToKV` - Store compaction snapshots in the session KV store for recovery (default: `true`)
+
+#### Execution
+- `executionModel` - Model override for plan execution sessions, format: `provider/model` (e.g. `anthropic/claude-sonnet-4-20250514`). When set, `memory-plan-execute` uses this model for the new Code session. When empty or omitted, OpenCode's default model is used (typically the `model` field from `opencode.json`).
 
 ## Development
 

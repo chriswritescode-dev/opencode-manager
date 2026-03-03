@@ -68,5 +68,6 @@ export const PluginConfigSchema = z.object({
   embedding: EmbeddingConfigSchema,
   dedupThreshold: z.number().min(0).max(1).default(0.25),
   logging: LoggingConfigSchema.optional(),
+  executionModel: z.string().optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>
