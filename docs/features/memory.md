@@ -568,6 +568,68 @@ The cleanup function is idempotent — calling it multiple times is safe.
 
 ---
 
+## CLI
+
+The plugin includes the `ocm-mem` CLI for managing memories outside of OpenCode sessions. The CLI auto-detects the project ID from git and resolves the database path automatically.
+
+```bash
+ocm-mem <command> [options]
+```
+
+### Global Options
+
+| Flag | Description |
+|------|-------------|
+| `--db-path <path>` | Path to memory database |
+| `--project, -p <name>` | Project name or SHA (auto-detected from git) |
+| `--dir, -d <path>` | Git repo path for project detection |
+| `--help, -h` | Show help |
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `export` | Export memories to file (JSON or Markdown) |
+| `import` | Import memories from file |
+| `list` | List projects with memory and session state counts |
+| `stats` | Show memory statistics for a project |
+| `cleanup` | Delete memories or session states by criteria |
+
+### Usage Examples
+
+```bash
+# Export all memories as markdown
+ocm-mem export --format markdown --output memories.md
+
+# Export filtered by scope
+ocm-mem export --project my-project --scope convention
+
+# Import from JSON
+ocm-mem import memories.json --project my-project
+
+# Import from Markdown, skip duplicate detection
+ocm-mem import memories.md --project my-project --force
+
+# List all projects
+ocm-mem list
+
+# Show stats for current project
+ocm-mem stats
+
+# Preview cleanup of old memories (dry run)
+ocm-mem cleanup --older-than 90 --dry-run
+
+# Delete specific memories
+ocm-mem cleanup --ids 1,2,3 --force
+
+# Clean up expired session states
+ocm-mem cleanup --sessions --older-than 30
+```
+
+Run `ocm-mem <command> --help` for full options on each command.
+
+---
+
 ## Troubleshooting
 
 ### Plugin shows "degraded" status

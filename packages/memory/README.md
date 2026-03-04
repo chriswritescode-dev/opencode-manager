@@ -9,7 +9,7 @@ Memory management plugin for OpenCode that enables semantic search and persisten
 - **Automatic Deduplication** - Prevents duplicates via exact match and semantic similarity detection
 - **Compaction Context Injection** - Injects planning state, conventions, and decisions into session compaction for seamless continuity
 - **Bundled Agents** - Ships with Code, Architect, and Memory agents preconfigured for memory-aware workflows
-- **CLI Export/Import** - Export and import memories as JSON or Markdown for backup and migration
+- **CLI Tools** - Export, import, list, stats, and cleanup commands via `ocm-mem` binary
 - **Dimension Mismatch Detection** - Detects embedding model changes and guides recovery via reindex
 - **Session Planning** - Tracks objectives, phases, findings, and errors across sessions with automatic TTL cleanup
 
@@ -45,57 +45,93 @@ The Architect agent operates in read-only mode (`temperature: 0.0`, all edits de
 
 ## CLI
 
-Export and import memories using the bundled CLI tool. The CLI auto-detects the project ID from git and resolves the database path automatically.
-
-### Export
+Manage memories using the `ocm-mem` CLI. The CLI auto-detects the project ID from git and resolves the database path automatically.
 
 ```bash
-# Export all memories as JSON (stdout)
-bun run src/cli/export.ts export
-
-# Export as Markdown to file
-bun run src/cli/export.ts export --format markdown --output memories.md
-
-# Export with project and scope filter
-bun run src/cli/export.ts export --project my-project --scope convention
-
-# Limit and paginate results
-bun run src/cli/export.ts export --limit 50 --offset 100
+ocm-mem <command> [options]
 ```
 
-**Export options:**
+**Global options** (apply to all commands):
+
+| Flag | Description |
+|------|-------------|
+| `--db-path <path>` | Path to memory database |
+| `--project, -p <name>` | Project name or SHA (auto-detected from git) |
+| `--dir, -d <path>` | Git repo path for project detection |
+| `--help, -h` | Show help |
+
+### Commands
+
+#### export
+
+Export memories to file (JSON or Markdown).
+
+```bash
+ocm-mem export --format markdown --output memories.md
+ocm-mem export --project my-project --scope convention
+ocm-mem export --limit 50 --offset 100
+```
 
 | Flag | Description |
 |------|-------------|
 | `--format, -f` | Output format: `json` or `markdown` (default: `json`) |
 | `--output, -o` | Output file path (prints to stdout if omitted) |
-| `--project, -p` | Project ID filter (auto-detected from git) |
 | `--scope, -s` | Filter by scope: `convention`, `decision`, or `context` |
 | `--limit, -l` | Max number of memories (default: `1000`) |
 | `--offset` | Pagination offset (default: `0`) |
-| `--db-path` | Custom database file path |
 
-### Import
+#### import
+
+Import memories from file.
 
 ```bash
-# Import from JSON
-bun run src/cli/export.ts import memories.json --project my-project
-
-# Import from Markdown (format auto-detected from extension)
-bun run src/cli/export.ts import memories.md --project my-project
-
-# Skip duplicate detection
-bun run src/cli/export.ts import memories.json --project my-project --force
+ocm-mem import memories.json --project my-project
+ocm-mem import memories.md --project my-project --force
 ```
-
-**Import options:**
 
 | Flag | Description |
 |------|-------------|
 | `--format, -f` | Input format: `json` or `markdown` (auto-detected from extension) |
-| `--project, -p` | Project ID to assign memories to (auto-detected from git) |
 | `--force` | Skip duplicate detection and import all |
-| `--db-path` | Custom database file path |
+
+#### list
+
+List all projects with memory and session state counts.
+
+```bash
+ocm-mem list
+```
+
+#### stats
+
+Show memory statistics for a project (scope breakdown, session state counts).
+
+```bash
+ocm-mem stats
+ocm-mem stats --project my-project
+```
+
+#### cleanup
+
+Delete memories or session states by criteria.
+
+```bash
+ocm-mem cleanup --older-than 90
+ocm-mem cleanup --ids 1,2,3 --force
+ocm-mem cleanup --scope context --dry-run
+ocm-mem cleanup --sessions --older-than 30
+ocm-mem cleanup --all --project my-project
+```
+
+| Flag | Description |
+|------|-------------|
+| `--older-than <days>` | Delete memories older than N days |
+| `--ids <id,id,...>` | Delete specific memory IDs |
+| `--scope <scope>` | Filter by scope: `convention`, `decision`, or `context` |
+| `--sessions` | Clean up session states instead of memories |
+| `--all` | Delete all memories for the project |
+| `--dry-run` | Preview what would be deleted without deleting |
+| `--force` | Skip confirmation prompt |
 
 ## Installation
 
