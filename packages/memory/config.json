@@ -16,5 +16,6 @@
     "inlinePlanning": true,
     "maxContextTokens": 4000,
     "snapshotToKV": true
-  }
+  },
+  "executionModel": ""
 }
