@@ -36,7 +36,15 @@ interface Logger {
 export function createMemoryQuery(db: Database, vec: VecService, logger?: Logger) {
   const logError = (context: string, error?: unknown) => {
     if (logger) {
-      logger.error(context, error)
+      const errorMessage = error instanceof Error ? error.message : String(error)
+      const errorStack = error instanceof Error ? error.stack : undefined
+      logger.error(context, { message: errorMessage, stack: errorStack })
+    }
+  }
+
+  const logInfo = (message: string) => {
+    if (logger) {
+      logger.log(message)
     }
   }
 
@@ -227,6 +235,7 @@ export function createMemoryQuery(db: Database, vec: VecService, logger?: Logger
           : { scope: filters?.scope, limit: filters?.limit }
 
         const memories = this.listAll(basicFilters)
+        logInfo(`memory-queries: vec unavailable, returning ${memories.length} unranked results`)
         return memories.map(memory => ({ memory, distance: 1.0 }))
       }
 
@@ -238,6 +247,7 @@ export function createMemoryQuery(db: Database, vec: VecService, logger?: Logger
             ? { projectId, scope: filters?.scope, limit: filters?.limit }
             : { scope: filters?.scope, limit: filters?.limit }
           const memories = this.listAll(basicFilters)
+          logInfo(`memory-queries: vec returned 0 results (no embeddings?), returning ${memories.length} unranked results`)
           return memories.map(memory => ({ memory, distance: 1.0 }))
         }
 
@@ -251,18 +261,23 @@ export function createMemoryQuery(db: Database, vec: VecService, logger?: Logger
           WHERE id IN (${placeholders})
         `).all(...memoryIds) as MemoryRow[]
 
-        return rows
+        const results = rows
           .map(row => ({
             memory: mapRow(row),
             distance: distanceMap.get(row.id) ?? 1.0,
           }))
           .sort((a, b) => a.distance - b.distance)
-      } catch {
+
+        logInfo(`memory-queries: vec returned ${vecResults.length} ranked results`)
+        return results
+      } catch (error) {
+        logError('memory-queries: vec search error, returning unranked results', error)
         const basicFilters = projectId
           ? { projectId, scope: filters?.scope, limit: filters?.limit }
           : { scope: filters?.scope, limit: filters?.limit }
 
         const memories = this.listAll(basicFilters)
+        logInfo(`memory-queries: returning ${memories.length} unranked results after error`)
         return memories.map(memory => ({ memory, distance: 1.0 }))
       }
     },
@@ -312,93 +327,25 @@ export function createMemoryQuery(db: Database, vec: VecService, logger?: Logger
       return !!result
     },
 
-    getMemoriesWithoutEmbeddings(
+    async getMemoriesWithoutEmbeddings(
       projectId?: string,
       limit: number = 50
-    ): Memory[] {
-      const embeddingsTableExists = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
-      ).get()
+    ): Promise<Memory[]> {
+      const rows = await vec.getWithoutEmbeddings(projectId, limit)
+      if (rows.length === 0) return []
 
-      if (!embeddingsTableExists) {
-        const conditions: string[] = []
-        const params: (string | number)[] = []
-
-        if (projectId) {
-          conditions.push('project_id = ?')
-          params.push(projectId)
-        }
-
-        const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-        const rows = db.prepare(`
-          SELECT id, project_id, scope, content, file_path, access_count, last_accessed_at, created_at, updated_at
-          FROM memories
-          ${where}
-          ORDER BY created_at ASC
-          LIMIT ? OFFSET 0
-        `).all(...params, limit) as MemoryRow[]
-
-        return rows.map(mapRow)
-      }
-
-      const conditions: string[] = ['e.memory_id IS NULL']
-      const params: (string | number)[] = []
-
-      if (projectId) {
-        conditions.push('m.project_id = ?')
-        params.push(projectId)
-      }
-
-      const rows = db.prepare(`
-        SELECT m.id, m.project_id, m.scope, m.content, m.file_path, m.access_count, m.last_accessed_at, m.created_at, m.updated_at
-        FROM memories m
-        LEFT JOIN memory_embeddings e ON m.id = e.memory_id
-        WHERE ${conditions.join(' AND ')}
-        ORDER BY m.created_at ASC
-        LIMIT ? OFFSET 0
-      `).all(...params, limit) as MemoryRow[]
-
-      return rows.map(mapRow)
+      const ids = rows.map(r => r.id)
+      const placeholders = ids.map(() => '?').join(',')
+      const memories = db.prepare(`
+        SELECT id, project_id, scope, content, file_path, access_count, last_accessed_at, created_at, updated_at
+        FROM memories WHERE id IN (${placeholders})
+        ORDER BY created_at ASC
+      `).all(...ids) as MemoryRow[]
+      return memories.map(mapRow)
     },
 
-    countMemoriesWithoutEmbeddings(projectId?: string): number {
-      const embeddingsTableExists = db.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
-      ).get()
-
-      if (!embeddingsTableExists) {
-        const conditions: string[] = []
-        const params: (string | number)[] = []
-
-        if (projectId) {
-          conditions.push('project_id = ?')
-          params.push(projectId)
-        }
-
-        const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-        const result = db.prepare(`
-          SELECT COUNT(*) as count FROM memories ${where}
-        `).get(...params) as { count: number }
-
-        return result.count
-      }
-
-      const conditions: string[] = ['e.memory_id IS NULL']
-      const params: (string | number)[] = []
-
-      if (projectId) {
-        conditions.push('m.project_id = ?')
-        params.push(projectId)
-      }
-
-      const result = db.prepare(`
-        SELECT COUNT(*) as count
-        FROM memories m
-        LEFT JOIN memory_embeddings e ON m.id = e.memory_id
-        WHERE ${conditions.join(' AND ')}
-      `).get(...params) as { count: number }
-
-      return result.count
+    async countMemoriesWithoutEmbeddings(projectId?: string): Promise<number> {
+      return vec.countWithoutEmbeddings(projectId)
     },
 
     getByContent(projectId: string, content: string): Memory | undefined {

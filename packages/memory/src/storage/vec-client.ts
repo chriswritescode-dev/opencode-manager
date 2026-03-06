@@ -84,7 +84,10 @@ async function startWorker(config: {
 
   cleanupStale(pidPath, socketPath)
 
-  const workerScript = join(__dirname, 'vec-worker.ts')
+  const workerScriptJs = join(__dirname, 'vec-worker.js')
+  const workerScript = existsSync(workerScriptJs)
+    ? workerScriptJs
+    : join(__dirname, 'vec-worker.ts')
   const proc = spawn('bun', [
     workerScript,
     '--db', config.dbPath,
@@ -172,6 +175,27 @@ export async function createWorkerVecService(config: {
       const resp = await req({ action: 'findSimilar', embedding, projectId, threshold, limit })
       if (!resp?.results) return []
       return resp.results as VecSearchResult[]
+    },
+
+    async countWithoutEmbeddings(projectId?: string): Promise<number> {
+      const resp = await req({ action: 'countWithoutEmbeddings', projectId })
+      return (resp?.count as number) ?? 0
+    },
+
+    async getWithoutEmbeddings(projectId?: string, limit: number = 50): Promise<Array<{ id: number; content: string }>> {
+      const resp = await req({ action: 'getWithoutEmbeddings', projectId, limit })
+      if (!resp?.rows) return []
+      return resp.rows as Array<{ id: number; content: string }>
+    },
+
+    async recreateTable(dimensions: number): Promise<void> {
+      await req({ action: 'recreateTable', dimensions })
+    },
+
+    async getDimensions(): Promise<{ exists: boolean; dimensions: number | null }> {
+      const resp = await req({ action: 'getDimensions' })
+      if (!resp) return { exists: false, dimensions: null }
+      return { exists: resp.exists as boolean, dimensions: (resp.dimensions as number | null) ?? null }
     },
 
     dispose() {

@@ -1,40 +1,25 @@
 import type { Database } from 'bun:sqlite'
-import { platform } from 'os'
 import { join } from 'path'
 import type { VecService } from './vec-types'
-import { createDirectVecService } from './vec-direct'
+import type { Logger } from '../types'
 
 export type { VecService, VecSearchResult } from './vec-types'
 
-export function initializeVecTables(db: Database, dimensions: number): void {
-  const direct = createDirectVecService(db)
-  if (direct.available) {
-    direct.initialize(dimensions)
-  }
-}
-
-export async function createVecService(db: Database, dataDir: string, dimensions: number): Promise<VecService> {
-  const direct = createDirectVecService(db)
-
-  if (direct.available) {
-    await direct.initialize(dimensions)
-    return direct
-  }
-
-  if (platform() === 'darwin') {
-    try {
-      const { createWorkerVecService } = await import('./vec-client')
-      const dbPath = join(dataDir, 'memory.db')
-      const worker = await createWorkerVecService({ dbPath, dataDir, dimensions })
-      if (worker.available) {
-        await worker.initialize(dimensions)
-        return worker
-      }
-    } catch {
-      // Worker fallback unavailable
+export async function createVecService(_db: Database, dataDir: string, dimensions: number, logger?: Logger): Promise<VecService> {
+  try {
+    const { createWorkerVecService } = await import('./vec-client')
+    const dbPath = join(dataDir, 'memory.db')
+    const worker = await createWorkerVecService({ dbPath, dataDir, dimensions })
+    if (worker.available) {
+      await worker.initialize(dimensions)
+      return worker
     }
+    logger?.error('Vec worker started but not available')
+  } catch (err) {
+    logger?.error('Vec worker failed to start', err)
   }
 
+  logger?.log('Vec worker unavailable, using noop service')
   return createNoopVecService()
 }
 
@@ -48,6 +33,10 @@ export function createNoopVecService(): VecService {
     async deleteByMemoryIds() {},
     async search() { return [] },
     async findSimilar() { return [] },
+    async countWithoutEmbeddings() { return 0 },
+    async getWithoutEmbeddings() { return [] },
+    async recreateTable() {},
+    async getDimensions() { return { exists: false, dimensions: null } },
     dispose() {},
   }
 }

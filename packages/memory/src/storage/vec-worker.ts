@@ -57,7 +57,40 @@ class VecWorker {
     if (!exists) {
       this.db.run(`
         CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
-          embedding float[${this.config.dimensions}],
+          embedding float[${this.config.dimensions}] distance_metric=cosine,
+          +memory_id INTEGER,
+          +project_id TEXT
+        )
+      `)
+      return
+    }
+
+    const row = this.db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
+    ).get() as { sql: string } | undefined
+
+    if (!row) return
+
+    const match = row.sql.match(/float\[(\d+)\]/i)
+    const existingDimensions = match ? parseInt(match[1]!, 10) : null
+
+    if (existingDimensions !== null && existingDimensions !== this.config.dimensions) {
+      this.db.run('DROP TABLE IF EXISTS memory_embeddings')
+      this.db.run(`
+        CREATE VIRTUAL TABLE memory_embeddings USING vec0(
+          embedding float[${this.config.dimensions}] distance_metric=cosine,
+          +memory_id INTEGER,
+          +project_id TEXT
+        )
+      `)
+      return
+    }
+
+    if (!row.sql.includes('distance_metric=cosine')) {
+      this.db.run('DROP TABLE IF EXISTS memory_embeddings')
+      this.db.run(`
+        CREATE VIRTUAL TABLE memory_embeddings USING vec0(
+          embedding float[${this.config.dimensions}] distance_metric=cosine,
           +memory_id INTEGER,
           +project_id TEXT
         )
@@ -118,7 +151,7 @@ class VecWorker {
           if (!exists) {
             this.db.run(`
               CREATE VIRTUAL TABLE IF NOT EXISTS memory_embeddings USING vec0(
-                embedding float[${dims}],
+                embedding float[${dims}] distance_metric=cosine,
                 +memory_id INTEGER,
                 +project_id TEXT
               )
@@ -165,32 +198,40 @@ class VecWorker {
         const scope = req.scope as string | undefined
         const limit = (req.limit as number) ?? 10
         const embeddingJson = JSON.stringify(embedding)
+        const needsPostFilter = !!(projectId || scope)
+        const knnLimit = needsPostFilter ? limit * 5 : limit
 
-        const conditions: string[] = []
-        const params: (string | number)[] = [embeddingJson]
-
-        if (projectId) {
-          conditions.push('e.project_id = ?')
-          params.push(projectId)
-        }
-        if (scope) {
-          conditions.push('m.scope = ?')
-          params.push(scope)
-        }
-
-        params.push(limit)
-
-        const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-        const rows = this.db.prepare(`
-          SELECT e.memory_id, (e.embedding <=> ?) as distance
-          FROM memory_embeddings e
-          JOIN memories m ON m.id = e.memory_id
-          ${where}
-          ORDER BY distance
+        let knnRows = this.db.prepare(`
+          SELECT memory_id, distance
+          FROM memory_embeddings
+          WHERE embedding MATCH ?
           LIMIT ?
-        `).all(...params) as Array<{ memory_id: number; distance: number }>
+        `).all(embeddingJson, knnLimit) as Array<{ memory_id: number; distance: number }>
 
-        return { results: rows.map(r => ({ memoryId: r.memory_id, distance: r.distance })) }
+        if (needsPostFilter && knnRows.length > 0) {
+          const ids = knnRows.map(r => r.memory_id)
+          const placeholders = ids.map(() => '?').join(',')
+          const conditions: string[] = [`id IN (${placeholders})`]
+          const params: (string | number)[] = [...ids]
+
+          if (projectId) {
+            conditions.push('project_id = ?')
+            params.push(projectId)
+          }
+          if (scope) {
+            conditions.push('scope = ?')
+            params.push(scope)
+          }
+
+          const validRows = this.db.prepare(
+            `SELECT id FROM memories WHERE ${conditions.join(' AND ')}`
+          ).all(...params) as Array<{ id: number }>
+          const validIds = new Set(validRows.map(r => r.id))
+          knnRows = knnRows.filter(r => validIds.has(r.memory_id))
+        }
+
+        const results = knnRows.slice(0, limit)
+        return { results: results.map(r => ({ memoryId: r.memory_id, distance: r.distance })) }
       }
 
       case 'findSimilar': {
@@ -200,24 +241,126 @@ class VecWorker {
         const limit = req.limit as number
         const embeddingJson = JSON.stringify(embedding)
 
-        const rows = this.db.prepare(`
-          SELECT e.memory_id, (e.embedding <=> ?) as distance
-          FROM memory_embeddings e
-          JOIN memories m ON m.id = e.memory_id
-          WHERE m.project_id = ?
-            AND (e.embedding <=> ?) < ?
-          ORDER BY distance LIMIT ?
-        `).all(embeddingJson, projectId, embeddingJson, threshold, limit) as Array<{
-          memory_id: number
-          distance: number
-        }>
+        const knnRows = this.db.prepare(`
+          SELECT memory_id, distance
+          FROM memory_embeddings
+          WHERE embedding MATCH ?
+          LIMIT ?
+        `).all(embeddingJson, limit * 5) as Array<{ memory_id: number; distance: number }>
 
-        return { results: rows.map(r => ({ memoryId: r.memory_id, distance: r.distance })) }
+        const ids = knnRows.map(r => r.memory_id)
+        if (ids.length === 0) {
+          return { results: [] }
+        }
+
+        const placeholders = ids.map(() => '?').join(',')
+        const projectRows = this.db.prepare(
+          `SELECT id FROM memories WHERE id IN (${placeholders}) AND project_id = ?`
+        ).all(...ids, projectId) as Array<{ id: number }>
+        const validIds = new Set(projectRows.map(r => r.id))
+
+        const filtered = knnRows
+          .filter(r => validIds.has(r.memory_id) && r.distance < threshold)
+          .slice(0, limit)
+        return { results: filtered.map(r => ({ memoryId: r.memory_id, distance: r.distance })) }
       }
 
       case 'count': {
         const row = this.db.prepare('SELECT COUNT(*) as count FROM memory_embeddings').get() as { count: number }
         return { count: row.count }
+      }
+
+      case 'countWithoutEmbeddings': {
+        const projectId = req.projectId as string | undefined
+        const embeddingsTableExists = this.db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
+        ).get()
+
+        if (!embeddingsTableExists) {
+          const conditions: string[] = []
+          const params: (string | number)[] = []
+          if (projectId) {
+            conditions.push('project_id = ?')
+            params.push(projectId)
+          }
+          const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+          const result = this.db.prepare(`SELECT COUNT(*) as count FROM memories ${where}`).get(...params) as { count: number }
+          return { count: result.count }
+        }
+
+        const conditions: string[] = ['e.memory_id IS NULL']
+        const params: (string | number)[] = []
+        if (projectId) {
+          conditions.push('m.project_id = ?')
+          params.push(projectId)
+        }
+        const result = this.db.prepare(`
+          SELECT COUNT(*) as count
+          FROM memories m
+          LEFT JOIN memory_embeddings e ON m.id = e.memory_id
+          WHERE ${conditions.join(' AND ')}
+        `).get(...params) as { count: number }
+        return { count: result.count }
+      }
+
+      case 'getWithoutEmbeddings': {
+        const projectId = req.projectId as string | undefined
+        const limit = (req.limit as number) ?? 50
+        const embeddingsTableExists = this.db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
+        ).get()
+
+        if (!embeddingsTableExists) {
+          const conditions: string[] = []
+          const params: (string | number)[] = []
+          if (projectId) {
+            conditions.push('project_id = ?')
+            params.push(projectId)
+          }
+          const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+          const rows = this.db.prepare(`
+            SELECT id, content FROM memories ${where} ORDER BY created_at ASC LIMIT ?
+          `).all(...params, limit) as Array<{ id: number; content: string }>
+          return { rows }
+        }
+
+        const conditions: string[] = ['e.memory_id IS NULL']
+        const params: (string | number)[] = []
+        if (projectId) {
+          conditions.push('m.project_id = ?')
+          params.push(projectId)
+        }
+        const rows = this.db.prepare(`
+          SELECT m.id, m.content
+          FROM memories m
+          LEFT JOIN memory_embeddings e ON m.id = e.memory_id
+          WHERE ${conditions.join(' AND ')}
+          ORDER BY m.created_at ASC
+          LIMIT ?
+        `).all(...params, limit) as Array<{ id: number; content: string }>
+        return { rows }
+      }
+
+      case 'recreateTable': {
+        const dims = req.dimensions as number
+        this.db.run('DROP TABLE IF EXISTS memory_embeddings')
+        this.db.run(`
+          CREATE VIRTUAL TABLE memory_embeddings USING vec0(
+            embedding float[${dims}] distance_metric=cosine,
+            +memory_id INTEGER,
+            +project_id TEXT
+          )
+        `)
+        return { status: 'ok' }
+      }
+
+      case 'getDimensions': {
+        const row = this.db.prepare(
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='memory_embeddings'"
+        ).get() as { sql: string } | undefined
+        if (!row) return { exists: false, dimensions: null }
+        const match = row.sql.match(/float\[(\d+)\]/i)
+        return { exists: true, dimensions: match ? parseInt(match[1]!, 10) : null }
       }
 
       default:
