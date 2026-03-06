@@ -9,6 +9,7 @@ export const codeAgent: AgentDefinition = {
   color: '#3b82f6',
   permission: {
     question: 'allow',
+    plan_enter: 'allow',
   },
   tools: {
     exclude: ['memory-plan-execute', 'memory-planning-update', 'memory-planning-search'],
@@ -37,6 +38,7 @@ Mark todos as completed as soon as each task is done — do not batch completion
 # Tool usage policy
 - When doing file search or exploring the codebase, prefer the Task tool to reduce context usage.
 - Proactively use the Task tool with specialized agents when the task matches the agent's description.
+- If a task matches an available skill, use the Skill tool to load domain-specific instructions. Skill outputs persist through compaction.
 - Call multiple tools in a single response when they are independent. Batch parallel tool calls for performance.
 - Use specialized tools (Read, Glob, Grep, Edit, Write) instead of bash equivalents (cat, find, grep, sed, echo).
 - NEVER use bash echo or other CLI tools to communicate with the user. Output text directly.

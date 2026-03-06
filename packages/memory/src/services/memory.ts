@@ -169,6 +169,7 @@ export class MemoryService {
     }
   ): Promise<MemorySearchResult[]> {
     const embedding = await this.embeddingService.embedText(query)
+    this.logger?.log(`memory-search: embedding generated (dimensions=${embedding.length}, hasSignal=${embedding.some(v => v !== 0)})`)
     const results = await this.queries.search(embedding, projectId, filters)
     results.forEach((r) => this.queries.trackAccess(r.memory.id))
     return results
@@ -197,11 +198,11 @@ export class MemoryService {
     return this.queries.countByProject(projectId)
   }
 
-  getMemoriesWithoutEmbeddings(projectId?: string, limit: number = 50): Memory[] {
+  async getMemoriesWithoutEmbeddings(projectId?: string, limit: number = 50): Promise<Memory[]> {
     return this.queries.getMemoriesWithoutEmbeddings(projectId, limit)
   }
 
-  countMemoriesWithoutEmbeddings(projectId?: string): number {
+  async countMemoriesWithoutEmbeddings(projectId?: string): Promise<number> {
     return this.queries.countMemoriesWithoutEmbeddings(projectId)
   }
 

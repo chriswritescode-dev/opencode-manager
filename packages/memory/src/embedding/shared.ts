@@ -111,7 +111,7 @@ export async function acquireEmbeddingServer(config: SharedEmbeddingConfig): Pro
 
   const lockAcquired = await acquireLock(lockPath)
   if (!lockAcquired) {
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 30; i++) {
       await sleep(500)
       const health = await checkServerHealth(socketPath)
       if (health !== null) {

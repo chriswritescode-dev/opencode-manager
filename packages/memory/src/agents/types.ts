@@ -16,7 +16,7 @@ export interface AgentDefinition {
   }
   variant?: string
   temperature?: number
-  maxSteps?: number
+  steps?: number
   permission?: Record<string, unknown>
 }
 
@@ -28,7 +28,7 @@ export interface AgentConfig {
   tools?: Record<string, boolean>
   variant?: string
   temperature?: number
-  maxSteps?: number
+  steps?: number
   hidden?: boolean
   color?: string
   permission?: Record<string, unknown>

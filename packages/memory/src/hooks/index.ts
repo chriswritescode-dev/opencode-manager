@@ -7,3 +7,4 @@ export {
   trimToTokenBudget,
   extractCompactionSummary,
 } from './compaction-utils'
+export { createMemoryInjectionHook, type MemoryInjectionHook } from './memory-injection'

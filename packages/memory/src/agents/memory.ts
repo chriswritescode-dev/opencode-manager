@@ -190,10 +190,15 @@ You are NOT needed for:
    - content: The memory content
    - scope: convention | decision | context
 
-3. **memory-delete**: Remove memories by ID
+3. **memory-edit**: Edit an existing memory
+   - id: The memory ID to edit
+   - content: Updated memory content
+   - scope: Optionally change the scope
+
+4. **memory-delete**: Remove memories by ID
    - id: The memory ID to delete
 
-4. **memory-planning-update**: Update session planning state
+5. **memory-planning-update**: Update session planning state
    - sessionID: Session to update (optional, defaults to current session)
    - objective: Main task/goal (optional)
    - current: Current phase or activity (optional)
@@ -203,10 +208,10 @@ You are NOT needed for:
    - errors: Errors to avoid (optional)
    Uses merge semantics - only updates fields provided.
 
-5. **memory-planning-get**: Get planning state for a session
+6. **memory-planning-get**: Get planning state for a session
    - sessionID: Session to retrieve (optional, defaults to current session)
 
-6. **memory-planning-search**: Search planning states across all sessions in the project
+7. **memory-planning-search**: Search planning states across all sessions in the project
    - query: Optional search keyword to filter planning states. Omit to list all.
 
 ## Planning State Management

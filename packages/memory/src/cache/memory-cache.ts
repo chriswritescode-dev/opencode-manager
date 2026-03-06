@@ -9,8 +9,8 @@ export class InMemoryCacheService implements CacheService {
   private cache = new Map<string, CacheEntry<unknown>>()
   private cleanupInterval: ReturnType<typeof setInterval> | null = null
 
-  constructor() {
-    this.cleanupInterval = setInterval(() => this.cleanup(), 60000)
+  constructor(cleanupIntervalMs: number = 60000) {
+    this.cleanupInterval = setInterval(() => this.cleanup(), cleanupIntervalMs)
   }
 
   private cleanup(): void {

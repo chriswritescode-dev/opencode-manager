@@ -18,7 +18,7 @@ export class EmbeddingSyncService {
   private batchSize: number
   private maxRetries: number
   private syncInProgress: boolean = false
-  private static readonly MAX_ITERATIONS = 100
+  private static readonly MAX_ITERATIONS = 1000
 
   constructor(memoryService: MemoryService, logger?: Logger, options: EmbeddingSyncOptions = {}) {
     this.memoryService = memoryService
@@ -44,12 +44,12 @@ export class EmbeddingSyncService {
     let failed = 0
 
     try {
-      let pending = this.memoryService.countMemoriesWithoutEmbeddings()
+      let pending = await this.memoryService.countMemoriesWithoutEmbeddings()
       let iterations = 0
 
       while (pending > 0 && iterations < EmbeddingSyncService.MAX_ITERATIONS) {
         iterations++
-        const memories = this.memoryService.getMemoriesWithoutEmbeddings(undefined, this.batchSize)
+        const memories = await this.memoryService.getMemoriesWithoutEmbeddings(undefined, this.batchSize)
         let batchSuccess = 0
         let batchFailed = 0
 
@@ -83,7 +83,7 @@ export class EmbeddingSyncService {
           break
         }
 
-        pending = this.memoryService.countMemoriesWithoutEmbeddings()
+        pending = await this.memoryService.countMemoriesWithoutEmbeddings()
 
         if (pending > 0) {
           this.logger?.log(`[embedding-sync] Progress: ${embedded} embedded, ${failed} failed, ${pending} remaining`)
@@ -110,12 +110,12 @@ export class EmbeddingSyncService {
     let failed = 0
 
     try {
-      let pending = this.memoryService.countMemoriesWithoutEmbeddings(projectId)
+      let pending = await this.memoryService.countMemoriesWithoutEmbeddings(projectId)
       let iterations = 0
 
       while (pending > 0 && iterations < EmbeddingSyncService.MAX_ITERATIONS) {
         iterations++
-        const memories = this.memoryService.getMemoriesWithoutEmbeddings(projectId, this.batchSize)
+        const memories = await this.memoryService.getMemoriesWithoutEmbeddings(projectId, this.batchSize)
         let batchSuccess = 0
         let batchFailed = 0
 
@@ -148,7 +148,7 @@ export class EmbeddingSyncService {
           break
         }
 
-        pending = this.memoryService.countMemoriesWithoutEmbeddings(projectId)
+        pending = await this.memoryService.countMemoriesWithoutEmbeddings(projectId)
       }
 
       if (iterations >= EmbeddingSyncService.MAX_ITERATIONS) {

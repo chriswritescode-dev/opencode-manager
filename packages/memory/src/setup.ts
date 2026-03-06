@@ -110,6 +110,8 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
     dedupThreshold: config.dedupThreshold,
     logging: config.logging,
     compaction: config.compaction,
+    memoryInjection: config.memoryInjection,
+    messagesTransform: config.messagesTransform,
     executionModel: config.executionModel,
   }
   

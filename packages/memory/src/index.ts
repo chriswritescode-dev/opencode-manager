@@ -3,9 +3,9 @@ import { tool } from '@opencode-ai/plugin'
 import { agents } from './agents'
 import { createConfigHandler } from './config'
 import { VERSION } from './version'
-import { createSessionHooks } from './hooks'
+import { createSessionHooks, createMemoryInjectionHook } from './hooks'
 import { join } from 'path'
-import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery, getTableDimensions, recreateVecTable } from './storage'
+import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery } from './storage'
 import type { MemoryService } from './services/memory'
 import { createVecService } from './storage/vec'
 import { createEmbeddingProvider, checkServerHealth, isServerRunning, killEmbeddingServer } from './embedding'
@@ -18,6 +18,7 @@ import { createLogger } from './utils/logger'
 import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig, HealthStatus, Logger, PlanningState } from './types'
 import type { EmbeddingProvider } from './embedding'
+import type { VecService } from './storage/vec-types'
 import { createNoopVecService } from './storage/vec'
 
 
@@ -158,8 +159,8 @@ async function executeReindex(
   db: Database,
   config: PluginConfig,
   provider: EmbeddingProvider,
-  dataDir: string,
   mismatchState: DimensionMismatchState,
+  vec: VecService,
 ): Promise<string> {
   const configuredModel = config.embedding.model
   const configuredDimensions = config.embedding.dimensions ?? provider.dimensions
@@ -175,11 +176,9 @@ async function executeReindex(
     return 'Reindex failed: embedding provider is not operational. Check your API key and model configuration.'
   }
 
-  const tableResult = getTableDimensions(db)
-  if (tableResult.exists && tableResult.dimensions !== configuredDimensions) {
-    recreateVecTable(db, configuredDimensions)
-    const newVec = await createVecService(db, dataDir, configuredDimensions)
-    memoryService.setVecService(newVec)
+  const tableInfo = await vec.getDimensions()
+  if (tableInfo.exists && tableInfo.dimensions !== null && tableInfo.dimensions !== configuredDimensions) {
+    await vec.recreateTable(configuredDimensions)
   }
 
   const result = await memoryService.reindex()
@@ -218,6 +217,8 @@ async function autoValidateOnLoad(
   config: PluginConfig,
   provider: EmbeddingProvider,
   dataDir: string,
+  mismatchState: DimensionMismatchState,
+  vec: VecService,
   logger: Logger,
 ): Promise<void> {
   const status = await getHealthStatus(db, config, provider, dataDir)
@@ -238,16 +239,8 @@ async function autoValidateOnLoad(
   }
 
   logger.log('Auto-validate: model drift detected, starting reindex')
-  const result = await memoryService.reindex()
-
-  if (result.success > 0 || result.total === 0) {
-    const metadata = createMetadataQuery(db)
-    metadata.setEmbeddingModel(
-      config.embedding.model,
-      config.embedding.dimensions ?? provider.dimensions,
-    )
-  }
-  logger.log(`Auto-validate: reindex complete (total=${result.total}, success=${result.success}, failed=${result.failed})`)
+  await executeReindex(memoryService, db, config, provider, mismatchState, vec)
+  logger.log('Auto-validate: reindex complete')
 }
 
 function parseModelString(modelStr?: string): { providerID: string; modelID: string } | undefined {
@@ -269,6 +262,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
     const logger = createLogger({
       enabled: loggingConfig?.enabled ?? false,
       file: loggingConfig?.file ?? resolveLogPath(),
+      debug: loggingConfig?.debug ?? false,
     })
     logger.log(`Initializing plugin for directory: ${directory}, projectId: ${projectId}`)
 
@@ -306,8 +300,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       actual: null,
     }
 
-    const initPromise = createVecService(db, dataDir, dimensions)
+    let currentVec: VecService = noopVec
+
+    const initPromise = createVecService(db, dataDir, dimensions, logger)
       .then(async (vec) => {
+        currentVec = vec
         memoryService.setVecService(vec)
 
         if (!vec.available) {
@@ -317,14 +314,10 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
         logger.log('Vec service initialized')
 
-        const tableResult = getTableDimensions(db)
-        if (tableResult.exists && tableResult.dimensions !== dimensions) {
-          mismatchState.detected = true
-          mismatchState.expected = dimensions
-          mismatchState.actual = tableResult.dimensions
-          memoryService.setVecService(createNoopVecService())
-          logger.log(`Dimension mismatch detected: config=${dimensions}, table=${tableResult.dimensions ?? 'unknown'}`)
-          return
+        const tableInfo = await vec.getDimensions()
+        if (tableInfo.exists && tableInfo.dimensions !== null && tableInfo.dimensions !== dimensions) {
+          logger.log(`Dimension mismatch detected: config=${dimensions}, table=${tableInfo.dimensions}, auto-recreating`)
+          await vec.recreateTable(dimensions)
         }
 
         const embeddingSync = createEmbeddingSyncService(memoryService, logger)
@@ -332,14 +325,22 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           logger.error('Embedding sync failed', err)
         })
 
-        await autoValidateOnLoad(memoryService, db, config, provider, dataDir, logger)
+        await autoValidateOnLoad(memoryService, db, config, provider, dataDir, mismatchState, currentVec, logger)
       })
       .catch((err: unknown) => {
         logger.error('Vec service initialization failed', err)
       })
 
     const compactionConfig: CompactionConfig | undefined = config.compaction
+    const memoryInjectionConfig = config.memoryInjection
+    const messagesTransformConfig = config.messagesTransform
     const sessionHooks = createSessionHooks(projectId, memoryService, sessionStateService, logger, input, compactionConfig)
+    const memoryInjection = createMemoryInjectionHook({
+      projectId,
+      memoryService,
+      logger,
+      config: memoryInjectionConfig,
+    })
 
     const scopeEnum = z.enum(['convention', 'decision', 'context'])
 
@@ -353,6 +354,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       if (cleaned) return
       cleaned = true
       logger.log('Cleaning up plugin resources...')
+      memoryInjection.destroy()
       await memoryService.destroy()
       sessionStateService.destroy()
       closeDatabase(db)
@@ -479,7 +481,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           execute: async (args) => {
             await initPromise
             if (args.action === 'reindex') {
-              return executeReindex(memoryService, db, config, provider, dataDir, mismatchState)
+              return executeReindex(memoryService, db, config, provider, mismatchState, currentVec)
             }
             return withDimensionWarning(await executeHealthCheck(db, config, provider, dataDir))
           },
@@ -715,7 +717,33 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             break
           }
         }
-        if (!userMessage || userMessage.info.agent !== agents.architect.displayName) return
+
+        if (!userMessage) return
+
+        const textParts = userMessage.parts
+          .filter((p) => p.type === 'text' && typeof p.text === 'string')
+          .map((p) => p.text as string)
+        const userText = textParts.join('\n').trim()
+
+        if (userText.length > 0) {
+          const memoryInjectionEnabled = config.memoryInjection?.enabled ?? true
+          if (memoryInjectionEnabled) {
+            const injected = await memoryInjection.handler(userText)
+            if (injected) {
+              userMessage.parts.push({
+                type: 'text',
+                text: injected,
+                synthetic: true,
+              })
+            }
+          }
+        }
+
+        const messagesTransformEnabled = messagesTransformConfig?.enabled ?? true
+        if (!messagesTransformEnabled) return
+
+        const isArchitect = userMessage.info.agent === agents.architect.displayName
+        if (!isArchitect) return
 
         userMessage.parts.push({
           type: 'text',
