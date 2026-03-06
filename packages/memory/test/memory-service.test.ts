@@ -2,9 +2,9 @@ import { describe, test, expect, beforeEach, beforeAll } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { MemoryService } from '../src/services/memory'
 import { createMemoryQuery } from '../src/storage/memory-queries'
-import { initializeVecTables } from '../src/storage/vec'
+import type { VecService } from '../src/storage/vec-types'
 import type { EmbeddingProvider } from '../src/embedding'
-import type { CacheService } from '../src/cache/types'
+import type { CacheService, Logger } from '../src/types'
 import type { MemoryScope } from '../src/types'
 
 const TEST_PROJECT_ID = 'test-project-id'
@@ -99,9 +99,7 @@ describe('MemoryService', () => {
 
   beforeEach(() => {
     db = createTestDb()
-    initializeVecTables(db, 1536)
 
-    const queries = createMemoryQuery(db)
     memoryService = new MemoryService({
       db,
       embeddingService: {
@@ -392,7 +390,6 @@ describe('MemoryService', () => {
     }
 
     const db2 = createTestDb()
-    initializeVecTables(db2, 1536)
 
     const trackingService = new MemoryService({
       db: db2,
@@ -422,5 +419,176 @@ describe('MemoryService', () => {
     expect(embedTextsCallCount).toBeGreaterThan(1)
     expect(embedTextsCalls.length).toBeGreaterThan(1)
     expect(embedTextsCalls[0]!.length).toBeLessThanOrEqual(50)
+  })
+
+  test('search logs embedding dimensions when logger provided', async () => {
+    const capturingLogger: Logger & { logs: string[] } = {
+      logs: [],
+      log: (message: string) => { capturingLogger.logs.push(message) },
+      error: (message: string) => {},
+    }
+
+    const serviceWithLogger = new MemoryService({
+      db,
+      embeddingService: {
+        embedText: async (text: string) => {
+          const results = await mockEmbeddingProvider.embed([text])
+          return results[0]
+        },
+        embedTexts: mockEmbeddingProvider.embed.bind(mockEmbeddingProvider),
+      },
+      cache: mockCache,
+      logger: capturingLogger,
+    })
+
+    await serviceWithLogger.search('test query', TEST_PROJECT_ID)
+
+    const embeddingLog = capturingLogger.logs.find(l => l.includes('embedding generated'))
+    expect(embeddingLog).toBeDefined()
+    expect(embeddingLog).toContain('dimensions=')
+    expect(embeddingLog).toContain('hasSignal=')
+  })
+})
+
+describe('MemoryQuery search logging', () => {
+  let db: Database
+
+  function createTestDb(): Database {
+    const db = new Database(':memory:')
+    db.run(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT NOT NULL,
+        scope TEXT NOT NULL,
+        content TEXT NOT NULL,
+        file_path TEXT,
+        access_count INTEGER NOT NULL DEFAULT 0,
+        last_accessed_at INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `)
+    db.run(`CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)`)
+    return db
+  }
+
+  function createUnavailableVecService(): VecService {
+    return {
+      get available() { return false },
+      async initialize() {},
+      async insert() {},
+      async delete() {},
+      async deleteByProject() {},
+      async deleteByMemoryIds() {},
+      async search() { return [] },
+      async findSimilar() { return [] },
+      async countWithoutEmbeddings() { return 0 },
+      async getWithoutEmbeddings() { return [] },
+      async recreateTable() {},
+      async getDimensions() { return { exists: false, dimensions: null } },
+      dispose() {},
+    }
+  }
+
+  function createEmptyResultsVecService(): VecService {
+    return {
+      get available() { return true },
+      async initialize() {},
+      async insert() {},
+      async delete() {},
+      async deleteByProject() {},
+      async deleteByMemoryIds() {},
+      async search() { return [] },
+      async findSimilar() { return [] },
+      async countWithoutEmbeddings() { return 0 },
+      async getWithoutEmbeddings() { return [] },
+      async recreateTable() {},
+      async getDimensions() { return { exists: false, dimensions: null } },
+      dispose() {},
+    }
+  }
+
+  function createSuccessfulVecService(): VecService {
+    return {
+      get available() { return true },
+      async initialize() {},
+      async insert() {},
+      async delete() {},
+      async deleteByProject() {},
+      async deleteByMemoryIds() {},
+      async search(embedding, projectId, scope, limit) {
+        return [
+          { memoryId: 1, distance: 0.1 },
+          { memoryId: 2, distance: 0.2 },
+        ]
+      },
+      async findSimilar() { return [] },
+      async countWithoutEmbeddings() { return 0 },
+      async getWithoutEmbeddings() { return [] },
+      async recreateTable() {},
+      async getDimensions() { return { exists: false, dimensions: null } },
+      dispose() {},
+    }
+  }
+
+  beforeEach(() => {
+    db = createTestDb()
+  })
+
+  test('logs when vec is unavailable', async () => {
+    const capturingLogger: Logger & { logs: string[]; errors: string[] } = {
+      logs: [],
+      errors: [],
+      log: (message: string) => { capturingLogger.logs.push(message) },
+      error: (message: string) => { capturingLogger.errors.push(message) },
+    }
+
+    const queries = createMemoryQuery(db, createUnavailableVecService(), capturingLogger)
+
+    await queries.search([0.1, 0.2, 0.3], TEST_PROJECT_ID)
+
+    const unavailableLog = capturingLogger.logs.find(l => l.includes('vec unavailable'))
+    expect(unavailableLog).toBeDefined()
+  })
+
+  test('logs when vec returns 0 results', async () => {
+    const capturingLogger: Logger & { logs: string[]; errors: string[] } = {
+      logs: [],
+      errors: [],
+      log: (message: string) => { capturingLogger.logs.push(message) },
+      error: (message: string) => { capturingLogger.errors.push(message) },
+    }
+
+    const queries = createMemoryQuery(db, createEmptyResultsVecService(), capturingLogger)
+
+    await queries.search([0.1, 0.2, 0.3], TEST_PROJECT_ID)
+
+    const emptyLog = capturingLogger.logs.find(l => l.includes('vec returned 0 results'))
+    expect(emptyLog).toBeDefined()
+  })
+
+  test('logs on successful vec search', async () => {
+    const capturingLogger: Logger & { logs: string[]; errors: string[] } = {
+      logs: [],
+      errors: [],
+      log: (message: string) => { capturingLogger.logs.push(message) },
+      error: (message: string) => { capturingLogger.errors.push(message) },
+    }
+
+    db.run(
+      'INSERT INTO memories (project_id, scope, content, file_path, access_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [TEST_PROJECT_ID, 'context', 'test content', null, 0, Date.now(), Date.now()]
+    )
+    db.run(
+      'INSERT INTO memories (project_id, scope, content, file_path, access_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [TEST_PROJECT_ID, 'context', 'test content 2', null, 0, Date.now(), Date.now()]
+    )
+
+    const queries = createMemoryQuery(db, createSuccessfulVecService(), capturingLogger)
+
+    await queries.search([0.1, 0.2, 0.3], TEST_PROJECT_ID)
+
+    const successLog = capturingLogger.logs.find(l => l.includes('ranked results'))
+    expect(successLog).toBeDefined()
   })
 })
