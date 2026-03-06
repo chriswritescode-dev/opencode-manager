@@ -472,24 +472,6 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
                     />
                   </div>
 
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="inlinePlanning">Inline Planning</Label>
-                    <Switch
-                      id="inlinePlanning"
-                      checked={displayConfig.compaction?.inlinePlanning ?? true}
-                      onCheckedChange={(checked) => handleNestedChange('compaction', 'inlinePlanning', checked)}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="snapshotToKV">Snapshot to KV</Label>
-                    <Switch
-                      id="snapshotToKV"
-                      checked={displayConfig.compaction?.snapshotToKV ?? true}
-                      onCheckedChange={(checked) => handleNestedChange('compaction', 'snapshotToKV', checked)}
-                    />
-                  </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="maxContextTokens">Max Context Tokens</Label>
                     <Input

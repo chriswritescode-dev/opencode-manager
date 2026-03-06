@@ -97,20 +97,6 @@ export function initializeDatabase(dataDir: string): Database {
   db.run(`CREATE INDEX IF NOT EXISTS idx_memories_project_id ON memories(project_id)`)
   db.run(`CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)`)
 
-  db.run(`
-    CREATE TABLE IF NOT EXISTS session_state (
-      key TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL,
-      data TEXT NOT NULL,
-      expires_at INTEGER,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
-    )
-  `)
-
-  db.run(`CREATE INDEX IF NOT EXISTS idx_session_state_project_id ON session_state(project_id)`)
-  db.run(`CREATE INDEX IF NOT EXISTS idx_session_state_expires_at ON session_state(expires_at)`)
-
   runMigrations(db)
 
   db.run(`

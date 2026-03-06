@@ -4,7 +4,6 @@ interface CleanupOptions {
   olderThan?: number
   ids?: number[]
   scope?: MemoryScope
-  sessions?: boolean
   all?: boolean
   dryRun?: boolean
   force?: boolean
@@ -40,8 +39,6 @@ function parseArgs(args: string[]): CleanupOptions {
         process.exit(1)
       }
       options.scope = scope
-    } else if (arg === '--sessions') {
-      options.sessions = true
     } else if (arg === '--all') {
       options.all = true
     } else if (arg === '--dry-run') {
@@ -78,7 +75,6 @@ Options:
   --older-than <days>   Delete memories older than N days
   --ids <id,id,...>     Delete specific memory IDs
   --scope <scope>       Filter by scope (convention, decision, context)
-  --sessions            Clean up session states instead of memories
   --all                 Delete all memories for the project (requires --project)
   --dry-run             Preview what would be deleted without deleting
   --force               Skip confirmation prompt
@@ -97,8 +93,8 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
     process.exit(0)
   }
 
-  if (!options.olderThan && !options.ids && !options.sessions && !options.all) {
-    console.error('At least one filter must be provided: --older-than, --ids, --sessions, or --all')
+  if (!options.olderThan && !options.ids && !options.all) {
+    console.error('At least one filter must be provided: --older-than, --ids, or --all')
     help()
     process.exit(1)
   }
@@ -116,11 +112,7 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
   const db = openDatabase(options.dbPath || globalOpts.dbPath)
 
   try {
-    if (options.sessions) {
-      runSessionCleanup(db, options)
-    } else {
-      runMemoryCleanup(db, options)
-    }
+    runMemoryCleanup(db, options)
   } finally {
     db.close()
   }
@@ -205,73 +197,4 @@ async function runMemoryCleanup(db: ReturnType<typeof openDatabase>, options: Cl
 
   console.log(`Deleted ${rows.length} memories. ${remainingCount.count} remaining.`)
   console.log("Note: Run 'memory-health reindex' in OpenCode to clean up orphaned embeddings.")
-}
-
-async function runSessionCleanup(db: ReturnType<typeof openDatabase>, options: CleanupOptions): Promise<void> {
-  const projectId = options.projectId!
-  const nameMap = resolveProjectNames()
-  let query = 'SELECT key, project_id, expires_at, created_at, updated_at FROM session_state WHERE project_id = ?'
-  const params: (string | number)[] = [projectId]
-
-  if (options.olderThan) {
-    const cutoffTime = Date.now() - options.olderThan * 24 * 60 * 60 * 1000
-    query += ' AND created_at < ?'
-    params.push(cutoffTime)
-  }
-
-  if (options.all) {
-    query = 'SELECT key, project_id, expires_at, created_at, updated_at FROM session_state WHERE project_id = ?'
-    params.length = 0
-    params.push(projectId)
-  }
-
-  const rows = db.prepare(query).all(...params) as Array<{
-    key: string
-    project_id: string
-    expires_at: number | null
-    created_at: number
-    updated_at: number
-  }>
-
-  if (rows.length === 0) {
-    console.log('No session states found to delete.')
-    return
-  }
-
-  console.log('')
-  console.log(`Found ${rows.length} session states to delete:`)
-  console.log('  KEY                                    PROJECT        CREATED      EXPIRED')
-
-  const displayRows = rows.slice(0, 20)
-  for (const row of displayRows) {
-    const key = truncate(row.key, 38).padEnd(40)
-    const project = displayProjectId(row.project_id, nameMap).padEnd(14)
-    const created = formatDate(row.created_at)
-    const expired = row.expires_at ? formatDate(row.expires_at) : '-'
-    console.log(`  ${key}  ${project}  ${created}  ${expired}`)
-  }
-
-  if (rows.length > 20) {
-    console.log(`  ... and ${rows.length - 20} more`)
-  }
-
-  console.log('')
-
-  if (options.dryRun) {
-    console.log('Dry run - no session states deleted.')
-    return
-  }
-
-  const shouldProceed = options.force || (await confirm(`Delete ${rows.length} session states`))
-
-  if (!shouldProceed) {
-    console.log('Cancelled.')
-    return
-  }
-
-  const keysToDelete = rows.map((r) => r.key)
-  const deleteQuery = `DELETE FROM session_state WHERE key IN (${keysToDelete.map(() => '?').join(',')})`
-  db.prepare(deleteQuery).run(...keysToDelete)
-
-  console.log(`Deleted ${rows.length} session states.`)
 }

@@ -1,8 +1,7 @@
 import { describe, test, expect, beforeEach } from 'bun:test'
 import { createSessionHooks } from '../src/hooks/session'
 import type { MemoryService } from '../src/services/memory'
-import type { SessionStateService } from '../src/services/session-state'
-import type { Logger, Memory, MemoryScope, PlanningState } from '../src/types'
+import type { Logger, Memory, MemoryScope } from '../src/types'
 import type { PluginInput } from '@opencode-ai/plugin'
 
 const TEST_PROJECT_ID = 'test-project-id'
@@ -10,19 +9,8 @@ const TEST_PROJECT_ID = 'test-project-id'
 const mockLogger: Logger = {
   log: () => {},
   error: () => {},
+  debug: () => {},
 }
-
-const mockSessionStateService = {
-  getPlanningState: (_sessionId: string, _projectId: string) => null,
-  getCompactionSnapshot: (_sessionId: string, _projectId: string) => null,
-  setCompactionSnapshot: () => {},
-} as unknown as SessionStateService
-
-const createMockSessionStateServiceWithPlanning = (planningState: PlanningState | null): SessionStateService => ({
-  getPlanningState: (_sessionId: string, _projectId: string) => planningState,
-  getCompactionSnapshot: (_sessionId: string, _projectId: string) => null,
-  setCompactionSnapshot: () => {},
-} as unknown as SessionStateService)
 
 const mockPromptAsync = async () => {}
 
@@ -110,7 +98,7 @@ const mockMemories: Memory[] = [
 describe('SessionHooks', () => {
   test('Session compacting hook includes memory sections in context', async () => {
     const memoryService = createMockMemoryService(mockMemories)
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, mockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, mockPluginInput)
 
     const input = { sessionID: 'test-session' }
     const output = { context: [] as string[] }
@@ -126,7 +114,7 @@ describe('SessionHooks', () => {
 
   test('Session compacting hook does nothing when no memories', async () => {
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, mockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, mockPluginInput)
 
     const input = { sessionID: 'test-session' }
     const output = { context: [] as string[] }
@@ -138,7 +126,7 @@ describe('SessionHooks', () => {
 
   test('Session tracks initialized sessions', async () => {
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, mockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, mockPluginInput)
 
     const input = { sessionID: 'test-session-1' }
     const output = {}
@@ -151,7 +139,7 @@ describe('SessionHooks', () => {
 
   test('Session event handler logs session.compacted event', async () => {
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, mockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, mockPluginInput)
 
     const input = {
       event: {
@@ -194,7 +182,7 @@ describe('SessionHooks', () => {
     } as unknown as PluginInput
 
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, customMockPluginInput)
 
     await hooks.onEvent({
       event: { type: 'session.compacted', properties: { sessionId: 'test-session-123' } },
@@ -210,124 +198,8 @@ describe('SessionHooks', () => {
     expect(subtask.agent).toBe('Memory')
     expect(subtask.description).toBe('Memory extraction after compaction')
     expect(subtask.prompt).toContain('Compaction summary content')
-    expect(subtask.prompt).toContain('sessionID "test-session-123"')
     expect(subtask.prompt).toContain('active work in progress')
     expect(call.body.parts.length).toBe(1)
-  })
-
-  test('session.compacted includes planning state in subtask prompt when available', async () => {
-    let promptCall: unknown = null
-
-    const planningState: PlanningState = {
-      objective: 'Refactor memory extraction flow',
-      current: 'Updating buildSubtaskPrompt to accept planning state',
-      next: 'Run tests and verify behavior',
-      phases: [
-        { title: 'Update buildSubtaskPrompt', status: 'completed', notes: 'Added planningState parameter' },
-        { title: 'Update runPostCompactionFlow', status: 'in_progress', notes: 'Fetching from KV store' },
-        { title: 'Add tests', status: 'pending' },
-      ],
-      findings: ['SubtaskPart keeps session busy'],
-      errors: [],
-    }
-
-    const customMockPluginInput: PluginInput = {
-      client: {
-        session: {
-          messages: async () => ({
-            data: [
-              { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Compaction summary here' }] },
-            ],
-          }),
-          create: async () => ({ data: { id: 'unused' } }),
-          prompt: async (call: unknown) => {
-            promptCall = call
-            return { data: { parts: [{ type: 'text', text: 'Done' }] } }
-          },
-          promptAsync: async () => {},
-        },
-        app: {
-          log: () => {},
-        },
-      },
-      project: { id: TEST_PROJECT_ID, worktree: '/test' },
-      directory: '/test',
-      worktree: '/test',
-      serverUrl: new URL('http://localhost:5551'),
-    } as unknown as PluginInput
-
-    const memoryService = createMockMemoryService([])
-    const sessionStateWithPlanning = createMockSessionStateServiceWithPlanning(planningState)
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, sessionStateWithPlanning, mockLogger, customMockPluginInput)
-
-    await hooks.onEvent({
-      event: { type: 'session.compacted', properties: { sessionId: 'test-session-planning' } },
-    })
-    await new Promise(resolve => setTimeout(resolve, 50))
-
-    expect(promptCall).not.toBeNull()
-    const call = promptCall as any
-    const subtask = call.body.parts[0]
-
-    expect(subtask.prompt).toContain('Current Planning State')
-    expect(subtask.prompt).toContain('Refactor memory extraction flow')
-    expect(subtask.prompt).toContain('Updating buildSubtaskPrompt')
-    expect(subtask.prompt).toContain('[x] Update buildSubtaskPrompt')
-    expect(subtask.prompt).toContain('[~] Update runPostCompactionFlow')
-  })
-
-  test('session.compacted with active planning includes resume instruction', async () => {
-    let promptCall: unknown = null
-
-    const planningState: PlanningState = {
-      objective: 'Complete the refactor',
-      current: 'Running tests',
-      next: 'Commit changes',
-      phases: [
-        { title: 'Phase 1', status: 'completed' },
-        { title: 'Phase 2', status: 'in_progress', notes: 'Almost done' },
-      ],
-    }
-
-    const customMockPluginInput: PluginInput = {
-      client: {
-        session: {
-          messages: async () => ({
-            data: [
-              { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'Summary' }] },
-            ],
-          }),
-          create: async () => ({ data: { id: 'unused' } }),
-          prompt: async (call: unknown) => {
-            promptCall = call
-            return { data: { parts: [{ type: 'text', text: 'Done' }] } }
-          },
-          promptAsync: async () => {},
-        },
-        app: {
-          log: () => {},
-        },
-      },
-      project: { id: TEST_PROJECT_ID, worktree: '/test' },
-      directory: '/test',
-      worktree: '/test',
-      serverUrl: new URL('http://localhost:5551'),
-    } as unknown as PluginInput
-
-    const memoryService = createMockMemoryService([])
-    const sessionStateWithPlanning = createMockSessionStateServiceWithPlanning(planningState)
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, sessionStateWithPlanning, mockLogger, customMockPluginInput)
-
-    await hooks.onEvent({
-      event: { type: 'session.compacted', properties: { sessionId: 'test-session-active' } },
-    })
-    await new Promise(resolve => setTimeout(resolve, 50))
-
-    expect(promptCall).not.toBeNull()
-    const call = promptCall as any
-    expect(call.path.id).toBe('test-session-active')
-    expect(call.body.parts[0]?.type).toBe('subtask')
-    expect(call.body.parts[0]?.prompt).toContain('continue where it left off')
   })
 
   test('session.compacted with missing sessionId does NOT trigger flow', async () => {
@@ -355,7 +227,7 @@ describe('SessionHooks', () => {
     } as unknown as PluginInput
 
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, customMockPluginInput)
 
     await hooks.onEvent({
       event: { type: 'session.compacted', properties: {} },
@@ -394,7 +266,7 @@ describe('SessionHooks', () => {
     } as unknown as PluginInput
 
     const memoryService = createMockMemoryService([])
-    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockSessionStateService, mockLogger, customMockPluginInput)
+    const hooks = createSessionHooks(TEST_PROJECT_ID, memoryService, mockLogger, customMockPluginInput)
 
     await hooks.onEvent({
       event: { type: 'session.compacted', properties: { sessionId: 'test-no-summary' } },

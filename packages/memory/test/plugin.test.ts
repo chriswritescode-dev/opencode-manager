@@ -476,8 +476,6 @@ describe('messages.transform hook', () => {
     const text = userMsg.parts[1].text as string
     expect(text).toContain('system-reminder')
     expect(text).toContain('MUST NOT make any file edits')
-    expect(text).not.toContain('memory-planning-update')
-    expect(text).not.toContain('memory-planning-search')
   })
 
   test('does NOT inject for non-Architect agents', async () => {

@@ -76,38 +76,9 @@ export interface ListMemoriesFilter {
   offset?: number
 }
 
-export interface SessionState {
-  key: string
-  projectId: string
-  data: unknown
-  expiresAt: number | null
-  createdAt: number
-  updatedAt: number
-}
-
-export interface PlanningState {
-  objective?: string
-  current?: string
-  next?: string
-  phases?: Array<{ title: string; status: string; notes?: string }>
-  findings?: string[]
-  errors?: string[]
-  active?: boolean
-}
-
-export interface PreCompactionSnapshot {
-  timestamp: string
-  sessionId: string
-  planningState?: PlanningState
-  branch?: string
-  activeFiles?: string[]
-}
-
 export interface CompactionConfig {
   customPrompt?: boolean
-  inlinePlanning?: boolean
   maxContextTokens?: number
-  snapshotToKV?: boolean
 }
 
 export interface MemoryInjectionConfig {

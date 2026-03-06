@@ -1,10 +1,8 @@
-import type { Logger, PlanningState, PreCompactionSnapshot, CompactionConfig } from '../types'
+import type { Logger, CompactionConfig } from '../types'
 import type { MemoryService } from '../services/memory'
-import type { SessionStateService } from '../services/session-state'
 import type { PluginInput } from '@opencode-ai/plugin'
 import {
   buildCustomCompactionPrompt,
-  formatPlanningState,
   formatCompactionDiagnostics,
   estimateTokens,
   trimToTokenBudget,
@@ -33,7 +31,6 @@ interface EventInput {
 
 interface CompactingInput {
   sessionID: string
-  branch?: string
 }
 
 interface CompactingOutput {
@@ -53,17 +50,11 @@ function formatEventProperties(props?: Record<string, unknown>): string {
 }
 
 function buildSubtaskPrompt(
-  sessionId: string,
   compactionSummary: string,
-  planningState: PlanningState | null
 ): string {
-  const planningSection = planningState
-    ? `## Current Planning State\n\n${formatPlanningState(planningState) ?? '(no details)'}\n\n---\n`
-    : ''
-
   return `Review the following and extract any project knowledge worth preserving across sessions.
 
-${planningSection}## Compaction Summary
+## Compaction Summary
 
 ${compactionSummary}
 
@@ -74,26 +65,21 @@ For each item found, store it with the appropriate scope:
 - decision: architectural choices with their rationale
 - context: project structure, key file locations, domain knowledge, known issues
 
-Also extract any planning state (phases, objectives, progress, blockers). If found, use memory-planning-update with sessionID "${sessionId}" to store it.
-
 Be selective — only store knowledge useful in future sessions. Check for duplicates before writing (use memory-read to search first). 
 
 End your response with:
 1. A brief summary of what was stored
-2. Whether there was active work in progress (in-progress todos, pending tasks, or incomplete planning phases). If so, tell the main agent to review the planning state and todo list and continue where it left off.`
+2. Whether there was active work in progress (in-progress todos or pending tasks). If so, tell the main agent to review the todo list and continue where it left off.`
 }
 
 const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   customPrompt: true,
-  inlinePlanning: true,
   maxContextTokens: 4000,
-  snapshotToKV: true,
 }
 
 export function createSessionHooks(
   projectId: string,
   memoryService: MemoryService,
-  sessionStateService: SessionStateService,
   logger: Logger,
   ctx: PluginInput,
   config?: CompactionConfig
@@ -119,11 +105,6 @@ export function createSessionHooks(
 
     logger.log(`Post-compaction: fetched compaction summary (${compactionSummary.length} chars)`)
 
-    const planningState = sessionStateService.getPlanningState(sessionId, projectId)
-    if (planningState) {
-      logger.log(`Post-compaction: fetched planning state for session ${sessionId}`)
-    }
-
     await ctx.client.session.prompt({
       path: { id: sessionId },
       body: {
@@ -132,7 +113,7 @@ export function createSessionHooks(
             type: 'subtask',
             agent: 'Memory',
             description: 'Memory extraction after compaction',
-            prompt: buildSubtaskPrompt(sessionId, compactionSummary, planningState),
+            prompt: buildSubtaskPrompt(compactionSummary),
           },
         ],
       },
@@ -172,45 +153,11 @@ export function createSessionHooks(
       })
     },
     async onCompacting(input: CompactingInput, output: CompactingOutput) {
-      const { sessionID: sessionId, branch } = input
+      const { sessionID: sessionId } = input
       logger.log(`Compacting hook fired for project ${projectId}, session ${sessionId}`)
 
       try {
         const sections: string[] = []
-        let totalTokens = 0
-
-        let planningState: PlanningState | null = null
-        if (compactionConfig.inlinePlanning) {
-          planningState = sessionStateService.getPlanningState(sessionId, projectId)
-          if (planningState) {
-            const planningText = formatPlanningState(planningState)
-            if (planningText) {
-              sections.push(`## Planning State\n${planningText}`)
-              totalTokens += estimateTokens(planningText)
-            }
-            logger.log(`Compacting: fetched planning state for session ${sessionId}`)
-          }
-        }
-
-        if (compactionConfig.snapshotToKV) {
-          const priorSnapshot = sessionStateService.getCompactionSnapshot(sessionId, projectId)
-          if (priorSnapshot) {
-            const snapshotParts: string[] = []
-            snapshotParts.push(`Last compaction: ${new Date(priorSnapshot.timestamp).toLocaleString()}`)
-            if (priorSnapshot.branch) {
-              snapshotParts.push(`branch: ${priorSnapshot.branch}`)
-            }
-            if (priorSnapshot.planningState) {
-              const priorPlanningText = formatPlanningState(priorSnapshot.planningState)
-              if (priorPlanningText) {
-                snapshotParts.push(`\n### Prior Planning State:\n${priorPlanningText}`)
-              }
-            }
-            sections.push(`## Prior Session Context\n${snapshotParts.join('\n')}`)
-            totalTokens += estimateTokens(snapshotParts.join('\n'))
-            logger.log(`Compacting: fetched prior snapshot for session ${sessionId}`)
-          }
-        }
 
         const [convMemories, decMemories] = await Promise.all([
           memoryService.listByProject(projectId, { scope: 'convention', limit: 10 }),
@@ -234,7 +181,7 @@ export function createSessionHooks(
         const maxTokens = compactionConfig.maxContextTokens ?? 4000
 
         let trimmedSections = [...sections]
-        let currentTokens = totalTokens
+        let currentTokens = 0
 
         for (let i = trimmedSections.length - 1; i >= 0; i--) {
           const sectionTokens = estimateTokens(trimmedSections[i]!)
@@ -257,23 +204,7 @@ export function createSessionHooks(
           logger.log(`Compacting: set custom compaction prompt`)
         }
 
-        if (compactionConfig.snapshotToKV) {
-          try {
-            const snapshot: PreCompactionSnapshot = {
-              timestamp: new Date().toISOString(),
-              sessionId,
-              planningState: planningState ?? undefined,
-              branch,
-            }
-            sessionStateService.setCompactionSnapshot(sessionId, projectId, snapshot)
-            logger.log(`Compacting: stored pre-compaction snapshot`)
-          } catch (error) {
-            logger.error(`Failed to store pre-compaction snapshot: ${error}`)
-          }
-        }
-
         const diagnostics = formatCompactionDiagnostics({
-          planningPhases: planningState?.phases?.length ?? 0,
           conventions: convMemories.length,
           decisions: decMemories.length,
           tokensInjected: estimateTokens(trimmedSections.join('\n\n')),

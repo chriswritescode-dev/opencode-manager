@@ -14,9 +14,7 @@
   },
   "compaction": {
     "customPrompt": true,
-    "inlinePlanning": true,
-    "maxContextTokens": 4000,
-    "snapshotToKV": true
+    "maxContextTokens": 4000
   },
   "memoryInjection": {
     "enabled": true,

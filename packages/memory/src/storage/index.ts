@@ -2,7 +2,6 @@ export { initializeDatabase, closeDatabase, resolveDataDir, resolveLogPath } fro
 export { createVecService } from './vec'
 export type { VecService, VecSearchResult, TableDimensionsResult } from './vec-types'
 export { createMemoryQuery } from './memory-queries'
-export { createSessionStateQueries } from './session-state-queries'
 export { createMetadataQuery } from './metadata-queries'
 
 export type {
@@ -13,8 +12,5 @@ export type {
   MemorySearchResult,
   MemoryStats,
   ListMemoriesFilter,
-  SessionState,
-  PlanningState,
-  PreCompactionSnapshot,
   CompactionConfig,
 } from '../types'

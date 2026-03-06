@@ -10,12 +10,6 @@ interface ProjectStats {
   newest: number
 }
 
-interface SessionStats {
-  planning: number
-  compaction: number
-  expired: number
-}
-
 function parseArgs(args: string[]): { projectId?: string; dbPath?: string; help?: boolean } {
   const options: { projectId?: string; dbPath?: string; help?: boolean } = {}
   let i = 0
@@ -86,14 +80,6 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
       FROM memories WHERE project_id = ?
     `).get(finalProjectId) as ProjectStats | undefined
 
-    const sessionRows = db.prepare(`
-      SELECT 
-        SUM(CASE WHEN key LIKE 'session:%' THEN 1 ELSE 0 END) as planning,
-        SUM(CASE WHEN key LIKE 'compaction:%' THEN 1 ELSE 0 END) as compaction,
-        SUM(CASE WHEN expires_at IS NOT NULL AND expires_at < ? THEN 1 ELSE 0 END) as expired
-      FROM session_state WHERE project_id = ?
-    `).get(Date.now(), finalProjectId) as SessionStats | undefined
-
     const totalMemories = scopeRows.reduce((sum, row) => sum + row.count, 0)
 
     console.log('')
@@ -116,17 +102,6 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
     if (statsRow && statsRow.oldest) {
       console.log(`  Oldest: ${formatDate(statsRow.oldest)}`)
       console.log(`  Newest: ${formatDate(statsRow.newest)}`)
-    }
-
-    console.log('')
-    console.log('Session State:')
-
-    if (sessionRows) {
-      console.log(`  Planning states: ${sessionRows.planning || 0}`)
-      console.log(`  Compaction snapshots: ${sessionRows.compaction || 0}`)
-      console.log(`  Expired (pending cleanup): ${sessionRows.expired || 0}`)
-    } else {
-      console.log('  None')
     }
 
     console.log('')

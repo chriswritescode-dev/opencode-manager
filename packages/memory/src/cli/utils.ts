@@ -26,15 +26,6 @@ export interface GlobalOptions {
   help?: boolean
 }
 
-export interface SessionState {
-  key: string
-  projectId: string
-  data: string
-  expiresAt: number | null
-  createdAt: number
-  updatedAt: number
-}
-
 export function resolveDefaultDbPath(): string {
   const localPath = join(process.cwd(), '.opencode', 'state', 'opencode', 'memory', 'memory.db')
   if (existsSync(localPath)) {

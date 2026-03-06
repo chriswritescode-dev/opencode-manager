@@ -66,9 +66,7 @@ export type LoggingConfig = z.infer<typeof LoggingConfigSchema>
 
 export const CompactionConfigSchema = z.object({
   customPrompt: z.boolean().optional(),
-  inlinePlanning: z.boolean().optional(),
   maxContextTokens: z.number().optional(),
-  snapshotToKV: z.boolean().optional(),
 })
 export type CompactionConfig = z.infer<typeof CompactionConfigSchema>
 

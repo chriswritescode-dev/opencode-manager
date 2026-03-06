@@ -99,7 +99,7 @@ export function createMemoryInjectionHook(deps: MemoryInjectionDeps): MemoryInje
 
       for (const result of filteredResults) {
         const { memory } = result
-        sections.push(`- [${memory.scope}] ${memory.content}`)
+        sections.push(`- #${memory.id} [${memory.scope}] ${memory.content}`)
       }
 
       sections.push('</project-memory>')
@@ -113,7 +113,7 @@ export function createMemoryInjectionHook(deps: MemoryInjectionDeps): MemoryInje
 
         let currentTokens = estimateTokens('<project-memory>')
         for (const result of filteredResults) {
-          const line = `- [${result.memory.scope}] ${result.memory.content}`
+          const line = `- #${result.memory.id} [${result.memory.scope}] ${result.memory.content}`
           const lineTokens = estimateTokens(line)
 
           if (currentTokens + lineTokens > maxTokens - estimateTokens('</project-memory>')) {

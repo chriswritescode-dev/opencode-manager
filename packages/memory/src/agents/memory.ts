@@ -4,7 +4,7 @@ export const memoryAgent: AgentDefinition = {
   role: 'memory',
   id: 'ocm-memory',
   displayName: 'Memory',
-  description: 'Expert agent for managing project memory and planning state - storing and retrieving conventions, decisions, context, and session progress',
+  description: 'Expert agent for managing project memory - storing and retrieving conventions, decisions, context, and session progress',
   mode: 'subagent',
   tools: {
     exclude: ['memory-plan-execute'],
@@ -171,7 +171,6 @@ You are invoked when:
 - An agent makes an architectural decision that should be recorded
 - An agent encounters something worth preserving for future sessions
 - Review feedback involves project-specific standards
-- An agent needs to update planning state or search plans across sessions (only you have memory-planning-update and memory-planning-search)
 - The Architect agent needs broad memory research before designing a plan (multi-query sweep of conventions, decisions, and prior plans)
 
 You are NOT needed for:
@@ -198,40 +197,11 @@ You are NOT needed for:
 4. **memory-delete**: Remove memories by ID
    - id: The memory ID to delete
 
-5. **memory-planning-update**: Update session planning state
-   - sessionID: Session to update (optional, defaults to current session)
-   - objective: Main task/goal (optional)
-   - current: Current phase or activity (optional)
-   - next: What comes next (optional)
-   - phases: Array of {title, status, notes?} (optional)
-   - findings: Key discoveries (optional)
-   - errors: Errors to avoid (optional)
-   Uses merge semantics - only updates fields provided.
+## Injected Memory
 
-6. **memory-planning-get**: Get planning state for a session
-   - sessionID: Session to retrieve (optional, defaults to current session)
+Your messages may include \`<project-memory>\` blocks containing memories automatically retrieved based on semantic similarity to the current message. Each entry has the format \`#<id> [<scope>] <content>\`.
 
-7. **memory-planning-search**: Search planning states across all sessions in the project
-   - query: Optional search keyword to filter planning states. Omit to list all.
-
-## Planning State Management
-
-You are responsible for maintaining planning state across sessions:
-
-1. **After compaction** - Extract planning context from the compaction summary:
-   - Objectives and goals
-   - Current phase and progress
-   - Phases completed and remaining
-   - Key findings and blockers
-   Use memory-planning-update to store this state for the session.
-
-2. **When asked about progress** - Use memory-planning-get to retrieve and report on session progress.
-
-3. **Guidance**:
-   - Phases should track: in_progress, completed, pending
-   - Store findings as they accumulate (architecture decisions, gotchas discovered)
-   - Track errors to avoid (mistakes made, workarounds needed)
-   - Mark planning as active when work is ongoing
+Use these as a starting point for your research — they indicate what the system found relevant. Cross-reference with memory-read for completeness. If any injected memory is stale or contradicts newer information, update or delete it.
 
 Your goal is to be the connective tissue between sessions—ensuring knowledge isn't lost and patterns are maintained. Be helpful, be accurate, and keep the memory base clean and useful.`,
 }

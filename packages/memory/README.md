@@ -31,12 +31,11 @@ The local embedding model downloads automatically on install. For API-based embe
 - **Semantic Memory Search** - Store and retrieve project memories using vector embeddings
 - **Multiple Memory Scopes** - Categorize memories as convention, decision, or context
 - **Automatic Deduplication** - Prevents duplicates via exact match and semantic similarity detection
-- **Compaction Context Injection** - Injects planning state, conventions, and decisions into session compaction for seamless continuity
+- **Compaction Context Injection** - Injects conventions and decisions into session compaction for seamless continuity
 - **Automatic Memory Injection** - Injects relevant project memories into user messages via semantic search with distance filtering and caching
 - **Bundled Agents** - Ships with Code, Architect, and Memory agents preconfigured for memory-aware workflows
 - **CLI Tools** - Export, import, list, stats, and cleanup commands via `ocm-mem` binary
 - **Dimension Mismatch Detection** - Detects embedding model changes and guides recovery via reindex
-- **Session Planning** - Tracks objectives, phases, findings, and errors across sessions with automatic TTL cleanup
 
 ## Agents
 
@@ -46,12 +45,12 @@ The plugin bundles four agents that integrate with the memory system:
 |-------|----|------|-------------|
 | **Code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @Memory subagent. |
 | **Architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @Memory for broad knowledge retrieval, designs implementation plans, then hands off to Code via `memory-plan-execute`. |
-| **Memory** | `ocm-memory` | subagent | Expert agent for managing project memory and planning state. Handles post-compaction memory extraction, contradiction resolution, planning state updates, and cross-session plan searches. |
+| **Memory** | `ocm-memory` | subagent | Expert agent for managing project memory. Handles post-compaction memory extraction and contradiction resolution. |
 | **Code Review** | `ocm-code-review` | subagent | Read-only code reviewer with access to project memory for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
 
 The Code Review agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
 
-The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which saves planning state and creates a new Code session with the full plan as context. Code and Architect agents delegate `memory-planning-update` and `memory-planning-search` to the Memory subagent.
+The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which creates a new Code session with the full plan as context.
 
 ## Tools
 
@@ -62,11 +61,7 @@ The Architect agent operates in read-only mode (`temperature: 0.0`, all edits de
 | `memory-edit` | Update an existing project memory |
 | `memory-delete` | Delete a project memory by ID |
 | `memory-health` | Health check or full reindex of the memory store |
-| `memory-planning-update` | Update session planning state (phases, objectives, progress) |
-| `memory-planning-get` | Get the current planning state for a session |
-| `memory-plan-execute` | Create a new Code session, save planning state, and send an approved plan as the first prompt |
-
-Planning state differs from memories: it stores temporary session data (objectives, phase progress, findings, errors) with a 7-day TTL, while memories are persisted indefinitely and retrieved via semantic search.
+| `memory-plan-execute` | Create a new Code session and send an approved plan as the first prompt |
 
 ## CLI
 
@@ -121,7 +116,7 @@ ocm-mem import memories.md --project my-project --force
 
 #### list
 
-List all projects with memory and session state counts.
+List all projects with memory counts.
 
 ```bash
 ocm-mem list
@@ -129,7 +124,7 @@ ocm-mem list
 
 #### stats
 
-Show memory statistics for a project (scope breakdown, session state counts).
+Show memory statistics for a project (scope breakdown).
 
 ```bash
 ocm-mem stats
@@ -138,13 +133,12 @@ ocm-mem stats --project my-project
 
 #### cleanup
 
-Delete memories or session states by criteria.
+Delete memories by criteria.
 
 ```bash
 ocm-mem cleanup --older-than 90
 ocm-mem cleanup --ids 1,2,3 --force
 ocm-mem cleanup --scope context --dry-run
-ocm-mem cleanup --sessions --older-than 30
 ocm-mem cleanup --all --project my-project
 ```
 
@@ -153,7 +147,6 @@ ocm-mem cleanup --all --project my-project
 | `--older-than <days>` | Delete memories older than N days |
 | `--ids <id,id,...>` | Delete specific memory IDs |
 | `--scope <scope>` | Filter by scope: `convention`, `decision`, or `context` |
-| `--sessions` | Clean up session states instead of memories |
 | `--all` | Delete all memories for the project |
 | `--dry-run` | Preview what would be deleted without deleting |
 | `--force` | Skip confirmation prompt |
@@ -183,9 +176,7 @@ You can edit this file to customize settings. The file is created only if it doe
   },
   "compaction": {
     "customPrompt": true,
-    "inlinePlanning": true,
-    "maxContextTokens": 4000,
-    "snapshotToKV": true
+    "maxContextTokens": 4000
   },
   "memoryInjection": {
     "enabled": true,
@@ -238,9 +229,7 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 
 #### Compaction
 - `compaction.customPrompt` - Use a custom compaction prompt optimized for session continuity (default: `true`)
-- `compaction.inlinePlanning` - Inject planning state (phases, objectives, progress) into compaction context (default: `true`)
 - `compaction.maxContextTokens` - Token budget for injected memory context with priority-based trimming (default: `4000`)
-- `compaction.snapshotToKV` - Store compaction snapshots in the session KV store for recovery (default: `true`)
 
 #### Memory Injection
 - `memoryInjection.enabled` - Inject relevant project memories into user messages via semantic search (default: `true`)
