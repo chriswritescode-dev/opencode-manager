@@ -1,6 +1,6 @@
 {
   "name": "@opencode-manager/memory",
-  "version": "0.0.10",
+  "version": "0.0.12",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -34,10 +34,10 @@
     "plugin"
   ],
   "license": "MIT",
-  "homepage": "https://github.com/chriswritescode-dev/opencode-manager#readme",
+  "homepage": "https://chriswritescode-dev.github.io/opencode-manager/features/memory/",
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@opencode-ai/plugin": "^1.2.9",
+    "@opencode-ai/plugin": "^1.2.16",
     "sqlite-vec": "0.1.7-alpha.2"
   },
   "optionalDependencies": {

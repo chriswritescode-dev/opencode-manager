@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.12] - 2026-03-05
+
+### Added
+
+- `experimental.chat.messages.transform` hook: automatically injects project conventions and decisions into system prompts for every LLM call, with configurable token budget and caching
+- Skill tool awareness in Code and Architect agent prompts
+- `plan_enter` permission on Code agent for switching to Architect mode
+- `memory-edit` documentation in Memory agent's tool list
+- Agent name logging in all tool handlers via new ToolContext.agent field
+
+### Changed
+
+- Upgraded `@opencode-ai/plugin` from ^1.2.9 to ^1.2.16
+- Renamed deprecated `maxSteps` to `steps` in AgentDefinition and AgentConfig types
+
+### Fixed
+
+- Memory agent tool documentation now lists all 7 available tools (was missing memory-edit)
+
 ## [0.0.9] - 2026-02-27
 
 ### Added
