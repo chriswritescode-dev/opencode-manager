@@ -282,8 +282,8 @@ importers:
         specifier: ^3.8.1
         version: 3.8.1
       '@opencode-ai/plugin':
-        specifier: ^1.2.9
-        version: 1.2.10
+        specifier: ^1.2.16
+        version: 1.2.16
       sqlite-vec:
         specifier: 0.1.7-alpha.2
         version: 0.1.7-alpha.2
@@ -991,11 +991,11 @@ packages:
     resolution: {integrity: sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==}
     engines: {node: '>= 20.19.0'}
 
-  '@opencode-ai/plugin@1.2.10':
-    resolution: {integrity: sha512-Z1BMqNHnD8AGAEb+kUz0b2SOuiODwdQLdCA4aVGTXqkGzhiD44OVxr85MeoJ5AMTnnea9SnJ3jp9GAQ5riXA5g==}
+  '@opencode-ai/plugin@1.2.16':
+    resolution: {integrity: sha512-9Kb7BQIC2P3oKCvI8K3thP5YP0vE7yLvcmBmgyACUIqc3e5UL6U+4umLpTvgQa2eQdjxtOXznuGTNwgcGMHUHg==}
 
-  '@opencode-ai/sdk@1.2.10':
-    resolution: {integrity: sha512-SyXcVqry2hitPVvQtvXOhqsWyFhSycG/+LTLYXrcq8AFmd9FR7dyBSDB3f5Ol6IPkYOegk8P2Eg2kKPNSNiKGw==}
+  '@opencode-ai/sdk@1.2.16':
+    resolution: {integrity: sha512-y9ae9VnCcuog0GaI4DveX1HB6DBoZgGN3EuJVlRFbBCPwhzkls6fCfHSb5+VnTS6Fy0OWFUL28VBCmixL/D+/Q==}
 
   '@peculiar/asn1-android@2.6.0':
     resolution: {integrity: sha512-cBRCKtYPF7vJGN76/yG8VbxRcHLPF3HnkoHhKOZeHpoVtbMYfY9ROKtH3DtYUY9m8uI1Mh47PRhHf2hSK3xcSQ==}
@@ -4940,12 +4940,12 @@ snapshots:
 
   '@noble/hashes@2.0.1': {}
 
-  '@opencode-ai/plugin@1.2.10':
+  '@opencode-ai/plugin@1.2.16':
     dependencies:
-      '@opencode-ai/sdk': 1.2.10
+      '@opencode-ai/sdk': 1.2.16
       zod: 4.1.8
 
-  '@opencode-ai/sdk@1.2.10': {}
+  '@opencode-ai/sdk@1.2.16': {}
 
   '@peculiar/asn1-android@2.6.0':
     dependencies:
