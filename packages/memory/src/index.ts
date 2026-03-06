@@ -341,6 +341,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       logger,
       config: memoryInjectionConfig,
     })
+    const injectedMessageIds = new Set<string>()
 
     const scopeEnum = z.enum(['convention', 'decision', 'context'])
 
@@ -707,7 +708,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       },
       'experimental.chat.messages.transform': async (
         _input: Record<string, never>,
-        output: { messages: Array<{ info: { role: string; agent?: string }; parts: Array<Record<string, unknown>> }> }
+        output: { messages: Array<{ info: { role: string; agent?: string; id?: string }; parts: Array<Record<string, unknown>> }> }
       ) => {
         const messages = output.messages
         let userMessage: typeof messages[number] | undefined
@@ -720,21 +721,34 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
         if (!userMessage) return
 
-        const textParts = userMessage.parts
-          .filter((p) => p.type === 'text' && typeof p.text === 'string')
-          .map((p) => p.text as string)
-        const userText = textParts.join('\n').trim()
+        const messageId = userMessage.info.id
+        const alreadyInjected = messageId ? injectedMessageIds.has(messageId) : false
 
-        if (userText.length > 0) {
-          const memoryInjectionEnabled = config.memoryInjection?.enabled ?? true
-          if (memoryInjectionEnabled) {
-            const injected = await memoryInjection.handler(userText)
-            if (injected) {
-              userMessage.parts.push({
-                type: 'text',
-                text: injected,
-                synthetic: true,
-              })
+        if (!alreadyInjected) {
+          const textParts = userMessage.parts
+            .filter((p) => p.type === 'text' && typeof p.text === 'string')
+            .map((p) => p.text as string)
+          const userText = textParts.join('\n').trim()
+
+          if (userText.length > 0) {
+            const memoryInjectionEnabled = config.memoryInjection?.enabled ?? true
+            if (memoryInjectionEnabled) {
+              const injected = await memoryInjection.handler(userText)
+              if (injected) {
+                userMessage.parts.push({
+                  type: 'text',
+                  text: injected,
+                  synthetic: true,
+                })
+              }
+            }
+          }
+
+          if (messageId) {
+            injectedMessageIds.add(messageId)
+            if (injectedMessageIds.size > 100) {
+              const first = injectedMessageIds.values().next().value
+              if (first) injectedMessageIds.delete(first)
             }
           }
         }

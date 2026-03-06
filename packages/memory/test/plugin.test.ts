@@ -518,4 +518,73 @@ describe('messages.transform hook', () => {
     expect(output.messages[0].parts).toHaveLength(1)
     expect(output.messages[2].parts).toHaveLength(2)
   })
+
+  test('does not double-inject memory for same message id', async () => {
+    const output = {
+      messages: [
+        { info: { role: 'user', id: 'msg-123' }, parts: [{ type: 'text', text: 'tell me about the project' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+    const partsAfterFirst = output.messages[0].parts.length
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+    const partsAfterSecond = output.messages[0].parts.length
+
+    expect(partsAfterSecond).toBe(partsAfterFirst)
+  })
+
+  test('processes messages without id on every call without throwing', async () => {
+    const output = {
+      messages: [
+        { info: { role: 'user' }, parts: [{ type: 'text', text: 'tell me about the project' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output)
+    const partsAfterFirst = output.messages[0].parts.length
+
+    const output2 = {
+      messages: [
+        { info: { role: 'user' }, parts: [{ type: 'text', text: 'tell me more' }] },
+      ],
+    }
+
+    await hooks['experimental.chat.messages.transform']({}, output2)
+    const partsAfterSecond = output2.messages[0].parts.length
+
+    expect(partsAfterFirst).toBeGreaterThanOrEqual(1)
+    expect(partsAfterSecond).toBeGreaterThanOrEqual(1)
+  })
+
+  test('evicts oldest message id after 100 entries', async () => {
+    const firstId = 'msg-evict-0'
+
+    const firstOutput = {
+      messages: [
+        { info: { role: 'user', id: firstId }, parts: [{ type: 'text', text: 'first message' }] },
+      ],
+    }
+    await hooks['experimental.chat.messages.transform']({}, firstOutput)
+    const firstInjectionParts = firstOutput.messages[0].parts.length
+
+    for (let i = 1; i <= 100; i++) {
+      const output = {
+        messages: [
+          { info: { role: 'user', id: `msg-evict-${i}` }, parts: [{ type: 'text', text: `message ${i}` }] },
+        ],
+      }
+      await hooks['experimental.chat.messages.transform']({}, output)
+    }
+
+    const reOutput = {
+      messages: [
+        { info: { role: 'user', id: firstId }, parts: [{ type: 'text', text: 'first message again' }] },
+      ],
+    }
+    await hooks['experimental.chat.messages.transform']({}, reOutput)
+
+    expect(reOutput.messages[0].parts.length).toBe(firstInjectionParts)
+  })
 })

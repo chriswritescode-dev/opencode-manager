@@ -60,14 +60,42 @@ export type EmbeddingConfig = z.infer<typeof EmbeddingConfigSchema>
 export const LoggingConfigSchema = z.object({
   enabled: z.boolean(),
   file: z.string().optional(),
+  debug: z.boolean().optional(),
 })
 export type LoggingConfig = z.infer<typeof LoggingConfigSchema>
+
+export const CompactionConfigSchema = z.object({
+  customPrompt: z.boolean().optional(),
+  inlinePlanning: z.boolean().optional(),
+  maxContextTokens: z.number().optional(),
+  snapshotToKV: z.boolean().optional(),
+})
+export type CompactionConfig = z.infer<typeof CompactionConfigSchema>
+
+export const MemoryInjectionConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  maxResults: z.number().optional(),
+  distanceThreshold: z.number().optional(),
+  maxTokens: z.number().optional(),
+  cacheTtlMs: z.number().optional(),
+  debug: z.boolean().optional(),
+})
+export type MemoryInjectionConfig = z.infer<typeof MemoryInjectionConfigSchema>
+
+export const MessagesTransformConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  debug: z.boolean().optional(),
+})
+export type MessagesTransformConfig = z.infer<typeof MessagesTransformConfigSchema>
 
 export const PluginConfigSchema = z.object({
   dataDir: z.string().optional(),
   embedding: EmbeddingConfigSchema,
   dedupThreshold: z.number().min(0).max(1).default(0.25),
   logging: LoggingConfigSchema.optional(),
+  compaction: CompactionConfigSchema.optional(),
+  memoryInjection: MemoryInjectionConfigSchema.optional(),
+  messagesTransform: MessagesTransformConfigSchema.optional(),
   executionModel: z.string().optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>

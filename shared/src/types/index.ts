@@ -86,5 +86,8 @@ export type {
   EmbeddingProviderType,
   EmbeddingConfig,
   LoggingConfig,
+  CompactionConfig,
+  MemoryInjectionConfig,
+  MessagesTransformConfig,
   PluginConfig,
 } from '../schemas/memory'

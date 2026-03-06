@@ -26,21 +26,41 @@ function checkFileSize(filePath: string): void {
 }
 
 export function createLogger(config: LoggingConfig) {
-  if (!config.enabled) {
+  const isEnabled = config.enabled
+  const isDebug = config.debug ?? false
+
+  if (!isEnabled) {
     return {
       log: (_message: string, ..._args: unknown[]): void => {},
       error: (_message: string, ..._args: unknown[]): void => {},
+      debug: (_message: string, ..._args: unknown[]): void => {},
     }
   }
 
   const filePath = config.file
   ensureLogDir(filePath)
 
+  function formatArg(arg: unknown): string {
+    if (arg === null) return 'null'
+    if (arg === undefined) return 'undefined'
+    if (arg instanceof Error) {
+      return arg.stack ?? `${arg.name}: ${arg.message}`
+    }
+    if (typeof arg === 'object') {
+      try {
+        return JSON.stringify(arg)
+      } catch {
+        return String(arg)
+      }
+    }
+    return String(arg)
+  }
+
   function write(level: string, message: string, args: unknown[]): void {
     checkFileSize(filePath)
 
     const timestamp = new Date().toISOString()
-    const formattedArgs = args.length > 0 ? ' ' + args.map(a => String(a)).join(' ') : ''
+    const formattedArgs = args.length > 0 ? ' ' + args.map(formatArg).join(' ') : ''
     const line = `${timestamp} ${level} ${PREFIX} ${message}${formattedArgs}\n`
 
     try {
@@ -57,5 +77,10 @@ export function createLogger(config: LoggingConfig) {
     error: (message: string, ...args: unknown[]): void => {
       write('ERROR', message, args)
     },
+    debug: isDebug
+      ? (message: string, ...args: unknown[]): void => {
+          write('DEBUG', message, args)
+        }
+      : (_message: string, ..._args: unknown[]): void => {},
   }
 }

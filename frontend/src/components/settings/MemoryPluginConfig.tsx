@@ -9,7 +9,7 @@ import { getProviders } from '@/api/providers'
 import { useModelStore } from '@/stores/modelStore'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { ChevronDown, ChevronRight, Save, Loader2, Database, Brain, AlertCircle, RefreshCw, Play, Cpu } from 'lucide-react'
+import { ChevronDown, ChevronRight, Save, Loader2, Database, Brain, AlertCircle, RefreshCw, Play, Cpu, FileText, Layers, Syringe, MessageSquare } from 'lucide-react'
 import { getPluginConfig, updatePluginConfig, reindexMemories, testEmbeddingConfig } from '@/api/memory'
 import { FetchError } from '@/api/fetchWrapper'
 import { settingsApi } from '@/api/settings'
@@ -104,14 +104,15 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
 
   const handleProviderChange = (provider: EmbeddingProviderType) => {
     if (!localConfig && !config) return
+    const current = localConfig ?? config!
     const defaults = DEFAULT_CONFIGS[provider]
     setLocalConfig({
+      ...current,
       embedding: {
         provider,
         model: defaults.model,
         dimensions: defaults.dimensions,
       },
-      dedupThreshold: config?.dedupThreshold ?? 0.25,
     })
   }
 
@@ -183,6 +184,22 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
       ...(localConfig ?? config!),
       embedding: {
         ...(localConfig?.embedding ?? config!.embedding),
+        [field]: value === '' ? undefined : value,
+      },
+    })
+  }
+
+  const handleNestedChange = <K extends 'logging' | 'compaction' | 'memoryInjection' | 'messagesTransform'>(
+    section: K,
+    field: string,
+    value: string | number | boolean | undefined,
+  ) => {
+    if (!localConfig && !config) return
+    const current = localConfig ?? config!
+    setLocalConfig({
+      ...current,
+      [section]: {
+        ...current[section],
         [field]: value === '' ? undefined : value,
       },
     })
@@ -400,6 +417,165 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
                     <p className="text-xs text-muted-foreground">
                       Model used when executing plans from the Architect. Format: provider/model. Leave empty to use the current session's model.
                     </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 border-t pt-4">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <FileText className="h-4 w-4 text-yellow-500" />
+                    <span className="text-sm font-medium">Logging</span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="loggingEnabled">Enabled</Label>
+                    <Switch
+                      id="loggingEnabled"
+                      checked={displayConfig.logging?.enabled ?? false}
+                      onCheckedChange={(checked) => handleNestedChange('logging', 'enabled', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="loggingDebug">Debug</Label>
+                    <Switch
+                      id="loggingDebug"
+                      checked={displayConfig.logging?.debug ?? false}
+                      onCheckedChange={(checked) => handleNestedChange('logging', 'debug', checked)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="loggingFile">Log File</Label>
+                    <Input
+                      id="loggingFile"
+                      value={displayConfig.logging?.file ?? ''}
+                      onChange={(e) => handleNestedChange('logging', 'file', e.target.value)}
+                      placeholder="Path to log file"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Layers className="h-4 w-4 text-cyan-500" />
+                    <span className="text-sm font-medium">Compaction</span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="customPrompt">Custom Prompt</Label>
+                    <Switch
+                      id="customPrompt"
+                      checked={displayConfig.compaction?.customPrompt ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('compaction', 'customPrompt', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="inlinePlanning">Inline Planning</Label>
+                    <Switch
+                      id="inlinePlanning"
+                      checked={displayConfig.compaction?.inlinePlanning ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('compaction', 'inlinePlanning', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="snapshotToKV">Snapshot to KV</Label>
+                    <Switch
+                      id="snapshotToKV"
+                      checked={displayConfig.compaction?.snapshotToKV ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('compaction', 'snapshotToKV', checked)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="maxContextTokens">Max Context Tokens</Label>
+                    <Input
+                      id="maxContextTokens"
+                      type="number"
+                      value={displayConfig.compaction?.maxContextTokens ?? 4000}
+                      onChange={(e) => handleNestedChange('compaction', 'maxContextTokens', e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                      placeholder="4000"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2 border-t pt-4">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Syringe className="h-4 w-4 text-pink-500" />
+                    <span className="text-sm font-medium">Memory Injection</span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="injectionEnabled">Enabled</Label>
+                    <Switch
+                      id="injectionEnabled"
+                      checked={displayConfig.memoryInjection?.enabled ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('memoryInjection', 'enabled', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="injectionDebug">Debug</Label>
+                    <Switch
+                      id="injectionDebug"
+                      checked={displayConfig.memoryInjection?.debug ?? false}
+                      onCheckedChange={(checked) => handleNestedChange('memoryInjection', 'debug', checked)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="injectionMaxTokens">Max Tokens</Label>
+                    <Input
+                      id="injectionMaxTokens"
+                      type="number"
+                      value={displayConfig.memoryInjection?.maxTokens ?? 2000}
+                      onChange={(e) => handleNestedChange('memoryInjection', 'maxTokens', e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                      placeholder="2000"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="cacheTtlMs">Cache TTL (ms)</Label>
+                    <Input
+                      id="cacheTtlMs"
+                      type="number"
+                      value={displayConfig.memoryInjection?.cacheTtlMs ?? 30000}
+                      onChange={(e) => handleNestedChange('memoryInjection', 'cacheTtlMs', e.target.value ? parseInt(e.target.value, 10) : undefined)}
+                      placeholder="30000"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      How long injected memories are cached before re-querying
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <MessageSquare className="h-4 w-4 text-teal-500" />
+                    <span className="text-sm font-medium">Messages Transform</span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="transformEnabled">Enabled</Label>
+                    <Switch
+                      id="transformEnabled"
+                      checked={displayConfig.messagesTransform?.enabled ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('messagesTransform', 'enabled', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="transformDebug">Debug</Label>
+                    <Switch
+                      id="transformDebug"
+                      checked={displayConfig.messagesTransform?.debug ?? false}
+                      onCheckedChange={(checked) => handleNestedChange('messagesTransform', 'debug', checked)}
+                    />
                   </div>
                 </div>
               </div>
