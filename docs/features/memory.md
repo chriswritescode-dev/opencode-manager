@@ -50,17 +50,27 @@ The file is only created if it does not already exist. The config is validated o
     "baseUrl": "",
     "apiKey": ""
   },
-  "dataDir": "~/.local/share/opencode/memory",
   "dedupThreshold": 0.25,
   "logging": {
     "enabled": false,
-    "file": "~/.local/share/opencode/memory/logs/memory.log"
+    "debug": false,
+    "file": ""
   },
   "compaction": {
     "customPrompt": true,
     "inlinePlanning": true,
     "maxContextTokens": 4000,
     "snapshotToKV": true
+  },
+  "memoryInjection": {
+    "enabled": true,
+    "debug": false,
+    "maxTokens": 2000,
+    "cacheTtlMs": 30000
+  },
+  "messagesTransform": {
+    "enabled": true,
+    "debug": false
   },
   "executionModel": ""
 }
@@ -98,14 +108,22 @@ Set `baseUrl` to point at any OpenAI-compatible self-hosted service (vLLM, Ollam
 | `embedding.apiKey` | API key for OpenAI/Voyage | — |
 | `embedding.baseUrl` | Custom endpoint for self-hosted services | — |
 | `embedding.serverGracePeriod` | Time (ms) before idle embedding server shuts down | `30000` |
-| `dataDir` | SQLite database and embedding server directory | `~/.local/share/opencode/memory` |
 | `dedupThreshold` | Similarity threshold for deduplication (0.05–0.40) | `0.25` |
 | `logging.enabled` | Write logs to file | `false` |
-| `logging.file` | Log file path (10MB limit, auto-rotated) | `…/logs/memory.log` |
+| `logging.debug` | Enable debug-level log output | `false` |
+| `logging.file` | Log file path (resolves to `~/.local/share/opencode/memory/logs/memory.log` when empty, 10MB limit, auto-rotated) | — |
 | `compaction.customPrompt` | Use optimized compaction prompt for session continuity | `true` |
 | `compaction.inlinePlanning` | Include planning state in compaction context | `true` |
 | `compaction.maxContextTokens` | Max tokens for injected memory context | `4000` |
 | `compaction.snapshotToKV` | Save pre-compaction snapshot for recovery | `true` |
+| `memoryInjection.enabled` | Inject relevant memories into user messages via semantic search | `true` |
+| `memoryInjection.debug` | Enable debug logging for memory injection | `false` |
+| `memoryInjection.maxResults` | Max vector search results to retrieve | `5` |
+| `memoryInjection.distanceThreshold` | Max vector distance for relevance filtering (lower = stricter) | `0.5` |
+| `memoryInjection.maxTokens` | Token budget for injected `<project-memory>` block | `2000` |
+| `memoryInjection.cacheTtlMs` | Cache TTL (ms) for identical query results | `30000` |
+| `messagesTransform.enabled` | Enable the messages transform hook (memory injection + Architect enforcement) | `true` |
+| `messagesTransform.debug` | Enable debug logging for messages transform | `false` |
 | `executionModel` | Model override for plan execution sessions (`provider/model`). Falls back to OpenCode's default model. | — |
 
 ---
@@ -386,6 +404,43 @@ The plugin injects active planning state into compaction context so task progres
 
 ---
 
+## Workflows
+
+### Architect → Code
+
+The Architect and Code agents work together in a plan-then-execute pattern. The Architect researches and designs; the Code agent implements.
+
+**Steps:**
+
+1. **Switch to the Architect agent** using the agent selector in the chat header
+2. **Describe your task** — the Architect researches the codebase, checks memory for conventions and decisions, and designs a plan
+3. **Review the plan** — the Architect presents a structured plan with objectives, phases, and decisions for your approval
+4. **Approve the plan** — the Architect calls `memory-plan-execute`, which creates a new Code session and sends the full plan as context
+5. **Switch to the new session** — the Code agent executes the plan phase by phase, updating planning state as it progresses
+
+The Architect operates in read-only mode — it cannot edit files. This separation ensures planning is thorough before any code changes are made.
+
+#### Recommended Model Strategy
+
+Planning requires strong reasoning — use a smart model (e.g., `claude-opus-4-6`) for the Architect session. Code execution is more mechanical — set `executionModel` to a faster, cheaper model (e.g., `claude-haiku-3-5-20241022` or a MiniMax model).
+
+This gives you the best of both worlds: high-quality plans at the reasoning tier, fast execution at a fraction of the cost.
+
+**Configure the execution model** in the memory plugin config (`~/.local/share/opencode/memory/config.json`):
+
+```json
+{
+  "executionModel": "anthropic/claude-haiku-3-5-20241022"
+}
+```
+
+Or set it from the UI: **Settings > Memory Plugin > Execution Model**.
+
+!!! tip "Cost Optimization"
+    With this setup, only the planning phase uses the expensive model. The Code session — which typically consumes far more tokens implementing the plan — runs on the cheaper model. The Architect's plan provides enough structure and detail that the Code agent doesn't need the same level of reasoning capability.
+
+---
+
 ## Agents
 
 The plugin registers four agents that are configured into OpenCode:
@@ -518,12 +573,26 @@ The core compaction hook that fires when a session is about to be compacted. It 
 
 ### experimental.chat.messages.transform
 
-Injects a read-only enforcement reminder into user messages when the Architect agent is active:
+Performs two functions on the message array before each LLM inference call:
 
-1. Scans messages to find the last user message
-2. If the message is addressed to the Architect agent, appends a synthetic `<system-reminder>` part
-3. The reminder instructs the agent that plan mode is active and it must not make file edits or run non-readonly tools
-4. This provides message-level enforcement on top of the agent's `edit: { '*': 'deny' }` permission config
+**Memory Injection** (all agents):
+
+1. Finds the last user message in the message array
+2. Extracts all text parts and runs a semantic vector search against stored project memories
+3. Filters results by `distanceThreshold` — only memories with distance below the threshold are kept
+4. Formats matching memories into a `<project-memory>` block with scope labels (e.g., `[convention]`, `[decision]`)
+5. Trims the block to fit within `maxTokens` and appends it as a synthetic text part to the user message
+6. Uses SHA-256 content-hash caching (`cacheTtlMs`, default 30s) to avoid redundant vector searches across inference steps
+
+The hook fires on every LLM inference step (including tool-use follow-ups), but since OpenCode re-reads messages from the database each iteration, synthetic parts are ephemeral. The cache ensures the vector search only runs once per unique user message within the TTL window.
+
+Memory injection is controlled independently by `memoryInjection.enabled` (default `true`). Architect read-only enforcement is controlled by `messagesTransform.enabled` (default `true`).
+
+**Architect Read-Only Enforcement** (Architect agent only):
+
+1. Checks if the last user message is addressed to the Architect agent
+2. If so, appends a synthetic `<system-reminder>` part enforcing read-only mode
+3. This provides message-level enforcement on top of the agent's `edit: { '*': 'deny' }` permission config
 
 ---
 

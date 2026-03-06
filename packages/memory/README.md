@@ -1,6 +1,30 @@
-# @opencode-manager/memory
+<h1 align="center">@opencode-manager/memory</h1>
 
-Memory management plugin for OpenCode that enables semantic search and persistent storage of project knowledge.
+<p align="center">
+  <strong>Semantic memory and planning plugin for <a href="https://opencode.ai">OpenCode</a> AI agents</strong>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@opencode-manager/memory"><img src="https://img.shields.io/npm/v/@opencode-manager/memory" alt="npm" /></a>
+  <a href="https://www.npmjs.com/package/@opencode-manager/memory"><img src="https://img.shields.io/npm/dm/@opencode-manager/memory" alt="npm downloads" /></a>
+  <a href="https://github.com/chriswritescode-dev/opencode-manager/blob/main/LICENSE"><img src="https://img.shields.io/github/license/chriswritescode-dev/opencode-manager" alt="License" /></a>
+</p>
+
+## Quick Start
+
+```bash
+pnpm add @opencode-manager/memory
+```
+
+Add to your `opencode.json`:
+
+```json
+{
+  "plugin": ["@opencode-manager/memory"]
+}
+```
+
+The local embedding model downloads automatically on install. For API-based embeddings (OpenAI or Voyage), see [Configuration](#configuration).
 
 ## Features
 
@@ -8,25 +32,11 @@ Memory management plugin for OpenCode that enables semantic search and persisten
 - **Multiple Memory Scopes** - Categorize memories as convention, decision, or context
 - **Automatic Deduplication** - Prevents duplicates via exact match and semantic similarity detection
 - **Compaction Context Injection** - Injects planning state, conventions, and decisions into session compaction for seamless continuity
+- **Automatic Memory Injection** - Injects relevant project memories into user messages via semantic search with distance filtering and caching
 - **Bundled Agents** - Ships with Code, Architect, and Memory agents preconfigured for memory-aware workflows
 - **CLI Tools** - Export, import, list, stats, and cleanup commands via `ocm-mem` binary
 - **Dimension Mismatch Detection** - Detects embedding model changes and guides recovery via reindex
 - **Session Planning** - Tracks objectives, phases, findings, and errors across sessions with automatic TTL cleanup
-
-## Tools
-
-| Tool | Description |
-|------|-------------|
-| `memory-read` | Search and retrieve project memories with semantic search |
-| `memory-write` | Store a new project memory |
-| `memory-edit` | Update an existing project memory |
-| `memory-delete` | Delete a project memory by ID |
-| `memory-health` | Health check or full reindex of the memory store |
-| `memory-planning-update` | Update session planning state (phases, objectives, progress) |
-| `memory-planning-get` | Get the current planning state for a session |
-| `memory-plan-execute` | Create a new Code session, save planning state, and send an approved plan as the first prompt |
-
-Planning state differs from memories: it stores temporary session data (objectives, phase progress, findings, errors) with a 7-day TTL, while memories are persisted indefinitely and retrieved via semantic search.
 
 ## Agents
 
@@ -42,6 +52,21 @@ The plugin bundles four agents that integrate with the memory system:
 The Code Review agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
 
 The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which saves planning state and creates a new Code session with the full plan as context. Code and Architect agents delegate `memory-planning-update` and `memory-planning-search` to the Memory subagent.
+
+## Tools
+
+| Tool | Description |
+|------|-------------|
+| `memory-read` | Search and retrieve project memories with semantic search |
+| `memory-write` | Store a new project memory |
+| `memory-edit` | Update an existing project memory |
+| `memory-delete` | Delete a project memory by ID |
+| `memory-health` | Health check or full reindex of the memory store |
+| `memory-planning-update` | Update session planning state (phases, objectives, progress) |
+| `memory-planning-get` | Get the current planning state for a session |
+| `memory-plan-execute` | Create a new Code session, save planning state, and send an approved plan as the first prompt |
+
+Planning state differs from memories: it stores temporary session data (objectives, phase progress, findings, errors) with a 7-day TTL, while memories are persisted indefinitely and retrieved via semantic search.
 
 ## CLI
 
@@ -133,26 +158,6 @@ ocm-mem cleanup --all --project my-project
 | `--dry-run` | Preview what would be deleted without deleting |
 | `--force` | Skip confirmation prompt |
 
-## Installation
-
-Install the package from npm:
-
-```bash
-npm install @opencode-manager/memory
-# or
-pnpm add @opencode-manager/memory
-```
-
-During installation, the local embedding model (`all-MiniLM-L6-v2`) is downloaded automatically via the `postinstall` script. For API-based embeddings (OpenAI or Voyage), skip the local model and set your provider and API key in the configuration instead.
-
-Then configure opencode to load the plugin. In your `opencode.json`:
-
-```json
-{
-  "plugin": ["@opencode-manager/memory"]
-}
-```
-
 ## Configuration
 
 On first run, the plugin automatically copies the bundled config to your data directory:
@@ -166,19 +171,31 @@ You can edit this file to customize settings. The file is created only if it doe
   "embedding": {
     "provider": "local",
     "model": "all-MiniLM-L6-v2",
-    "dimensions": 384
+    "dimensions": 384,
+    "baseUrl": "",
+    "apiKey": ""
   },
-  "dataDir": "~/.local/share/opencode/memory",
   "dedupThreshold": 0.25,
   "logging": {
     "enabled": false,
-    "file": "~/.local/share/opencode/memory/logs/memory.log"
+    "debug": false,
+    "file": ""
   },
   "compaction": {
     "customPrompt": true,
     "inlinePlanning": true,
     "maxContextTokens": 4000,
     "snapshotToKV": true
+  },
+  "memoryInjection": {
+    "enabled": true,
+    "debug": false,
+    "maxTokens": 2000,
+    "cacheTtlMs": 30000
+  },
+  "messagesTransform": {
+    "enabled": true,
+    "debug": false
   },
   "executionModel": ""
 }
@@ -214,7 +231,8 @@ For API-based embeddings:
 
 #### Logging
 - `logging.enabled` - Enable file logging (default: `false`)
-- `logging.file` - Log file path (default: `"~/.local/share/opencode/memory/logs/memory.log"`)
+- `logging.debug` - Enable debug-level log output (default: `false`)
+- `logging.file` - Log file path. When empty, resolves to `~/.local/share/opencode/memory/logs/memory.log` (default: `""`)
 
 When enabled, logs are written to the specified file with timestamps. The log file has a 10MB size limit with automatic rotation.
 
@@ -224,8 +242,32 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 - `compaction.maxContextTokens` - Token budget for injected memory context with priority-based trimming (default: `4000`)
 - `compaction.snapshotToKV` - Store compaction snapshots in the session KV store for recovery (default: `true`)
 
+#### Memory Injection
+- `memoryInjection.enabled` - Inject relevant project memories into user messages via semantic search (default: `true`)
+- `memoryInjection.debug` - Enable debug logging for memory injection (default: `false`)
+- `memoryInjection.maxResults` - Maximum number of vector search results to retrieve (default: `5`)
+- `memoryInjection.distanceThreshold` - Maximum vector distance for a memory to be considered relevant; lower values are stricter (default: `0.5`)
+- `memoryInjection.maxTokens` - Token budget for the injected `<project-memory>` block (default: `2000`)
+- `memoryInjection.cacheTtlMs` - How long (ms) to cache results for identical queries (default: `30000`)
+
+#### Messages Transform
+- `messagesTransform.enabled` - Enable the messages transform hook that handles memory injection and Architect read-only enforcement (default: `true`)
+- `messagesTransform.debug` - Enable debug logging for messages transform (default: `false`)
+
 #### Execution
-- `executionModel` - Model override for plan execution sessions, format: `provider/model` (e.g. `anthropic/claude-sonnet-4-20250514`). When set, `memory-plan-execute` uses this model for the new Code session. When empty or omitted, OpenCode's default model is used (typically the `model` field from `opencode.json`).
+- `executionModel` - Model override for plan execution sessions, format: `provider/model` (e.g. `anthropic/claude-haiku-3-5-20241022`). When set, `memory-plan-execute` uses this model for the new Code session. When empty or omitted, OpenCode's default model is used (typically the `model` field from `opencode.json`). **Recommended:** Set this to a fast, cheap model (e.g. Haiku or MiniMax) and use a smart model (e.g. Opus) for the Architect session — planning needs reasoning, execution needs speed.
+
+## Architect → Code Workflow
+
+Plan with a smart model, execute with a fast model. The Architect agent researches and designs; the Code agent implements.
+
+Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the Architect session.
+
+See the [full workflow guide](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#architect--code) for setup details.
+
+## Documentation
+
+Full documentation available at [chriswritescode-dev.github.io/opencode-manager/features/memory](https://chriswritescode-dev.github.io/opencode-manager/features/memory/)
 
 ## Development
 
@@ -234,3 +276,7 @@ pnpm build      # Compile TypeScript to dist/
 pnpm test       # Run tests
 pnpm typecheck  # Type check without emitting
 ```
+
+## License
+
+MIT

@@ -58,6 +58,7 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Planning State** - Track objectives, phases, and progress across compactions
 - **Automatic Extraction** - Durable knowledge extracted after session compaction
 - **Compaction Awareness** - Injects project memories and planning state into compaction context
+- **Architect → Code** - Plan with a smart model, execute with a fast model for cost-optimized workflows
 
 [Learn more →](memory.md)
 
