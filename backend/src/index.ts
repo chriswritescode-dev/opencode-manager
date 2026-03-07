@@ -39,6 +39,8 @@ import { createAuthMiddleware } from './auth/middleware'
 import { sseAggregator } from './services/sse-aggregator'
 import { createSessionRoutes } from './routes/sessions'
 import { DockerOrchestrator } from './services/docker-orchestrator'
+import { DevcontainerManager } from './services/devcontainer-manager'
+import { createDevcontainerRoutes } from './routes/devcontainers'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
@@ -83,6 +85,7 @@ import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
+let devcontainerManager: DevcontainerManager
 
 async function ensureDefaultConfigExists(): Promise<void> {
   const settingsService = new SettingsService(db)
@@ -212,6 +215,10 @@ try {
   await dockerOrchestrator.ensureNetwork()
   logger.info('Docker network initialized')
 
+  devcontainerManager = new DevcontainerManager(db)
+  await devcontainerManager.initialize()
+  logger.info('Devcontainer templates initialized')
+
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
@@ -253,6 +260,7 @@ protectedApi.use('/*', requireAuth)
 protectedApi.route('/health', createHealthRoutes(db))
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService))
 protectedApi.route('/sessions', createSessionRoutes(db))
+protectedApi.route('/devcontainers', createDevcontainerRoutes(db, devcontainerManager))
 protectedApi.route('/settings', createSettingsRoutes(db))
 protectedApi.route('/files', createFileRoutes())
 protectedApi.route('/providers', createProvidersRoutes())

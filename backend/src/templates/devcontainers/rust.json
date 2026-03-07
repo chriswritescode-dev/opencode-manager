@@ -1,0 +1,33 @@
+{
+  "name": "Rust",
+  "version": "1.0.0",
+  "description": "Rust development environment with cargo",
+  "build": {
+    "dockerfile": "Dockerfile.nix",
+    "context": ".",
+    "args": {
+      "NIX_PACKAGES": "git gh rustc cargo rust-analyzer ripgrep fd jq"
+    }
+  },
+  "containerEnv": {
+    "RUST_BACKTRACE": "1"
+  },
+  "postCreateCommand": "opencode serve --port 5551 --hostname 0.0.0.0",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "rust-analyzer.checkOnSave.command": "clippy"
+      }
+    }
+  },
+  "metadata": {
+    "tags": ["rust", "cargo"],
+    "author": "opencode-manager",
+    "createdAt": "2025-03-07"
+  }
+}

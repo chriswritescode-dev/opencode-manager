@@ -1,0 +1,20 @@
+{
+  "name": "Minimal",
+  "version": "1.0.0",
+  "description": "Minimal development environment with git only",
+  "build": {
+    "dockerfile": "Dockerfile.nix",
+    "context": ".",
+    "args": {
+      "NIX_PACKAGES": "git curl"
+    }
+  },
+  "containerEnv": {},
+  "postCreateCommand": "opencode serve --port 5551 --hostname 0.0.0.0",
+  "remoteUser": "vscode",
+  "metadata": {
+    "tags": ["minimal", "git"],
+    "author": "opencode-manager",
+    "createdAt": "2025-03-07"
+  }
+}

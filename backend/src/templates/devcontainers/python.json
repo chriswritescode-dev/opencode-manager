@@ -1,0 +1,36 @@
+{
+  "name": "Python",
+  "version": "1.0.0",
+  "description": "Python development environment with pip and common tools",
+  "build": {
+    "dockerfile": "Dockerfile.nix",
+    "context": ".",
+    "args": {
+      "NIX_PACKAGES": "git gh python3 python311Packages.pip ripgrep fd jq"
+    }
+  },
+  "containerEnv": {
+    "PYTHONUNBUFFERED": "1"
+  },
+  "postCreateCommand": "opencode serve --port 5551 --hostname 0.0.0.0",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.linting.enabled": true,
+        "python.linting.pylintEnabled": true,
+        "python.formatting.provider": "black"
+      }
+    }
+  },
+  "metadata": {
+    "tags": ["python", "pip"],
+    "author": "opencode-manager",
+    "createdAt": "2025-03-07"
+  }
+}

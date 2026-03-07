@@ -1,0 +1,35 @@
+{
+  "name": "Node.js",
+  "version": "1.0.0",
+  "description": "Node.js development environment with npm and common tools",
+  "build": {
+    "dockerfile": "Dockerfile.nix",
+    "context": ".",
+    "args": {
+      "NIX_PACKAGES": "git gh nodejs_22 ripgrep fd jq"
+    }
+  },
+  "containerEnv": {
+    "NODE_ENV": "development"
+  },
+  "postCreateCommand": "opencode serve --port 5551 --hostname 0.0.0.0",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      }
+    }
+  },
+  "metadata": {
+    "tags": ["nodejs", "javascript", "typescript"],
+    "author": "opencode-manager",
+    "createdAt": "2025-03-07"
+  }
+}

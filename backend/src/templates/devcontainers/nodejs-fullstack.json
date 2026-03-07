@@ -1,0 +1,38 @@
+{
+  "name": "Node.js Full-Stack",
+  "version": "1.0.0",
+  "description": "Node.js with PostgreSQL and Redis for full-stack development",
+  "build": {
+    "dockerfile": "Dockerfile.nix",
+    "context": ".",
+    "args": {
+      "NIX_PACKAGES": "git gh nodejs_22 postgresql redis ripgrep fd jq"
+    }
+  },
+  "containerEnv": {
+    "NODE_ENV": "development",
+    "DATABASE_URL": "postgresql://localhost:5432/dev"
+  },
+  "postCreateCommand": "opencode serve --port 5551 --hostname 0.0.0.0",
+  "remoteUser": "vscode",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-docker",
+        "prisma.prisma",
+        "ckolkman.vscode-postgres"
+      ],
+      "settings": {
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "esbenp.prettier-vscode"
+      }
+    }
+  },
+  "metadata": {
+    "tags": ["nodejs", "postgresql", "redis", "fullstack"],
+    "author": "opencode-manager",
+    "createdAt": "2025-03-07"
+  }
+}
