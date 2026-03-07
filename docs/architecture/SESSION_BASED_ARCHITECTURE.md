@@ -1189,12 +1189,14 @@ CREATE TABLE devcontainer_requests (
 ### 1. Code-Server Authentication
 **Question**: How should code-server authenticate users?
 
-**Options:**
-- **A**: Auto-generated password per session (simple, secure)
-- **B**: Unified SSO with Manager (seamless, complex)
-- **C**: No auth (dev only, not secure)
+**Decision**: **Option B - Unified SSO with Manager**
 
-**Recommendation**: Option A for initial release, Option B for future enhancement
+Code-server will use the same OAuth authentication as OpenCode Manager:
+- Users authenticate once with Manager (email/password, OAuth, passkeys)
+- Manager generates JWT token for code-server access
+- Code-server validates JWT via Manager API
+- Seamless single sign-on experience
+- Session security tied to Manager's auth system
 
 ---
 
