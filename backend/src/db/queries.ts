@@ -4,6 +4,8 @@ import { getReposPath } from '@opencode-manager/shared/config/env'
 import { getErrorMessage } from '../utils/error-utils'
 import path from 'path'
 
+export * from './queries-session'
+
 export interface RepoRow {
   id: number
   repo_url?: string

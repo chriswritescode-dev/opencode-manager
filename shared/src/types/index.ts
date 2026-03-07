@@ -88,3 +88,17 @@ export type {
   LoggingConfig,
   PluginConfig,
 } from '../schemas/memory'
+
+export type {
+  Session as SessionData,
+  SessionStatus,
+  SessionDetail,
+  RepoMapping,
+  CreateSessionInput,
+  DevcontainerConfig,
+  DevcontainerTemplate,
+  CreateDevcontainerTemplateInput,
+  DevcontainerChanges,
+  DevcontainerUpdateRequest,
+  ContainerStatus,
+} from './session'
