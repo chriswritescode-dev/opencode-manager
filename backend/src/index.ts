@@ -37,6 +37,8 @@ import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './rout
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { sseAggregator } from './services/sse-aggregator'
+import { createSessionRoutes } from './routes/sessions'
+import { DockerOrchestrator } from './services/docker-orchestrator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
@@ -206,6 +208,10 @@ try {
   await gitAuthService.initialize(ipcServer, db)
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
+  const dockerOrchestrator = new DockerOrchestrator()
+  await dockerOrchestrator.ensureNetwork()
+  logger.info('Docker network initialized')
+
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
@@ -246,6 +252,7 @@ protectedApi.use('/*', requireAuth)
 
 protectedApi.route('/health', createHealthRoutes(db))
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService))
+protectedApi.route('/sessions', createSessionRoutes(db))
 protectedApi.route('/settings', createSettingsRoutes(db))
 protectedApi.route('/files', createFileRoutes())
 protectedApi.route('/providers', createProvidersRoutes())

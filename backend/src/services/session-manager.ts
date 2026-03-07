@@ -8,17 +8,20 @@ import type {
 import * as db from '../db/queries'
 import { logger } from '../utils/logger'
 import path from 'path'
-import { mkdir, symlink } from 'fs/promises'
+import { mkdir, symlink, rm } from 'fs/promises'
 import { randomUUID } from 'crypto'
+import { DockerOrchestrator } from './docker-orchestrator'
 
 const SESSIONS_BASE_PATH = '/workspace/sessions'
 const REPOS_BASE_PATH = '/workspace/repos'
 
 export class SessionManager {
   private db: Database
+  private dockerOrchestrator: DockerOrchestrator
 
-  constructor(database: Database) {
+  constructor(database: Database, dockerOrchestrator: DockerOrchestrator) {
     this.db = database
+    this.dockerOrchestrator = dockerOrchestrator
   }
 
   async createSession(input: CreateSessionInput): Promise<Session> {
@@ -89,6 +92,74 @@ export class SessionManager {
     logger.info(`Session ${sessionId} status updated to ${status}`)
   }
 
+  async startSession(sessionId: string): Promise<void> {
+    const session = await this.getSession(sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    if (session.status === 'running') {
+      logger.info(`Session ${sessionId} is already running`)
+      return
+    }
+
+    logger.info(`Starting session: ${sessionId}`)
+    
+    try {
+      const composeConfig = {
+        sessionName: session.name,
+        sessionPath: session.sessionPath,
+        nixPackages: 'git nodejs_22',
+        configHash: session.devcontainerConfigHash,
+        publicDomain: process.env.PUBLIC_DOMAIN || 'localhost',
+      }
+
+      await this.dockerOrchestrator.createSessionPod(composeConfig)
+      
+      const opencodeId = await this.dockerOrchestrator.getContainerId(`${session.name}-opencode`)
+      const dindId = await this.dockerOrchestrator.getContainerId(`${session.name}-dind`)
+      const codeServerId = await this.dockerOrchestrator.getContainerId(`${session.name}-code`)
+
+      db.updateSessionContainerIds(this.db, sessionId, {
+        opencode: opencodeId || undefined,
+        dind: dindId || undefined,
+        codeServer: codeServerId || undefined,
+      })
+
+      await this.updateSessionStatus(sessionId, 'running')
+      logger.info(`Session ${sessionId} started successfully`)
+    } catch (error) {
+      await this.updateSessionStatus(sessionId, 'error')
+      logger.error(`Failed to start session ${sessionId}:`, error)
+      throw error
+    }
+  }
+
+  async stopSession(sessionId: string): Promise<void> {
+    const session = await this.getSession(sessionId)
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`)
+    }
+
+    logger.info(`Stopping session: ${sessionId}`)
+    
+    try {
+      await this.dockerOrchestrator.stopSessionPod(session.name, session.sessionPath)
+      await this.updateSessionStatus(sessionId, 'stopped')
+      logger.info(`Session ${sessionId} stopped successfully`)
+    } catch (error) {
+      logger.error(`Failed to stop session ${sessionId}:`, error)
+      throw error
+    }
+  }
+
+  async restartSession(sessionId: string): Promise<void> {
+    logger.info(`Restarting session: ${sessionId}`)
+    await this.stopSession(sessionId)
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    await this.startSession(sessionId)
+  }
+
   async deleteSession(sessionId: string, keepWorktrees: boolean = false): Promise<void> {
     const session = await this.getSession(sessionId)
     if (!session) {
@@ -96,6 +167,25 @@ export class SessionManager {
     }
 
     logger.info(`Deleting session: ${sessionId}, keepWorktrees: ${keepWorktrees}`)
+    
+    try {
+      await this.dockerOrchestrator.destroySessionPod(session.name, session.sessionPath)
+    } catch (error) {
+      logger.warn(`Failed to destroy session pod (may not exist):`, error)
+    }
+
+    if (!keepWorktrees) {
+      for (const mapping of session.repoMappings) {
+        logger.info(`Removing worktree: ${mapping.worktreePath}`)
+      }
+    }
+
+    try {
+      await rm(session.sessionPath, { recursive: true, force: true })
+      logger.info(`Removed session directory: ${session.sessionPath}`)
+    } catch (error) {
+      logger.warn(`Failed to remove session directory:`, error)
+    }
     
     db.deleteSession(this.db, sessionId)
     
