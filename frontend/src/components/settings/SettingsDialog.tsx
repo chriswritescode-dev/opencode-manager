@@ -138,9 +138,9 @@ export function SettingsDialog() {
                <X className="w-5 h-5" />
              </Button>
             </div>
-            <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="w-full flex flex-col flex-1 min-h-0">
-              <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
-                 <ResizablePanel defaultSize={26} minSize={20} maxSize={34}>
+             <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} orientation="vertical" className="w-full flex flex-col flex-1 min-h-0">
+              <ResizablePanelGroup orientation="horizontal" resizeTargetMinimumSize={{ coarse: 28, fine: 14 }} className="min-h-0 flex-1">
+                 <ResizablePanel defaultSize={28} minSize={22} maxSize={40}>
                    <div className="flex h-full flex-col border-r border-border/70 bg-panel/60">
                      <div className="px-5 pt-5 pb-3">
                        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">Workspace Preferences</p>
@@ -152,11 +152,11 @@ export function SettingsDialog() {
                           const isActive = activeTab === item.id
 
                           return (
-                            <TabsTrigger
-                              key={item.id}
-                              value={item.id}
-                              className="h-auto w-full justify-start px-3 py-3 text-left data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
-                            >
+                             <TabsTrigger
+                               key={item.id}
+                               value={item.id}
+                               className="h-auto w-full justify-start whitespace-normal px-3 py-3 text-left data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm"
+                             >
                               <div className="flex items-start gap-3">
                                 <div className={cn(
                                   'mt-0.5 flex size-10 items-center justify-center rounded-xl border border-border/70 bg-background/70 text-muted-foreground transition-colors',
@@ -184,7 +184,7 @@ export function SettingsDialog() {
                      </div>
                    </div>
                  </ResizablePanel>
-                <ResizableHandle withHandle />
+                <ResizableHandle withHandle className="w-3 bg-transparent" />
                  <ResizablePanel defaultSize={74} minSize={48}>
                    <div className="scrollbar-thin h-full overflow-y-auto">
                      <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-6">

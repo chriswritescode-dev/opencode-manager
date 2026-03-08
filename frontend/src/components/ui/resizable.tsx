@@ -28,7 +28,7 @@ function ResizableHandle({
     <ResizablePrimitive.Separator
       data-slot="resizable-handle"
       className={cn(
-        "group relative flex w-px shrink-0 items-center justify-center bg-border/70 transition-colors hover:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[orientation=vertical]:h-px data-[orientation=vertical]:w-full",
+        "group relative flex w-px shrink-0 items-center justify-center bg-border/70 transition-colors hover:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 after:absolute after:inset-y-0 after:left-1/2 after:w-px after:-translate-x-1/2 after:bg-border/70 after:transition-colors hover:after:bg-primary/35 data-[orientation=vertical]:h-3 data-[orientation=vertical]:w-full data-[orientation=vertical]:after:left-0 data-[orientation=vertical]:after:right-0 data-[orientation=vertical]:after:top-1/2 data-[orientation=vertical]:after:h-px data-[orientation=vertical]:after:w-auto data-[orientation=vertical]:after:-translate-y-1/2 data-[orientation=vertical]:after:translate-x-0",
         className
       )}
       {...props}
