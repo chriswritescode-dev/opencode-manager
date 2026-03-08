@@ -179,6 +179,11 @@ export interface SSESessionErrorEvent {
   }
 }
 
+export interface SSELspUpdatedEvent {
+  type: 'lsp.updated'
+  properties: Record<string, never>
+}
+
 export interface SSESSHHostKeyRequestEvent {
   type: 'ssh.host-key-request'
   properties: SSHHostKeyRequest
@@ -203,6 +208,7 @@ export type SSEEvent =
   | SSEQuestionRejectedEvent
   | SSEInstallationUpdatedEvent
   | SSEInstallationUpdateAvailableEvent
+  | SSELspUpdatedEvent
   | SSESSHHostKeyRequestEvent
 
 export type ContentPart = 

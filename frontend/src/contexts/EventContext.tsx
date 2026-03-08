@@ -386,6 +386,11 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             })
           }
           break
+        case 'lsp.updated':
+          queryClient.invalidateQueries({
+            queryKey: ['opencode', 'lsp']
+          })
+          break
       }
     }
 
