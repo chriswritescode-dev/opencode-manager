@@ -6,13 +6,13 @@ const Card = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className, ...props }, ref) => (
-    <div
-      ref={ref}
-      className={cn(
-        "rounded-xl border border-border/70 bg-card/90 text-card-foreground shadow-sm transition-[border-color,background-color,box-shadow] supports-[backdrop-filter]:backdrop-blur-sm",
-        className
-      )}
-      {...props}
+  <div
+    ref={ref}
+    className={cn(
+      "surface-panel rounded-xl bg-card/92 text-card-foreground shadow-[0_18px_40px_-28px_color-mix(in_oklab,var(--foreground)_24%,transparent)] transition-[border-color,background-color,box-shadow] supports-[backdrop-filter]:backdrop-blur-sm",
+      className
+    )}
+    {...props}
   />
 ))
 Card.displayName = "Card"

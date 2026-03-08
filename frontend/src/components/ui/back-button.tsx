@@ -15,7 +15,7 @@ export function BackButton({ to = '/', className = '' }: BackButtonProps) {
     <button
       onClick={() => navigate(to)}
       className={cn(
-        'rounded-lg border border-border/70 bg-panel/70 px-3 py-1.5 text-sm text-muted-foreground transition-all duration-200 hover:scale-105 hover:bg-accent hover:text-foreground',
+        'inline-flex items-center justify-center rounded-[calc(var(--radius)-0.125rem)] border border-border/70 bg-panel/80 px-2.5 py-1.5 text-muted-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)] transition-[color,background-color,border-color,transform] hover:border-border hover:bg-accent hover:text-foreground active:translate-y-px',
         className
       )}
     >

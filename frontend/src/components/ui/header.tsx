@@ -50,7 +50,7 @@ function HeaderTitle({ children, logo, className }: HeaderTitleProps) {
           className="h-6 w-auto sm:h-8"
         />
       ) : (
-        <h1 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate">
+        <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-foreground sm:text-base">
           {children}
         </h1>
       )}
@@ -150,7 +150,7 @@ function HeaderEditableTitle({ value, onChange, subtitle, generating, className 
             </div>
           ) : (
             <h1 
-              className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
+              className="cursor-pointer truncate text-xs font-semibold text-foreground transition-opacity hover:opacity-80 sm:text-base"
               onClick={handleTitleClick}
             >
               {value}

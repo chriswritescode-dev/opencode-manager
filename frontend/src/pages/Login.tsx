@@ -80,17 +80,21 @@ export function Login() {
   const hasCredentials = config.enabledProviders.includes('credentials')
 
   return (
-    <div className="h-dvh flex flex-col items-center justify-center bg-gradient-to-br from-background via-background to-background p-4">
+    <div className="flex h-dvh flex-col items-center justify-center bg-[radial-gradient(circle_at_top,color-mix(in_oklab,var(--primary)_14%,transparent),transparent_38%),linear-gradient(180deg,color-mix(in_oklab,var(--background)_94%,var(--panel)_6%),var(--background))] p-4">
       <div className="w-full max-w-sm space-y-6">
-        <div className="flex flex-col items-center space-y-2">
+        <div className="flex flex-col items-center space-y-3 text-center">
           <img 
             src={theme === 'light' ? "/opencode-wordmark-light.svg" : "/opencode-wordmark-dark.svg"} 
             alt="OpenCode" 
             className="h-8 w-auto"
           />
+          <div className="space-y-1">
+            <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">OpenCode Manager</p>
+            <p className="text-sm text-muted-foreground">Use the same theme-aware workspace account you use for your coding sessions.</p>
+          </div>
         </div>
 
-        <div className="rounded-lg border border-border bg-card p-6 space-y-4">
+        <div className="surface-panel space-y-4 rounded-xl p-6">
           {error && (
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
