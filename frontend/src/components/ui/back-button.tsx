@@ -1,20 +1,25 @@
-import { useNavigate } from "react-router-dom";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+
+import { cn } from '@/lib/utils'
 
 interface BackButtonProps {
-  to?: string;
-  className?: string;
+  to?: string
+  className?: string
 }
 
-export function BackButton({ to = "/", className = "" }: BackButtonProps) {
-  const navigate = useNavigate();
+export function BackButton({ to = '/', className = '' }: BackButtonProps) {
+  const navigate = useNavigate()
 
   return (
     <button
       onClick={() => navigate(to)}
-      className={`text-zinc-400 hover:text-zinc-100 transition-all duration-200 hover:scale-105 text-sm md:text-md border border-zinc-700 rounded-md px-3 py-1.5 hover ${className}`}
+      className={cn(
+        'rounded-lg border border-border/70 bg-panel/70 px-3 py-1.5 text-sm text-muted-foreground transition-all duration-200 hover:scale-105 hover:bg-accent hover:text-foreground',
+        className
+      )}
     >
       <ArrowLeft className="w-4 h-4" />
     </button>
-  );
+  )
 }

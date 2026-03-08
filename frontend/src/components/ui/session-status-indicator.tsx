@@ -73,23 +73,23 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     const intensity = Math.max(0, 1 - distance / (maxDistance + 2))
     
     if (statusType === 'retry') {
-      if (intensity > 0.8) return 'bg-amber-500'
-      if (intensity > 0.5) return 'bg-amber-500/70'
-      if (intensity > 0.2) return 'bg-amber-500/40'
-      return 'bg-amber-500/20'
+      if (intensity > 0.8) return 'bg-warning'
+      if (intensity > 0.5) return 'bg-warning/70'
+      if (intensity > 0.2) return 'bg-warning/40'
+      return 'bg-warning/20'
     }
     
     if (statusType === 'compact') {
-      if (intensity > 0.8) return 'bg-purple-500'
-      if (intensity > 0.5) return 'bg-purple-500/70'
-      if (intensity > 0.2) return 'bg-purple-500/40'
-      return 'bg-purple-500/20'
+      if (intensity > 0.8) return 'bg-chart-4'
+      if (intensity > 0.5) return 'bg-chart-4/70'
+      if (intensity > 0.2) return 'bg-chart-4/40'
+      return 'bg-chart-4/20'
     }
     
-    if (intensity > 0.8) return 'bg-blue-500'
-    if (intensity > 0.5) return 'bg-blue-500/70'
-    if (intensity > 0.2) return 'bg-blue-500/40'
-    return 'bg-blue-500/20'
+    if (intensity > 0.8) return 'bg-primary'
+    if (intensity > 0.5) return 'bg-primary/70'
+    if (intensity > 0.2) return 'bg-primary/40'
+    return 'bg-primary/20'
   }
   
   return (
@@ -106,7 +106,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
         {status.type === 'retry'  && (
           <>
             Retry #{status.attempt}
-            {retryCountdown > 0 && <span className="text-amber-500 ml-1">({retryCountdown}s)</span>}
+            {retryCountdown > 0 && <span className="ml-1 text-warning">({retryCountdown}s)</span>}
           </>
         )}
       </span>
@@ -141,7 +141,7 @@ export const CompactStatusIndicator = memo(function CompactStatusIndicator({
   }
   
   const pulseFrames = ['●', '◐', '○', '◑', '●', '◐', '○', '◑']
-  const color = status.type === 'retry' ? 'text-amber-500' : status.type === 'compact' ? 'text-purple-500' : 'text-blue-500'
+  const color = status.type === 'retry' ? 'text-warning' : status.type === 'compact' ? 'text-chart-4' : 'text-primary'
   
   return (
     <span className={`inline-flex items-center gap-1.5 ${className}`}>

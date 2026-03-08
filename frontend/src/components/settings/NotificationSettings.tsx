@@ -63,7 +63,7 @@ export function NotificationSettings() {
         <h2 className="text-lg font-semibold text-foreground mb-4">
           Push Notifications
         </h2>
-        <div className="flex items-center gap-3 text-yellow-500">
+        <div className="flex items-center gap-3 text-warning">
           <BellOff className="h-5 w-5" />
           <p className="text-sm">
             Notification permission was denied. Please enable notifications in

@@ -49,7 +49,7 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory, isConne
   }
 
   if (isReconnecting) {
-    return <span className="text-xs text-yellow-700 dark:text-yellow-400 font-medium">Reconnecting...</span>
+    return <span className="text-xs font-medium text-warning">Reconnecting...</span>
   }
 
   if (!isConnected) {
@@ -65,9 +65,9 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory, isConne
   }
 
   const getUsageTextColor = (percentage: number) => {
-    if (percentage < 50) return 'text-green-700 dark:text-green-400'
-    if (percentage < 80) return 'text-yellow-700 dark:text-yellow-400'
-    return 'text-red-700 dark:text-red-400'
+    if (percentage < 50) return 'text-success'
+    if (percentage < 80) return 'text-warning'
+    return 'text-destructive'
   }
 
   if (isReconnecting) {

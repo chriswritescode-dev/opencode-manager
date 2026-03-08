@@ -17,9 +17,9 @@ interface MemoryListProps {
 }
 
 const scopeColors: Record<string, string> = {
-  convention: 'bg-blue-600/20 text-blue-400 border-blue-600/40',
-  decision: 'bg-green-600/20 text-green-400 border-green-600/40',
-  context: 'bg-purple-600/20 text-purple-400 border-purple-600/40',
+  convention: 'border-info/25 bg-info/12 text-info',
+  decision: 'border-success/25 bg-success/12 text-success',
+  context: 'border-accent-foreground/10 bg-accent text-accent-foreground',
 }
 
 export function MemoryList({ projectId, scope, showFilters = true }: MemoryListProps) {

@@ -8,10 +8,10 @@ export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
 export const PageHeader = React.forwardRef<HTMLElement, PageHeaderProps>(
   ({ className, children, ...props }, ref) => {
     return (
-      <header
-        ref={ref}
-        className={cn(
-          "sticky top-0 z-10 bg-gradient-to-b from-background via-background to-background backdrop-blur-sm pt-safe",
+        <header
+          ref={ref}
+          className={cn(
+          "sticky top-0 z-10 border-b border-border/60 bg-background/84 supports-[backdrop-filter]:bg-background/68 backdrop-blur-xl pt-safe",
           className
         )}
         {...props}

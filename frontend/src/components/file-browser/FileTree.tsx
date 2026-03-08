@@ -200,7 +200,7 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
               <Edit3 className="w-4 h-4 mr-2" />
               Rename
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleDelete} className="text-red-600">
+            <DropdownMenuItem onClick={handleDelete} className="text-destructive">
               <Trash2 className="w-4 h-4 mr-2" />
               Delete
             </DropdownMenuItem>

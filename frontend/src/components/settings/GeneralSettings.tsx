@@ -36,7 +36,7 @@ export function GeneralSettings() {
                   href={versionInfo.releaseUrl ?? ''}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-xs font-medium text-green-500 hover:text-green-400 transition-colors"
+                  className="text-xs font-medium text-success transition-colors hover:text-success"
                 >
                   v{versionInfo.latestVersion} available
                 </a>

@@ -282,7 +282,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               return (
                 <div 
                   key={index}
-                  className={`flex transition-colors duration-300 ${isHighlighted ? 'bg-yellow-500/30' : ''}`}
+                  className={`flex transition-colors duration-300 ${isHighlighted ? 'bg-warning/20' : ''}`}
                   style={{ minHeight: '20px', lineHeight: '20px' }}
                 >
                   <span className="w-12 flex-shrink-0 text-right pr-3 text-muted-foreground select-none border-r border-border/50 text-xs">
@@ -342,10 +342,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                 <span className="truncate flex-shrink-0">{formatFileSize(file.size)}</span>
                 <span className="hidden sm:inline truncate flex-shrink-0">{formatDate(file.lastModified)}</span>
                 {shouldVirtualize && (
-                  <span className="text-xs text-blue-500 flex-shrink-0">Virtualized</span>
+                  <span className="text-xs text-info flex-shrink-0">Virtualized</span>
                 )}
                 {hasVirtualizedChanges && (
-                  <span className="text-xs text-yellow-500 flex-shrink-0">Unsaved changes</span>
+                  <span className="text-xs text-warning flex-shrink-0">Unsaved changes</span>
                 )}
               </div>
             </div>
@@ -382,7 +382,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
               )}
               
               {showSaveButton && (
-                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (shouldVirtualize) { handleVirtualizedSaveClick(); } else { handleSave(); } }} disabled={isSaving || (shouldVirtualize && !hasVirtualizedChanges)} className="border-green-600 bg-green-600/10 text-green-600 hover:bg-green-600/20 h-7 w-7 p-0">
+                <Button variant="outline" size="sm" onClick={(e) => { e.stopPropagation(); e.preventDefault(); if (shouldVirtualize) { handleVirtualizedSaveClick(); } else { handleSave(); } }} disabled={isSaving || (shouldVirtualize && !hasVirtualizedChanges)} className="h-7 w-7 border-success/30 bg-success/10 p-0 text-success hover:bg-success/20">
                   <Save className="w-3 h-3" />
                 </Button>
               )}

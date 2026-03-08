@@ -44,12 +44,12 @@ export const SessionCard = ({
   return (
     <div className="relative" onClick={close}>
       <div
-        className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-red-600 flex items-center justify-center rounded-r-lg transition-opacity ${
+        className={`absolute top-0.5 right-0 bottom-0.5 flex w-20 items-center justify-center rounded-r-lg bg-destructive transition-opacity ${
           !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
         <button
-          className="h-full w-full flex items-center justify-center text-white hover:bg-red-700"
+          className="flex h-full w-full items-center justify-center text-destructive-foreground hover:bg-destructive/90"
           onClick={handleDeleteClick}
         >
           <Trash2 className="w-5 h-5" />
@@ -61,12 +61,12 @@ export const SessionCard = ({
             isOpen
               ? "rounded-none"
               : "rounded-r-lg"
-          } ${
-            isSelected
-              ? "border-blue-500 shadow-lg shadow-blue-900/30 dark:shadow-blue-900/30 bg-accent"
-              : isActive
-                ? "bg-accent border-border"
-                : "bg-card border-border hover:bg-accent hover:border-border"
+            } ${
+              isSelected
+                ? "border-primary/50 bg-accent shadow-lg shadow-primary/15"
+                : isActive
+                  ? "bg-accent border-border"
+                  : "bg-card border-border hover:bg-accent hover:border-border"
           } hover:shadow-lg`}
           onClick={() => {
             if (!isOpen) {
@@ -92,7 +92,7 @@ export const SessionCard = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    <h3 className="text-base font-semibold text-orange-600 dark:text-orange-400 truncate">
+                    <h3 className="truncate text-base font-semibold text-warning">
                       {session.title || "Untitled Session"}
                     </h3>
                   </div>
@@ -108,7 +108,7 @@ export const SessionCard = ({
               </div>
             ) : (
               <div className="flex flex-col flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
+                <h3 className="truncate text-sm font-semibold text-warning">
                   {session.title || "Untitled Session"}
                 </h3>
                 <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
@@ -124,7 +124,7 @@ export const SessionCard = ({
             )}
             {manageMode && (
               <button
-                className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
+                className="h-6 w-6 cursor-pointer border-none bg-transparent p-0 text-foreground hover:text-destructive"
                 onClick={(e) => {
                   e.stopPropagation();
                   onDelete(e);
