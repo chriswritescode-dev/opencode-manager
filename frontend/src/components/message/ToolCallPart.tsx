@@ -302,7 +302,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
                     <span className="text-success">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
                   </div>
-                  <div className={`mt-2 flex items-center gap-2 text-xs ${isWaitingPermission ? 'text-warning' : 'text-warning'}`}>
+                  <div className="mt-2 flex items-center gap-2 text-xs text-warning">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
                   </div>
@@ -311,7 +311,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 <div className="text-sm">
                   <div className="text-muted-foreground mb-1">Input:</div>
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-                  <div className={`mt-2 flex items-center gap-2 text-xs ${isWaitingPermission ? 'text-warning' : 'text-warning'}`}>
+                  <div className="mt-2 flex items-center gap-2 text-xs text-warning">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
                   </div>
