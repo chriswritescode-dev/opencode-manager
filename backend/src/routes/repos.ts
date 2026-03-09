@@ -10,7 +10,7 @@ import { opencodeServerManager } from '../services/opencode-single-server'
 import { proxyToOpenCodeWithDirectory } from '../services/proxy'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
-import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
 import { createRepoGitRoutes } from './repo-git'
 import type { GitAuthService } from '../services/git-auth'
 import path from 'path'
@@ -68,7 +68,30 @@ export function createRepoRoutes(database: Database, gitAuthService: GitAuthServ
       return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
     }
   })
-  
+
+  app.post('/discover', async (c) => {
+    try {
+      const body = await c.req.json() as { rootPath?: string; maxDepth?: number }
+      const rootPath = body.rootPath?.trim()
+
+      if (!rootPath) {
+        return c.json({ error: 'rootPath is required' }, 400)
+      }
+
+      const result = await repoService.discoverLocalRepos(
+        database,
+        gitAuthService,
+        rootPath,
+        body.maxDepth
+      )
+
+      return c.json(result)
+    } catch (error: unknown) {
+      logger.error('Failed to discover repos:', error)
+      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
+    }
+  })
+
 app.get('/', async (c) => {
     try {
       const settingsService = new SettingsService(database)
@@ -267,8 +290,8 @@ app.get('/', async (c) => {
         return c.json({ error: 'Repo not found' }, 404)
       }
 
-      const repoPath = path.resolve(getReposPath(), repo.localPath)
-      const repoName = path.basename(repo.localPath)
+      const repoPath = repo.fullPath
+      const repoName = path.basename(repo.fullPath)
 
       const includeGit = c.req.query('includeGit') === 'true'
       const includePathsParam = c.req.query('includePaths')

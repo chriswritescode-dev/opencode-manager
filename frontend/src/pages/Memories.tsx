@@ -68,10 +68,10 @@ export function Memories() {
         <Header.BackButton to={`/repos/${repoId}`} />
         <div className="min-w-0 flex-1 flex justify-center ml-2">
           <Header.Title className="hidden sm:flex ">
-            Memory: {getRepoDisplayName(repo.repoUrl, repo.localPath)}
+            Memory: {getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
           </Header.Title>
           <Header.Title className="sm:hidden truncate">
-            {getRepoDisplayName(repo.repoUrl, repo.localPath)}
+            {getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
           </Header.Title>
         </div>
         <Header.Actions>

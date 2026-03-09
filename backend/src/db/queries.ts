@@ -8,6 +8,7 @@ export interface RepoRow {
   id: number
   repo_url?: string
   local_path: string
+  source_path?: string
   branch?: string
   default_branch: string
   clone_status: string
@@ -19,11 +20,14 @@ export interface RepoRow {
 }
 
 function rowToRepo(row: RepoRow): Repo {
+  const fullPath = row.source_path || path.join(getReposPath(), row.local_path)
+
   return {
     id: row.id,
     repoUrl: row.repo_url,
     localPath: row.local_path,
-    fullPath: path.join(getReposPath(), row.local_path),
+    fullPath,
+    sourcePath: row.source_path,
     branch: row.branch,
     defaultBranch: row.default_branch,
     cloneStatus: row.clone_status as Repo['cloneStatus'],
@@ -39,7 +43,9 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
   const normalizedPath = repo.localPath.trim().replace(/\/+$/, '')
   
   const existing = repo.isLocal 
-    ? getRepoByLocalPath(db, normalizedPath)
+    ? repo.sourcePath
+      ? getRepoBySourcePath(db, repo.sourcePath) ?? getRepoByLocalPath(db, normalizedPath)
+      : getRepoByLocalPath(db, normalizedPath)
     : getRepoByUrlAndBranch(db, repo.repoUrl, repo.branch)
   
   if (existing) {
@@ -47,14 +53,15 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
   }
   
   const stmt = db.prepare(`
-    INSERT INTO repos (repo_url, local_path, branch, default_branch, clone_status, cloned_at, is_worktree, is_local)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO repos (repo_url, local_path, source_path, branch, default_branch, clone_status, cloned_at, is_worktree, is_local)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   
   try {
     const result = stmt.run(
       repo.repoUrl || null,
       normalizedPath,
+      repo.sourcePath || null,
       repo.branch || null,
       repo.defaultBranch,
       repo.cloneStatus,
@@ -72,7 +79,9 @@ export function createRepo(db: Database, repo: CreateRepoInput): Repo {
     const errorMessage = getErrorMessage(error)
     if (errorMessage.includes('UNIQUE constraint failed') || (error && typeof error === 'object' && 'code' in error && error.code === 'SQLITE_CONSTRAINT_UNIQUE')) {
       const conflictRepo = repo.isLocal 
-        ? getRepoByLocalPath(db, normalizedPath)
+        ? repo.sourcePath
+          ? getRepoBySourcePath(db, repo.sourcePath) ?? getRepoByLocalPath(db, normalizedPath)
+          : getRepoByLocalPath(db, normalizedPath)
         : getRepoByUrlAndBranch(db, repo.repoUrl, repo.branch)
       
       if (conflictRepo) {
@@ -114,6 +123,13 @@ export function getRepoByLocalPath(db: Database, localPath: string): Repo | null
   return row ? rowToRepo(row) : null
 }
 
+export function getRepoBySourcePath(db: Database, sourcePath: string): Repo | null {
+  const stmt = db.prepare('SELECT * FROM repos WHERE source_path = ?')
+  const row = stmt.get(sourcePath) as RepoRow | undefined
+
+  return row ? rowToRepo(row) : null
+}
+
 export function listRepos(db: Database, repoOrder?: number[]): Repo[] {
   const stmt = db.prepare('SELECT * FROM repos ORDER BY cloned_at DESC')
   const rows = stmt.all() as RepoRow[]
@@ -146,7 +162,7 @@ export function listRepos(db: Database, repoOrder?: number[]): Repo[] {
 function getRepoName(repo: Repo): string {
   return repo.repoUrl
     ? repo.repoUrl.split('/').slice(-1)[0]?.replace('.git', '') || repo.localPath
-    : repo.localPath
+    : repo.sourcePath ? path.basename(repo.sourcePath) : repo.localPath
 }
 
 export function updateRepoStatus(db: Database, id: number, cloneStatus: Repo['cloneStatus']): void {
