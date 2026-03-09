@@ -16,7 +16,7 @@ import { useSwipeBack } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2 } from "lucide-react";
+import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2, CalendarClock } from "lucide-react";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
@@ -184,7 +184,19 @@ export function RepoDetail() {
             <span className="hidden sm:inline">Memory</span>
           </Button>
         )}
+        <Button
+          variant="outline"
+          onClick={() => navigate(`/repos/${repoId}/schedules`)}
+          size="sm"
+          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+        >
+          <CalendarClock className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">Schedules</span>
+        </Button>
         <Header.MobileDropdown>
+          <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/schedules`)}>
+            <CalendarClock className="w-4 h-4 mr-2" /> Schedules
+          </DropdownMenuItem>
           {memoryPluginStatus?.memoryPluginEnabled && (
             <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/memories`)}>
               <Brain className="w-4 h-4 mr-2" /> Memory

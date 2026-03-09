@@ -33,6 +33,16 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 [Learn more →](chat.md)
 
+### Schedules & Recurring Jobs
+
+- **Recurring Repo Jobs** - Run reusable prompts against a repository on an interval or cron schedule
+- **Prompt Templates** - Start with built-in reviews for repo health, dependencies, release readiness, docs drift, and more
+- **Run History** - Inspect statuses, logs, errors, and assistant output from past runs
+- **Session Handoff** - Open the linked OpenCode session for any run and continue from there
+- **Manual Runs** - Trigger the same job on demand when you want a fresh report immediately
+
+[Learn more →](schedules.md)
+
 ### AI Configuration
 
 - **Model Selection** - Browse and filter available AI models
@@ -94,4 +104,3 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Customizable** - Control which events trigger notifications
 
 [Learn more →](notifications.md)
-

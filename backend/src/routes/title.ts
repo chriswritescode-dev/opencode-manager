@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { resolveOpenCodeModel } from '../services/opencode-models'
 
 const TitleRequestSchema = z.object({
   text: z.string().min(1).max(5000),
@@ -9,10 +10,99 @@ const TitleRequestSchema = z.object({
 })
 
 const OPENCODE_SERVER_URL = `http://127.0.0.1:${ENV.OPENCODE.PORT}`
+const TITLE_POLL_INTERVAL_MS = 1_000
+const TITLE_POLL_TIMEOUT_MS = 30_000
+
+interface PromptResponse {
+  parts?: Array<{ type?: string; text?: string }>
+}
+
+interface SessionMessage {
+  info?: {
+    role?: string
+    time?: {
+      completed?: number
+    }
+    error?: {
+      name?: string
+      data?: {
+        message?: string
+      }
+    }
+  }
+  parts?: Array<{ type?: string; text?: string }>
+}
 
 function buildUrl(path: string, directory?: string): string {
   const url = `${OPENCODE_SERVER_URL}${path}`
   return directory ? `${url}${url.includes('?') ? '&' : '?'}directory=${encodeURIComponent(directory)}` : url
+}
+
+function parsePromptResponse(responseText: string): PromptResponse | null {
+  if (!responseText.trim()) {
+    return null
+  }
+
+  try {
+    return JSON.parse(responseText) as PromptResponse
+  } catch {
+    return null
+  }
+}
+
+function extractText(parts: Array<{ type?: string; text?: string }> | undefined): string {
+  return (parts ?? [])
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text?.replace(/<think>[\s\S]*?<\/think>\s*/g, '').trim() ?? '')
+    .filter(Boolean)
+    .join('\n')
+}
+
+function extractTitle(result: PromptResponse | SessionMessage): string {
+  const text = extractText(result.parts)
+  const title = text
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.length > 0) || ''
+
+  if (title.length > 100) {
+    return title.substring(0, 97) + '...'
+  }
+
+  return title
+}
+
+async function waitForTitleResponse(sessionID: string, directory: string): Promise<SessionMessage> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < TITLE_POLL_TIMEOUT_MS) {
+    const messagesResponse = await fetch(buildUrl(`/session/${sessionID}/message`, directory))
+
+    if (!messagesResponse.ok) {
+      const errorText = await messagesResponse.text()
+      throw new Error(errorText || 'Failed to fetch title generation messages')
+    }
+
+    const messages = await messagesResponse.json() as SessionMessage[]
+    const assistantMessage = [...messages]
+      .reverse()
+      .find((message) => message.info?.role === 'assistant')
+
+    if (assistantMessage) {
+      const errorText = assistantMessage.info?.error?.data?.message ?? assistantMessage.info?.error?.name
+      if (errorText) {
+        throw new Error(errorText)
+      }
+
+      if (assistantMessage.info?.time?.completed) {
+        return assistantMessage
+      }
+    }
+
+    await Bun.sleep(TITLE_POLL_INTERVAL_MS)
+  }
+
+  throw new Error('Timed out waiting for title generation')
 }
 
 const TITLE_PROMPT = `You are a title generator. You output ONLY a thread title. Nothing else.
@@ -63,15 +153,9 @@ export function createTitleRoutes() {
 
       logger.info('Generating session title via LLM', { sessionID, textLength: text.length })
 
-      const configResponse = await fetch(buildUrl('/config', directory))
-      if (!configResponse.ok) {
-        logger.error('Failed to fetch OpenCode config')
-        return c.json({ error: 'Failed to fetch config' }, 500)
-      }
-      const config = await configResponse.json() as { model?: string; small_model?: string }
-
-      const modelStr = config.small_model || (config.model ?? "")
-      const [providerID, modelID] = modelStr.split('/')
+      const model = await resolveOpenCodeModel(directory || undefined, {
+        preferSmallModel: true,
+      })
 
       const titleSessionResponse = await fetch(buildUrl('/session', directory), {
         method: 'POST',
@@ -98,7 +182,10 @@ export function createTitleRoutes() {
                 text: `${TITLE_PROMPT}\n\nGenerate a title for this conversation:\n<user_message>\n${text.substring(0, 2000)}\n</user_message>` 
               }
             ],
-            model: { providerID, modelID }
+            model: {
+              providerID: model.providerID,
+              modelID: model.modelID,
+            }
           })
         })
 
@@ -108,23 +195,9 @@ export function createTitleRoutes() {
           return c.json({ error: 'LLM request failed' }, 500)
         }
 
-        const result = await promptResponse.json() as { parts?: Array<{ type: string; text?: string }> }
-        
-        let title = ''
-        if (result.parts) {
-          const textPart = result.parts.find((p: { type: string }) => p.type === 'text')
-          if (textPart && 'text' in textPart) {
-            title = (textPart.text as string)
-              .replace(/<think>[\s\S]*?<\/think>\s*/g, '')
-              .split('\n')
-              .map((line: string) => line.trim())
-              .find((line: string) => line.length > 0) || ''
-          }
-        }
-
-        if (title && title.length > 100) {
-          title = title.substring(0, 97) + '...'
-        }
+        const promptBody = await promptResponse.text()
+        const promptResult = parsePromptResponse(promptBody)
+        const title = extractTitle(promptResult ?? await waitForTitleResponse(titleSessionID, directory))
 
         if (title) {
           const updateResponse = await fetch(buildUrl(`/session/${sessionID}`, directory), {

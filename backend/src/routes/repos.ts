@@ -12,6 +12,7 @@ import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 import { getOpenCodeConfigFilePath, getReposPath } from '@opencode-manager/shared/config/env'
 import { createRepoGitRoutes } from './repo-git'
+import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import path from 'path'
 
@@ -19,6 +20,7 @@ export function createRepoRoutes(database: Database, gitAuthService: GitAuthServ
   const app = new Hono()
 
   app.route('/', createRepoGitRoutes(database, gitAuthService))
+  app.route('/:id/schedules', createScheduleRoutes(database))
 
   app.post('/', async (c) => {
     try {

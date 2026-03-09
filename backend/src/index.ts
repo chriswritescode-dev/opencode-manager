@@ -42,6 +42,7 @@ import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
 import { NotificationService } from './services/notification'
+import { ScheduleRunner, ScheduleService } from './services/schedules'
 
 import { logger } from './utils/logger'
 import { 
@@ -209,6 +210,9 @@ try {
   opencodeServerManager.setDatabase(db)
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
+
+  const scheduleRunner = new ScheduleRunner(new ScheduleService(db))
+  scheduleRunner.start()
 
   await syncAdminFromEnv(auth, db)
 } catch (error) {

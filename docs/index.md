@@ -21,6 +21,7 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 
 - **Manage repositories** - Clone, browse, and work with multiple git repos
 - **Chat with AI** - Real-time streaming chat with file mentions and slash commands
+- **Run recurring jobs** - Schedule repo reviews, health checks, and other reusable prompts
 - **View diffs** - See code changes with syntax highlighting
 - **Control from anywhere** - Mobile-first PWA with push notifications
 - **Configure AI** - Manage models, providers, and MCP servers
@@ -30,6 +31,7 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 - **Multi-Repository Support** - Clone and manage multiple git repos with private repo support
 - **Git Integration** - View diffs, manage branches, create PRs directly from the UI
 - **Real-time Chat** - Stream responses with file mentions and custom slash commands
+- **Scheduled Repo Jobs** - Run recurring prompts with linked sessions, logs, and reviewable output
 - **Mobile-First PWA** - Install as an app on any device with push notifications
 - **Push Notifications** - Get background alerts for agent events when app is closed
 - **AI Configuration** - Configure models, providers, OAuth, and custom agents
@@ -46,5 +48,6 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 - [Installation Guide](getting-started/installation.md) - Detailed setup instructions
 - [Quick Start](getting-started/quickstart.md) - Get up and running fast
 - [Features Overview](features/overview.md) - Explore all features
+- [Schedules & Recurring Jobs](features/schedules.md) - Automate recurring repo reviews and follow-ups
 - [Memory Plugin](features/memory.md) - Persistent project knowledge with semantic search
 - [Configuration](configuration/environment.md) - Environment variables and setup

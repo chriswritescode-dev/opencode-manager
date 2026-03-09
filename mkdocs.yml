@@ -31,6 +31,7 @@ nav:
     - Repository & Git: features/git.md
     - File Browser: features/files.md
     - Chat & Sessions: features/chat.md
+    - Schedules & Recurring Jobs: features/schedules.md
     - AI Configuration: features/ai-config.md
     - Memory Plugin: features/memory.md
     - MCP Servers: features/mcp.md

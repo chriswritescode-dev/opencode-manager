@@ -91,3 +91,14 @@ export type {
   MessagesTransformConfig,
   PluginConfig,
 } from '../schemas/memory'
+
+export type {
+  ScheduleMode,
+  ScheduleRunTriggerSource,
+  ScheduleRunStatus,
+  ScheduleSkillMetadata,
+  ScheduleJob,
+  ScheduleRun,
+  CreateScheduleJobRequest,
+  UpdateScheduleJobRequest,
+} from '../schemas/schedule'
