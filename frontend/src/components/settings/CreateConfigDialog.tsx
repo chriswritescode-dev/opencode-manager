@@ -141,7 +141,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
               className="font-mono md:text-sm"
             />
             {error && (
-              <p className="text-sm text-red-500 mt-2">
+              <p className="mt-2 text-sm text-destructive">
                 {error}
                 {errorLine && (
                   <span className="ml-2 text-xs">(Line {errorLine})</span>

@@ -339,7 +339,7 @@ export function SessionDetail() {
                 variant="ghost"
                 size="sm"
                 onClick={handleParentSessionClick}
-                className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
+                className="h-7 gap-1 px-2 text-info hover:bg-info/12 hover:text-info"
                 title="Back to parent session"
               >
                 <CornerUpLeft className="w-3.5 h-3.5" />
@@ -355,7 +355,7 @@ export function SessionDetail() {
           <Header.EditableTitle
             value={session?.title || "Untitled Session"}
             onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
+            subtitle={<span className="text-warning">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
             generating={isTitleGenerating}
           />
         </div>
@@ -485,7 +485,7 @@ export function SessionDetail() {
                     handleClearPrompt()
                   }}
                   onClick={handleClearPrompt}
-                  className="absolute -top-12 right-0 md:right-4 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 hover:border-red-400 shadow-lg shadow-red-500/30 hover:shadow-red-500/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-500/20 hover:ring-red-500/40"
+                  className="absolute -top-12 right-0 z-50 flex items-center gap-2 rounded-xl border border-destructive/50 bg-destructive px-4 py-2 text-destructive-foreground shadow-lg shadow-destructive/20 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 hover:border-destructive/70 hover:bg-destructive/92 hover:shadow-destructive/30 md:right-4"
                   aria-label="Clear"
                 >
                   <X className="w-6 h-6" />
@@ -505,7 +505,7 @@ export function SessionDetail() {
                     stop()
                   }}
                   onClick={stop}
-                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-red-700 to-red-800 hover:from-red-600 hover:to-red-700 text-destructive-foreground border-2 border-red-600/80 hover:border-red-500 shadow-2xl shadow-red-600/40 hover:shadow-red-600/60 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-600/30 hover:ring-red-600/50 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"
+                  className="absolute -top-12 left-0 z-50 flex items-center gap-2 rounded-xl border border-destructive/60 bg-destructive px-4 py-2 text-destructive-foreground shadow-2xl shadow-destructive/30 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 hover:border-destructive/80 hover:bg-destructive/92 hover:shadow-destructive/40 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite] md:left-4"
                   aria-label="Stop Audio"
                 >
                   <VolumeX className="w-6 h-6" />

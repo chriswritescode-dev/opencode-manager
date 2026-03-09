@@ -94,12 +94,12 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
         className="w-full px-3 py-1.5 bg-card hover:bg-card-hover text-left flex items-center justify-between text-sm gap-2"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-green-600 dark:text-green-400 flex-shrink-0">✓</span>
+          <span className="flex-shrink-0 text-success">✓</span>
           <span className="font-medium flex-shrink-0">{toolName}</span>
           {filePath && (
             <span 
               onClick={handleFileClick}
-              className="text-blue-600 dark:text-blue-400 text-xs truncate hover:underline cursor-pointer"
+              className="cursor-pointer truncate text-xs text-info hover:underline"
             >
               {getRelativePath(filePath)}
             </span>

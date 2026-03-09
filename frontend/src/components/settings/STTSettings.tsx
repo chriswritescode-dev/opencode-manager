@@ -180,12 +180,12 @@ export function STTSettings() {
         <div className="flex items-center gap-2 text-sm">
           {saveStatus === 'saved' && (
             <>
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-              <span className="text-green-600">Saved</span>
+              <CheckCircle2 className="h-4 w-4 text-success" />
+              <span className="text-success">Saved</span>
             </>
           )}
           {saveStatus === 'idle' && isDirty && isValid && (
-            <span className="text-amber-600">Unsaved changes</span>
+            <span className="text-warning">Unsaved changes</span>
           )}
           {saveStatus === 'idle' && !isDirty && (
             <span className="text-muted-foreground">All changes saved</span>
@@ -376,8 +376,8 @@ export function STTSettings() {
               )}
 
               {sttError && (
-                <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4">
-                  <div className="text-sm text-amber-800 dark:text-amber-200 flex items-start gap-2">
+                <div className="rounded-lg border border-warning/30 bg-warning/12 p-4">
+                  <div className="flex items-start gap-2 text-sm text-warning">
                     <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
                     <div>{sttError}</div>
                   </div>
@@ -411,19 +411,19 @@ export function STTSettings() {
                     </div>
                   )}
                   {!isTesting && !isProcessing && testResult === 'success' && testTranscript && (
-                    <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded max-h-24 overflow-y-auto">
+                    <div className="mt-2 max-h-24 overflow-y-auto rounded border border-success/30 bg-success/10 p-2">
                       <div className="flex items-center gap-1 mb-1">
-                        <CheckCircle2 className="h-3 w-3 text-green-600 dark:text-green-400" />
-                        <span className="text-xs font-medium text-green-700 dark:text-green-300">Test successful</span>
+                        <CheckCircle2 className="h-3 w-3 text-success" />
+                        <span className="text-xs font-medium text-success">Test successful</span>
                       </div>
-                      <p className="text-sm text-green-800 dark:text-green-200">{testTranscript}</p>
+                      <p className="text-sm text-success">{testTranscript}</p>
                     </div>
                   )}
                   {!isTesting && !isProcessing && testResult === 'failed' && (
-                    <div className="mt-2 p-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded">
+                    <div className="mt-2 rounded border border-destructive/30 bg-destructive/10 p-2">
                       <div className="flex items-center gap-1">
-                        <XCircle className="h-3 w-3 text-red-600 dark:text-red-400" />
-                        <span className="text-xs font-medium text-red-700 dark:text-red-300">Test failed - {sttError || 'no speech detected'}</span>
+                        <XCircle className="h-3 w-3 text-destructive" />
+                        <span className="text-xs font-medium text-destructive">Test failed - {sttError || 'no speech detected'}</span>
                       </div>
                     </div>
                   )}
@@ -435,8 +435,8 @@ export function STTSettings() {
                   className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center gap-2 ${
                     !canTest && !isRecording && !isProcessing
                       ? 'bg-muted text-muted-foreground cursor-not-allowed'
-                      : isRecording
-                      ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 shadow-lg shadow-red-500/30'
+                    : isRecording
+                      ? 'border-2 border-destructive/50 bg-destructive text-destructive-foreground shadow-lg shadow-destructive/20 hover:bg-destructive/92'
                       : isProcessing
                       ? 'bg-muted text-muted-foreground cursor-wait'
                       : 'bg-primary hover:bg-primary/90 text-primary-foreground'

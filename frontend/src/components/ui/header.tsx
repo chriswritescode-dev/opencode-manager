@@ -50,7 +50,7 @@ function HeaderTitle({ children, logo, className }: HeaderTitleProps) {
           className="h-6 w-auto sm:h-8"
         />
       ) : (
-        <h1 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate">
+        <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-foreground sm:text-base">
           {children}
         </h1>
       )}
@@ -150,7 +150,7 @@ function HeaderEditableTitle({ value, onChange, subtitle, generating, className 
             </div>
           ) : (
             <h1 
-              className="text-xs sm:text-base font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate cursor-pointer hover:opacity-80 transition-opacity"
+              className="cursor-pointer truncate text-xs font-semibold text-foreground transition-opacity hover:opacity-80 sm:text-base"
               onClick={handleTitleClick}
             >
               {value}
@@ -193,7 +193,7 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
           {totalPending > 0 ? (
             <>
               <Bell className="w-4 h-4" />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-orange-500 animate-pulse" />
+              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-warning animate-pulse" />
             </>
           ) : (
             <MoreVertical className="w-4 h-4" />
@@ -203,13 +203,13 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
       <DropdownMenuContent align="end">
         {permissionCount > 0 && (
           <DropdownMenuItem onClick={() => setShowDialog(true)} className="gap-2">
-            <Bell className="w-4 h-4 text-orange-500" />
+            <Bell className="w-4 h-4 text-warning" />
             <span>{permissionCount} pending permission{permissionCount > 1 ? 's' : ''}</span>
           </DropdownMenuItem>
         )}
         {questionCount > 0 && (
           <DropdownMenuItem onClick={navigateToCurrent} className="gap-2">
-            <HelpCircle className="w-4 h-4 text-blue-500" />
+            <HelpCircle className="w-4 h-4 text-info" />
             <span>{questionCount} pending question{questionCount > 1 ? 's' : ''}</span>
           </DropdownMenuItem>
         )}

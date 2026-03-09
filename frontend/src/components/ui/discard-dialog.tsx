@@ -47,7 +47,6 @@ export function DiscardDialog({
             variant="destructive" 
             onClick={onConfirm} 
             disabled={isDiscarding}
-            className="bg-red-600 hover:bg-red-700 text-white font-semibold border-red-600"
           >
             {isDiscarding && 'Discarding...'}
             {!isDiscarding && 'Discard'}

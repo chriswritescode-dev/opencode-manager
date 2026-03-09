@@ -39,7 +39,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
           e.stopPropagation()
           onFileClick?.(ref.filePath)
         }}
-        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
+        className="cursor-pointer text-info underline decoration-dotted hover:text-info"
         title={`Click to open ${ref.filePath}`}
       >
         {ref.fullMatch}
@@ -83,13 +83,13 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const getStatusColor = () => {
     switch (part.state.status) {
       case 'completed':
-        return 'text-green-600 dark:text-green-400'
+        return 'text-success'
       case 'error':
-        return 'text-red-600 dark:text-red-400'
+        return 'text-destructive'
       case 'running':
-        if (isWaitingPermission) return 'text-orange-600 dark:text-orange-400'
-        if (isWaitingQuestion) return 'text-blue-600 dark:text-blue-400'
-        return 'text-yellow-600 dark:text-yellow-400'
+        if (isWaitingPermission) return 'text-warning'
+        if (isWaitingQuestion) return 'text-info'
+        return 'text-warning'
       default:
         return 'text-muted-foreground'
     }
@@ -171,7 +171,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
     if (part.state.status === 'error') {
       return (
-        <div className="my-2 text-sm text-red-600 dark:text-red-400">
+        <div className="my-2 text-sm text-destructive">
           Error updating tasks: {part.state.error}
         </div>
       )
@@ -191,7 +191,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     return (
       <div className="my-2">
         <div className="flex items-center gap-2 text-sm mb-2">
-          <span className="text-green-600 dark:text-green-400">✓</span>
+          <span className="text-success">✓</span>
           <span className="font-medium">$</span>
           <span className="text-foreground">{command}</span>
           {part.state.status === 'completed' && part.state.time && (
@@ -213,13 +213,13 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const getBorderStyle = () => {
     switch (part.state.status) {
       case 'running':
-        if (isWaitingPermission) return 'border-orange-500/50 shadow-sm shadow-orange-500/20'
-        if (isWaitingQuestion) return 'border-blue-500/50 shadow-sm shadow-blue-500/20'
-        return 'border-yellow-500/50 shadow-sm shadow-yellow-500/10'
+        if (isWaitingPermission) return 'border-warning/40 shadow-sm shadow-warning/15'
+        if (isWaitingQuestion) return 'border-info/40 shadow-sm shadow-info/15'
+        return 'border-warning/40 shadow-sm shadow-warning/10'
       case 'pending':
-        return 'border-blue-500/30'
+        return 'border-info/30'
       case 'error':
-        return 'border-red-500/30'
+        return 'border-destructive/30'
       case 'completed':
         return 'border-border'
       default:
@@ -244,7 +244,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 onFileClick(previewText)
               }
             }}
-            className="text-blue-600 dark:text-blue-400 text-xs truncate hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
+            className="cursor-pointer truncate text-xs text-info underline decoration-dotted hover:text-info"
             title={`Click to open ${previewText}`}
           >
             {previewText}
@@ -264,7 +264,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 e.stopPropagation()
                 onChildSessionClick?.(sessionId)
               }}
-              className="text-purple-600 dark:text-purple-400 text-xs hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
+              className="flex cursor-pointer items-center gap-1 text-xs text-info underline decoration-dotted hover:text-info"
               title="View subagent session"
             >
               <ExternalLink className="w-3 h-3" />
@@ -280,9 +280,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           {part.state.status === 'pending' && (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <div className="flex gap-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-info" style={{ animationDelay: '0ms' }} />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-info" style={{ animationDelay: '150ms' }} />
+                <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-info" style={{ animationDelay: '300ms' }} />
               </div>
               <span>Preparing tool call...</span>
             </div>
@@ -300,9 +300,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                    <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                    <span className="text-success">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
                   </div>
-                  <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                  <div className="mt-2 flex items-center gap-2 text-xs text-warning">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
                   </div>
@@ -311,7 +311,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 <div className="text-sm">
                   <div className="text-muted-foreground mb-1">Input:</div>
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
-                  <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
+                  <div className="mt-2 flex items-center gap-2 text-xs text-warning">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
                   </div>
@@ -332,7 +332,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
-                    <span className="text-green-600 dark:text-green-400">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
+                    <span className="text-success">$</span> {typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
                   </div>
                 </div>
               ) : (
@@ -362,8 +362,8 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
           {part.state.status === 'error' && (
             <div className="text-sm">
-              <div className="text-red-600 dark:text-red-400 mb-1">Error:</div>
-              <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-red-600 dark:text-red-300">
+              <div className="mb-1 text-destructive">Error:</div>
+              <pre className="rounded bg-accent p-2 text-xs text-destructive overflow-x-auto whitespace-pre-wrap break-words">
                 {part.state.error}
               </pre>
             </div>

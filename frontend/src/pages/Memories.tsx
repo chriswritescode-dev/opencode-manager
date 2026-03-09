@@ -86,7 +86,7 @@ export function Memories() {
           <Card className="mb-6 hidden sm:block">
             <CardContent className="p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Brain className="w-4 h-4 text-blue-500" />
+                <Brain className="w-4 h-4 text-info" />
                 <span className="font-medium">Total Memories: {stats.total}</span>
               </div>
               {Object.keys(stats.byScope).length > 0 && (

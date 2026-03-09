@@ -9,7 +9,7 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-lg border bg-card text-card-foreground shadow-sm",
+      "surface-panel rounded-xl bg-card/92 text-card-foreground shadow-[0_18px_40px_-28px_color-mix(in_oklab,var(--foreground)_24%,transparent)] transition-[border-color,background-color,box-shadow] supports-[backdrop-filter]:backdrop-blur-sm",
       className
     )}
     {...props}

@@ -110,7 +110,7 @@ export function OpenCodeConfigEditor({
           />
           {editError && (
             <div className="absolute bottom-0 left-0 right-0 bg-background/95 border-t p-2 sm:p-3">
-              <p className="text-xs sm:text-sm text-red-500">
+              <p className="text-xs text-destructive sm:text-sm">
                 {editError}
                 {editErrorLine && (
                   <span className="ml-2 text-xs">(Line {editErrorLine})</span>

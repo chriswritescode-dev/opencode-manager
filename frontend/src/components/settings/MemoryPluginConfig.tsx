@@ -219,7 +219,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
               className="flex items-center gap-2 p-1 hover:opacity-80 transition-opacity"
             >
               {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-              <Brain className="h-4 w-4 text-blue-500" />
+              <Brain className="h-4 w-4 text-info" />
               <CardTitle className="text-sm">Memory Plugin</CardTitle>
             </button>
             <Switch
@@ -334,7 +334,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
 
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
-                      <RefreshCw className="h-4 w-4 text-purple-500" />
+                      <RefreshCw className="h-4 w-4 text-info" />
                       <span className="text-sm font-medium">Reindex</span>
                     </div>
                     <Button
@@ -361,7 +361,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
               <div className="grid gap-4 md:grid-cols-2 border-t pt-4">
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <Database className="h-4 w-4 text-green-500" />
+                    <Database className="h-4 w-4 text-success" />
                     <span className="text-sm font-medium">Storage</span>
                   </div>
 
@@ -395,7 +395,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
 
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <Cpu className="h-4 w-4 text-orange-500" />
+                    <Cpu className="h-4 w-4 text-warning" />
                     <span className="text-sm font-medium">Plan Execution</span>
                   </div>
 
@@ -424,7 +424,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
               <div className="grid gap-4 md:grid-cols-2 border-t pt-4">
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <FileText className="h-4 w-4 text-yellow-500" />
+                    <FileText className="h-4 w-4 text-warning" />
                     <span className="text-sm font-medium">Logging</span>
                   </div>
 
@@ -459,7 +459,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
 
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <Layers className="h-4 w-4 text-cyan-500" />
+                    <Layers className="h-4 w-4 text-info" />
                     <span className="text-sm font-medium">Compaction</span>
                   </div>
 
@@ -488,7 +488,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
               <div className="grid gap-4 md:grid-cols-2 border-t pt-4">
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <Syringe className="h-4 w-4 text-pink-500" />
+                    <Syringe className="h-4 w-4 text-primary" />
                     <span className="text-sm font-medium">Memory Injection</span>
                   </div>
 
@@ -538,7 +538,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
 
                 <div className="space-y-4">
                   <div className="flex items-center gap-2 mb-3">
-                    <MessageSquare className="h-4 w-4 text-teal-500" />
+                    <MessageSquare className="h-4 w-4 text-info" />
                     <span className="text-sm font-medium">Messages Transform</span>
                   </div>
 

@@ -108,6 +108,7 @@ export const DEFAULT_GIT_IDENTITY: GitIdentity = {
 
 export const UserPreferencesSchema = z.object({
   theme: z.enum(["dark", "light", "system"]),
+  themePreset: z.string().optional(),
   mode: z.enum(["plan", "build"]),
   defaultModel: z.string().optional(),
   defaultAgent: z.string().optional(),
@@ -155,6 +156,7 @@ export const DEFAULT_STT_CONFIG: STTConfig = {
 
 export const DEFAULT_USER_PREFERENCES = {
   theme: "dark" as const,
+  themePreset: "opencode",
   mode: "build" as const,
   autoScroll: true,
   showReasoning: false,

@@ -123,10 +123,10 @@ const MessageRow = memo(function MessageRow({
         className={`w-full rounded-lg p-1.5 ${
           msg.role === 'user'
             ? isQueued 
-              ? 'bg-amber-500/10 border border-amber-500/30'
+              ? 'border border-warning/30 bg-warning/10'
               : isEditingThisMessage
-                ? 'bg-blue-600/30 border border-blue-600/50'
-                : 'bg-blue-600/20 border border-blue-600/30'
+                ? 'border border-primary/40 bg-primary/18'
+                : 'border border-primary/25 bg-primary/10'
             : 'bg-card/50 border border-border'
         } ${streaming ? 'animate-pulse-subtle' : ''}`}
       >
@@ -150,7 +150,7 @@ const MessageRow = memo(function MessageRow({
               </button>
             )}
             {isQueued && (
-              <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
+              <span className="rounded bg-warning px-1.5 py-0.5 text-xs font-semibold text-warning-foreground">
                 QUEUED
               </span>
             )}
