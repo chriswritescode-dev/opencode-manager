@@ -14,16 +14,16 @@ export const GPU_ACCELERATED_STYLE: CSSProperties = {
 
 export const MODAL_TRANSITION_MS = 300
 
-/**
- * Sanitizes markdown text for TTS playback by removing non-read-aloud symbols
- * Converts markdown into clean, readable text suitable for speech synthesis
- */
+function getPathBaseName(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath
+}
+
 export function getRepoDisplayName(repoUrl?: string | null, localPath?: string | null, sourcePath?: string | null): string {
   if (repoUrl) {
     return repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
   }
   if (sourcePath) {
-    return sourcePath.split('/').pop() || localPath || 'Repository'
+    return getPathBaseName(sourcePath) || localPath || 'Repository'
   }
   return localPath || "Repository"
 }

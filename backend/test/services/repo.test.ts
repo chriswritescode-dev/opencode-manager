@@ -277,4 +277,74 @@ describe('repo service', () => {
     expect(result.repos.map((repo) => repo.fullPath)).toContain(existingRepo.fullPath)
     expect(symlink).toHaveBeenCalledTimes(1)
   })
+
+  it('continues discovery when a nested directory cannot be read', async () => {
+    const { discoverLocalRepos } = await import('../../src/services/repo')
+    const database = {} as never
+    const rootPath = '/Users/test/projects'
+
+    getRepoByLocalPath.mockReturnValue(null)
+    getRepoBySourcePath.mockReturnValue(null)
+    createRepo.mockImplementation((_, input) => ({
+      id: 4,
+      localPath: input.localPath,
+      sourcePath: input.sourcePath,
+      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
+      branch: input.branch,
+      defaultBranch: input.defaultBranch,
+      cloneStatus: input.cloneStatus,
+      clonedAt: input.clonedAt,
+      isLocal: true,
+      isWorktree: input.isWorktree,
+    }))
+
+    lstat.mockImplementation(async (targetPath: string) => {
+      if (targetPath === rootPath || targetPath === path.join(rootPath, 'app-one') || targetPath === path.join(rootPath, 'restricted')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(rootPath, '.git')) {
+        throw createEnoentError(targetPath)
+      }
+
+      if (targetPath === path.join(rootPath, 'app-one', '.git')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(rootPath, 'restricted', '.git')) {
+        throw createEnoentError(targetPath)
+      }
+
+      if (targetPath === path.join(getReposPath(), 'app-one')) {
+        throw createEnoentError(targetPath)
+      }
+
+      throw createEnoentError(targetPath)
+    })
+
+    readdir.mockImplementation(async (targetPath: string) => {
+      if (targetPath === rootPath) {
+        return [createDirent('app-one'), createDirent('restricted')]
+      }
+
+      if (targetPath === path.join(rootPath, 'restricted')) {
+        throw new Error('EACCES: permission denied')
+      }
+
+      return []
+    })
+
+    const result = await discoverLocalRepos(database, mockGitAuthService, rootPath)
+
+    expect(result.discoveredCount).toBe(1)
+    expect(result.existingCount).toBe(0)
+    expect(result.repos).toHaveLength(1)
+    expect(result.repos[0]?.fullPath).toBe('/Users/test/projects/app-one')
+    expect(result.errors).toEqual([
+      {
+        path: '/Users/test/projects/restricted',
+        error: 'EACCES: permission denied',
+      },
+    ])
+  })
 })
