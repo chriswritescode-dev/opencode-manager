@@ -34,7 +34,7 @@ export const CreateRepoRequestSchema = z.object({
 )
 
 export const DiscoverReposRequestSchema = z.object({
-  rootPath: z.string().min(1),
+  rootPath: z.string().trim().min(1),
   maxDepth: z.number().int().min(0).max(8).optional(),
 })
 

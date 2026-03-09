@@ -244,28 +244,32 @@ async function ensureDefaultConfigExists(): Promise<void> {
 }
 
 async function ensureHomeStateImported(): Promise<void> {
-  const workspaceStateRoot = path.join(getWorkspacePath(), '.opencode', 'state')
-  const workspaceStatePath = path.join(workspaceStateRoot, 'opencode')
-  const workspaceStateDbPath = path.join(workspaceStatePath, 'opencode.db')
+  try {
+    const workspaceStateRoot = path.join(getWorkspacePath(), '.opencode', 'state')
+    const workspaceStatePath = path.join(workspaceStateRoot, 'opencode')
+    const workspaceStateDbPath = path.join(workspaceStatePath, 'opencode.db')
 
-  if (await fileExists(workspaceStateDbPath)) {
-    return
-  }
+    if (await fileExists(workspaceStateDbPath)) {
+      return
+    }
 
-  const importStatePath = await getFirstExistingPath(
-    getImportPathCandidates(
-      'OPENCODE_IMPORT_STATE_PATH',
-      path.join(os.homedir(), '.local', 'share', 'opencode')
+    const importStatePath = await getFirstExistingPath(
+      getImportPathCandidates(
+        'OPENCODE_IMPORT_STATE_PATH',
+        path.join(os.homedir(), '.local', 'share', 'opencode')
+      )
     )
-  )
 
-  if (!importStatePath) {
-    return
+    if (!importStatePath) {
+      return
+    }
+
+    await ensureDirectoryExists(workspaceStateRoot)
+    await importOpenCodeStateDirectory(importStatePath, workspaceStatePath)
+    logger.info(`Imported OpenCode state from ${importStatePath}`)
+  } catch (error) {
+    logger.warn('Failed to import OpenCode state, continuing without imported state', error)
   }
-
-  await ensureDirectoryExists(workspaceStateRoot)
-  await importOpenCodeStateDirectory(importStatePath, workspaceStatePath)
-  logger.info(`Imported OpenCode state from ${importStatePath}`)
 }
 
 async function ensureDefaultAgentsMdExists(): Promise<void> {

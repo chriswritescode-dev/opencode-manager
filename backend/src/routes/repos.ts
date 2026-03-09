@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
+import { DiscoverReposRequestSchema } from '@opencode-manager/shared/schemas'
 import * as db from '../db/queries'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
@@ -71,21 +72,21 @@ export function createRepoRoutes(database: Database, gitAuthService: GitAuthServ
 
   app.post('/discover', async (c) => {
     try {
-      const body = await c.req.json() as { rootPath?: string; maxDepth?: number }
-      const rootPath = body.rootPath?.trim()
+      const body = await c.req.json()
+      const result = DiscoverReposRequestSchema.safeParse(body)
 
-      if (!rootPath) {
-        return c.json({ error: 'rootPath is required' }, 400)
+      if (!result.success) {
+        return c.json({ error: result.error.issues[0]?.message || 'Invalid request' }, 400)
       }
 
-      const result = await repoService.discoverLocalRepos(
+      const discovery = await repoService.discoverLocalRepos(
         database,
         gitAuthService,
-        rootPath,
-        body.maxDepth
+        result.data.rootPath,
+        result.data.maxDepth
       )
 
-      return c.json(result)
+      return c.json(discovery)
     } catch (error: unknown) {
       logger.error('Failed to discover repos:', error)
       return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)

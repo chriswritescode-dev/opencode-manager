@@ -13,6 +13,7 @@ import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
 import { RepoCardSkeleton } from "./RepoCardSkeleton"
 import { useMobile } from "@/hooks/useMobile"
+import { getRepoDisplayName } from "@/lib/utils"
 
 interface RepoCardWrapperProps {
   repo: Repo
@@ -254,9 +255,7 @@ export function RepoList() {
   }, [] as Repo[])
 
   const filteredRepos = dedupedRepos.filter((repo) => {
-    const repoName = repo.repoUrl
-      ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
-      : repo.sourcePath?.split('/').pop() || repo.localPath
+    const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
     const searchTarget = repo.repoUrl || repo.sourcePath || repo.localPath || ""
     return (
       repoName.toLowerCase().includes(searchQuery.toLowerCase()) ||

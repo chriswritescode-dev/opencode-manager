@@ -62,7 +62,7 @@ async function isValidGitRepo(repoPath: string, env: Record<string, string>): Pr
 }
 
 function normalizeInputPath(input: string): string {
-  return input.trim().replace(/\/+$/, '')
+  return input.trim().replace(/[\\/]+$/, '')
 }
 
 function normalizeAbsolutePath(input: string): string {
@@ -315,31 +315,38 @@ export async function discoverLocalRepos(
   }
 
   const repoPaths: string[] = []
+  const errors: Array<{ path: string; error: string }> = []
 
   const walk = async (currentPath: string, depth: number): Promise<void> => {
-    if (await isGitRepoRootPath(currentPath)) {
-      repoPaths.push(currentPath)
-      return
-    }
-
-    if (depth >= maxDepth) {
-      return
-    }
-
-    const entries = await fs.readdir(currentPath, { withFileTypes: true })
-    for (const entry of entries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || DISCOVERY_SKIP_DIRECTORIES.has(entry.name)) {
-        continue
+    try {
+      if (await isGitRepoRootPath(currentPath)) {
+        repoPaths.push(currentPath)
+        return
       }
 
-      await walk(path.join(currentPath, entry.name), depth + 1)
+      if (depth >= maxDepth) {
+        return
+      }
+
+      const entries = await fs.readdir(currentPath, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory() || entry.isSymbolicLink() || DISCOVERY_SKIP_DIRECTORIES.has(entry.name)) {
+          continue
+        }
+
+        await walk(path.join(currentPath, entry.name), depth + 1)
+      }
+    } catch (error: unknown) {
+      errors.push({
+        path: currentPath,
+        error: getErrorMessage(error),
+      })
     }
   }
 
   await walk(normalizedRootPath, 0)
 
   const repos: Repo[] = []
-  const errors: Array<{ path: string; error: string }> = []
   let discoveredCount = 0
   let existingCount = 0
 
