@@ -20,7 +20,7 @@ Add to your `opencode.json`:
 
 ```json
 {
-  "plugin": ["@opencode-manager/memory"]
+  "plugin": ["@opencode-manager/memory@latest"]
 }
 ```
 
@@ -33,7 +33,8 @@ The local embedding model downloads automatically on install. For API-based embe
 - **Automatic Deduplication** - Prevents duplicates via exact match and semantic similarity detection
 - **Compaction Context Injection** - Injects conventions and decisions into session compaction for seamless continuity
 - **Automatic Memory Injection** - Injects relevant project memories into user messages via semantic search with distance filtering and caching
-- **Bundled Agents** - Ships with Code, Architect, and Memory agents preconfigured for memory-aware workflows
+- **Project KV Store** - Ephemeral key-value storage with TTL management for project state
+- **Bundled Agents** - Ships with Code, Architect, and Librarian agents preconfigured for memory-aware workflows
 - **CLI Tools** - Export, import, list, stats, and cleanup commands via `ocm-mem` binary
 - **Dimension Mismatch Detection** - Detects embedding model changes and guides recovery via reindex
 
@@ -43,16 +44,18 @@ The plugin bundles four agents that integrate with the memory system:
 
 | Agent | ID | Mode | Description |
 |-------|----|------|-------------|
-| **Code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @Memory subagent. |
-| **Architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @Memory for broad knowledge retrieval, designs implementation plans, then hands off to Code via `memory-plan-execute`. |
-| **Memory** | `ocm-memory` | subagent | Expert agent for managing project memory. Handles post-compaction memory extraction and contradiction resolution. |
-| **Code Review** | `ocm-code-review` | subagent | Read-only code reviewer with access to project memory for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
+| **code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @librarian subagent. |
+| **architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @librarian for broad knowledge retrieval, designs implementation plans, then hands off to code via `memory-plan-execute`. |
+| **librarian** | `ocm-librarian` | subagent | Expert agent for managing project memory. Handles post-compaction memory extraction and contradiction resolution. |
+| **auditor** | `ocm-auditor` | subagent | Read-only code auditor with access to project memory for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
 
-The Code Review agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
+The auditor agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
 
-The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which creates a new Code session with the full plan as context.
+The architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which creates a new code session with the full plan as context.
 
 ## Tools
+
+### Memory Tools
 
 | Tool | Description |
 |------|-------------|
@@ -62,6 +65,16 @@ The Architect agent operates in read-only mode (`temperature: 0.0`, all edits de
 | `memory-delete` | Delete a project memory by ID |
 | `memory-health` | Health check or full reindex of the memory store |
 | `memory-plan-execute` | Create a new Code session and send an approved plan as the first prompt |
+
+### Project KV Tools
+
+Ephemeral key-value storage for project state with automatic TTL-based expiration.
+
+| Tool | Description |
+|------|-------------|
+| `memory-kv-set` | Store a value with optional TTL (default 24 hours) |
+| `memory-kv-get` | Retrieve a value by key |
+| `memory-kv-list` | List all active KV entries for the project |
 
 ## CLI
 
@@ -246,11 +259,11 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 #### Execution
 - `executionModel` - Model override for plan execution sessions, format: `provider/model` (e.g. `anthropic/claude-haiku-3-5-20241022`). When set, `memory-plan-execute` uses this model for the new Code session. When empty or omitted, OpenCode's default model is used (typically the `model` field from `opencode.json`). **Recommended:** Set this to a fast, cheap model (e.g. Haiku or MiniMax) and use a smart model (e.g. Opus) for the Architect session — planning needs reasoning, execution needs speed.
 
-## Architect → Code Workflow
+## architect → code Workflow
 
-Plan with a smart model, execute with a fast model. The Architect agent researches and designs; the Code agent implements.
+Plan with a smart model, execute with a fast model. The architect agent researches and designs; the code agent implements.
 
-Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the Architect session.
+Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the architect session.
 
 See the [full workflow guide](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#architect--code) for setup details.
 

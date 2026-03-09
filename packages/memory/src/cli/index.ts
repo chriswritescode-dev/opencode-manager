@@ -57,6 +57,16 @@ const commands: Record<string, CommandModule> = {
       help()
     },
   },
+  upgrade: {
+    run: async (args, globalOpts) => {
+      const { run } = await import('./commands/upgrade')
+      await run(args, globalOpts)
+    },
+    help: async () => {
+      const { help } = await import('./commands/upgrade')
+      help()
+    },
+  },
 }
 
 function printMainHelp(): void {
@@ -72,6 +82,7 @@ Commands:
   list      List projects with memory counts
   stats     Show memory statistics
   cleanup   Delete memories by criteria
+  upgrade   Check for and install plugin updates
 
 Global Options:
   --db-path <path>       Path to memory database

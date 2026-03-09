@@ -4,6 +4,7 @@ import type { GitAuthService } from '../../src/services/git-auth'
 
 const executeCommand = vi.fn()
 const ensureDirectoryExists = vi.fn()
+const existsSync = vi.fn()
 
 const getRepoByUrlAndBranch = vi.fn()
 const createRepo = vi.fn()
@@ -16,6 +17,11 @@ vi.mock('../../src/utils/process', () => ({
 
 vi.mock('../../src/services/file-operations', () => ({
   ensureDirectoryExists,
+}))
+
+vi.mock('node:fs', () => ({
+  existsSync,
+  rmSync: vi.fn(),
 }))
 
 vi.mock('../../src/db/queries', () => ({
@@ -76,15 +82,13 @@ describe('repoService.cloneRepo auth env', () => {
       clonedAt: Date.now(),
     })
 
+    existsSync.mockReturnValue(false)
     executeCommand
-      .mockResolvedValueOnce('missing')
-      .mockResolvedValueOnce('missing')
       .mockResolvedValueOnce('')
 
     await cloneRepo(database, mockGitAuthService, repoUrl)
 
-    expect(executeCommand).toHaveBeenNthCalledWith(
-      3,
+    expect(executeCommand).toHaveBeenLastCalledWith(
       ['git', 'clone', 'https://github.com/acme/forge', 'forge'],
       expect.objectContaining({ cwd: getReposPath(), env: mockEnv })
     )

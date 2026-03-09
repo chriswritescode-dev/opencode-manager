@@ -138,26 +138,42 @@ The plugin is composed of several subsystems that work together:
 ├──────────────┬────────────────┬───────────────────┤
 │  Embedding   │   Vec Search   │   Cache          │
 │  Service     │   (sqlite-vec) │   (In-Memory)    │
+├──────────────┴────────────────┬───────────────────┤
+│         KV Service            │   Auto-Cleanup    │
+│   (ephemeral state + TTL)     │   (30min interval)│
 ├──────────────┴────────────────┴───────────────────┤
 │              SQLite Database (WAL)                 │
-│               memories | metadata                 │
+│   memories | metadata | project_kv (TTL indexed)  │
 └──────────────────────────────────────────────────┘
 ```
 
 ### Storage Layer
 
-The plugin uses a single SQLite database in WAL mode with three tables:
+The plugin uses a single SQLite database in WAL mode with four tables:
 
 | Table | Purpose |
 |-------|---------|
 | `memories` | Stores all memory records with scope, content, access tracking |
 | `plugin_metadata` | Tracks the active embedding model and dimensions for drift detection |
+| `project_kv` | Stores ephemeral key-value pairs with TTL expiration (auto-cleaned every 30 minutes) |
 
 SQLite pragmas are tuned for concurrent access:
 
 - `journal_mode=WAL` — concurrent reads during writes
 - `busy_timeout=5000` — wait up to 5s on lock contention
 - `synchronous=NORMAL` — balanced durability and performance
+
+### KV Store
+
+The KV store provides ephemeral project state management with automatic TTL-based expiration:
+
+- **Key-Value Storage**: Store arbitrary JSON values under string keys, scoped by project ID
+- **TTL Management**: Each entry has a configurable expiration time (default 24 hours)
+- **Auto-Cleanup**: Background cleanup runs every 30 minutes to remove expired entries
+- **Graceful Degradation**: `get()` and `list()` methods handle malformed JSON gracefully
+- **Use Cases**: Planning progress, code review patterns, session context, temporary state
+
+The KV service is initialized on plugin startup and begins its cleanup interval automatically. Call `kvService.destroy()` during cleanup to stop the interval.
 
 ### Vector Search
 
@@ -259,7 +275,7 @@ When deduplication triggers, the existing memory's ID is returned instead of cre
 
 ## Tools
 
-The plugin registers nine tools that the AI agent can call:
+The plugin registers thirteen tools that the AI agent can call:
 
 ### memory-read
 
@@ -341,6 +357,49 @@ Create a new Code session and send an implementation plan as the first prompt. D
 Creates a new session via the OpenCode API and sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
 
 The model used for the new Code session is determined by `executionModel` in the plugin config (format: `provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). If not set, OpenCode's default model resolution is used — typically the `model` field from `opencode.json`.
+
+### memory-kv-set
+
+Store a key-value pair for the current project. Values expire after 24 hours by default. Use for ephemeral project state like planning progress, code review patterns, or session context.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | The key to store the value under |
+| `value` | string | Yes | The value to store (JSON string) |
+| `ttlMs` | number | No | Time-to-live in milliseconds (default: 24 hours) |
+
+Returns confirmation with the key and expiration timestamp.
+
+### memory-kv-get
+
+Retrieve a value by key for the current project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | The key to retrieve |
+
+Returns the stored value (formatted as JSON if applicable) or a message indicating the key was not found.
+
+### memory-kv-delete
+
+Delete a key-value pair for the current project.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `key` | string | Yes | The key to delete |
+
+Returns confirmation that the key was deleted.
+
+### memory-kv-list
+
+List all active key-value pairs for the current project.
+
+No parameters required.
+
+Returns a list of all stored keys with their values and expiration times. Useful for debugging or inspecting current project state.
+
+!!! note "KV Store vs Memory"
+    The KV store is designed for **ephemeral** project state that expires automatically (default 24 hours). Use `memory-write` for **durable** knowledge that should persist across sessions, such as conventions, decisions, and context.
 
 ---
 
@@ -523,7 +582,8 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 3. Warmup embedding provider (non-blocking)
 4. Initialize SQLite database with WAL mode
 5. Create memory service with no-op vec service
-6. Initialize vec service asynchronously:
+6. Initialize KV service and start auto-cleanup interval (30 minutes)
+7. Initialize vec service asynchronously:
     - If available: sync missing embeddings, auto-validate model drift
     - If unavailable: continue with no-op (semantic search degraded)
 
@@ -531,10 +591,11 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 
 On process exit, `SIGINT`, or `SIGTERM`:
 
-1. Dispose vec service
-2. Destroy in-memory cache
-3. Dispose embedding provider (disconnect from shared server or release model)
-4. Close SQLite database
+1. Stop KV cleanup interval
+2. Dispose vec service
+3. Destroy in-memory cache
+4. Dispose embedding provider (disconnect from shared server or release model)
+5. Close SQLite database
 
 The cleanup function is idempotent — calling it multiple times is safe.
 

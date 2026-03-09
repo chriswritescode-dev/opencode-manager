@@ -1,4 +1,4 @@
-export type AgentRole = 'code' | 'memory' | 'architect' | 'code-review'
+export type AgentRole = 'code' | 'librarian' | 'architect' | 'auditor'
 
 export interface AgentDefinition {
   role: AgentRole

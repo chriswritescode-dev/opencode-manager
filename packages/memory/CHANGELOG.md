@@ -5,14 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.16] - 2026-03-07
+
+### Added
+
+- Project KV store for ephemeral project state with TTL management
+- `memory-kv-set`, `memory-kv-get`, `memory-kv-list` tools for managing project state
+- Automatic cleanup of expired KV entries (30-minute interval)
+- Default 24-hour TTL for KV entries
+
+### Fixed
+
+- KV `list()` method now handles malformed JSON data gracefully instead of throwing, consistent with `get()` behavior
+
 ## [0.0.12] - 2026-03-05
 
 ### Added
 
 - `experimental.chat.messages.transform` hook: automatically injects project conventions and decisions into system prompts for every LLM call, with configurable token budget and caching
-- Skill tool awareness in Code and Architect agent prompts
-- `plan_enter` permission on Code agent for switching to Architect mode
-- `memory-edit` documentation in Memory agent's tool list
+- Skill tool awareness in code and architect agent prompts
+- `plan_enter` permission on code agent for switching to architect mode
+- `memory-edit` documentation in Librarian agent's tool list
 - Agent name logging in all tool handlers via new ToolContext.agent field
 
 ### Changed
@@ -22,24 +35,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Memory agent tool documentation now lists all 7 available tools (was missing memory-edit)
+- Librarian agent tool documentation now lists all 7 available tools (was missing memory-edit)
 
 ## [0.0.9] - 2026-02-27
 
 ### Added
 
-- `experimental.chat.messages.transform` hook that injects read-only enforcement reminder into Architect agent sessions, preventing file edits and non-readonly tool usage at the message level
-- Code Review agent (`ocm-code-review`) — read-only subagent for convention-aware code reviews with memory integration, invoked via Task tool
-- `/review` command that triggers the Code Review agent to review current changes
+- `experimental.chat.messages.transform` hook that injects read-only enforcement reminder into architect agent sessions, preventing file edits and non-readonly tool usage at the message level
+- auditor agent (`ocm-auditor`) — read-only subagent for convention-aware code reviews with memory integration, invoked via Task tool
+- `/review` command that triggers the auditor agent to review current changes
 
 ### Changed
 
-- Restricted `memory-planning-update` and `memory-planning-search` tools to Memory subagent only — Code and Architect agents now delegate planning operations via @Memory Task tool
-- Overhauled Code and Architect agent system prompts with tone/style guidelines, tool usage policies, task management instructions, and planning state delegation patterns
+- Restricted `memory-planning-update` and `memory-planning-search` tools to librarian subagent only — code and architect agents now delegate planning operations via @librarian Task tool
+- Overhauled code and architect agent system prompts with tone/style guidelines, tool usage policies, task management instructions, and planning state delegation patterns
 - `memory-plan-execute` now accepts optional `objective`, `phases`, and `findings` parameters and saves planning state inline before dispatching the plan, eliminating the need for a separate `memory-planning-update` call
-- Planning instruction appended to dispatched plans now directs Code agent to delegate planning updates to @Memory subagent
-- Updated Memory agent description to include planning state and session progress management
-- Updated Code Review agent description to accurately reflect its capabilities
+- Planning instruction appended to dispatched plans now directs code agent to delegate planning updates to @librarian subagent
+- Updated librarian agent description to include planning state and session progress management
+- Updated auditor agent description to accurately reflect its capabilities
 
 ## [0.0.6] - 2026-02-24
 
@@ -49,9 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Planning state tools: `memory-planning-update` and `memory-planning-get` for tracking session objectives, phases, findings, and errors
 - `memory-plan-execute` tool for creating new Code sessions with approved implementation plans
 - Three embedding providers: local (`all-MiniLM-L6-v2`), OpenAI (`text-embedding-3-small/large`, `ada-002`), and Voyage (`voyage-code-3`, `voyage-2`)
-- Bundled Code agent (`ocm-code`) with memory-aware coding workflows
-- Bundled Architect agent (`ocm-architect`) for read-only planning with automatic plan handoff
-- Bundled Memory agent (`ocm-memory`) for expert knowledge curation and post-compaction extraction
+- Bundled code agent (`ocm-code`) with memory-aware coding workflows
+- Bundled architect agent (`ocm-architect`) for read-only planning with automatic plan handoff
+- Bundled librarian agent (`ocm-librarian`) for expert knowledge curation and post-compaction extraction
 - Compaction context injection with custom prompt, planning state, conventions, and decisions
 - Configurable compaction settings: custom prompt, inline planning, token budget, snapshot storage
 - CLI export/import for backing up and migrating memories as JSON or Markdown

@@ -107,6 +107,20 @@ export function initializeDatabase(dataDir: string): Database {
     )
   `)
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS project_kv (
+      project_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      data TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (project_id, key)
+    )
+  `)
+
+  db.run(`CREATE INDEX IF NOT EXISTS idx_project_kv_expires_at ON project_kv(expires_at)`)
+
   return db
 }
 

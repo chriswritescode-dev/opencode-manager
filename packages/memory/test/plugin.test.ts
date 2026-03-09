@@ -457,11 +457,11 @@ describe('messages.transform hook', () => {
     }
   })
 
-  test('injects system-reminder for Architect agent messages', async () => {
+  test('injects system-reminder for architect agent messages', async () => {
     const output = {
       messages: [
         { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'hello' }] },
-        { info: { role: 'user', agent: 'Architect' }, parts: [{ type: 'text', text: 'plan this' }] },
+        { info: { role: 'user', agent: 'architect' }, parts: [{ type: 'text', text: 'plan this' }] },
       ],
     }
 
@@ -478,10 +478,10 @@ describe('messages.transform hook', () => {
     expect(text).toContain('MUST NOT make any file edits')
   })
 
-  test('does NOT inject for non-Architect agents', async () => {
+  test('does NOT inject for non-architect agents', async () => {
     const output = {
       messages: [
-        { info: { role: 'user', agent: 'Code' }, parts: [{ type: 'text', text: 'do something' }] },
+        { info: { role: 'user', agent: 'code' }, parts: [{ type: 'text', text: 'do something' }] },
       ],
     }
 
@@ -505,9 +505,9 @@ describe('messages.transform hook', () => {
   test('targets the LAST user message in the array', async () => {
     const output = {
       messages: [
-        { info: { role: 'user', agent: 'Code' }, parts: [{ type: 'text', text: 'first' }] },
+        { info: { role: 'user', agent: 'code' }, parts: [{ type: 'text', text: 'first' }] },
         { info: { role: 'assistant' }, parts: [{ type: 'text', text: 'response' }] },
-        { info: { role: 'user', agent: 'Architect' }, parts: [{ type: 'text', text: 'second' }] },
+        { info: { role: 'user', agent: 'architect' }, parts: [{ type: 'text', text: 'second' }] },
       ],
     }
 

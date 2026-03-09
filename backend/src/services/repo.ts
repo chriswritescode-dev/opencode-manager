@@ -1,3 +1,4 @@
+import { existsSync, rmSync } from 'node:fs'
 import { executeCommand } from '../utils/process'
 import { ensureDirectoryExists } from './file-operations'
 import * as db from '../db/queries'
@@ -304,9 +305,9 @@ export async function cloneRepo(
   }
 
   await ensureDirectoryExists(getReposPath())
-  const baseRepoExists = await executeCommand(['bash', '-c', `test -d ${baseRepoDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
+  const baseRepoExists = existsSync(path.join(path.resolve(getReposPath()), baseRepoDirName))
 
-  const shouldUseWorktree = useWorktree && branch && baseRepoExists.trim() === 'exists'
+  const shouldUseWorktree = useWorktree && branch && baseRepoExists
 
   const createRepoInput: CreateRepoInput = {
     repoUrl: normalizedRepoUrl,
@@ -340,9 +341,7 @@ export async function cloneRepo(
       
        await createWorktreeSafely(baseRepoPath, worktreePath, branch, env)
       
-      const worktreeVerified = await executeCommand(['test', '-d', worktreePath])
-        .then(() => true)
-        .catch(() => false)
+      const worktreeVerified = existsSync(worktreePath)
       
       if (!worktreeVerified) {
         throw new Error(`Worktree directory was not created at: ${worktreePath}`)
@@ -350,16 +349,16 @@ export async function cloneRepo(
       
       logger.info(`Worktree verified at: ${worktreePath}`)
       
-    } else if (branch && baseRepoExists.trim() === 'exists' && useWorktree) {
+    } else if (branch && baseRepoExists && useWorktree) {
       logger.info(`Base repo exists but worktree creation failed, cloning branch separately`)
       
-      const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
-      if (worktreeExists.trim() === 'exists') {
+      const worktreeExists = existsSync(path.join(path.resolve(getReposPath()), worktreeDirName))
+      if (worktreeExists) {
         logger.info(`Workspace directory exists, removing it: ${worktreeDirName}`)
         try {
-          await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
-          const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-          if (verifyRemoved.trim() === 'exists') {
+          rmSync(path.join(path.resolve(getReposPath()), worktreeDirName), { recursive: true, force: true })
+          const verifyRemoved = !existsSync(path.join(path.resolve(getReposPath()), worktreeDirName))
+          if (!verifyRemoved) {
             throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
           }
         } catch (cleanupError: unknown) {
@@ -402,7 +401,7 @@ export async function cloneRepo(
         }
       }
     } else {
-      if (baseRepoExists.trim() === 'exists') {
+      if (baseRepoExists) {
         logger.info(`Repository directory already exists, verifying it's a valid git repo: ${baseRepoDirName}`)
         const isValidRepo = await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--git-dir'], path.resolve(getReposPath())).then(() => 'valid').catch(() => 'invalid')
         
@@ -446,26 +445,26 @@ export async function cloneRepo(
           return { ...repo, cloneStatus: 'ready' }
         } else {
           logger.warn(`Invalid repository directory found, removing and recloning: ${baseRepoDirName}`)
-          await executeCommand(['rm', '-rf', baseRepoDirName], getReposPath())
+          rmSync(path.join(getReposPath(), baseRepoDirName), { recursive: true, force: true })
         }
       }
       
       logger.info(`Cloning repo: ${normalizedRepoUrl}${branch ? ` to branch ${branch}` : ''}`)
       
-      const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], getReposPath())
-      if (worktreeExists.trim() === 'exists') {
+      const worktreeExists = existsSync(path.join(getReposPath(), worktreeDirName))
+      if (worktreeExists) {
         logger.info(`Workspace directory exists, removing it: ${worktreeDirName}`)
         try {
-          await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
-          const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-        if (verifyRemoved.trim() === 'exists') {
-          throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
+          rmSync(path.join(getReposPath(), worktreeDirName), { recursive: true, force: true })
+          const verifyRemoved = !existsSync(path.join(getReposPath(), worktreeDirName))
+          if (!verifyRemoved) {
+            throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
+          }
+        } catch (cleanupError: unknown) {
+          logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
+          throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
         }
-      } catch (cleanupError: unknown) {
-        logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
-        throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
       }
-    }
     
       try {
         const cloneCmd = branch
