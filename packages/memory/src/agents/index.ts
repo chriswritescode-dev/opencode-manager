@@ -1,14 +1,14 @@
 import type { AgentRole, AgentDefinition } from './types'
 import { codeAgent } from './code'
-import { memoryAgent } from './memory'
+import { librarianAgent } from './librarian'
 import { architectAgent } from './architect'
-import { codeReviewAgent } from './code-review'
+import { auditorAgent } from './auditor'
 
 export const agents: Record<AgentRole, AgentDefinition> = {
   code: codeAgent,
-  memory: memoryAgent,
+  librarian: librarianAgent,
   architect: architectAgent,
-  'code-review': codeReviewAgent,
+  auditor: auditorAgent,
 }
 
 export { type AgentRole, type AgentDefinition, type AgentConfig } from './types'

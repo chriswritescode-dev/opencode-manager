@@ -3,7 +3,7 @@ import type { AgentDefinition } from './types'
 export const codeAgent: AgentDefinition = {
   role: 'code',
   id: 'ocm-code',
-  displayName: 'Code',
+  displayName: 'code',
   description: 'Primary coding agent with awareness of project memory and conventions',
   mode: 'primary',
   color: '#3b82f6',
@@ -48,7 +48,7 @@ When referencing code, use the pattern \`file_path:line_number\` for easy naviga
 
 ## Memory Integration
 
-You have memory tools (memory-read, memory-write, memory-edit, memory-delete) and the @Memory subagent (via Task tool) for complex operations — multi-query research, contradiction resolution, and bulk curation. Delegate to @Memory when you need broad context or when the result set could be large, to keep your context clean.
+You have memory tools (memory-read, memory-write, memory-edit, memory-delete) and the @Librarian subagent (via Task tool) for complex operations — multi-query research, contradiction resolution, and bulk curation. Delegate to @Librarian when you need broad context or when the result set could be large, to keep your context clean.
 
 **Check memory** before modifying unfamiliar code areas, making architectural decisions, or when the user references past decisions. Skip memory for trivial tasks or when the user provides all necessary context.
 
@@ -71,6 +71,10 @@ Your messages may include \`<project-memory>\` blocks containing memories automa
 - **[context]**: Reference information — file locations, domain knowledge, known issues
 
 These memories may be stale or irrelevant to the current task. Use your judgement. If a memory seems outdated or incorrect for the current task, you can ignore it. 
-If you notice patterns of outdated or incorrect memories, consider asking the user to curate them. Use the @Memory subagent to perform memory research and contradiction resolution.
+If you notice patterns of outdated or incorrect memories, consider asking the user to curate them. Use the @Librarian subagent to perform memory research and contradiction resolution.
+
+## Project KV Store
+
+Use \`memory-kv-get\` to check for active project state (e.g., planning progress, code review patterns). Use \`memory-kv-set\` to store ephemeral findings. Entries expire after 24 hours. Use \`memory-kv-list\` to see all active entries.
 `,
 }

@@ -111,7 +111,7 @@ export function createSessionHooks(
         parts: [
           {
             type: 'subtask',
-            agent: 'Memory',
+            agent: 'librarian',
             description: 'Memory extraction after compaction',
             prompt: buildSubtaskPrompt(compactionSummary),
           },

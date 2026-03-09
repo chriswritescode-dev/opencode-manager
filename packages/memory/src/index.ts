@@ -11,6 +11,7 @@ import { createVecService } from './storage/vec'
 import { createEmbeddingProvider, checkServerHealth, isServerRunning, killEmbeddingServer } from './embedding'
 import { createMemoryService } from './services/memory'
 import { createEmbeddingSyncService } from './services/embedding-sync'
+import { createKvService } from './services/kv'
 import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
 import { createLogger } from './utils/logger'
@@ -19,6 +20,7 @@ import type { PluginConfig, CompactionConfig, HealthStatus, Logger } from './typ
 import type { EmbeddingProvider } from './embedding'
 import type { VecService } from './storage/vec-types'
 import { createNoopVecService } from './storage/vec'
+import { checkForUpdate, formatUpgradeCheck, performUpgrade } from './utils/upgrade'
 
 
 const z = tool.schema
@@ -293,6 +295,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       memoryService.setDedupThreshold(config.dedupThreshold)
     }
 
+    const kvService = createKvService(db, logger)
+
     const mismatchState: DimensionMismatchState = {
       detected: false,
       expected: null,
@@ -486,20 +490,32 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           },
         }),
         'memory-health': tool({
-          description: 'Check memory plugin health or trigger a reindex of all embeddings. Use action "check" (default) to view status, or "reindex" to regenerate all embeddings when model has changed or embeddings are missing. Always report the plugin version from the output. Never run reindex unless the user explicitly asks for it.',
+          description: 'Check memory plugin health or trigger a reindex of all embeddings. Use action "check" (default) to view status, "reindex" to regenerate all embeddings when model has changed or embeddings are missing, or "upgrade" to update the plugin to the latest version. Always report the plugin version from the output. Never run reindex unless the user explicitly asks for it.',
           args: {
-            action: z.enum(['check', 'reindex']).optional().default('check').describe('Action to perform: "check" for health status, "reindex" to regenerate embeddings'),
+            action: z.enum(['check', 'reindex', 'upgrade']).optional().default('check').describe('Action to perform: "check" for health status, "reindex" to regenerate embeddings, "upgrade" to update plugin'),
           },
           execute: async (args) => {
+            if (args.action === 'upgrade') {
+              const result = await performUpgrade(async (cacheDir, version) => {
+                const pkg = `@opencode-manager/memory@${version}`
+                const output = await input.$`bun add --force --no-cache --exact --cwd ${cacheDir} ${pkg}`.nothrow().quiet()
+                return { exitCode: output.exitCode, stderr: output.stderr.toString() }
+              })
+              return result.message
+            }
             if (args.action === 'reindex') {
               if (!currentVec.available) {
                 return 'Reindex unavailable: vector service is still initializing. Try again in a few seconds.'
               }
               return executeReindex(projectId, memoryService, db, config, provider, mismatchState, currentVec)
             }
-            const result = await executeHealthCheck(projectId, db, config, provider, dataDir)
+            const [healthResult, updateCheck] = await Promise.all([
+              executeHealthCheck(projectId, db, config, provider, dataDir),
+              checkForUpdate(),
+            ])
+            const versionLine = formatUpgradeCheck(updateCheck)
             const initInfo = `\nInit: ${initState.vecReady ? 'vec ready' : 'vec pending'}${initState.syncRunning ? ', sync in progress' : initState.syncComplete ? ', sync complete' : ''}`
-            return withDimensionWarning(result + initInfo)
+            return withDimensionWarning(healthResult + initInfo + '\n' + versionLine)
           },
         }),
         'memory-plan-execute': tool({
@@ -531,7 +547,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               path: { id: newSessionId },
               body: {
                 parts: [{ type: 'text' as const, text: args.plan }],
-                agent: 'Code',
+                agent: 'code',
                 ...(executionModel && { model: executionModel }),
               },
             })
@@ -545,6 +561,62 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
             const modelInfo = executionModel ? `${executionModel.providerID}/${executionModel.modelID}` : 'default'
             return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\nModel: ${modelInfo}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
+          },
+        }),
+        'memory-kv-set': tool({
+          description: 'Store a key-value pair for the current project. Values expire after 24 hours by default. Use for ephemeral project state like planning progress, code review patterns, or session context.',
+          args: {
+            key: z.string().describe('The key to store the value under'),
+            value: z.string().describe('The value to store (JSON string)'),
+            ttlMs: z.number().optional().describe('Time-to-live in milliseconds (default: 24 hours)'),
+          },
+          execute: async (args) => {
+            logger.log(`memory-kv-set: key="${args.key}"`)
+            let parsed: unknown
+            try {
+              parsed = JSON.parse(args.value)
+            } catch {
+              parsed = args.value
+            }
+            kvService.set(projectId, args.key, parsed, args.ttlMs)
+            const expiresAt = new Date(Date.now() + (args.ttlMs ?? 24 * 60 * 60 * 1000))
+            logger.log(`memory-kv-set: stored key="${args.key}", expires=${expiresAt.toISOString()}`)
+            return `Stored key "${args.key}" (expires ${expiresAt.toISOString()})`
+          },
+        }),
+        'memory-kv-get': tool({
+          description: 'Retrieve a value by key for the current project.',
+          args: {
+            key: z.string().describe('The key to retrieve'),
+          },
+          execute: async (args) => {
+            logger.log(`memory-kv-get: key="${args.key}"`)
+            const value = kvService.get(projectId, args.key)
+            if (value === null) {
+              logger.log(`memory-kv-get: key="${args.key}" not found`)
+              return `No value found for key "${args.key}"`
+            }
+            logger.log(`memory-kv-get: key="${args.key}" found`)
+            return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+          },
+        }),
+        'memory-kv-list': tool({
+          description: 'List all active key-value pairs for the current project.',
+          args: {},
+          execute: async () => {
+            logger.log('memory-kv-list')
+            const entries = kvService.list(projectId)
+            if (entries.length === 0) {
+              logger.log('memory-kv-list: no entries')
+              return 'No active KV entries for this project.'
+            }
+            const formatted = entries.map((e) => {
+              const expiresIn = Math.round((e.expiresAt - Date.now()) / 60000)
+              const dataPreview = typeof e.data === 'string' ? e.data.substring(0, 100) : JSON.stringify(e.data).substring(0, 100)
+              return `- **${e.key}** (expires in ${expiresIn}m)\n  ${dataPreview}${dataPreview.length >= 100 ? '...' : ''}`
+            })
+            logger.log(`memory-kv-list: ${entries.length} entries`)
+            return `${entries.length} active KV entries:\n\n${formatted.join('\n')}`
           },
         }),
       },
@@ -623,7 +695,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           text: `<system-reminder>
 Plan mode is active. You MUST NOT make any file edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
-You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-health, memory-plan-execute).
+You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list), and mcp_question.
+
+You MUST get explicit approval via mcp_question before calling memory-plan-execute. Never execute a plan without approval.
 </system-reminder>`,
           synthetic: true,
         })

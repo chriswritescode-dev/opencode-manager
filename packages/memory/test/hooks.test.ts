@@ -195,7 +195,7 @@ describe('SessionHooks', () => {
 
     const subtask = call.body.parts[0]
     expect(subtask.type).toBe('subtask')
-    expect(subtask.agent).toBe('Memory')
+    expect(subtask.agent).toBe('librarian')
     expect(subtask.description).toBe('Memory extraction after compaction')
     expect(subtask.prompt).toContain('Compaction summary content')
     expect(subtask.prompt).toContain('active work in progress')
