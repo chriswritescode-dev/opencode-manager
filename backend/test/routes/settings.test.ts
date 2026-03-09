@@ -1,18 +1,25 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { execSync } from 'child_process'
 
-vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+vi.mock('fs', () => ({
+  existsSync: vi.fn(() => false),
+  promises: {
+    mkdir: vi.fn(),
+    access: vi.fn(),
+    readFile: vi.fn(),
+    writeFile: vi.fn(),
+    stat: vi.fn(),
+    chmod: vi.fn(),
+    unlink: vi.fn(),
+    rm: vi.fn(),
+    readdir: vi.fn(),
+  },
 }))
 
-vi.mock('../../src/services/opencode-single-server', () => ({
-  opencodeServerManager: {
-    getVersion: vi.fn(),
-    fetchVersion: vi.fn(),
-    reloadConfig: vi.fn(),
-    restart: vi.fn(),
-    clearStartupError: vi.fn(),
-  },
+vi.mock('child_process', () => ({
+  execSync: vi.fn(),
+  spawnSync: vi.fn(),
+  spawn: vi.fn(),
 }))
 
 vi.mock('../../src/utils/logger', () => ({
@@ -45,17 +52,36 @@ vi.mock('../../src/services/proxy', () => ({
   proxyToOpenCodeWithDirectory: vi.fn(),
 }))
 
+vi.mock('../../src/services/opencode-single-server', () => ({
+  opencodeServerManager: {
+    getVersion: vi.fn(),
+    fetchVersion: vi.fn(),
+    reloadConfig: vi.fn(),
+    restart: vi.fn(),
+    clearStartupError: vi.fn(),
+    getLastStartupError: vi.fn(),
+    setDatabase: vi.fn(),
+    reinitializeBinDirectory: vi.fn(),
+  },
+}))
+
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  getOpenCodeConfigFilePath: vi.fn(() => '/test/config.json'),
-  getAgentsMdPath: vi.fn(() => '/test/AGENTS.md'),
-  getWorkspacePath: vi.fn(() => '/test/workspace'),
-  getReposPath: vi.fn(() => '/test/repos'),
-  getDatabasePath: vi.fn(() => '/test/db.sqlite'),
+  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
+  getReposPath: vi.fn(() => '/tmp/test-repos'),
+  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
+  getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
+  getDatabasePath: vi.fn(() => ':memory:'),
+  getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
   ENV: {
-    SERVER: { PORT: 5003, HOST: '0.0.0.0' },
-    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173' },
-    WORKSPACE: { BASE_PATH: '/test/workspace' },
+    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
+    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
+    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    DATABASE: { PATH: ':memory:' },
+    FILE_LIMITS: {
+      MAX_SIZE_BYTES: 1024 * 1024,
+      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
+    },
   },
   FILE_LIMITS: {
     MAX_SIZE_BYTES: 1024 * 1024,
@@ -63,8 +89,8 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   },
 }))
 
-import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { createSettingsRoutes } from '../../src/routes/settings'
+import { opencodeServerManager } from '../../src/services/opencode-single-server'
 
 const mockExecSync = execSync as ReturnType<typeof vi.fn>
 const mockGetVersion = opencodeServerManager.getVersion as ReturnType<typeof vi.fn>
