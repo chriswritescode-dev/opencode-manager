@@ -259,6 +259,26 @@ describe('schedule database queries', () => {
     expect(runs[1]).toMatchObject({ id: 6, status: 'failed', errorText: 'Model unavailable' })
   })
 
+  it('lists run summaries without loading large log or response blobs', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([
+        makeRunRow({ log_text: null, response_text: null, error_text: 'Run failed' }),
+      ]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const runs = schedulesDb.listScheduleRunsByJob(mockDb, 42, 7, 5)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS log_text'))
+    expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS response_text'))
+    expect(runs[0]).toMatchObject({
+      id: 5,
+      logText: null,
+      responseText: null,
+      errorText: 'Run failed',
+    })
+  })
+
   it('returns the running run for a job when present', () => {
     const stmt = {
       get: vi.fn().mockReturnValue(makeRunRow({ id: 8 })),

@@ -84,6 +84,38 @@ describe('schedule-config', () => {
     expect(result.nextRunAt).toBe(existing.nextRunAt)
   })
 
+  it('normalizes optional text fields when updating a schedule', () => {
+    const existing: ScheduleJob = {
+      id: 10,
+      repoId: 42,
+      name: 'Weekly engineering summary',
+      description: 'Existing description',
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: 'planner',
+      prompt: 'Old prompt',
+      model: 'openai/gpt-5-mini',
+      skillMetadata: null,
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    }
+
+    const result = buildUpdatedSchedulePersistenceInput(existing, {
+      description: '   ',
+      agentSlug: '  reviewer  ',
+      model: '   ',
+    }, Date.UTC(2026, 2, 9, 12, 30, 0))
+
+    expect(result.description).toBeNull()
+    expect(result.agentSlug).toBe('reviewer')
+    expect(result.model).toBeNull()
+  })
+
   it('recomputes the next run when a disabled schedule is re-enabled', () => {
     const existing: ScheduleJob = {
       id: 8,

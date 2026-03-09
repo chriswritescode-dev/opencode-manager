@@ -20,6 +20,19 @@ function parseId(value: string | undefined, label: string): number {
   return parsed
 }
 
+function parseRunListLimit(value: string | undefined): number {
+  if (value === undefined) {
+    return 20
+  }
+
+  const parsed = parseId(value, 'limit')
+  if (parsed < 1) {
+    throw new ScheduleServiceError('Limit must be greater than 0', 400)
+  }
+
+  return Math.min(parsed, 100)
+}
+
 export function createScheduleRoutes(database: Database) {
   const app = new Hono()
   const scheduleService = new ScheduleService(database)
@@ -98,8 +111,7 @@ export function createScheduleRoutes(database: Database) {
     try {
       const repoId = parseId(c.req.param('id'), 'repo id')
       const jobId = parseId(c.req.param('jobId'), 'schedule id')
-      const limitQuery = c.req.query('limit')
-      const limit = limitQuery ? parseId(limitQuery, 'limit') : 20
+      const limit = parseRunListLimit(c.req.query('limit'))
       return c.json({ runs: scheduleService.listRuns(repoId, jobId, limit) })
     } catch (error) {
       return handleScheduleError(c, error, 'Failed to list schedule runs')

@@ -356,7 +356,21 @@ export function listRunningScheduleRuns(db: Database, limit: number = 100): Sche
 
 export function listScheduleRunsByJob(db: Database, repoId: number, jobId: number, limit: number = 20): ScheduleRun[] {
   const stmt = db.prepare(`
-    SELECT * FROM schedule_runs
+    SELECT
+      id,
+      job_id,
+      repo_id,
+      trigger_source,
+      status,
+      started_at,
+      finished_at,
+      created_at,
+      session_id,
+      session_title,
+      NULL AS log_text,
+      NULL AS response_text,
+      error_text
+    FROM schedule_runs
     WHERE repo_id = ? AND job_id = ?
     ORDER BY started_at DESC
     LIMIT ?

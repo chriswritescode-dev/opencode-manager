@@ -174,4 +174,22 @@ describe('Schedule Routes', () => {
     expect(deleteBody.success).toBe(true)
     expect(mocks.scheduleService.deleteJob).toHaveBeenCalledWith(42, 7)
   })
+
+  it('rejects non-positive run list limits', async () => {
+    const response = await app.request('/repos/42/schedules/7/runs?limit=0')
+    const body = await response.json() as { error: string }
+
+    expect(response.status).toBe(400)
+    expect(body.error).toBe('Limit must be greater than 0')
+    expect(mocks.scheduleService.listRuns).not.toHaveBeenCalled()
+  })
+
+  it('clamps large run list limits', async () => {
+    mocks.scheduleService.listRuns.mockReturnValue([])
+
+    const response = await app.request('/repos/42/schedules/7/runs?limit=500')
+
+    expect(response.status).toBe(200)
+    expect(mocks.scheduleService.listRuns).toHaveBeenCalledWith(42, 7, 100)
+  })
 })

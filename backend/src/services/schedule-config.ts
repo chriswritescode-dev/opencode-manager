@@ -141,15 +141,15 @@ export function buildUpdatedSchedulePersistenceInput(
 
   return {
     name: input.name?.trim() || existing.name,
-    description: input.description === undefined ? existing.description : input.description,
+    description: input.description === undefined ? existing.description : (input.description?.trim() || null),
     enabled,
     scheduleMode: scheduleConfig.scheduleMode,
     intervalMinutes: scheduleConfig.intervalMinutes,
     cronExpression: scheduleConfig.cronExpression,
     timezone: scheduleConfig.timezone,
-    agentSlug: input.agentSlug === undefined ? existing.agentSlug : input.agentSlug,
+    agentSlug: input.agentSlug === undefined ? existing.agentSlug : (input.agentSlug?.trim() || null),
     prompt: input.prompt?.trim() || existing.prompt,
-    model: input.model === undefined ? existing.model : input.model,
+    model: input.model === undefined ? existing.model : (input.model?.trim() || null),
     skillMetadata: input.skillMetadata === undefined ? existing.skillMetadata : input.skillMetadata,
     nextRunAt,
   }

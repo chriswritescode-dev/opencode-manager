@@ -14,7 +14,7 @@ export default defineConfig({
       PORT: '3001',
       DATABASE_PATH: ':memory:',
       AUTH_SECRET: 'test-secret-for-encryption',
-      WORKSPACE_PATH: '/test/workspace',
+      WORKSPACE_PATH: '/tmp/test-workspace',
     },
   },
 })

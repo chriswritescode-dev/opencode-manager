@@ -12,7 +12,7 @@ const migration: Migration = {
         name TEXT NOT NULL,
         description TEXT,
         enabled BOOLEAN NOT NULL DEFAULT TRUE,
-        interval_minutes INTEGER NOT NULL,
+        interval_minutes INTEGER,
         agent_slug TEXT,
         prompt TEXT NOT NULL,
         model TEXT,
