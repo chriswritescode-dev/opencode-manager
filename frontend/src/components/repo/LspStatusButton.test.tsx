@@ -117,8 +117,8 @@ describe('LspStatusButton', () => {
     )
 
     const button = container.querySelector('button')
-    expect(button).toHaveClass('outline')
-    expect(button).toHaveClass('sm')
+    expect(button).toHaveClass('border')
+    expect(button).toHaveClass('bg-background')
   })
 
   it('should apply transition and hover classes', () => {
@@ -152,7 +152,7 @@ describe('LspStatusButton', () => {
       <LspStatusButton opcodeUrl="http://localhost:5551" directory="/test" onClick={mockOnClick} />
     )
 
-    const textSpan = container.querySelector('.hidden.sm.inline')
+    const textSpan = container.querySelector('.hidden.sm\\:inline')
     expect(textSpan).toBeInTheDocument()
   })
 })

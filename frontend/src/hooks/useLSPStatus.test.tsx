@@ -64,15 +64,24 @@ describe('useLSPStatus', () => {
     mockGetLSPStatus.mockResolvedValue([])
     vi.mocked(useOpenCodeClient).mockReturnValue(mockClient)
 
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
     const { result } = renderHook(() => useLSPStatus('http://localhost:5551', '/test'), {
-      wrapper: createWrapper()
+      wrapper
     })
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.queryKey).toEqual(['opencode', 'lsp', 'http://localhost:5551', '/test'])
+    const queryState = queryClient.getQueryState(['opencode', 'lsp', 'http://localhost:5551', '/test'])
+    expect(queryState).toBeTruthy()
+    expect(queryState?.status).toBe('success')
   })
 
   it('should return empty array when no servers active', async () => {
@@ -132,44 +141,68 @@ describe('useLSPStatus', () => {
     mockGetLSPStatus.mockResolvedValue([])
     vi.mocked(useOpenCodeClient).mockReturnValue(mockClient)
 
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
     const { result } = renderHook(() => useLSPStatus('http://localhost:5551', '/test'), {
-      wrapper: createWrapper()
+      wrapper
     })
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.refetchInterval).toBe(30000)
+    const observer = queryClient.getQueryCache().find({ queryKey: ['opencode', 'lsp', 'http://localhost:5551', '/test'] })
+    expect((observer?.options as any).refetchInterval).toBe(30000)
   })
 
   it('should have 10s stale time', async () => {
     mockGetLSPStatus.mockResolvedValue([])
     vi.mocked(useOpenCodeClient).mockReturnValue(mockClient)
 
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
     const { result } = renderHook(() => useLSPStatus('http://localhost:5551', '/test'), {
-      wrapper: createWrapper()
+      wrapper
     })
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.staleTime).toBe(10000)
+    const observer = queryClient.getQueryCache().find({ queryKey: ['opencode', 'lsp', 'http://localhost:5551', '/test'] })
+    expect((observer?.options as any).staleTime).toBe(10000)
   })
 
   it('should refetch on window focus', async () => {
     mockGetLSPStatus.mockResolvedValue([])
     vi.mocked(useOpenCodeClient).mockReturnValue(mockClient)
 
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } }
+    })
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
     const { result } = renderHook(() => useLSPStatus('http://localhost:5551', '/test'), {
-      wrapper: createWrapper()
+      wrapper
     })
 
     await waitFor(() => {
       expect(result.current.isSuccess).toBe(true)
     })
 
-    expect(result.current.refetchOnWindowFocus).toBe(true)
+    const observer = queryClient.getQueryCache().find({ queryKey: ['opencode', 'lsp', 'http://localhost:5551', '/test'] })
+    expect((observer?.options as any).refetchOnWindowFocus).toBe(true)
   })
 })

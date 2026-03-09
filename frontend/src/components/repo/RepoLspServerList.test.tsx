@@ -6,10 +6,10 @@ import type { LspStatus } from '@/api/opencode'
 describe('RepoLspServerList', () => {
   describe('loading state', () => {
     it('should show loading spinner when isLoading is true', () => {
-      render(<RepoLspServerList isLoading={true} data={undefined} />)
+      const { container } = render(<RepoLspServerList isLoading={true} data={undefined} />)
 
       expect(screen.getByText('Loading...')).toBeInTheDocument()
-      expect(screen.getByRole('status', { hidden: true })).toBeInTheDocument()
+      expect(container.querySelector('.animate-spin')).toBeInTheDocument()
     })
   })
 
