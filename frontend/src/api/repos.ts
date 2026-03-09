@@ -1,6 +1,7 @@
 import type { Repo } from './types'
 import { FetchError, fetchWrapper, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
+import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 
 export async function createRepo(
   repoUrl?: string,
@@ -19,6 +20,14 @@ export async function createRepo(
 
 export async function listRepos(): Promise<Repo[]> {
   return fetchWrapper(`${API_BASE_URL}/api/repos`)
+}
+
+export async function discoverRepos(rootPath: string, maxDepth?: number): Promise<DiscoverReposResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/discover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rootPath, maxDepth }),
+  })
 }
 
 export async function getRepo(id: number): Promise<Repo> {

@@ -352,7 +352,7 @@ export function SessionDetail() {
           <Header.EditableTitle
             value={session?.title || "Untitled Session"}
             onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
+            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>}
             generating={isTitleGenerating}
           />
         </div>
@@ -561,7 +561,7 @@ export function SessionDetail() {
         isOpen={fileBrowserOpen}
         onClose={handleFileBrowserClose}
         basePath={repo.localPath}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
         repoId={repoId}
         initialSelectedFile={selectedFilePath}
       />
@@ -577,7 +577,7 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
       />
 
       <ResetPermissionsDialog

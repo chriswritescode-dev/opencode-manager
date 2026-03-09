@@ -15,6 +15,7 @@ interface RepoCardProps {
     id: number;
     repoUrl?: string | null;
     localPath?: string;
+    sourcePath?: string;
     branch?: string;
     currentBranch?: string;
     cloneStatus: string;
@@ -43,7 +44,7 @@ export function RepoCard({
 
   const repoName = repo.repoUrl
     ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
-    : repo.localPath || "Local Repo";
+    : repo.sourcePath?.split('/').pop() || repo.localPath || "Local Repo";
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
   const isCloning = repo.cloneStatus === "cloning";

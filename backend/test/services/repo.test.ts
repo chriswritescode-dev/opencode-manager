@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import path from 'path'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import type { GitAuthService } from '../../src/services/git-auth'
 
@@ -6,9 +7,29 @@ const executeCommand = vi.fn()
 const ensureDirectoryExists = vi.fn()
 
 const getRepoByLocalPath = vi.fn()
+const getRepoBySourcePath = vi.fn()
 const createRepo = vi.fn()
 const updateRepoStatus = vi.fn()
+const updateRepoBranch = vi.fn()
 const deleteRepo = vi.fn()
+
+const lstat = vi.fn()
+const stat = vi.fn()
+const readdir = vi.fn()
+const mkdir = vi.fn()
+const symlink = vi.fn()
+const readlink = vi.fn()
+
+vi.mock('fs/promises', () => ({
+  default: {
+    lstat,
+    stat,
+    readdir,
+    mkdir,
+    symlink,
+    readlink,
+  },
+}))
 
 vi.mock('../../src/utils/process', () => ({
   executeCommand,
@@ -20,195 +41,240 @@ vi.mock('../../src/services/file-operations', () => ({
 
 vi.mock('../../src/db/queries', () => ({
   getRepoByLocalPath,
+  getRepoBySourcePath,
   createRepo,
   updateRepoStatus,
+  updateRepoBranch,
   deleteRepo,
-}))
-
-vi.mock('../../src/services/settings', () => ({
-  SettingsService: vi.fn().mockImplementation(() => ({
-    getSettings: () => ({
-      preferences: {
-        gitCredentials: [],
-      },
-      updatedAt: Date.now(),
-    }),
-  })),
 }))
 
 const mockGitAuthService = {
   getGitEnvironment: vi.fn().mockReturnValue({}),
 } as unknown as GitAuthService
 
-describe('initLocalRepo', () => {
+function createDirectoryStat() {
+  return {
+    isDirectory: () => true,
+    isFile: () => false,
+    isSymbolicLink: () => false,
+  }
+}
+
+function createFileStat() {
+  return {
+    isDirectory: () => false,
+    isFile: () => true,
+    isSymbolicLink: () => false,
+  }
+}
+
+function createDirent(name: string) {
+  return {
+    name,
+    isDirectory: () => true,
+    isSymbolicLink: () => false,
+  }
+}
+
+function createEnoentError(targetPath: string) {
+  return Object.assign(new Error(`ENOENT: ${targetPath}`), { code: 'ENOENT' })
+}
+
+describe('repo service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    executeCommand.mockResolvedValue('')
     ensureDirectoryExists.mockResolvedValue(undefined)
-  })
+    mkdir.mockResolvedValue(undefined)
+    symlink.mockResolvedValue(undefined)
+    readlink.mockResolvedValue('')
+    readdir.mockResolvedValue([])
+    stat.mockResolvedValue(createDirectoryStat())
+    executeCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('--git-dir')) {
+        return '.git'
+      }
 
-  it('creates new empty git repo for relative path', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const localPath = 'my-new-repo'
-    
-    getRepoByLocalPath.mockReturnValue(null)
-    createRepo.mockReturnValue({
-      id: 1,
-      repoUrl: undefined,
-      localPath: 'my-new-repo',
-      defaultBranch: 'main',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
-      isLocal: true,
+      if (args.includes('HEAD') && !args.includes('--abbrev-ref')) {
+        return 'abc123'
+      }
+
+      if (args.includes('--abbrev-ref')) {
+        return 'main'
+      }
+
+      return ''
     })
-    
-    const result = await initLocalRepo(database, mockGitAuthService, localPath)
-
-    expect(executeCommand).toHaveBeenCalledWith(['git', 'init'], expect.any(Object))
-    expect(ensureDirectoryExists).toHaveBeenCalledWith(expect.stringContaining('my-new-repo'))
-    expect(updateRepoStatus).toHaveBeenCalledWith(database, 1, 'ready')
-    expect(result.cloneStatus).toBe('ready')
   })
 
-  it('copies existing git repo from absolute path', async () => {
+  it('creates a new empty git repo for a relative path', async () => {
     const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const absolutePath = '/Users/test/existing-repo'
+    const database = {} as never
 
     getRepoByLocalPath.mockReturnValue(null)
     createRepo.mockImplementation((_, input) => ({
-      id: 2,
-      repoUrl: undefined,
+      id: 1,
       localPath: input.localPath,
-      defaultBranch: 'main',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
+      fullPath: path.join(getReposPath(), input.localPath),
+      defaultBranch: input.defaultBranch,
+      cloneStatus: input.cloneStatus,
+      clonedAt: input.clonedAt,
       isLocal: true,
     }))
 
-    let callCount = 0
-    executeCommand.mockImplementation(async () => {
-      callCount++
-      if (callCount === 2) return '.git'
-      if (callCount === 3) throw new Error('not found')
-      if (callCount === 5) return '.git'
-      return ''
+    const result = await initLocalRepo(database, mockGitAuthService, 'my-new-repo')
+
+    expect(ensureDirectoryExists).toHaveBeenCalledWith(expect.stringContaining('my-new-repo'))
+    expect(executeCommand).toHaveBeenCalledWith(['git', 'init'], expect.any(Object))
+    expect(updateRepoStatus).toHaveBeenCalledWith(database, 1, 'ready')
+    expect(result.cloneStatus).toBe('ready')
+    expect(result.fullPath).toContain('my-new-repo')
+  })
+
+  it('links an absolute git repo in place and preserves its source path', async () => {
+    const { initLocalRepo } = await import('../../src/services/repo')
+    const database = {} as never
+    const absolutePath = '/Users/test/existing-repo'
+    const aliasPath = path.join(getReposPath(), 'existing-repo')
+
+    getRepoBySourcePath.mockReturnValue(null)
+    getRepoByLocalPath.mockReturnValue(null)
+    createRepo.mockImplementation((_, input) => ({
+      id: 2,
+      localPath: input.localPath,
+      sourcePath: input.sourcePath,
+      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
+      branch: input.branch,
+      defaultBranch: input.defaultBranch,
+      cloneStatus: input.cloneStatus,
+      clonedAt: input.clonedAt,
+      isLocal: true,
+      isWorktree: input.isWorktree,
+    }))
+
+    lstat.mockImplementation(async (targetPath: string) => {
+      if (targetPath === absolutePath) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(absolutePath, '.git')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === aliasPath) {
+        throw createEnoentError(targetPath)
+      }
+
+      throw createEnoentError(targetPath)
     })
 
     const result = await initLocalRepo(database, mockGitAuthService, absolutePath)
 
-    expect(executeCommand).toHaveBeenCalledWith(['test', '-d', '/Users/test/existing-repo'], { silent: true })
-    expect(executeCommand).toHaveBeenCalledWith(['git', '-C', '/Users/test/existing-repo', 'rev-parse', '--git-dir'], expect.objectContaining({ silent: true }))
-    expect(executeCommand).toHaveBeenCalledWith(['git', 'clone', '--local', '/Users/test/existing-repo', 'existing-repo'], expect.objectContaining({ cwd: getReposPath() }))
-    expect(updateRepoStatus).toHaveBeenCalledWith(database, 2, 'ready')
-    expect(result.cloneStatus).toBe('ready')
+    expect(createRepo).toHaveBeenCalledWith(database, expect.objectContaining({
+      localPath: 'existing-repo',
+      sourcePath: absolutePath,
+      cloneStatus: 'ready',
+      isLocal: true,
+    }))
+    expect(symlink).toHaveBeenCalledWith(absolutePath, aliasPath, 'dir')
     expect(result.localPath).toBe('existing-repo')
+    expect(result.sourcePath).toBe(absolutePath)
+    expect(result.fullPath).toBe(absolutePath)
   })
 
-  it('returns existing repo if local path already in database (relative)', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const localPath = 'existing-repo'
+  it('discovers nested repos and keeps existing registrations', async () => {
+    const { discoverLocalRepos } = await import('../../src/services/repo')
+    const database = {} as never
+    const rootPath = '/Users/test/projects'
     const existingRepo = {
-      id: 100,
-      localPath: 'existing-repo',
+      id: 9,
+      localPath: 'app-two',
+      sourcePath: '/Users/test/projects/nested/app-two',
+      fullPath: '/Users/test/projects/nested/app-two',
+      branch: 'main',
+      defaultBranch: 'main',
       cloneStatus: 'ready' as const,
+      clonedAt: Date.now(),
+      isLocal: true,
+      isWorktree: true,
     }
 
-    getRepoByLocalPath.mockReturnValue(existingRepo)
-
-    const result = await initLocalRepo(database, mockGitAuthService, localPath)
-
-    expect(result).toBe(existingRepo)
-    expect(createRepo).not.toHaveBeenCalled()
-    expect(executeCommand).not.toHaveBeenCalled()
-  })
-
-  it('throws error when absolute path does not exist', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const nonExistentPath = '/Users/test/non-existent'
-
-    executeCommand.mockRejectedValueOnce(new Error('Command failed'))
-
-    await expect(initLocalRepo(database, mockGitAuthService, nonExistentPath)).rejects.toThrow("No such file or directory")
-  })
-
-  it('throws error when repo name already exists in workspace', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const absolutePath = '/Users/test/existing-repo'
-
-    let callCount = 0
-    executeCommand.mockImplementation(async () => {
-      callCount++
-      if (callCount === 2) return '.git'
-      if (callCount === 3) return ''
-      return ''
-    })
-
-    await expect(initLocalRepo(database, mockGitAuthService, absolutePath)).rejects.toThrow("A repository named 'existing-repo' already exists in the workspace")
-  })
-
-  it('throws error when absolute path is not a git repo', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const nonGitPath = '/Users/test/not-a-repo'
-
-    let callCount = 0
-    executeCommand.mockImplementation(async () => {
-      callCount++
-      if (callCount === 2) throw new Error('Not a git repo')
-      return ''
-    })
-
-    await expect(initLocalRepo(database, mockGitAuthService, nonGitPath)).rejects.toThrow("Directory exists but is not a valid Git repository")
-  })
-
-  it('creates new empty repo with custom branch', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const localPath = 'custom-branch-repo'
-    const branch = 'develop'
-
     getRepoByLocalPath.mockReturnValue(null)
-    createRepo.mockReturnValue({
+    getRepoBySourcePath.mockImplementation((_, sourcePath: string) => {
+      if (sourcePath === existingRepo.sourcePath) {
+        return existingRepo
+      }
+
+      return null
+    })
+    createRepo.mockImplementation((_, input) => ({
       id: 3,
-      repoUrl: undefined,
-      localPath: 'custom-branch-repo',
-      branch: 'develop',
-      defaultBranch: 'develop',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
+      localPath: input.localPath,
+      sourcePath: input.sourcePath,
+      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
+      branch: input.branch,
+      defaultBranch: input.defaultBranch,
+      cloneStatus: input.cloneStatus,
+      clonedAt: input.clonedAt,
       isLocal: true,
+      isWorktree: input.isWorktree,
+    }))
+
+    lstat.mockImplementation(async (targetPath: string) => {
+      if (targetPath === path.join(rootPath, 'app-one')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(rootPath, 'nested')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(rootPath, 'nested', 'app-two')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(rootPath, '.git')) {
+        throw createEnoentError(targetPath)
+      }
+
+      if (targetPath === path.join(rootPath, 'app-one', '.git')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === path.join(rootPath, 'nested', '.git')) {
+        throw createEnoentError(targetPath)
+      }
+
+      if (targetPath === path.join(rootPath, 'nested', 'app-two', '.git')) {
+        return createFileStat()
+      }
+
+      if (targetPath === path.join(getReposPath(), 'app-one')) {
+        throw createEnoentError(targetPath)
+      }
+
+      throw createEnoentError(targetPath)
     })
 
-    const result = await initLocalRepo(database, mockGitAuthService, localPath, branch)
+    readdir.mockImplementation(async (targetPath: string) => {
+      if (targetPath === rootPath) {
+        return [createDirent('app-one'), createDirent('nested')]
+      }
 
-    expect(executeCommand).toHaveBeenCalledWith(['git', 'init'], expect.any(Object))
-    expect(executeCommand).toHaveBeenCalledWith(['git', '-C', expect.any(String), 'checkout', '-b', 'develop'])
-    expect(result.defaultBranch).toBe('develop')
-  })
+      if (targetPath === path.join(rootPath, 'nested')) {
+        return [createDirent('app-two')]
+      }
 
-  it('normalizes trailing slashes in path', async () => {
-    const { initLocalRepo } = await import('../../src/services/repo')
-    const database = {} as any
-    const localPath = 'my-repo/'
-
-    getRepoByLocalPath.mockReturnValue(null)
-    createRepo.mockReturnValue({
-      id: 4,
-      repoUrl: undefined,
-      localPath: 'my-repo',
-      defaultBranch: 'main',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
-      isLocal: true,
+      return []
     })
 
-    const result = await initLocalRepo(database, mockGitAuthService, localPath)
+    const result = await discoverLocalRepos(database, mockGitAuthService, rootPath)
 
-    expect(result.localPath).toBe('my-repo')
+    expect(result.discoveredCount).toBe(1)
+    expect(result.existingCount).toBe(1)
+    expect(result.errors).toEqual([])
+    expect(result.repos).toHaveLength(2)
+    expect(result.repos.map((repo) => repo.fullPath)).toContain('/Users/test/projects/app-one')
+    expect(result.repos.map((repo) => repo.fullPath)).toContain(existingRepo.fullPath)
+    expect(symlink).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,8 +1,9 @@
 export interface Repo {
   id: number
-  repoUrl: string
+  repoUrl?: string
   localPath: string
   fullPath: string
+  sourcePath?: string
   branch?: string
   currentBranch?: string
   defaultBranch: string
@@ -11,6 +12,7 @@ export interface Repo {
   lastPulled?: number
   openCodeConfigName?: string
   isWorktree?: boolean
+  isLocal?: boolean
 }
 
 import type { components } from './opencode-types'

@@ -4,7 +4,8 @@ import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
 import os from 'os'
 import path from 'path'
-import { readFile } from 'fs/promises'
+import { cp, readdir, readFile, rm } from 'fs/promises'
+import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { initializeDatabase } from './db/schema'
 import { createRepoRoutes } from './routes/repos'
 import { createIPCServer, type IPCServer } from './ipc/ipcServer'
@@ -81,6 +82,71 @@ import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
+const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
+
+function getImportPathCandidates(envKey: string, fallbackPath: string): string[] {
+  const candidates = [process.env[envKey], fallbackPath]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => path.resolve(value))
+
+  return Array.from(new Set(candidates))
+}
+
+async function getFirstExistingPath(paths: string[]): Promise<string | undefined> {
+  for (const candidate of paths) {
+    if (await fileExists(candidate)) {
+      return candidate
+    }
+  }
+
+  return undefined
+}
+
+function escapeSqliteValue(value: string): string {
+  return value.replace(/'/g, "''")
+}
+
+async function copyOpenCodeStateFiles(sourcePath: string, targetPath: string): Promise<void> {
+  const entries = await readdir(sourcePath, { withFileTypes: true })
+
+  for (const entry of entries) {
+    if (OPENCODE_STATE_DB_FILENAMES.has(entry.name)) {
+      continue
+    }
+
+    await cp(path.join(sourcePath, entry.name), path.join(targetPath, entry.name), {
+      recursive: true,
+      force: false,
+      errorOnExist: false,
+    })
+  }
+}
+
+async function snapshotOpenCodeDatabase(sourcePath: string, targetPath: string): Promise<void> {
+  await rm(targetPath, { force: true })
+
+  const database = new SQLiteDatabase(sourcePath)
+
+  try {
+    database.exec(`VACUUM INTO '${escapeSqliteValue(targetPath)}'`)
+  } finally {
+    database.close()
+  }
+}
+
+async function importOpenCodeStateDirectory(sourcePath: string, targetPath: string): Promise<void> {
+  await ensureDirectoryExists(targetPath)
+  await copyOpenCodeStateFiles(sourcePath, targetPath)
+
+  const sourceDbPath = path.join(sourcePath, 'opencode.db')
+  if (!await fileExists(sourceDbPath)) {
+    return
+  }
+
+  await rm(path.join(targetPath, 'opencode.db-shm'), { force: true })
+  await rm(path.join(targetPath, 'opencode.db-wal'), { force: true })
+  await snapshotOpenCodeDatabase(sourceDbPath, path.join(targetPath, 'opencode.db'))
+}
 
 async function ensureDefaultConfigExists(): Promise<void> {
   const settingsService = new SettingsService(db)
@@ -118,11 +184,17 @@ async function ensureDefaultConfigExists(): Promise<void> {
     }
   }
   
-  const homeConfigPath = path.join(os.homedir(), '.config/opencode/opencode.json')
-  if (await fileExists(homeConfigPath)) {
-    logger.info(`Found home config at ${homeConfigPath}, importing...`)
+  const importConfigPath = await getFirstExistingPath(
+    getImportPathCandidates(
+      'OPENCODE_IMPORT_CONFIG_PATH',
+      path.join(os.homedir(), '.config/opencode/opencode.json')
+    )
+  )
+
+  if (importConfigPath) {
+    logger.info(`Found importable OpenCode config at ${importConfigPath}, importing...`)
     try {
-      const rawContent = await readFileContent(homeConfigPath)
+      const rawContent = await readFileContent(importConfigPath)
       const parsed = parseJsonc(rawContent)
       const validation = OpenCodeConfigSchema.safeParse(parsed)
       
@@ -142,11 +214,11 @@ async function ensureDefaultConfigExists(): Promise<void> {
         }
         
         await writeFileContent(workspaceConfigPath, rawContent)
-        logger.info('Imported home config to workspace')
+        logger.info(`Imported OpenCode config from ${importConfigPath} to workspace`)
         return
       }
     } catch (error) {
-      logger.warn('Failed to import home config', error)
+      logger.warn(`Failed to import OpenCode config from ${importConfigPath}`, error)
     }
   }
   
@@ -169,6 +241,31 @@ async function ensureDefaultConfigExists(): Promise<void> {
   })
   await writeFileContent(workspaceConfigPath, seedConfig)
   logger.info('Created minimal seed config')
+}
+
+async function ensureHomeStateImported(): Promise<void> {
+  const workspaceStateRoot = path.join(getWorkspacePath(), '.opencode', 'state')
+  const workspaceStatePath = path.join(workspaceStateRoot, 'opencode')
+  const workspaceStateDbPath = path.join(workspaceStatePath, 'opencode.db')
+
+  if (await fileExists(workspaceStateDbPath)) {
+    return
+  }
+
+  const importStatePath = await getFirstExistingPath(
+    getImportPathCandidates(
+      'OPENCODE_IMPORT_STATE_PATH',
+      path.join(os.homedir(), '.local', 'share', 'opencode')
+    )
+  )
+
+  if (!importStatePath) {
+    return
+  }
+
+  await ensureDirectoryExists(workspaceStateRoot)
+  await importOpenCodeStateDirectory(importStatePath, workspaceStatePath)
+  logger.info(`Imported OpenCode state from ${importStatePath}`)
 }
 
 async function ensureDefaultAgentsMdExists(): Promise<void> {
@@ -197,6 +294,7 @@ try {
   await cleanupExpiredCache()
 
   await ensureDefaultConfigExists()
+  await ensureHomeStateImported()
   await ensureDefaultAgentsMdExists()
 
   const settingsService = new SettingsService(db)

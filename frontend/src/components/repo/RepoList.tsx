@@ -242,8 +242,8 @@ export function RepoList() {
     if (repo.isWorktree) {
       acc.push(repo)
     } else {
-      const key = repo.repoUrl || repo.localPath
-      const existing = acc.find((r) => (r.repoUrl || r.localPath) === key && !r.isWorktree)
+      const key = repo.repoUrl || repo.sourcePath || repo.localPath
+      const existing = acc.find((r) => (r.repoUrl || r.sourcePath || r.localPath) === key && !r.isWorktree)
 
       if (!existing) {
         acc.push(repo)
@@ -256,8 +256,8 @@ export function RepoList() {
   const filteredRepos = dedupedRepos.filter((repo) => {
     const repoName = repo.repoUrl
       ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
-      : repo.localPath
-    const searchTarget = repo.repoUrl || repo.localPath || ""
+      : repo.sourcePath?.split('/').pop() || repo.localPath
+    const searchTarget = repo.repoUrl || repo.sourcePath || repo.localPath || ""
     return (
       repoName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       searchTarget.toLowerCase().includes(searchQuery.toLowerCase())
