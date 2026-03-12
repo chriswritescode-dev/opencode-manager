@@ -16,6 +16,7 @@ vi.mock('bun:sqlite', () => ({
 describe('Database Queries', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockDb.prepare.mockReset()
   })
 
   describe('createRepo', () => {
@@ -23,14 +24,20 @@ describe('Database Queries', () => {
       const repo = {
         repoUrl: 'https://github.com/test/repo',
         localPath: 'repos/test-repo',
+        sourcePath: '/Users/test/repos/test-repo',
         branch: 'main',
         defaultBranch: 'main',
         cloneStatus: 'ready' as const,
         clonedAt: Date.now(),
-        isWorktree: false
+        isWorktree: false,
+        isLocal: true,
       }
 
-      const existingCheckStmt = {
+      const existingCheckSourceStmt = {
+        get: vi.fn().mockReturnValue(undefined)
+      }
+
+      const existingCheckLocalStmt = {
         get: vi.fn().mockReturnValue(undefined)
       }
 
@@ -43,6 +50,7 @@ describe('Database Queries', () => {
           id: 1,
           repo_url: repo.repoUrl,
           local_path: repo.localPath,
+          source_path: repo.sourcePath,
           branch: repo.branch,
           default_branch: repo.defaultBranch,
           clone_status: repo.cloneStatus,
@@ -52,7 +60,8 @@ describe('Database Queries', () => {
       }
       
       mockDb.prepare
-        .mockReturnValueOnce(existingCheckStmt)
+        .mockReturnValueOnce(existingCheckSourceStmt)
+        .mockReturnValueOnce(existingCheckLocalStmt)
         .mockReturnValueOnce(insertStmt)
         .mockReturnValueOnce(selectStmt)
 
@@ -62,12 +71,13 @@ describe('Database Queries', () => {
       expect(insertStmt.run).toHaveBeenCalledWith(
         repo.repoUrl,
         repo.localPath,
+        repo.sourcePath,
         repo.branch || null,
         repo.defaultBranch,
         repo.cloneStatus,
         repo.clonedAt,
         repo.isWorktree ? 1 : 0,
-        0
+        1
       )
       expect(result.id).toBe(1)
     })
@@ -80,6 +90,7 @@ describe('Database Queries', () => {
         id: 1,
         repo_url: 'https://github.com/test/repo',
         local_path: 'repos/test-repo',
+        source_path: '/Users/test/repos/test-repo',
         branch: 'main',
         default_branch: 'main',
         clone_status: 'ready',
@@ -101,7 +112,8 @@ describe('Database Queries', () => {
         id: 1,
         repoUrl: 'https://github.com/test/repo',
         localPath: 'repos/test-repo',
-        fullPath: expect.stringContaining('repos/test-repo'),
+        fullPath: '/Users/test/repos/test-repo',
+        sourcePath: '/Users/test/repos/test-repo',
         branch: 'main',
         defaultBranch: 'main',
         cloneStatus: 'ready',

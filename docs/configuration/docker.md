@@ -203,6 +203,40 @@ Contains:
 
 Uses a named volume for data persistence.
 
+### Import Existing OpenCode Chats From Your Host
+
+If you already use standalone OpenCode on your machine and want Dockerized OpenCode Manager to show those chats on first setup, bind your host OpenCode config/state into the container and bind your repo root to the same absolute path that standalone OpenCode used.
+
+Add to `.env`:
+
+```bash
+OCM_REPOS_HOST_PATH=/Users/you/Development
+OCM_OPENCODE_CONFIG_HOST_PATH=/Users/you/.config/opencode
+OCM_OPENCODE_STATE_HOST_PATH=/Users/you/.local/share/opencode
+```
+
+Then add a compose override:
+
+```yaml
+services:
+  app:
+    environment:
+      - OPENCODE_IMPORT_CONFIG_PATH=/import/opencode-config/opencode.json
+      - OPENCODE_IMPORT_STATE_PATH=/import/opencode-state
+    volumes:
+      - ${OCM_REPOS_HOST_PATH}:${OCM_REPOS_HOST_PATH}:ro
+      - ${OCM_OPENCODE_CONFIG_HOST_PATH}:/import/opencode-config:ro
+      - ${OCM_OPENCODE_STATE_HOST_PATH}:/import/opencode-state:ro
+```
+
+Why the repo mount uses the host path as the container path:
+
+- standalone OpenCode stores chats against absolute directory paths
+- mounting `${OCM_REPOS_HOST_PATH}` to the same path inside the container preserves those paths exactly
+- OpenCode Manager can then discover that folder and create its normal workspace links under `/workspace/repos`
+
+With a fresh Docker volume, first startup imports the host OpenCode config and state, and after you add `${OCM_REPOS_HOST_PATH}` in the Manager UI, previously existing chats appear under the discovered repositories.
+
 ## Health Checks
 
 The container includes health checks:

@@ -81,6 +81,20 @@ describe('Git Routes', () => {
     })
   })
 
+  describe('POST /discover', () => {
+    it('should reject invalid maxDepth values', async () => {
+      const response = await app.request('/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rootPath: '/Users/test/projects', maxDepth: 99 }),
+      })
+      const body = await response.json()
+
+      expect(response.status).toBe(400)
+      expect(body).toHaveProperty('error')
+    })
+  })
+
   describe('POST /:id/git/fetch', () => {
     it('should return 404 when repo does not exist', async () => {
       getRepoByIdMock.mockReturnValue(null)

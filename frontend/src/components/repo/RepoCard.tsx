@@ -6,6 +6,7 @@ import { Loader2, Trash2, Download, GitBranch, FolderOpen, AlertCircle } from "l
 import { useNavigate } from "react-router-dom";
 import { downloadRepo } from "@/api/repos";
 import { showToast } from "@/lib/toast";
+import { getRepoDisplayName } from "@/lib/utils";
 import type { GitStatusResponse } from "@/types/git";
 import { SourceControlPanel } from "@/components/source-control/SourceControlPanel";
 import { DownloadDialog } from "@/components/ui/download-dialog";
@@ -15,6 +16,7 @@ interface RepoCardProps {
     id: number;
     repoUrl?: string | null;
     localPath?: string;
+    sourcePath?: string;
     branch?: string;
     currentBranch?: string;
     cloneStatus: string;
@@ -41,9 +43,7 @@ export function RepoCard({
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
   const [showSourceControl, setShowSourceControl] = useState(false);
 
-  const repoName = repo.repoUrl
-    ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
-    : repo.localPath || "Local Repo";
+  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
   const isCloning = repo.cloneStatus === "cloning";

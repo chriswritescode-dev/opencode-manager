@@ -13,6 +13,7 @@ import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
 import { RepoCardSkeleton } from "./RepoCardSkeleton"
 import { useMobile } from "@/hooks/useMobile"
+import { getRepoDisplayName } from "@/lib/utils"
 
 interface RepoCardWrapperProps {
   repo: Repo
@@ -242,8 +243,8 @@ export function RepoList() {
     if (repo.isWorktree) {
       acc.push(repo)
     } else {
-      const key = repo.repoUrl || repo.localPath
-      const existing = acc.find((r) => (r.repoUrl || r.localPath) === key && !r.isWorktree)
+      const key = repo.repoUrl || repo.sourcePath || repo.localPath
+      const existing = acc.find((r) => (r.repoUrl || r.sourcePath || r.localPath) === key && !r.isWorktree)
 
       if (!existing) {
         acc.push(repo)
@@ -254,10 +255,8 @@ export function RepoList() {
   }, [] as Repo[])
 
   const filteredRepos = dedupedRepos.filter((repo) => {
-    const repoName = repo.repoUrl
-      ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
-      : repo.localPath
-    const searchTarget = repo.repoUrl || repo.localPath || ""
+    const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
+    const searchTarget = repo.repoUrl || repo.sourcePath || repo.localPath || ""
     return (
       repoName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       searchTarget.toLowerCase().includes(searchQuery.toLowerCase())

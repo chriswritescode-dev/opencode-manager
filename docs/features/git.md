@@ -11,6 +11,18 @@ Clone any git repository:
 3. Paste the repository URL
 4. Click **Clone**
 
+## Discovering Existing Repositories
+
+Import repositories you already have on disk without recloning them:
+
+1. Click the **Repositories** button in the sidebar
+2. Click **Add Repository**
+3. Select **Folder Discovery**
+4. Enter a parent folder such as `/Users/you/Development`
+5. Click **Discover Repositories**
+
+OpenCode Manager scans that folder for nested git repositories and links each one into the workspace. If standalone OpenCode already has chats stored for those same paths, the sessions show up automatically.
+
 ### Private Repositories
 
 For private repositories, configure a GitHub Personal Access Token:
@@ -119,4 +131,3 @@ The UI shows your branch's relationship to its remote:
 - **↑ N** - You have N commits not pushed to remote
 - **↓ N** - Remote has N commits you haven't pulled
 - **↑ N ↓ M** - Both local and remote have diverged
-
