@@ -7,6 +7,7 @@ import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
 import { Memories } from './pages/Memories'
+import { Schedules } from './pages/Schedules'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
@@ -134,6 +135,11 @@ const router = createBrowserRouter([
       {
         path: '/repos/:id/memories',
         element: <Memories />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/repos/:id/schedules',
+        element: <Schedules />,
         loader: protectedLoader,
       },
     ],

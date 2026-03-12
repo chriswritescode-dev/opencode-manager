@@ -5,6 +5,8 @@ import migration003 from './003-repos-add-columns'
 import migration004 from './004-repos-indexes'
 import migration005 from './005-repos-local-path-prefix'
 import migration006 from './006-git-token-to-credentials'
+import migration007 from './007-schedules'
+import migration008 from './008-schedule-cron-support'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -13,4 +15,6 @@ export const allMigrations: Migration[] = [
   migration004,
   migration005,
   migration006,
+  migration007,
+  migration008,
 ]

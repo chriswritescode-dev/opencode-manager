@@ -42,6 +42,7 @@ import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
 import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
 import { NotificationService } from './services/notification'
+import { ScheduleRunner, ScheduleService } from './services/schedules'
 
 import { logger } from './utils/logger'
 import { 
@@ -210,6 +211,9 @@ try {
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
 
+  const scheduleRunner = new ScheduleRunner(new ScheduleService(db))
+  scheduleRunner.start()
+
   await syncAdminFromEnv(auth, db)
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
@@ -238,13 +242,13 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
+app.route('/api/health', createHealthRoutes(db))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(requireAuth))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
-protectedApi.route('/health', createHealthRoutes(db))
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService))
 protectedApi.route('/settings', createSettingsRoutes(db))
 protectedApi.route('/files', createFileRoutes())
