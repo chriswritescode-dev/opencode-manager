@@ -1,7 +1,7 @@
 import type { PluginInput } from '@opencode-ai/plugin'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { RalphService, RalphState } from '../services/ralph'
-import { MAX_RETRIES } from '../services/ralph'
+import { MAX_RETRIES, STALL_TIMEOUT_MS, MAX_CONSECUTIVE_STALLS } from '../services/ralph'
 import type { Logger } from '../types'
 import { execSync, spawnSync } from 'child_process'
 import { resolve } from 'path'
@@ -10,6 +10,8 @@ export interface RalphEventHandler {
   onEvent(input: { event: { type: string; properties?: Record<string, unknown> } }): Promise<void>
   terminateAll(): void
   clearAllRetryTimeouts(): void
+  startWatchdog(sessionId: string): void
+  getStallInfo(sessionId: string): { consecutiveStalls: number; lastActivityTime: number } | null
 }
 
 
@@ -42,6 +44,10 @@ export function createRalphEventHandler(
 ): RalphEventHandler {
   const minCleanAudits = ralphService.getMinCleanAudits()
   const retryTimeouts = new Map<string, NodeJS.Timeout>()
+  const lastActivityTime = new Map<string, number>()
+  const stallWatchdogs = new Map<string, NodeJS.Timeout>()
+  const consecutiveStalls = new Map<string, number>()
+  const childSessions = new Map<string, Set<string>>()
   async function commitAndCleanupWorktree(state: RalphState): Promise<{ committed: boolean; cleaned: boolean }> {
     if (state.inPlace) {
       logger.log(`Ralph: in-place mode, skipping commit and cleanup`)
@@ -94,7 +100,109 @@ export function createRalphEventHandler(
     return { committed, cleaned }
   }
 
+  function findRalphParent(childSessionId: string): string | undefined {
+    for (const [ralphId, children] of childSessions.entries()) {
+      if (children.has(childSessionId)) {
+        return ralphId
+      }
+    }
+    return undefined
+  }
+
+  function recordActivity(sessionId: string): void {
+    lastActivityTime.set(sessionId, Date.now())
+  }
+
+  function stopWatchdog(sessionId: string): void {
+    const interval = stallWatchdogs.get(sessionId)
+    if (interval) {
+      clearInterval(interval)
+      stallWatchdogs.delete(sessionId)
+    }
+    lastActivityTime.delete(sessionId)
+    consecutiveStalls.delete(sessionId)
+    childSessions.delete(sessionId)
+  }
+
+  function startWatchdog(sessionId: string): void {
+    stopWatchdog(sessionId)
+    lastActivityTime.set(sessionId, Date.now())
+    consecutiveStalls.set(sessionId, 0)
+
+    const stallTimeout = ralphService.getStallTimeoutMs()
+
+    const interval = setInterval(async () => {
+      const lastActivity = lastActivityTime.get(sessionId)
+      if (!lastActivity) return
+
+      const elapsed = Date.now() - lastActivity
+      if (elapsed < stallTimeout) return
+
+      const state = ralphService.getActiveState(sessionId)
+      if (!state?.active) {
+        stopWatchdog(sessionId)
+        return
+      }
+
+      try {
+        const statusResult = await v2Client.session.status()
+        const statuses = (statusResult.data ?? {}) as Record<string, { type: string }>
+
+        const sessionIds = [sessionId, ...(childSessions.get(sessionId) ?? [])]
+        const hasActiveWork = sessionIds.some(id => {
+          const status = statuses[id]?.type
+          return status === 'busy' || status === 'retry' || status === 'compact'
+        })
+
+        if (hasActiveWork) {
+          lastActivityTime.set(sessionId, Date.now())
+          logger.log(`Ralph watchdog: session ${sessionId} has active work, resetting timer`)
+          return
+        }
+      } catch (err) {
+        logger.error(`Ralph watchdog: failed to check session status`, err)
+        return
+      }
+
+      const stallCount = (consecutiveStalls.get(sessionId) ?? 0) + 1
+      consecutiveStalls.set(sessionId, stallCount)
+      lastActivityTime.set(sessionId, Date.now())
+
+      if (stallCount >= MAX_CONSECUTIVE_STALLS) {
+        logger.error(`Ralph watchdog: session ${sessionId} exceeded max consecutive stalls (${MAX_CONSECUTIVE_STALLS}), terminating`)
+        await terminateLoop(sessionId, state, 'stall_timeout')
+        return
+      }
+
+      logger.log(`Ralph watchdog: stall detected for session ${sessionId} (${stallCount}/${MAX_CONSECUTIVE_STALLS}), re-triggering ${state.phase} phase`)
+
+      try {
+        if (state.phase === 'auditing') {
+          await handleAuditingPhase(sessionId, state)
+        } else {
+          await handleCodingPhase(sessionId, state)
+        }
+      } catch (err) {
+        await handlePromptError(sessionId, state, `watchdog recovery in ${state.phase} phase`, err)
+      }
+    }, stallTimeout)
+
+    stallWatchdogs.set(sessionId, interval)
+    logger.log(`Ralph watchdog: started for session ${sessionId} (timeout: ${stallTimeout}ms)`)
+  }
+
+  function getStallInfo(sessionId: string): { consecutiveStalls: number; lastActivityTime: number } | null {
+    const lastActivity = lastActivityTime.get(sessionId)
+    if (lastActivity === undefined) return null
+    return {
+      consecutiveStalls: consecutiveStalls.get(sessionId) ?? 0,
+      lastActivityTime: lastActivity,
+    }
+  }
+
   async function terminateLoop(sessionId: string, state: RalphState, reason: string): Promise<void> {
+    stopWatchdog(sessionId)
+
     const retryTimeout = retryTimeouts.get(sessionId)
     if (retryTimeout) {
       clearTimeout(retryTimeout)
@@ -252,6 +360,7 @@ export function createRalphEventHandler(
       
       try {
         await sendAuditPrompt()
+        consecutiveStalls.set(sessionId, 0)
       } catch (err) {
         await handlePromptError(sessionId, { ...state, phase: 'coding' }, 'failed to send audit prompt', err, sendAuditPrompt)
       }
@@ -274,6 +383,7 @@ export function createRalphEventHandler(
     
     try {
       await sendContinuationPrompt()
+      consecutiveStalls.set(sessionId, 0)
     } catch (err) {
       await handlePromptError(sessionId, state, 'failed to send continuation prompt', err, sendContinuationPrompt)
     }
@@ -343,6 +453,7 @@ export function createRalphEventHandler(
     
     try {
       await sendContinuationPrompt()
+      consecutiveStalls.set(sessionId, 0)
     } catch (err) {
       await handlePromptError(sessionId, state, 'failed to send continuation prompt after audit', err, sendContinuationPrompt)
     }
@@ -366,13 +477,49 @@ export function createRalphEventHandler(
       return
     }
 
+    if (event.type === 'session.created' || event.type === 'session.updated') {
+      const info = event.properties?.info as { id?: string; parentID?: string } | undefined
+      if (info?.id && info?.parentID) {
+        const parentState = ralphService.getActiveState(info.parentID)
+        if (parentState?.active) {
+          let children = childSessions.get(info.parentID)
+          if (!children) {
+            children = new Set()
+            childSessions.set(info.parentID, children)
+          }
+          children.add(info.id)
+          recordActivity(info.parentID)
+        }
+      }
+    }
+
+    if (event.type === 'session.status') {
+      const eventSessionId = event.properties?.sessionID as string
+      if (eventSessionId) {
+        if (ralphService.getActiveState(eventSessionId)?.active) {
+          recordActivity(eventSessionId)
+        }
+        const parentId = findRalphParent(eventSessionId)
+        if (parentId) {
+          recordActivity(parentId)
+        }
+      }
+    }
+
     if (event.type !== 'session.idle') return
 
     const sessionId = event.properties?.sessionID as string
     if (!sessionId) return
 
+    const parentId = findRalphParent(sessionId)
+    if (parentId) {
+      recordActivity(parentId)
+    }
+
     const state = ralphService.getActiveState(sessionId)
     if (!state || !state.active) return
+
+    recordActivity(sessionId)
 
     try {
       if (state.phase === 'auditing') {
@@ -394,6 +541,13 @@ export function createRalphEventHandler(
       clearTimeout(timeout)
       retryTimeouts.delete(sessionId)
     }
+    for (const [sessionId, interval] of stallWatchdogs.entries()) {
+      clearInterval(interval)
+      stallWatchdogs.delete(sessionId)
+    }
+    lastActivityTime.clear()
+    consecutiveStalls.clear()
+    childSessions.clear()
     logger.log('Ralph: cleared all retry timeouts')
   }
 
@@ -401,5 +555,7 @@ export function createRalphEventHandler(
     onEvent,
     terminateAll,
     clearAllRetryTimeouts,
+    startWatchdog,
+    getStallInfo,
   }
 }

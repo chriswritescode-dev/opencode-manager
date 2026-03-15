@@ -66,6 +66,7 @@ export interface RalphConfig {
   defaultAudit?: boolean
   model?: string
   minCleanAudits?: number
+  stallTimeoutMs?: number
 }
 
 export interface PluginConfig {

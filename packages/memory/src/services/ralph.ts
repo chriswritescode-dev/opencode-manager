@@ -3,6 +3,8 @@ import type { Logger, RalphConfig } from '../types'
 
 export const MAX_RETRIES = 3
 export const DEFAULT_MIN_CLEAN_AUDITS = 2
+export const STALL_TIMEOUT_MS = 60_000
+export const MAX_CONSECUTIVE_STALLS = 5
 
 export interface RalphState {
   active: boolean
@@ -39,6 +41,7 @@ export interface RalphService {
   listRecent(): RalphState[]
   findByWorktreeName(name: string): RalphState | null
   getMinCleanAudits(): number
+  getStallTimeoutMs(): number
   terminateAll(): void
 }
 
@@ -137,6 +140,10 @@ export function createRalphService(
     return ralphConfig?.minCleanAudits ?? DEFAULT_MIN_CLEAN_AUDITS
   }
 
+  function getStallTimeoutMs(): number {
+    return ralphConfig?.stallTimeoutMs ?? STALL_TIMEOUT_MS
+  }
+
   function terminateAll(): void {
     const active = listActive()
     for (const state of active) {
@@ -163,6 +170,7 @@ export function createRalphService(
     listRecent,
     findByWorktreeName,
     getMinCleanAudits,
+    getStallTimeoutMs,
     terminateAll,
   }
 }

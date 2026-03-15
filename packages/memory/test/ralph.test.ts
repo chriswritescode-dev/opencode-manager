@@ -644,3 +644,302 @@ describe('hasAuditIssues', () => {
     expect(hasAuditIssues('**severity**: bug')).toBe(true)
   })
 })
+
+describe('Stall Detection', () => {
+  test('getStallInfo returns null when no watchdog running', () => {
+    const db = createTestDb()
+    const kvService = createKvService(db)
+    const ralphService = createRalphService(kvService, 'test-project', createMockLogger())
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+
+    const info = handler.getStallInfo('test-session')
+    expect(info).toBeNull()
+  })
+
+  test('startWatchdog initializes stall state', () => {
+    const db = createTestDb()
+    const kvService = createKvService(db)
+    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 100 })
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+
+    const sessionId = 'test-session'
+    ralphService.setState(sessionId, {
+      active: true,
+      sessionId,
+      worktreeName: 'test',
+      worktreeDir: '/tmp/test',
+      worktreeBranch: 'main',
+      workspaceId: '',
+      iteration: 1,
+      maxIterations: 0,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'test',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      cleanAuditCount: 0,
+    })
+
+    handler.startWatchdog(sessionId)
+
+    const info = handler.getStallInfo(sessionId)
+    expect(info).not.toBeNull()
+    expect(info?.consecutiveStalls).toBe(0)
+    expect(info?.lastActivityTime).toBeDefined()
+    expect(Date.now() - info!.lastActivityTime).toBeLessThan(100)
+  })
+
+  test('session.created event tracks child sessions', async () => {
+    const db = createTestDb()
+    const kvService = createKvService(db)
+    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+
+    const parentId = 'parent-session'
+    const childId = 'child-session'
+
+    ralphService.setState(parentId, {
+      active: true,
+      sessionId: parentId,
+      worktreeName: 'test',
+      worktreeDir: '/tmp/test',
+      worktreeBranch: 'main',
+      workspaceId: '',
+      iteration: 1,
+      maxIterations: 0,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'test',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      cleanAuditCount: 0,
+    })
+
+    handler.startWatchdog(parentId)
+    const initialInfo = handler.getStallInfo(parentId)
+    const initialTime = initialInfo?.lastActivityTime
+
+    await handler.onEvent({
+      event: {
+        type: 'session.created',
+        properties: {
+          info: {
+            id: childId,
+            parentID: parentId,
+          },
+        },
+      },
+    })
+
+    const updatedInfo = handler.getStallInfo(parentId)
+    expect(updatedInfo?.lastActivityTime).toBeGreaterThanOrEqual(initialTime!)
+  })
+
+  test('session.status event updates activity time', async () => {
+    const db = createTestDb()
+    const kvService = createKvService(db)
+    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+
+    const sessionId = 'test-session'
+    ralphService.setState(sessionId, {
+      active: true,
+      sessionId,
+      worktreeName: 'test',
+      worktreeDir: '/tmp/test',
+      worktreeBranch: 'main',
+      workspaceId: '',
+      iteration: 1,
+      maxIterations: 0,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'test',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      cleanAuditCount: 0,
+    })
+
+    handler.startWatchdog(sessionId)
+    const initialInfo = handler.getStallInfo(sessionId)
+    const initialTime = initialInfo?.lastActivityTime
+
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    await handler.onEvent({
+      event: {
+        type: 'session.status',
+        properties: {
+          sessionID: sessionId,
+        },
+      },
+    })
+
+    const updatedInfo = handler.getStallInfo(sessionId)
+    expect(updatedInfo?.lastActivityTime).toBeGreaterThanOrEqual(initialTime!)
+  })
+
+  test('stopWatchdog cleans up all state', () => {
+    const db = createTestDb()
+    const kvService = createKvService(db)
+    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+    const mockV2Client = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: 'test-session' }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+
+    const sessionId = 'test-session'
+    ralphService.setState(sessionId, {
+      active: true,
+      sessionId,
+      worktreeName: 'test',
+      worktreeDir: '/tmp/test',
+      worktreeBranch: 'main',
+      workspaceId: '',
+      iteration: 1,
+      maxIterations: 0,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'test',
+      phase: 'coding',
+      audit: false,
+      errorCount: 0,
+      cleanAuditCount: 0,
+    })
+
+    handler.startWatchdog(sessionId)
+    expect(handler.getStallInfo(sessionId)).not.toBeNull()
+
+    handler.clearAllRetryTimeouts()
+    expect(handler.getStallInfo(sessionId)).toBeNull()
+  })
+})

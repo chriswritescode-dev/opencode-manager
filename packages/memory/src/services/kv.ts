@@ -21,7 +21,6 @@ export interface KvService {
 
 export function createKvService(db: Database, logger?: Logger): KvService {
   const queries = createKvQuery(db)
-  queries.deleteExpired()
 
   return {
     get<T = unknown>(projectId: string, key: string): T | null {

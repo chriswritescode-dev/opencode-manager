@@ -443,6 +443,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       model?: { providerID: string; modelID: string }
       parentSessionId?: string
       inPlace?: boolean
+      onLoopStarted?: (sessionId: string) => void
     }
 
     async function setupRalphLoop(options: RalphSetupOptions): Promise<string> {
@@ -582,6 +583,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           ? 'Ralph session created but failed to send prompt.'
           : 'Ralph session created but failed to send prompt. Cleaned up.'
       }
+
+      options.onLoopStarted?.(loopContext.sessionId)
 
       const maxInfo = maxIter > 0 ? maxIter.toString() : 'unlimited'
       const auditInfo = options.audit ? 'enabled' : 'disabled'
@@ -871,6 +874,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               agent: 'code',
               model: ralphModel,
               inPlace: args.inPlace,
+              onLoopStarted: (id) => ralphHandler.startWatchdog(id),
             })
           },
         }),
@@ -960,6 +964,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               audit: args.audit ?? config.ralph?.defaultAudit ?? true,
               model: ralphModel,
               inPlace: args.inPlace,
+              onLoopStarted: (id) => ralphHandler.startWatchdog(id),
             })
           },
         }),
@@ -1058,8 +1063,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
                 const iterInfo = s.maxIterations > 0 ? `${s.iteration} / ${s.maxIterations}` : `${s.iteration} (unlimited)`
                 const sessionStatus = statuses[s.sessionId]?.type ?? 'unknown'
                 const modeIndicator = s.inPlace ? ' (in-place)' : ''
+                const stallInfo = ralphHandler.getStallInfo(s.sessionId)
+                const stallCount = stallInfo?.consecutiveStalls ?? 0
+                const stallSuffix = stallCount > 0 ? ` | Stalls: ${stallCount}` : ''
                 lines.push(`${i + 1}. ${s.worktreeName}${modeIndicator}`)
-                lines.push(`   Phase: ${s.phase} | Iteration: ${iterInfo} | Duration: ${duration} | Status: ${sessionStatus}`)
+                lines.push(`   Phase: ${s.phase} | Iteration: ${iterInfo} | Duration: ${duration} | Status: ${sessionStatus}${stallSuffix}`)
                 lines.push('')
               })
 
@@ -1143,6 +1151,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             const seconds = elapsed % 60
             const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
 
+            const stallInfo = ralphHandler.getStallInfo(state.sessionId)
+            const secondsSinceActivity = stallInfo
+              ? Math.round((Date.now() - stallInfo.lastActivityTime) / 1000)
+              : null
+            const stallCount = stallInfo?.consecutiveStalls ?? 0
+
             const statusLines: string[] = [
               'Ralph Loop Status',
               '',
@@ -1168,6 +1182,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               `Clean audit passes: ${state.cleanAuditCount ?? 0} / ${config.ralph?.minCleanAudits ?? 2}`,
               `Model: ${config.ralph?.model || config.executionModel || 'default'}`,
               `Auditor model: ${config.auditorModel || 'default'}`,
+              ...(stallCount > 0 ? [`Stalls: ${stallCount}`] : []),
+              ...(secondsSinceActivity !== null ? [`Last activity: ${secondsSinceActivity}s ago`] : []),
               '',
               `Prompt: ${promptPreview}`,
             )
