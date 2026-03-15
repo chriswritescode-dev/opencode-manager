@@ -67,6 +67,26 @@ const commands: Record<string, CommandModule> = {
       help()
     },
   },
+  status: {
+    run: async (args, globalOpts) => {
+      const { run } = await import('./commands/status')
+      await run(args, globalOpts)
+    },
+    help: async () => {
+      const { help } = await import('./commands/status')
+      help()
+    },
+  },
+  cancel: {
+    run: async (args, globalOpts) => {
+      const { run } = await import('./commands/cancel')
+      await run(args, globalOpts)
+    },
+    help: async () => {
+      const { help } = await import('./commands/cancel')
+      help()
+    },
+  },
 }
 
 function printMainHelp(): void {
@@ -83,6 +103,8 @@ Commands:
   stats     Show memory statistics
   cleanup   Delete memories by criteria
   upgrade   Check for and install plugin updates
+  status    Show Ralph loop status
+  cancel    Cancel a Ralph loop
 
 Global Options:
   --db-path <path>       Path to memory database
