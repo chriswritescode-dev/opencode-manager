@@ -29,6 +29,9 @@ function mapRow(row: KvRowRaw): KvRow {
   }
 }
 
+const CLEANUP_INTERVAL_MS = 300_000
+let lastCleanupAt = 0
+
 export function createKvQuery(db: Database) {
   const getStmt = db.prepare(
     `SELECT project_id, key, data, expires_at, created_at, updated_at
@@ -74,6 +77,17 @@ export function createKvQuery(db: Database) {
     set(projectId: string, key: string, data: string, expiresAt: number): void {
       const now = Date.now()
       setStmt.run(projectId, key, data, expiresAt, now, now)
+      
+      if (now - lastCleanupAt > CLEANUP_INTERVAL_MS) {
+        lastCleanupAt = now
+        setImmediate(() => {
+          try {
+            deleteExpiredStmt.run(now)
+          } catch {
+            // Ignore errors from cleanup (e.g., if db is closed)
+          }
+        })
+      }
     },
 
     delete(projectId: string, key: string): void {
