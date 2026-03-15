@@ -11,7 +11,10 @@ import {
   CreateMemoryRequestSchema,
   UpdateMemoryRequestSchema,
   MemoryListQuerySchema,
+  KvListQuerySchema,
   PluginConfigSchema,
+  CreateKvEntryRequestSchema,
+  UpdateKvEntryRequestSchema,
   type PluginConfig,
 } from '@opencode-manager/shared/schemas'
 
@@ -153,8 +156,9 @@ export function createMemoryRoutes(db: Database): Hono {
       }
 
       const stats = pluginMemory.getStats(projectId)
+      const kvCount = pluginMemory.getKvCount(projectId)
 
-      return c.json({ projectId, stats })
+      return c.json({ projectId, stats, kvCount })
     } catch (error) {
       logger.error('Failed to get project summary:', error)
       return c.json({ projectId: null, stats: { total: 0, byScope: {} }, error: 'Failed to get project summary' }, 500)
@@ -334,6 +338,134 @@ export function createMemoryRoutes(db: Database): Hono {
     }
   })
 
+  app.post('/reindex', async (c) => {
+    try {
+      const db = pluginMemory.getDb()
+
+      if (!db) {
+        return c.json({ 
+          error: 'Memory database not found. Make sure the memory plugin has been initialized.',
+          total: 0,
+          embedded: 0,
+          failed: 0
+        }, 404)
+      }
+
+      const memories = pluginMemory.listAll()
+      
+      if (memories.length === 0) {
+        return c.json({
+          success: true,
+          message: 'No memories to reindex',
+          total: 0,
+          embedded: 0,
+          failed: 0
+        })
+      }
+
+      try {
+        db.exec('DELETE FROM memory_embeddings')
+      } catch {
+        return c.json({
+          success: true,
+          message: 'Cleared embeddings. Server restart required to regenerate embeddings with new model.',
+          total: memories.length,
+          embedded: 0,
+          failed: 0,
+          requiresRestart: true
+        })
+      }
+
+      return c.json({
+        success: true,
+        message: `Cleared ${memories.length} embeddings. Server restart required to regenerate embeddings.`,
+        total: memories.length,
+        embedded: 0,
+        failed: 0,
+        requiresRestart: true
+      })
+    } catch (error) {
+      logger.error('Failed to reindex memories:', error)
+      return c.json({ error: 'Failed to reindex memories', details: error instanceof Error ? error.message : 'Unknown error' }, 500)
+    }
+  })
+
+  app.get('/kv', async (c) => {
+    const query = c.req.query()
+    const parsed = KvListQuerySchema.safeParse({
+      projectId: query.projectId,
+      prefix: query.prefix,
+    })
+
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid query parameters', details: parsed.error }, 400)
+    }
+
+    const { projectId, prefix } = parsed.data
+    const entries = pluginMemory.listKv(projectId, prefix)
+    return c.json({ entries })
+  })
+
+  app.post('/kv', async (c) => {
+    const body = await c.req.json()
+    const parsed = CreateKvEntryRequestSchema.safeParse(body)
+
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid request', details: parsed.error }, 400)
+    }
+
+    try {
+      pluginMemory.setKv(parsed.data.projectId, parsed.data.key, parsed.data.data, parsed.data.ttlMs)
+      const entry = pluginMemory.getKv(parsed.data.projectId, parsed.data.key)
+      return c.json({ entry }, 201)
+    } catch (error) {
+      logger.error('Failed to create KV entry:', error)
+      return c.json({ error: 'Failed to create KV entry' }, 500)
+    }
+  })
+
+  app.put('/kv/:key', async (c) => {
+    const key = decodeURIComponent(c.req.param('key'))
+    const projectId = c.req.query('projectId')
+
+    if (!projectId) {
+      return c.json({ error: 'Missing projectId parameter' }, 400)
+    }
+
+    const body = await c.req.json()
+    const parsed = UpdateKvEntryRequestSchema.safeParse(body)
+
+    if (!parsed.success) {
+      return c.json({ error: 'Invalid request', details: parsed.error }, 400)
+    }
+
+    try {
+      pluginMemory.setKv(projectId, key, parsed.data.data, parsed.data.ttlMs)
+      const entry = pluginMemory.getKv(projectId, key)
+      return c.json({ entry })
+    } catch (error) {
+      logger.error('Failed to update KV entry:', error)
+      return c.json({ error: 'Failed to update KV entry' }, 500)
+    }
+  })
+
+  app.delete('/kv/:key', async (c) => {
+    const key = decodeURIComponent(c.req.param('key'))
+    const projectId = c.req.query('projectId')
+
+    if (!projectId) {
+      return c.json({ error: 'Missing projectId parameter' }, 400)
+    }
+
+    try {
+      pluginMemory.deleteKv(projectId, key)
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to delete KV entry:', error)
+      return c.json({ error: 'Failed to delete KV entry' }, 500)
+    }
+  })
+
   app.get('/:id', async (c) => {
     const id = parseInt(c.req.param('id'), 10)
 
@@ -387,58 +519,6 @@ export function createMemoryRoutes(db: Database): Hono {
     } catch (error) {
       logger.error('Failed to delete memory:', error)
       return c.json({ error: 'Failed to delete memory' }, 500)
-    }
-  })
-
-  app.post('/reindex', async (c) => {
-    try {
-      const db = pluginMemory.getDb()
-
-      if (!db) {
-        return c.json({ 
-          error: 'Memory database not found. Make sure the memory plugin has been initialized.',
-          total: 0,
-          embedded: 0,
-          failed: 0
-        }, 404)
-      }
-
-      const memories = pluginMemory.listAll()
-      
-      if (memories.length === 0) {
-        return c.json({
-          success: true,
-          message: 'No memories to reindex',
-          total: 0,
-          embedded: 0,
-          failed: 0
-        })
-      }
-
-      try {
-        db.exec('DELETE FROM memory_embeddings')
-      } catch {
-        return c.json({
-          success: true,
-          message: 'Cleared embeddings. Server restart required to regenerate embeddings with new model.',
-          total: memories.length,
-          embedded: 0,
-          failed: 0,
-          requiresRestart: true
-        })
-      }
-
-      return c.json({
-        success: true,
-        message: `Cleared ${memories.length} embeddings. Server restart required to regenerate embeddings.`,
-        total: memories.length,
-        embedded: 0,
-        failed: 0,
-        requiresRestart: true
-      })
-    } catch (error) {
-      logger.error('Failed to reindex memories:', error)
-      return c.json({ error: 'Failed to reindex memories', details: error instanceof Error ? error.message : 'Unknown error' }, 500)
     }
   })
 
