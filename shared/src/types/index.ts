@@ -90,4 +90,8 @@ export type {
   MemoryInjectionConfig,
   MessagesTransformConfig,
   PluginConfig,
+  KvEntry,
+  KvListQuery,
+  CreateKvEntryRequest,
+  UpdateKvEntryRequest,
 } from '../schemas/memory'
