@@ -63,7 +63,7 @@ The architect agent operates in read-only mode (`temperature: 0.0`, all edits de
 | `memory-write` | Store a new project memory |
 | `memory-edit` | Update an existing project memory |
 | `memory-delete` | Delete a project memory by ID |
-| `memory-health` | Health check or full reindex of the memory store |
+| `memory-health` | Health check, reindex, or upgrade the plugin to latest version |
 | `memory-plan-execute` | Create a new Code session and send an approved plan as the first prompt |
 
 ### Project KV Tools
@@ -75,6 +75,25 @@ Ephemeral key-value storage for project state with automatic TTL-based expiratio
 | `memory-kv-set` | Store a value with optional TTL (default 24 hours) |
 | `memory-kv-get` | Retrieve a value by key |
 | `memory-kv-list` | List all active KV entries for the project |
+
+### Ralph Loop Tools
+
+Iterative development loops with automatic auditing. Runs in an isolated git worktree by default, or in the current directory with `inPlace`.
+
+| Tool | Description |
+|------|-------------|
+| `ralph-loop` | Start an iterative development loop with optional auditing |
+| `ralph-cancel` | Cancel an active Ralph loop and clean up the worktree |
+| `ralph-status` | Check status of active Ralph loops |
+| `memory-plan-ralph` | Execute an architect plan using a Ralph iterative loop |
+
+## Slash Commands
+
+| Command | Description | Agent |
+|---------|-------------|-------|
+| `/review` | Run a code review on current changes | auditor (subtask) |
+| `/ralph-loop` | Start a Ralph iterative development loop | code |
+| `/cancel-ralph` | Cancel the active Ralph loop | code |
 
 ## CLI
 
@@ -201,7 +220,16 @@ You can edit this file to customize settings. The file is created only if it doe
     "enabled": true,
     "debug": false
   },
-  "executionModel": ""
+  "executionModel": "",
+  "ralph": {
+    "enabled": true,
+    "defaultMaxIterations": 15,
+    "cleanupWorktree": false,
+    "defaultAudit": true,
+    "model": "",
+    "minCleanAudits": 2
+  },
+  "auditorModel": ""
 }
 ```
 
@@ -259,13 +287,44 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 #### Execution
 - `executionModel` - Model override for plan execution sessions, format: `provider/model` (e.g. `anthropic/claude-haiku-3-5-20241022`). When set, `memory-plan-execute` uses this model for the new Code session. When empty or omitted, OpenCode's default model is used (typically the `model` field from `opencode.json`). **Recommended:** Set this to a fast, cheap model (e.g. Haiku or MiniMax) and use a smart model (e.g. Opus) for the Architect session — planning needs reasoning, execution needs speed.
 
+#### Ralph
+- `ralph.enabled` - Enable Ralph iterative development loops (default: `true`)
+- `ralph.defaultMaxIterations` - Default max iterations for loops, 0 = unlimited (default: `15`)
+- `ralph.cleanupWorktree` - Auto-remove worktree on cancel (default: `false`)
+- `ralph.defaultAudit` - Run auditor after each coding iteration by default (default: `true`)
+- `ralph.model` - Model override for Ralph sessions (`provider/model`), falls back to `executionModel` (default: `""`)
+- `ralph.minCleanAudits` - Consecutive clean audit passes required before completion (default: `2`)
+
+#### Auditor
+- `auditorModel` - Model override for the auditor agent (`provider/model`). Applied globally, no fallback (default: `""`)
+
 ## architect → code Workflow
 
 Plan with a smart model, execute with a fast model. The architect agent researches and designs; the code agent implements.
 
+After the architect presents a plan, the user approves via one of three execution modes:
+
+- **Approve plan** — Creates a new Code session via `memory-plan-execute`
+- **Execute with Ralph loop** — Runs the plan in an isolated worktree with iterative coding/auditing via `memory-plan-ralph`
+- **Ralph in place** — Same as Ralph loop but runs in the current directory (no worktree isolation)
+
 Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the architect session.
 
 See the [full workflow guide](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#architect--code) for setup details.
+
+## Ralph Loop
+
+The Ralph loop is an iterative development system that alternates between coding and auditing phases:
+
+1. **Coding phase** — The Code agent works on the task
+2. **Auditing phase** — The Auditor agent reviews changes against project conventions
+3. **Repeat** — Findings from the audit feed back into the next coding iteration
+
+Completion requires `minCleanAudits` (default 2) consecutive clean audit passes. The loop auto-terminates after `maxIterations` (if set) or after 3 consecutive errors.
+
+By default, Ralph loops run in an isolated git worktree. Set `inPlace: true` to run in the current directory instead (skips worktree creation, auto-commit, and cleanup).
+
+See the [full documentation](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#ralph-loop) for details.
 
 ## Documentation
 

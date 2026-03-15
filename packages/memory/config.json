@@ -26,5 +26,14 @@
     "enabled": true,
     "debug": false
   },
-  "executionModel": ""
+  "executionModel": "",
+  "auditorModel": "",
+  "ralph": {
+    "enabled": true,
+    "defaultMaxIterations": 15,
+    "cleanupWorktree": false,
+    "defaultAudit": true,
+    "model": "",
+    "minCleanAudits": 2
+  }
 }
