@@ -284,6 +284,9 @@ importers:
       '@opencode-ai/plugin':
         specifier: ^1.2.16
         version: 1.2.16
+      '@opencode-ai/sdk':
+        specifier: ^1.2.26
+        version: 1.2.26
       sqlite-vec:
         specifier: 0.1.7-alpha.2
         version: 0.1.7-alpha.2
@@ -999,6 +1002,9 @@ packages:
 
   '@opencode-ai/sdk@1.2.16':
     resolution: {integrity: sha512-y9ae9VnCcuog0GaI4DveX1HB6DBoZgGN3EuJVlRFbBCPwhzkls6fCfHSb5+VnTS6Fy0OWFUL28VBCmixL/D+/Q==}
+
+  '@opencode-ai/sdk@1.2.26':
+    resolution: {integrity: sha512-HPB+0pfvTMPj2KEjNLF3oqgldKW8koTJ7ssqXwzndazqxS+gUynzvdIKIQP4+QIInNcc5nJMG9JtfLcePGgTLQ==}
 
   '@peculiar/asn1-android@2.6.0':
     resolution: {integrity: sha512-cBRCKtYPF7vJGN76/yG8VbxRcHLPF3HnkoHhKOZeHpoVtbMYfY9ROKtH3DtYUY9m8uI1Mh47PRhHf2hSK3xcSQ==}
@@ -4948,6 +4954,8 @@ snapshots:
       zod: 4.1.8
 
   '@opencode-ai/sdk@1.2.16': {}
+
+  '@opencode-ai/sdk@1.2.26': {}
 
   '@peculiar/asn1-android@2.6.0':
     dependencies:
