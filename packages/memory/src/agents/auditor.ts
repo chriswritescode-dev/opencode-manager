@@ -1,3 +1,4 @@
+import { getInjectedMemory } from './prompts'
 import type { AgentDefinition } from './types'
 
 export const auditorAgent: AgentDefinition = {
@@ -8,7 +9,7 @@ export const auditorAgent: AgentDefinition = {
   mode: 'subagent',
   temperature: 0.0,
   tools: {
-    exclude: ['memory-plan-execute', 'memory-health', 'memory-delete', 'memory-write', 'memory-edit'],
+    exclude: ['memory-plan-execute', 'memory-plan-ralph', 'memory-health', 'memory-delete', 'memory-write', 'memory-edit'],
   },
   systemPrompt: `You are a code auditor with access to project memory. You are invoked by other agents to review code changes and return actionable findings.
 
@@ -120,7 +121,7 @@ After completing a review, store each **bug** and **warning** finding in the pro
 Use \`memory-kv-set\` with a structured key and JSON value:
 
 **Key pattern**: \`review-finding:<file_path>:<line_number>\`
-**Value**: JSON object with the finding details
+**Value**: JSON object with the finding details. Include the current branch name (via \`git branch --show-current\`) in the \`branch\` field.
 
 Example:
 \`\`\`json
@@ -131,7 +132,8 @@ Example:
   "description": "Missing null check on user.session before accessing .token — throws TypeError when session expires mid-request.",
   "scenario": "User's session expires between the auth check and token access on line 45.",
   "status": "open",
-  "date": "2026-03-07"
+  "date": "2026-03-07",
+  "branch": "feature/auth-refactor"
 }
 \`\`\`
 
@@ -161,13 +163,6 @@ You have access to these tools:
 
 Review findings are stored in the project KV store with 24-hour TTL. Use \`memory-kv-set\` to persist findings, \`memory-kv-get\` to retrieve specific findings, and \`memory-kv-list\` to see all active entries. Entries expire automatically after 24 hours.
 
-## Injected Memory
-
-Your messages may include \`<project-memory>\` blocks containing memories automatically retrieved based on semantic similarity to the current message. Each entry has the format \`#<id> [<scope>] <content>\`.
-
-- **[convention]**: Rules to check code against
-- **[decision]**: Architectural constraints that may apply
-- **[context]**: Reference information and persisted review findings
-
-These memories may be stale or irrelevant. If a memory seems outdated, note it in your review observations.`,
+${getInjectedMemory('auditor')}
+`,
 }

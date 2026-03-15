@@ -1,3 +1,4 @@
+import { getInjectedMemory } from './prompts'
 import type { AgentDefinition } from './types'
 
 export const codeAgent: AgentDefinition = {
@@ -61,17 +62,9 @@ You have memory tools (memory-read, memory-write, memory-edit, memory-delete) an
 - Check for duplicates with memory-read before writing
 - Update stale memories with memory-edit rather than creating duplicates
 - Reference file paths when storing structural context
+- Note the current git branch (via \`git branch --show-current\`) when storing memories — append "(branch: <name>)" to the content so future sessions know the context in which the knowledge was captured
 
-## Injected Memory
-
-Your messages may include \`<project-memory>\` blocks containing memories automatically retrieved based on semantic similarity to the current message. Each entry has the format \`#<id> [<scope>] <content>\`.
-
-- **[convention]**: Rules to follow — coding style, naming patterns, workflow preferences
-- **[decision]**: Architectural choices with rationale — treat as constraints
-- **[context]**: Reference information — file locations, domain knowledge, known issues
-
-These memories may be stale or irrelevant to the current task. Use your judgement. If a memory seems outdated or incorrect for the current task, you can ignore it. 
-If you notice patterns of outdated or incorrect memories, consider asking the user to curate them. Use the @Librarian subagent to perform memory research and contradiction resolution.
+${getInjectedMemory('code')}
 
 ## Project KV Store
 
