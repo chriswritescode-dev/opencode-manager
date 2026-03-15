@@ -113,6 +113,8 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
     memoryInjection: config.memoryInjection,
     messagesTransform: config.messagesTransform,
     executionModel: config.executionModel,
+    auditorModel: config.auditorModel,
+    ralph: config.ralph,
   }
   
   if (normalized.embedding) {

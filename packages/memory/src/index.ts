@@ -17,6 +17,7 @@ import { createRalphService, type RalphState } from './services/ralph'
 import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
 import { createLogger, slugify } from './utils/logger'
+import { stripPromiseTags } from './utils/strip-promise-tags'
 import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig, HealthStatus, Logger } from './types'
 import type { EmbeddingProvider } from './embedding'
@@ -410,6 +411,15 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       if (cleaned) return
       cleaned = true
       logger.log('Cleaning up plugin resources...')
+      
+      // First, stop all active Ralph loops
+      ralphHandler.terminateAll()
+      logger.log('Ralph: all active loops terminated')
+      
+      // Clear all retry timeouts to prevent callbacks after cleanup
+      ralphHandler.clearAllRetryTimeouts()
+      
+      // Then proceed with remaining cleanup
       memoryInjection.destroy()
       await memoryService.destroy()
       closeDatabase(db)
@@ -746,16 +756,50 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           },
         }),
         'memory-plan-execute': tool({
-          description: 'Create a new Code session and send the plan as the first prompt. Call this after the user approves the plan.',
+          description: 'Send the plan to the Code agent for execution. By default creates a new session. Set inPlace to true to switch to the code agent in the current session (plan is already in context).',
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
+            inPlace: z.boolean().optional().default(false).describe('Execute in the current session as a subtask instead of creating a new session'),
           },
-          execute: async (args) => {
-            logger.log(`memory-plan-execute: creating session titled "${args.title}"`)
+          execute: async (args, context) => {
+            logger.log(`memory-plan-execute: ${args.inPlace ? 'switching to code agent' : 'creating session'} titled "${args.title}"`)
 
             const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
             const executionModel = parseModelString(config.executionModel)
+
+            if (args.inPlace) {
+              const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
+                () => v2.session.promptAsync({
+                  sessionID: context.sessionID,
+                  directory,
+                  agent: 'code',
+                  parts: [{ type: 'text' as const, text: args.plan }],
+                  ...(executionModel ? { model: executionModel } : {}),
+                }),
+                () => v2.session.promptAsync({
+                  sessionID: context.sessionID,
+                  directory,
+                  agent: 'code',
+                  parts: [{ type: 'text' as const, text: args.plan }],
+                }),
+                executionModel,
+                logger,
+              )
+
+              if (promptResult.error) {
+                logger.error(`memory-plan-execute: in-place agent switch failed`, promptResult.error)
+                return `Failed to switch to code agent. Error: ${JSON.stringify(promptResult.error)}`
+              }
+
+              const modelInfo = actualModel ? `${actualModel.providerID}/${actualModel.modelID}` : 'default'
+              return `Switching to code agent for execution.\n\nTitle: ${sessionTitle}\nModel: ${modelInfo}\nAgent: code`
+            }
+
+            const { cleaned: planText, stripped } = stripPromiseTags(args.plan)
+            if (stripped) {
+              logger.log(`memory-plan-execute: stripped <promise> tags from plan text`)
+            }
 
             const createResult = await v2.session.create({
               title: sessionTitle,
@@ -774,14 +818,14 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               () => v2.session.promptAsync({
                 sessionID: newSessionId,
                 directory,
-                parts: [{ type: 'text' as const, text: args.plan }],
+                parts: [{ type: 'text' as const, text: planText }],
                 agent: 'code',
                 model: executionModel!,
               }),
               () => v2.session.promptAsync({
                 sessionID: newSessionId,
                 directory,
-                parts: [{ type: 'text' as const, text: args.plan }],
+                parts: [{ type: 'text' as const, text: planText }],
                 agent: 'code',
               }),
               executionModel,
@@ -1190,7 +1234,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
         const allWithinWorktree = req.patterns.every((p) => {
           const resolved = p.startsWith('/') ? p : resolve(state.worktreeDir, p)
-          return resolved.startsWith(state.worktreeDir)
+          return resolved === state.worktreeDir || resolved.startsWith(state.worktreeDir + '/')
         })
 
         if (allWithinWorktree) {

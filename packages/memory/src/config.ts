@@ -17,6 +17,18 @@ const PLUGIN_COMMANDS: Record<string, { template: string; description: string; a
     subtask: true,
     template: 'Review the current code changes. $ARGUMENTS',
   },
+  'ralph-loop': {
+    description: 'Start a Ralph iterative development loop in a worktree',
+    agent: 'code',
+    subtask: false,
+    template: 'Use the ralph-loop tool to start a Ralph loop with the following arguments: $ARGUMENTS',
+  },
+  'cancel-ralph': {
+    description: 'Cancel the active Ralph loop',
+    agent: 'code',
+    subtask: false,
+    template: 'Use the ralph-cancel tool to cancel the active Ralph loop. $ARGUMENTS',
+  },
 }
 
 export function createConfigHandler(agents: Record<AgentRole, AgentDefinition>) {

@@ -39,6 +39,7 @@ export interface RalphService {
   listRecent(): RalphState[]
   findByWorktreeName(name: string): RalphState | null
   getMinCleanAudits(): number
+  terminateAll(): void
 }
 
 export function createRalphService(
@@ -136,6 +137,20 @@ export function createRalphService(
     return ralphConfig?.minCleanAudits ?? DEFAULT_MIN_CLEAN_AUDITS
   }
 
+  function terminateAll(): void {
+    const active = listActive()
+    for (const state of active) {
+      const updated: RalphState = {
+        ...state,
+        active: false,
+        completedAt: new Date().toISOString(),
+        terminationReason: 'shutdown',
+      }
+      setState(state.sessionId, updated)
+    }
+    logger.log(`Ralph: terminated ${active.length} active loop(s)`)
+  }
+
   return {
     getActiveState,
     getAnyState,
@@ -148,5 +163,6 @@ export function createRalphService(
     listRecent,
     findByWorktreeName,
     getMinCleanAudits,
+    terminateAll,
   }
 }
