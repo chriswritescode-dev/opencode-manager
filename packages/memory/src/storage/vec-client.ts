@@ -47,12 +47,13 @@ function sendRequest(socketPath: string, request: Record<string, unknown>): Prom
   })
 }
 
-function isWorkerRunning(pidPath: string, socketPath: string): boolean {
+async function isWorkerRunning(pidPath: string, socketPath: string): Promise<boolean> {
   if (!existsSync(pidPath) || !existsSync(socketPath)) return false
   try {
     const pid = parseInt(readFileSync(pidPath, 'utf-8'), 10)
     process.kill(pid, 0)
-    return true
+    const response = await sendRequest(socketPath, { action: 'health' })
+    return response.status === 'ok'
   } catch {
     return false
   }
@@ -70,6 +71,33 @@ function cleanupStale(pidPath: string, socketPath: string): void {
   } catch {}
 }
 
+export function cleanupOrphanedWorkers(pidPath: string, socketPath: string): void {
+  if (existsSync(socketPath) && !existsSync(pidPath)) {
+    try {
+      unlinkSync(socketPath)
+    } catch {}
+  }
+  
+  if (existsSync(pidPath)) {
+    try {
+      const pid = parseInt(readFileSync(pidPath, 'utf-8'), 10)
+      try {
+        process.kill(pid, 0)
+        if (!existsSync(socketPath)) {
+          try {
+            process.kill(pid, 'SIGTERM')
+          } catch {}
+        }
+      } catch {
+        unlinkSync(pidPath)
+        if (existsSync(socketPath)) {
+          unlinkSync(socketPath)
+        }
+      }
+    } catch {}
+  }
+}
+
 async function startWorker(config: {
   dbPath: string
   dataDir: string
@@ -78,11 +106,17 @@ async function startWorker(config: {
   const socketPath = join(config.dataDir, 'vec-worker.sock')
   const pidPath = join(config.dataDir, 'vec-worker.pid')
 
-  if (isWorkerRunning(pidPath, socketPath)) {
+  cleanupOrphanedWorkers(pidPath, socketPath)
+
+  if (await isWorkerRunning(pidPath, socketPath)) {
     return socketPath
   }
 
-  cleanupStale(pidPath, socketPath)
+  if (existsSync(socketPath)) {
+    try {
+      unlinkSync(socketPath)
+    } catch {}
+  }
 
   const workerScriptJs = join(__dirname, 'vec-worker.js')
   const workerScript = existsSync(workerScriptJs)

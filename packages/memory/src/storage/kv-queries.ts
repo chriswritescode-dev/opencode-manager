@@ -54,6 +54,13 @@ export function createKvQuery(db: Database) {
      ORDER BY updated_at DESC`
   )
 
+  const listByPrefixStmt = db.prepare(
+    `SELECT project_id, key, data, expires_at, created_at, updated_at
+     FROM project_kv
+     WHERE project_id = ? AND key LIKE ? AND expires_at > ?
+     ORDER BY updated_at DESC`
+  )
+
   const deleteExpiredStmt = db.prepare(
     `DELETE FROM project_kv WHERE expires_at < ?`
   )
@@ -75,6 +82,11 @@ export function createKvQuery(db: Database) {
 
     list(projectId: string): KvRow[] {
       const rows = listStmt.all(projectId, Date.now()) as KvRowRaw[]
+      return rows.map(mapRow)
+    },
+
+    listByPrefix(projectId: string, prefix: string): KvRow[] {
+      const rows = listByPrefixStmt.all(projectId, `${prefix}%`, Date.now()) as KvRowRaw[]
       return rows.map(mapRow)
     },
 
