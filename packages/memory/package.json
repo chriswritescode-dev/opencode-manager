@@ -1,6 +1,6 @@
 {
   "name": "@opencode-manager/memory",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -38,6 +38,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@opencode-ai/plugin": "^1.2.16",
+    "@opencode-ai/sdk": "^1.2.26",
     "sqlite-vec": "0.1.7-alpha.2"
   },
   "optionalDependencies": {
