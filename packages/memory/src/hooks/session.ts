@@ -65,7 +65,9 @@ For each item found, store it with the appropriate scope:
 - decision: architectural choices with their rationale
 - context: project structure, key file locations, domain knowledge, known issues
 
-Be selective — only store knowledge useful in future sessions. Check for duplicates before writing (use memory-read to search first). 
+Be selective — only store knowledge useful in future sessions. Check for duplicates before writing (use memory-read to search first).
+
+Note the current git branch (via \`git branch --show-current\`) and append "(branch: <name>)" to each memory stored, so future sessions know the context in which the knowledge was captured.
 
 End your response with:
 1. A brief summary of what was stored
