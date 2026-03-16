@@ -1245,21 +1245,6 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           output.status = 'deny'
           return
         }
-
-        if (state.inPlace) return
-
-        const allWithinWorktree = req.patterns.every((p) => {
-          const resolved = p.startsWith('/') ? p : resolve(state.worktreeDir, p)
-          return resolved === state.worktreeDir || resolved.startsWith(state.worktreeDir + '/')
-        })
-
-        if (allWithinWorktree) {
-          output.status = 'allow'
-          return
-        }
-
-        logger.log(`Ralph: denied permission outside worktree for session ${req.sessionID}`)
-        output.status = 'deny'
       },
       'experimental.session.compacting': async (input, output) => {
         logger.log(`Compacting triggered`)
