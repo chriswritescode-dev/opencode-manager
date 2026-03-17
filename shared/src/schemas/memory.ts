@@ -86,6 +86,17 @@ export const MessagesTransformConfigSchema = z.object({
 })
 export type MessagesTransformConfig = z.infer<typeof MessagesTransformConfigSchema>
 
+export const RalphConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  defaultMaxIterations: z.number().optional(),
+  cleanupWorktree: z.boolean().optional(),
+  defaultAudit: z.boolean().optional(),
+  model: z.string().optional(),
+  minCleanAudits: z.number().optional(),
+  stallTimeoutMs: z.number().optional(),
+})
+export type RalphConfig = z.infer<typeof RalphConfigSchema>
+
 export const PluginConfigSchema = z.object({
   dataDir: z.string().optional(),
   embedding: EmbeddingConfigSchema,
@@ -95,6 +106,8 @@ export const PluginConfigSchema = z.object({
   memoryInjection: MemoryInjectionConfigSchema.optional(),
   messagesTransform: MessagesTransformConfigSchema.optional(),
   executionModel: z.string().optional(),
+  auditorModel: z.string().optional(),
+  ralph: RalphConfigSchema.optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>
 

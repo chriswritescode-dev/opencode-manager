@@ -26,6 +26,7 @@ import { createNoopVecService } from './storage/vec'
 import { checkForUpdate, formatUpgradeCheck, performUpgrade } from './utils/upgrade'
 import { MAX_RETRIES } from './services/ralph'
 import { execSync, spawnSync } from 'child_process'
+import { existsSync } from 'fs'
 
 const z = tool.schema
 
@@ -614,7 +615,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         `Audit: ${auditInfo}`,
         '',
         'The loop will automatically continue when the session goes idle.',
-        'Use ralph-cancel to stop, or ralph-status to check progress.',
+        'Your job is done — just confirm to the user that the loop has been launched.',
+        'The user can run ralph-status or ralph-cancel later if needed.',
       )
 
       return lines.join('\n')
@@ -851,8 +853,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
-            maxIterations: z.number().optional().default(0).describe('Max iterations before auto-stop (0 = unlimited)'),
-            audit: z.boolean().optional().default(true).describe('Run auditor after each iteration'),
+            maxIterations: z.number().optional().describe('Override max iterations (uses config default if not specified)'),
+            audit: z.boolean().optional().describe('Override audit setting (uses config default if not specified)'),
             inPlace: z.boolean().optional().default(false).describe('Run in current directory instead of creating a worktree'),
           },
           execute: async (args) => {
@@ -869,7 +871,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               prompt: args.plan,
               sessionTitle: `Ralph: ${sessionTitle}`,
               completionPromise: DEFAULT_PLAN_COMPLETION_PROMISE,
-              maxIterations: args.maxIterations ?? 0,
+              maxIterations: args.maxIterations ?? config.ralph?.defaultMaxIterations ?? 0,
               audit: args.audit ?? config.ralph?.defaultAudit ?? true,
               agent: 'code',
               model: ralphModel,
@@ -939,10 +941,10 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           description: 'Start a Ralph Wiggum iterative development loop. By default runs in an isolated git worktree. Set inPlace to true to run in the current directory instead.',
           args: {
             prompt: z.string().describe('The task prompt to iterate on'),
-            maxIterations: z.number().optional().default(0).describe('Max iterations before auto-stop (0 = unlimited)'),
+            maxIterations: z.number().optional().describe('Override max iterations (uses config default if not specified)'),
             completionPromise: z.string().optional().describe('Phrase that signals completion when wrapped in <promise> tags'),
             name: z.string().optional().describe('Optional name for the worktree branch'),
-            audit: z.boolean().optional().describe('Run auditor after each iteration'),
+            audit: z.boolean().optional().describe('Override audit setting (uses config default if not specified)'),
             inPlace: z.boolean().optional().describe('Run in current directory instead of creating a worktree'),
           },
           execute: async (args) => {
@@ -960,7 +962,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               sessionTitle: `Ralph: ${titlePreview}`,
               worktreeName: args.name,
               completionPromise: args.completionPromise ?? null,
-              maxIterations: args.maxIterations ?? 0,
+              maxIterations: args.maxIterations ?? config.ralph?.defaultMaxIterations ?? 0,
               audit: args.audit ?? config.ralph?.defaultAudit ?? true,
               model: ralphModel,
               inPlace: args.inPlace,
@@ -1018,12 +1020,121 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           },
         }),
         'ralph-status': tool({
-          description: 'Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop.',
+          description: 'Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop. Use restart to resume a stopped loop.',
           args: {
             name: z.string().optional().describe('Worktree name to check for detailed status'),
+            restart: z.boolean().optional().describe('Restart a stopped loop by name'),
           },
           execute: async (args) => {
             const active = ralphService.listActive()
+
+            if (args.restart) {
+              if (!args.name) {
+                return 'Specify a loop name to restart. Use ralph-status to see available loops.'
+              }
+
+              const stoppedState = ralphService.findByWorktreeNameAny(args.name)
+              if (!stoppedState) {
+                const recent = ralphService.listRecent()
+                const available = [...active, ...recent].map((s) => `- ${s.worktreeName}`).join('\n')
+                return `No Ralph loop found for "${args.name}".\n\nAvailable loops:\n${available}`
+              }
+
+              if (stoppedState.active) {
+                return `Loop "${stoppedState.worktreeName}" is already active. Nothing to restart.`
+              }
+
+              if (stoppedState.terminationReason === 'completed') {
+                return `Loop "${stoppedState.worktreeName}" completed successfully and cannot be restarted.`
+              }
+
+              if (!stoppedState.inPlace) {
+                if (!existsSync(stoppedState.worktreeDir)) {
+                  return `Cannot restart "${stoppedState.worktreeName}": worktree directory no longer exists at ${stoppedState.worktreeDir}. The worktree may have been cleaned up.`
+                }
+              }
+
+              const createResult = await v2.session.create({
+                title: stoppedState.worktreeName,
+                directory: stoppedState.worktreeDir,
+              })
+
+              if (createResult.error || !createResult.data) {
+                logger.error(`ralph-restart: failed to create session`, createResult.error)
+                return `Failed to create new session for restart.`
+              }
+
+              const newSessionId = createResult.data.id
+
+              ralphService.deleteState(stoppedState.sessionId)
+
+              const newState: RalphState = {
+                active: true,
+                sessionId: newSessionId,
+                worktreeName: stoppedState.worktreeName,
+                worktreeDir: stoppedState.worktreeDir,
+                worktreeBranch: stoppedState.worktreeBranch,
+                workspaceId: stoppedState.workspaceId,
+                iteration: stoppedState.iteration,
+                maxIterations: stoppedState.maxIterations,
+                completionPromise: stoppedState.completionPromise,
+                startedAt: new Date().toISOString(),
+                prompt: stoppedState.prompt,
+                phase: 'coding',
+                audit: stoppedState.audit,
+                errorCount: 0,
+                cleanAuditCount: 0,
+                parentSessionId: stoppedState.parentSessionId,
+                inPlace: stoppedState.inPlace,
+              }
+
+              ralphService.setState(newSessionId, newState)
+
+              let promptText = stoppedState.prompt
+              if (stoppedState.completionPromise) {
+                promptText += `\n\n---\n\n**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully, you MUST output the following tag exactly: <promise>${stoppedState.completionPromise}</promise>\n\nDo NOT output this tag until every phase is truly complete. The loop will continue until this signal is detected.`
+              }
+
+              const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
+
+              const { result: promptResult } = await retryWithModelFallback(
+                () => v2.session.promptAsync({
+                  sessionID: newSessionId,
+                  directory: stoppedState.worktreeDir,
+                  parts: [{ type: 'text' as const, text: promptText }],
+                  agent: 'code',
+                  model: ralphModel!,
+                }),
+                () => v2.session.promptAsync({
+                  sessionID: newSessionId,
+                  directory: stoppedState.worktreeDir,
+                  parts: [{ type: 'text' as const, text: promptText }],
+                  agent: 'code',
+                }),
+                ralphModel,
+                logger,
+              )
+
+              if (promptResult.error) {
+                logger.error(`ralph-restart: failed to send prompt`, promptResult.error)
+                ralphService.deleteState(newSessionId)
+                return `Restart failed: could not send prompt to new session.`
+              }
+
+              ralphHandler.startWatchdog(newSessionId)
+
+              const modeInfo = stoppedState.inPlace ? ' (in-place)' : ''
+              return [
+                `Restarted Ralph loop "${stoppedState.worktreeName}"${modeInfo}`,
+                '',
+                `New session: ${newSessionId}`,
+                `Continuing from iteration: ${stoppedState.iteration}`,
+                `Previous termination: ${stoppedState.terminationReason}`,
+                `Directory: ${stoppedState.worktreeDir}`,
+                `Branch: ${stoppedState.worktreeBranch}`,
+                `Audit: ${stoppedState.audit ? 'enabled' : 'disabled'}`,
+              ].join('\n')
+            }
 
             if (!args.name) {
               const recent = ralphService.listRecent()
