@@ -325,9 +325,6 @@ export function createRalphEventHandler(
       ralphService.setState(sessionId, { ...state, phase: 'auditing', errorCount: 0 })
       logger.log(`Ralph iteration ${state.iteration} complete, running auditor for session ${sessionId}`)
 
-      const currentConfig = getConfig()
-      const auditorModel = parseModelString(currentConfig.auditorModel) ?? parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
-
       const auditPrompt = {
         sessionID: sessionId,
         directory: state.worktreeDir,
@@ -339,29 +336,11 @@ export function createRalphEventHandler(
         }],
       }
       
-      const sendAuditPromptWithModel = async () => {
-        const result = await v2Client.session.promptAsync({
-          ...auditPrompt,
-          model: auditorModel!,
-        })
-        return { data: result.data, error: result.error }
-      }
-      
-      const sendAuditPromptWithoutModel = async () => {
-        const result = await v2Client.session.promptAsync(auditPrompt)
-        return { data: result.data, error: result.error }
-      }
-      
-      const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
-        sendAuditPromptWithModel,
-        sendAuditPromptWithoutModel,
-        auditorModel,
-        logger,
-      )
+      const promptResult = await v2Client.session.promptAsync(auditPrompt)
       
       if (promptResult.error) {
         const retryFn = async () => {
-          const result = await sendAuditPromptWithoutModel()
+          const result = await v2Client.session.promptAsync(auditPrompt)
           if (result.error) {
             throw result.error
           }
@@ -370,11 +349,9 @@ export function createRalphEventHandler(
         return
       }
       
-      if (actualModel) {
-        logger.log(`auditor using model: ${actualModel.providerID}/${actualModel.modelID}`)
-      } else {
-        logger.log(`auditor using default model (fallback)`)
-      }
+      const currentConfig = getConfig()
+      const configuredModel = currentConfig.auditorModel ?? currentConfig.ralph?.model ?? currentConfig.executionModel
+      logger.log(`auditor using agent-configured model: ${configuredModel ?? 'default'}`)
       
       consecutiveStalls.set(sessionId, 0)
       return

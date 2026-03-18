@@ -228,7 +228,8 @@ You can edit this file to customize settings. The file is created only if it doe
     "defaultMaxIterations": 15,
     "cleanupWorktree": false,
     "defaultAudit": true,
-    "model": ""
+    "model": "",
+    "minAudits": 1
   },
   "auditorModel": ""
 }
