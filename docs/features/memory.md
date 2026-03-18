@@ -32,12 +32,14 @@ Then register the plugin in your `opencode.json`:
 
 ## Configuration
 
-On first run, the plugin copies a bundled `config.json` to the global data directory:
+On first run, the plugin copies a bundled `config.jsonc` to the global config directory:
 
-- `~/.local/share/opencode/memory/config.json`
-- Falls back to `$XDG_DATA_HOME/opencode/memory/config.json`
+- `~/.config/opencode/memory-config.jsonc`
+- Falls back to: `$XDG_CONFIG_HOME/opencode/memory-config.jsonc`
 
-The file is only created if it does not already exist. The config is validated on load — if it fails validation, defaults are used automatically.
+The plugin supports JSONC format, allowing comments with `//` and `/* */`.
+
+The file is only created if it does not already exist. The config is validated on load — if it fails validation, defaults are used automatically. If a config exists at the old location (`~/.local/share/opencode/memory/config.json`), it will be automatically migrated to the new location.
 
 ### Full Default Config
 
@@ -77,7 +79,7 @@ The file is only created if it does not already exist. The config is validated o
     "cleanupWorktree": false,
     "defaultAudit": true,
     "model": "",
-    "minCleanAudits": 2
+    "minAudits": 1
   },
   "auditorModel": ""
 }
@@ -135,8 +137,8 @@ Set `baseUrl` to point at any OpenAI-compatible self-hosted service (vLLM, Ollam
 | `ralph.cleanupWorktree` | Auto-remove worktree on cancel | `false` |
 | `ralph.defaultAudit` | Run auditor after each coding iteration | `true` |
 | `ralph.model` | Model override for Ralph sessions (`provider/model`), falls back to `executionModel` | — |
-| `ralph.minCleanAudits` | Consecutive clean audit passes required before completion | `2` |
-| `auditorModel` | Model override for the auditor agent (`provider/model`). Applied globally, no fallback. | — |
+| `ralph.minAudits` | Minimum audit iterations required before completion | `1` |
+| `auditorModel` | Model override for the auditor agent (`provider/model`). Falls back to `ralph.model`, then `executionModel`, then platform default. | — |
 
 ---
 
@@ -195,9 +197,9 @@ The KV service is initialized on plugin startup and begins its cleanup interval 
 
 The Ralph service manages iterative development loops using the KV store for state persistence:
 
-- **State Management**: Each loop's state is stored in the KV store under `ralph:{sessionId}` with fields: `worktreeName`, `phase` (coding/auditing), `iteration`, `goal`, `status` (running/stopped), `audit`, `lastAuditResult`, `errorCount`, `cleanAuditCount`
+- **State Management**: Each loop's state is stored in the KV store under `ralph:{sessionId}` with fields: `worktreeName`, `phase` (coding/auditing), `iteration`, `goal`, `status` (running/stopped), `audit`, `lastAuditResult`, `errorCount`, `auditCount`
 - **Two-Phase Cycle**: Alternates between coding (Code agent works on the task) and auditing (Auditor agent reviews changes). Audit findings feed back into the next coding iteration
-- **Completion Criteria**: Requires `minCleanAudits` (default 2) consecutive clean audit passes before marking the loop as completed
+- **Completion Criteria**: Requires `minAudits` (default 1) audit iterations before marking the loop as completed
 - **Error Handling**: Tracks consecutive errors with `MAX_RETRIES` (3). If 3 consecutive iterations fail, the loop terminates with reason `error_max_retries`
 - **Worktree Management**: By default creates an isolated git worktree for each loop. Uses `git rev-parse --git-common-dir` to find the main repo root. On completion, auto-commits changes and removes the worktree (preserving the branch). Set `inPlace: true` to skip worktree isolation
 - **Termination Reasons**: `completed`, `max_iterations`, `error_max_retries`, `worktree_failed`, `cancelled`
@@ -509,7 +511,7 @@ Planning requires strong reasoning — use a smart model (e.g., `claude-opus-4-6
 
 This gives you the best of both worlds: high-quality plans at the reasoning tier, fast execution at a fraction of the cost.
 
-**Configure the execution model** in the memory plugin config (`~/.local/share/opencode/memory/config.json`):
+**Configure the execution model** in the memory plugin config (`~/.config/opencode/memory-config.jsonc`):
 
 ```json
 {
@@ -534,7 +536,7 @@ The Ralph loop is an iterative development system that alternates between coding
     - **Coding phase** → If auditing is enabled, switches to auditing phase and runs the Auditor agent as a subtask
     - **Auditing phase** → Processes audit findings, switches back to coding phase, and sends a continuation prompt with the findings
 4. The loop repeats until one of these conditions is met:
-    - **Completion**: `minCleanAudits` (default 2) consecutive clean audit passes
+    - **Completion**: `minAudits` (default 1) audit iterations
     - **Max iterations**: Reached `maxIterations` limit (if set)
     - **Error limit**: 3 consecutive failures (`MAX_RETRIES`)
     - **Worktree failure**: The worktree becomes unavailable
@@ -779,12 +781,14 @@ The cleanup function is idempotent — calling it multiple times is safe.
 | File | Location | Purpose |
 |------|----------|---------|
 | `memory.db` | `{dataDir}/` | SQLite database with all memories |
-| `config.json` | `{dataDir}/` | Plugin configuration |
+| `memory-config.jsonc` | `{configDir}/` | Plugin configuration (JSONC format, supports comments) |
 | `embedding.sock` | `{dataDir}/` | Unix socket for shared embedding server |
 | `embedding.pid` | `{dataDir}/` | PID file for the embedding server process |
 | `embedding.startup.lock` | `{dataDir}/` | Directory-based lock to prevent duplicate server starts |
 | `memory.log` | `{dataDir}/logs/` | Debug log (when logging is enabled) |
 | `models/` | `{dataDir}/` | Hugging Face model cache for local embeddings |
+
+Where `{dataDir}` is `~/.local/share/opencode/memory` (or `$XDG_DATA_HOME/opencode/memory`) and `{configDir}` is `~/.config/opencode` (or `$XDG_CONFIG_HOME/opencode`).
 
 ---
 

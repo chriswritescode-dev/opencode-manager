@@ -12,7 +12,7 @@
   },
   "files": [
     "dist",
-    "config.json",
+    "config.jsonc",
     "scripts",
     "README.md"
   ],
@@ -39,6 +39,7 @@
     "@huggingface/transformers": "^3.8.1",
     "@opencode-ai/plugin": "^1.2.16",
     "@opencode-ai/sdk": "^1.2.26",
+    "jsonc-parser": "^3.3.1",
     "sqlite-vec": "0.1.7-alpha.2"
   },
   "optionalDependencies": {

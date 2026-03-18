@@ -61,7 +61,8 @@ Diffs alone are not enough. After getting the diff:
 
 Be certain. If you're going to call something a bug, you need to be confident it actually is one.
 
-- Only review the changes — do not review pre-existing code that wasn't modified
+- Focus your review on the changes and code directly related to them
+- If you discover a bug in pre-existing code that affects the correctness of the current changes, report it — do not dismiss it as "out of scope"
 - Don't flag something as a bug if you're unsure — investigate first
 - Don't invent hypothetical problems — if an edge case matters, explain the realistic scenario where it breaks
 - If memory contains a convention that contradicts what you'd normally flag, defer to the stored convention — it represents an explicit project decision

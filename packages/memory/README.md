@@ -185,11 +185,13 @@ ocm-mem cleanup --all --project my-project
 
 ## Configuration
 
-On first run, the plugin automatically copies the bundled config to your data directory:
-- Path: `~/.local/share/opencode/memory/config.json`
-- Falls back to: `$XDG_DATA_HOME/opencode/memory/config.json`
+On first run, the plugin automatically copies the bundled config to your config directory:
+- Path: `~/.config/opencode/memory-config.jsonc`
+- Falls back to: `$XDG_CONFIG_HOME/opencode/memory-config.jsonc`
 
-You can edit this file to customize settings. The file is created only if it doesn't already exist.
+The plugin supports JSONC format, allowing comments with `//` and `/* */`.
+
+You can edit this file to customize settings. The file is created only if it doesn't already exist. If a config exists at the old location (`~/.local/share/opencode/memory/config.json`), it will be automatically migrated to the new location.
 
 ```json
 {
@@ -226,8 +228,7 @@ You can edit this file to customize settings. The file is created only if it doe
     "defaultMaxIterations": 15,
     "cleanupWorktree": false,
     "defaultAudit": true,
-    "model": "",
-    "minCleanAudits": 2
+    "model": ""
   },
   "auditorModel": ""
 }
@@ -261,10 +262,14 @@ For API-based embeddings:
 - `dataDir` - Directory for SQLite database storage (default: `"~/.local/share/opencode/memory"`)
 - `dedupThreshold` - Similarity threshold for deduplication (0–1, default: `0.25`, clamped to `0.05–0.40`)
 
+#### Config Location
+- Config file: `~/.config/opencode/memory-config.jsonc` (or `$XDG_CONFIG_HOME/opencode/memory-config.jsonc`)
+- Old config location (`~/.local/share/opencode/memory/config.json`) is automatically migrated on first load
+
 #### Logging
 - `logging.enabled` - Enable file logging (default: `false`)
 - `logging.debug` - Enable debug-level log output (default: `false`)
-- `logging.file` - Log file path. When empty, resolves to `~/.local/share/opencode/memory/logs/memory.log` (default: `""`)
+- `logging.file` - Log file path. When empty, resolves to `~/.local/share/opencode/memory/logs/memory.log` (default: `""`). Logs remain in the data directory, only config has moved.
 
 When enabled, logs are written to the specified file with timestamps. The log file has a 10MB size limit with automatic rotation.
 
@@ -293,10 +298,10 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 - `ralph.cleanupWorktree` - Auto-remove worktree on cancel (default: `false`)
 - `ralph.defaultAudit` - Run auditor after each coding iteration by default (default: `true`)
 - `ralph.model` - Model override for Ralph sessions (`provider/model`), falls back to `executionModel` (default: `""`)
-- `ralph.minCleanAudits` - Consecutive clean audit passes required before completion (default: `2`)
+- `ralph.minAudits` - Minimum audit iterations required before completion (default: `1`)
 
 #### Auditor
-- `auditorModel` - Model override for the auditor agent (`provider/model`). Applied globally, no fallback (default: `""`)
+- `auditorModel` - Model override for the auditor agent (`provider/model`). Falls back to `ralph.model`, then `executionModel`, then platform default (default: `""`)
 
 ## architect → code Workflow
 
@@ -320,7 +325,7 @@ The Ralph loop is an iterative development system that alternates between coding
 2. **Auditing phase** — The Auditor agent reviews changes against project conventions
 3. **Repeat** — Findings from the audit feed back into the next coding iteration
 
-Completion requires `minCleanAudits` (default 2) consecutive clean audit passes. The loop auto-terminates after `maxIterations` (if set) or after 3 consecutive errors.
+The loop completes when the Code agent outputs the completion promise. It auto-terminates after `maxIterations` (if set) or after 3 consecutive errors.
 
 By default, Ralph loops run in an isolated git worktree. Set `inPlace: true` to run in the current directory instead (skips worktree creation, auto-commit, and cleanup).
 

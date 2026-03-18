@@ -101,7 +101,7 @@ RUN cd /opt/opencode-plugins/src && npm install
 RUN mkdir -p /opt/opencode-plugins/node_modules/@opencode-manager/memory && \
     cp -r /opt/opencode-plugins/src/dist/* /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
     cp /opt/opencode-plugins/src/package.json /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
-    cp /opt/opencode-plugins/src/config.json /opt/opencode-plugins/node_modules/@opencode-manager/memory/config.json 2>/dev/null || true && \
+    cp /opt/opencode-plugins/src/config.jsonc /opt/opencode-plugins/node_modules/@opencode-manager/memory/config.jsonc 2>/dev/null || true && \
     cp -r /opt/opencode-plugins/src/node_modules/* /opt/opencode-plugins/node_modules/ 2>/dev/null || true
 
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh

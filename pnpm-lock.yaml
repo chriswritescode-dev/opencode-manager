@@ -287,6 +287,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: ^1.2.26
         version: 1.2.26
+      jsonc-parser:
+        specifier: ^3.3.1
+        version: 3.3.1
       sqlite-vec:
         specifier: 0.1.7-alpha.2
         version: 0.1.7-alpha.2
