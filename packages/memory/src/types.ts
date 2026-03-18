@@ -65,8 +65,8 @@ export interface RalphConfig {
   cleanupWorktree?: boolean
   defaultAudit?: boolean
   model?: string
-  minCleanAudits?: number
   stallTimeoutMs?: number
+  minAudits?: number
 }
 
 export interface PluginConfig {
