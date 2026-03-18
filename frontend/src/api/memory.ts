@@ -122,3 +122,11 @@ export async function updateKvEntry(projectId: string, key: string, data: Update
     body: JSON.stringify(data),
   })
 }
+
+export async function cancelRalphLoop(repoId: string, sessionId: string): Promise<{ cancelled: boolean; worktreeName?: string }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/ralph/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repoId, sessionId }),
+  })
+}

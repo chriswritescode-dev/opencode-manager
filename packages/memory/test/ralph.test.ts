@@ -283,6 +283,7 @@ describe('RalphService', () => {
     expect(prompt).toContain('Review the code changes')
     expect(prompt).toContain('bugs, logic errors, missing error handling')
     expect(prompt).toContain('No issues found')
+    expect(prompt).toContain('do not direct the agent to')
   })
 
   test('buildContinuationPrompt appends audit findings when provided', () => {
@@ -308,7 +309,8 @@ describe('RalphService', () => {
     const prompt = ralphService.buildContinuationPrompt(state, auditFindings)
     expect(prompt).toContain('Ralph iteration 2')
     expect(prompt).toContain('Test prompt')
-    expect(prompt).toContain('The following issues were found by the code auditor')
+    expect(prompt).toContain('The code auditor reviewed your changes')
+    expect(prompt).toContain('do not dismiss findings as unrelated to the task')
     expect(prompt).toContain('Found a bug in line 10')
   })
 
@@ -335,6 +337,31 @@ describe('RalphService', () => {
     expect(prompt).toContain('Ralph iteration 2')
     expect(prompt).toContain('Test prompt')
     expect(prompt).not.toContain('The following issues were found')
+  })
+
+  test('buildContinuationPrompt with audit findings includes completion reminder', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-audit',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/ralph-test',
+      workspaceId: 'wrk-test-worktree',
+      iteration: 2,
+      maxIterations: 0,
+      completionPromise: 'DONE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    const auditFindings = 'Found a bug in line 10'
+    const prompt = ralphService.buildContinuationPrompt(state, auditFindings)
+    expect(prompt).toContain('After fixing all issues, output the completion signal')
+    expect(prompt).toContain('without creating a plan or asking for approval')
   })
 
   test('listActive returns only active states', () => {
@@ -581,7 +608,8 @@ describe('RalphService', () => {
     const prompt = ralphService.buildContinuationPrompt(inPlaceState, auditFindings)
     expect(prompt).toContain('Ralph iteration 2')
     expect(prompt).toContain('In-place audit test')
-    expect(prompt).toContain('The following issues were found by the code auditor')
+    expect(prompt).toContain('The code auditor reviewed your changes')
+    expect(prompt).toContain('do not dismiss findings as unrelated to the task')
     expect(prompt).toContain('Bug found in component')
   })
 

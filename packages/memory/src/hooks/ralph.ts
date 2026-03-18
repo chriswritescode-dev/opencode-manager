@@ -13,6 +13,7 @@ export interface RalphEventHandler {
   clearAllRetryTimeouts(): void
   startWatchdog(sessionId: string): void
   getStallInfo(sessionId: string): { consecutiveStalls: number; lastActivityTime: number } | null
+  cancelBySessionId(sessionId: string): Promise<boolean>
 }
 
 export function createRalphEventHandler(
@@ -302,37 +303,44 @@ export function createRalphEventHandler(
   }
 
   async function handleCodingPhase(sessionId: string, state: RalphState): Promise<void> {
-    if (state.completionPromise) {
-      const textContent = await getLastAssistantText(sessionId, state.worktreeDir)
-      if (textContent && ralphService.checkCompletionPromise(textContent, state.completionPromise)) {
+    // Re-fetch and validate state to catch aborts that happened during idle event processing
+    const currentState = ralphService.getActiveState(sessionId)
+    if (!currentState?.active) {
+      logger.log(`Ralph: loop ${sessionId} no longer active, skipping coding phase`)
+      return
+    }
+
+    if (currentState.completionPromise) {
+      const textContent = await getLastAssistantText(sessionId, currentState.worktreeDir)
+      if (textContent && ralphService.checkCompletionPromise(textContent, currentState.completionPromise)) {
         // Check if minimum audits have been performed
-        const currentAuditCount = state.auditCount ?? 0
-        if (!state.audit || currentAuditCount >= minAudits) {
-          await terminateLoop(sessionId, state, 'completed')
-          logger.log(`Ralph loop completed: detected <promise>${state.completionPromise}</promise> at iteration ${state.iteration} (${currentAuditCount}/${minAudits} audits)`)
+        const currentAuditCount = currentState.auditCount ?? 0
+        if (!currentState.audit || currentAuditCount >= minAudits) {
+          await terminateLoop(sessionId, currentState, 'completed')
+          logger.log(`Ralph loop completed: detected <promise>${currentState.completionPromise}</promise> at iteration ${currentState.iteration} (${currentAuditCount}/${minAudits} audits)`)
           return
         }
         logger.log(`Ralph: completion promise detected but only ${currentAuditCount}/${minAudits} audits performed, continuing`)
       }
     }
 
-    if (state.maxIterations > 0 && state.iteration >= state.maxIterations) {
-      await terminateLoop(sessionId, state, 'max_iterations')
+    if (currentState.maxIterations > 0 && currentState.iteration >= currentState.maxIterations) {
+      await terminateLoop(sessionId, currentState, 'max_iterations')
       return
     }
 
-    if (state.audit) {
-      ralphService.setState(sessionId, { ...state, phase: 'auditing', errorCount: 0 })
-      logger.log(`Ralph iteration ${state.iteration} complete, running auditor for session ${sessionId}`)
+    if (currentState.audit) {
+      ralphService.setState(sessionId, { ...currentState, phase: 'auditing', errorCount: 0 })
+      logger.log(`Ralph iteration ${currentState.iteration} complete, running auditor for session ${sessionId}`)
 
       const auditPrompt = {
         sessionID: sessionId,
-        directory: state.worktreeDir,
+        directory: currentState.worktreeDir,
         parts: [{
           type: 'subtask' as const,
           agent: 'auditor',
-          description: `Post-iteration ${state.iteration} code review`,
-          prompt: ralphService.buildAuditPrompt(state),
+          description: `Post-iteration ${currentState.iteration} code review`,
+          prompt: ralphService.buildAuditPrompt(currentState),
         }],
       }
       
@@ -345,7 +353,7 @@ export function createRalphEventHandler(
             throw result.error
           }
         }
-        await handlePromptError(sessionId, { ...state, phase: 'coding' }, 'failed to send audit prompt', promptResult.error, retryFn)
+        await handlePromptError(sessionId, { ...currentState, phase: 'coding' }, 'failed to send audit prompt', promptResult.error, retryFn)
         return
       }
       
@@ -357,10 +365,10 @@ export function createRalphEventHandler(
       return
     }
 
-    const nextIteration = state.iteration + 1
-    ralphService.setState(sessionId, { ...state, iteration: nextIteration, errorCount: 0 })
+    const nextIteration = currentState.iteration + 1
+    ralphService.setState(sessionId, { ...currentState, iteration: nextIteration, errorCount: 0 })
 
-    const continuationPrompt = ralphService.buildContinuationPrompt({ ...state, iteration: nextIteration })
+    const continuationPrompt = ralphService.buildContinuationPrompt({ ...currentState, iteration: nextIteration })
     logger.log(`Ralph iteration ${nextIteration} for session ${sessionId}`)
 
     const currentConfig = getConfig()
@@ -369,7 +377,7 @@ export function createRalphEventHandler(
     const sendContinuationPromptWithModel = async () => {
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: state.worktreeDir,
+        directory: currentState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
         model: ralphModel!,
       })
@@ -379,7 +387,7 @@ export function createRalphEventHandler(
     const sendContinuationPromptWithoutModel = async () => {
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: state.worktreeDir,
+        directory: currentState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
       })
       return { data: result.data, error: result.error }
@@ -399,7 +407,7 @@ export function createRalphEventHandler(
           throw result.error
         }
       }
-      await handlePromptError(sessionId, state, 'failed to send continuation prompt', promptResult.error, retryFn)
+      await handlePromptError(sessionId, currentState, 'failed to send continuation prompt', promptResult.error, retryFn)
       return
     }
     
@@ -413,34 +421,41 @@ export function createRalphEventHandler(
   }
 
   async function handleAuditingPhase(sessionId: string, state: RalphState): Promise<void> {
-    const auditText = await getLastAssistantText(sessionId, state.worktreeDir)
+    // Re-fetch and validate state to catch aborts that happened during idle event processing
+    const currentState = ralphService.getActiveState(sessionId)
+    if (!currentState?.active) {
+      logger.log(`Ralph: loop ${sessionId} no longer active, skipping auditing phase`)
+      return
+    }
 
-    const nextIteration = state.iteration + 1
-    const newAuditCount = (state.auditCount ?? 0) + 1
-    logger.log(`Ralph audit ${newAuditCount} at iteration ${state.iteration}`)
+    const auditText = await getLastAssistantText(sessionId, currentState.worktreeDir)
+
+    const nextIteration = currentState.iteration + 1
+    const newAuditCount = (currentState.auditCount ?? 0) + 1
+    logger.log(`Ralph audit ${newAuditCount} at iteration ${currentState.iteration}`)
 
     // Always pass the full audit response to the code agent
     const auditFindings = auditText ?? undefined
 
-    if (state.completionPromise && auditText) {
-      if (ralphService.checkCompletionPromise(auditText, state.completionPromise)) {
+    if (currentState.completionPromise && auditText) {
+      if (ralphService.checkCompletionPromise(auditText, currentState.completionPromise)) {
         // Check if minimum audits have been performed
-        if (!state.audit || newAuditCount >= minAudits) {
-          await terminateLoop(sessionId, state, 'completed')
-          logger.log(`Ralph loop completed: detected <promise>${state.completionPromise}</promise> in audit at iteration ${state.iteration} (${newAuditCount}/${minAudits} audits)`)
+        if (!currentState.audit || newAuditCount >= minAudits) {
+          await terminateLoop(sessionId, currentState, 'completed')
+          logger.log(`Ralph loop completed: detected <promise>${currentState.completionPromise}</promise> in audit at iteration ${currentState.iteration} (${newAuditCount}/${minAudits} audits)`)
           return
         }
         logger.log(`Ralph: completion promise detected but only ${newAuditCount}/${minAudits} audits performed, continuing`)
       }
     }
 
-    if (state.maxIterations > 0 && nextIteration > state.maxIterations) {
-      await terminateLoop(sessionId, state, 'max_iterations')
+    if (currentState.maxIterations > 0 && nextIteration > currentState.maxIterations) {
+      await terminateLoop(sessionId, currentState, 'max_iterations')
       return
     }
 
     ralphService.setState(sessionId, {
-      ...state,
+      ...currentState,
       iteration: nextIteration,
       phase: 'coding',
       lastAuditResult: auditFindings,
@@ -449,7 +464,7 @@ export function createRalphEventHandler(
     })
 
     const continuationPrompt = ralphService.buildContinuationPrompt(
-      { ...state, iteration: nextIteration },
+      { ...currentState, iteration: nextIteration },
       auditFindings,
     )
     logger.log(`Ralph iteration ${nextIteration} for session ${sessionId}`)
@@ -460,7 +475,7 @@ export function createRalphEventHandler(
     const sendContinuationPromptWithModel = async () => {
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: state.worktreeDir,
+        directory: currentState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
         model: ralphModel!,
       })
@@ -470,7 +485,7 @@ export function createRalphEventHandler(
     const sendContinuationPromptWithoutModel = async () => {
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: state.worktreeDir,
+        directory: currentState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
       })
       return { data: result.data, error: result.error }
@@ -490,7 +505,7 @@ export function createRalphEventHandler(
           throw result.error
         }
       }
-      await handlePromptError(sessionId, state, 'failed to send continuation prompt after audit', promptResult.error, retryFn)
+      await handlePromptError(sessionId, currentState, 'failed to send continuation prompt after audit', promptResult.error, retryFn)
       return
     }
     
@@ -550,6 +565,26 @@ export function createRalphEventHandler(
       }
     }
 
+    if (event.type === 'session.aborted' || event.type === 'session.stopped') {
+      const eventSessionId = event.properties?.sessionID as string
+      if (eventSessionId) {
+        const state = ralphService.getActiveState(eventSessionId)
+        if (state?.active) {
+          logger.log(`Ralph: session ${eventSessionId} aborted/stopped, terminating loop`)
+          await terminateLoop(eventSessionId, state, 'user_aborted')
+        }
+      }
+      const parentId = findRalphParent(eventSessionId)
+      if (parentId) {
+        const parentState = ralphService.getActiveState(parentId)
+        if (parentState?.active) {
+          logger.log(`Ralph: parent session ${parentId} aborted/stopped, terminating loop`)
+          await terminateLoop(parentId, parentState, 'user_aborted')
+        }
+      }
+      return
+    }
+
     if (event.type !== 'session.idle') return
 
     const sessionId = event.properties?.sessionID as string
@@ -566,13 +601,21 @@ export function createRalphEventHandler(
     recordActivity(sessionId)
 
     try {
-      if (state.phase === 'auditing') {
-        await handleAuditingPhase(sessionId, state)
+      // Re-check state right before calling phase handler as extra safety
+      const freshState = ralphService.getActiveState(sessionId)
+      if (!freshState?.active) {
+        logger.log(`Ralph: loop ${sessionId} was terminated, skipping phase handler`)
+        return
+      }
+      
+      if (freshState.phase === 'auditing') {
+        await handleAuditingPhase(sessionId, freshState)
       } else {
-        await handleCodingPhase(sessionId, state)
+        await handleCodingPhase(sessionId, freshState)
       }
     } catch (err) {
-      await handlePromptError(sessionId, state, `unhandled error in ${state.phase} phase`, err)
+      const freshState = ralphService.getActiveState(sessionId)
+      await handlePromptError(sessionId, freshState ?? state, `unhandled error in ${(freshState ?? state).phase} phase`, err)
     }
   }
 
@@ -595,11 +638,21 @@ export function createRalphEventHandler(
     logger.log('Ralph: cleared all retry timeouts')
   }
 
+  async function cancelBySessionId(sessionId: string): Promise<boolean> {
+    const state = ralphService.getActiveState(sessionId)
+    if (!state?.active) {
+      return false
+    }
+    await terminateLoop(sessionId, state, 'cancelled')
+    return true
+  }
+
   return {
     onEvent,
     terminateAll,
     clearAllRetryTimeouts,
     startWatchdog,
     getStallInfo,
+    cancelBySessionId,
   }
 }

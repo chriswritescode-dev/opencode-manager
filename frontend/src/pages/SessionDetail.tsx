@@ -525,6 +525,7 @@ export function SessionDetail() {
                 opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 sessionID={sessionId}
+                repoId={repoId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton}
                 hasActiveStream={hasActiveStream}

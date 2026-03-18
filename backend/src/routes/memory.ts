@@ -525,6 +525,55 @@ export function createMemoryRoutes(db: Database): Hono {
     }
   })
 
+  app.post('/ralph/cancel', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { repoId, sessionId } = body
+
+      if (!repoId || !sessionId) {
+        return c.json({ error: 'Missing repoId or sessionId' }, 400)
+      }
+
+      const repo = getRepoById(db, parseInt(repoId, 10))
+
+      if (!repo) {
+        return c.json({ cancelled: false })
+      }
+
+      const projectId = await resolveProjectId(repo.fullPath)
+
+      if (!projectId) {
+        return c.json({ cancelled: false })
+      }
+
+      const kvEntry = pluginMemory.getKv(projectId, `ralph:${sessionId}`)
+
+      if (!kvEntry) {
+        return c.json({ cancelled: false })
+      }
+
+      const state = kvEntry.data as { active?: boolean; worktreeName?: string } | undefined
+
+      if (!state?.active) {
+        return c.json({ cancelled: false })
+      }
+
+      const updatedState = {
+        ...state,
+        active: false,
+        terminationReason: 'cancelled',
+        completedAt: new Date().toISOString(),
+      }
+
+      pluginMemory.setKv(projectId, `ralph:${sessionId}`, updatedState)
+
+      return c.json({ cancelled: true, worktreeName: state.worktreeName })
+    } catch (error) {
+      logger.error('Failed to cancel Ralph loop:', error)
+      return c.json({ error: 'Failed to cancel Ralph loop' }, 500)
+    }
+  })
+
   app.get('/:id', async (c) => {
     const id = parseInt(c.req.param('id'), 10)
 

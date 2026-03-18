@@ -96,7 +96,10 @@ export function createRalphService(
     let prompt = `[${systemLine}]\n\n${state.prompt}`
 
     if (auditFindings) {
-      prompt += `\n\n---\nThe following issues were found by the code auditor. Fix them:\n${auditFindings}`
+      const completionInstruction = state.completionPromise
+        ? '\n\nAfter fixing all issues, output the completion signal.'
+        : ''
+      prompt += `\n\n---\nThe code auditor reviewed your changes. You MUST address all bugs and convention violations below — do not dismiss findings as unrelated to the task. Fix them directly without creating a plan or asking for approval.\n\n${auditFindings}${completionInstruction}`
     }
 
     return prompt
@@ -115,6 +118,8 @@ export function createRalphService(
       'Review the code changes in this worktree. Focus on bugs, logic errors, missing error handling, and convention violations.',
       'If you find bugs in related code that affect the correctness of this task, report them — even if the buggy code was not directly modified.',
       'If everything looks good, state "No issues found." clearly.',
+      '',
+      'This is an automated loop — do not direct the agent to "create a plan" or "present for approval." Just report findings directly.',
     ].join('\n')
   }
 

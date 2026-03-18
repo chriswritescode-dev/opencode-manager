@@ -956,12 +956,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               }
             }
 
-            ralphService.setState(state.sessionId, {
-              ...state,
-              active: false,
-              completedAt: new Date().toISOString(),
-              terminationReason: 'cancelled',
-            })
+            await ralphHandler.cancelBySessionId(state.sessionId)
             logger.log(`ralph-cancel: cancelled loop for session=${state.sessionId} at iteration ${state.iteration}`)
 
             if (config.ralph?.cleanupWorktree && !state.inPlace) {
