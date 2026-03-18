@@ -92,7 +92,7 @@ export const RalphConfigSchema = z.object({
   cleanupWorktree: z.boolean().optional(),
   defaultAudit: z.boolean().optional(),
   model: z.string().optional(),
-  minCleanAudits: z.number().optional(),
+  minAudits: z.number().optional(),
   stallTimeoutMs: z.number().optional(),
 })
 export type RalphConfig = z.infer<typeof RalphConfigSchema>

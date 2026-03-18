@@ -25,6 +25,7 @@ import type { VecService } from './storage/vec-types'
 import { createNoopVecService } from './storage/vec'
 import { checkForUpdate, formatUpgradeCheck, performUpgrade } from './utils/upgrade'
 import { MAX_RETRIES } from './services/ralph'
+import { parseModelString, retryWithModelFallback } from './utils/model-fallback'
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 
@@ -255,41 +256,6 @@ async function autoValidateOnLoad(
   logger.log('Auto-validate: reindex complete')
 }
 
-function parseModelString(modelStr?: string): { providerID: string; modelID: string } | undefined {
-  if (!modelStr) return undefined
-  const slashIndex = modelStr.indexOf('/')
-  if (slashIndex <= 0 || slashIndex === modelStr.length - 1) return undefined
-  return {
-    providerID: modelStr.substring(0, slashIndex),
-    modelID: modelStr.substring(slashIndex + 1),
-  }
-}
-
-async function retryWithModelFallback<T>(
-  callWithModel: () => Promise<{ data?: T; error?: unknown }>,
-  callWithoutModel: () => Promise<{ data?: T; error?: unknown }>,
-  model: { providerID: string; modelID: string } | undefined,
-  logger: { error: (msg: string, err?: unknown) => void; log: (msg: string) => void },
-  maxRetries: number = 2
-): Promise<{ result: { data?: T; error?: unknown }; usedModel: { providerID: string; modelID: string } | undefined }> {
-  if (!model) {
-    return { result: await callWithoutModel(), usedModel: undefined }
-  }
-
-  let lastError: unknown
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const result = await callWithModel()
-    if (!result.error) {
-      return { result, usedModel: model }
-    }
-    lastError = result.error
-    logger.log(`model attempt ${attempt}/${maxRetries} failed, retrying`)
-  }
-
-  logger.error(`configured model unavailable after ${maxRetries} attempts, falling back to default`, lastError)
-  return { result: await callWithoutModel(), usedModel: undefined }
-}
-
 export function createMemoryPlugin(config: PluginConfig): Plugin {
   return async (input: PluginInput): Promise<Hooks> => {
     const { directory, project, client } = input
@@ -332,7 +298,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
     const kvService = createKvService(db, logger)
 
     const ralphService = createRalphService(kvService, projectId, logger, config.ralph)
-    const ralphHandler = createRalphEventHandler(ralphService, client, v2, logger)
+    const ralphHandler = createRalphEventHandler(ralphService, client, v2, logger, () => config)
 
     const mismatchState: DimensionMismatchState = {
       detected: false,
@@ -539,7 +505,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         phase: 'coding',
         audit: options.audit,
         errorCount: 0,
-        cleanAuditCount: 0,
+        auditCount: 0,
         parentSessionId: options.parentSessionId,
         inPlace: options.inPlace,
       }
@@ -1080,7 +1046,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
                 phase: 'coding',
                 audit: stoppedState.audit,
                 errorCount: 0,
-                cleanAuditCount: 0,
+                auditCount: 0,
                 parentSessionId: stoppedState.parentSessionId,
                 inPlace: stoppedState.inPlace,
               }
@@ -1287,7 +1253,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               `Completion promise: ${state.completionPromise ?? 'none'}`,
               `Started: ${state.startedAt}`,
               ...(state.errorCount > 0 ? [`Error count: ${state.errorCount} (retries before termination: ${MAX_RETRIES})`] : []),
-              `Clean audit passes: ${state.cleanAuditCount ?? 0} / ${config.ralph?.minCleanAudits ?? 2}`,
+              `Audit count: ${state.auditCount ?? 0}`,
               `Model: ${config.ralph?.model || config.executionModel || 'default'}`,
               `Auditor model: ${config.auditorModel || 'default'}`,
               ...(stallCount > 0 ? [`Stalls: ${stallCount}`] : []),

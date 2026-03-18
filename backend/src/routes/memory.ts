@@ -1,12 +1,13 @@
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs'
 import { join } from 'path'
 import { logger } from '../utils/logger'
 import { PluginMemoryService } from '../services/plugin-memory'
 import { resolveProjectId } from '../services/project-id-resolver'
 import { getRepoById } from '../db/queries'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { getWorkspacePath, getConfigPath } from '@opencode-manager/shared/config/env'
+import { parseJsonc } from '@opencode-manager/shared/utils'
 import {
   CreateMemoryRequestSchema,
   UpdateMemoryRequestSchema,
@@ -23,6 +24,10 @@ function resolveMemoryDataDir(): string {
 }
 
 function resolvePluginConfigPath(): string {
+  return join(getConfigPath(), 'memory-config.jsonc')
+}
+
+function resolveOldPluginConfigPath(): string {
   return join(resolveMemoryDataDir(), 'config.json')
 }
 
@@ -39,21 +44,30 @@ function getDefaultPluginConfig(): PluginConfig {
 
 function loadPluginConfigFromDisk(): PluginConfig {
   const configPath = resolvePluginConfigPath()
-  
+
   if (!existsSync(configPath)) {
-    return getDefaultPluginConfig()
+    const oldPath = resolveOldPluginConfigPath()
+    if (existsSync(oldPath)) {
+      const configDir = getConfigPath()
+      if (!existsSync(configDir)) {
+        mkdirSync(configDir, { recursive: true })
+      }
+      copyFileSync(oldPath, configPath)
+    } else {
+      return getDefaultPluginConfig()
+    }
   }
-  
+
   try {
     const content = readFileSync(configPath, 'utf-8')
-    const parsed = JSON.parse(content)
+    const parsed = parseJsonc(content)
     const result = PluginConfigSchema.safeParse(parsed)
-    
+
     if (!result.success) {
       logger.error('Invalid plugin config:', result.error)
       return getDefaultPluginConfig()
     }
-    
+
     return result.data
   } catch (error) {
     logger.error('Failed to load plugin config:', error)
@@ -63,13 +77,58 @@ function loadPluginConfigFromDisk(): PluginConfig {
 
 function savePluginConfigToDisk(config: PluginConfig): void {
   const configPath = resolvePluginConfigPath()
-  const dataDir = resolveMemoryDataDir()
-  
-  if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true })
+  const configDir = getConfigPath()
+
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true })
   }
-  
-  writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+
+  // Read existing content to preserve comments
+  let existingContent = ''
+  if (existsSync(configPath)) {
+    try {
+      existingContent = readFileSync(configPath, 'utf-8')
+    } catch {
+      // File doesn't exist or can't be read, will create new
+    }
+  }
+
+  // If we have existing content, preserve comments by extracting them
+  // and re-adding them to the new content
+  if (existingContent) {
+    // Extract comments from existing content
+    const lines = existingContent.split('\n')
+    const commentLines: string[] = []
+    
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (trimmed.startsWith('//')) {
+        commentLines.push(line.match(/\/\/\s*(.*)/)?.[1] || '')
+      }
+    }
+
+    // Create new JSON string
+    const newContent = JSON.stringify(config, null, 2)
+    
+    // If we found comments, try to preserve them
+    if (commentLines.length > 0) {
+      const newLines = newContent.split('\n')
+      const result: string[] = []
+      
+      // Add comments at the beginning
+      for (const comment of commentLines) {
+        result.push(`// ${comment}`)
+      }
+      
+      result.push(...newLines)
+      writeFileSync(configPath, result.join('\n'), 'utf-8')
+      return
+    }
+    
+    writeFileSync(configPath, newContent, 'utf-8')
+  } else {
+    writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8')
+  }
 }
 
 export function createMemoryRoutes(db: Database): Hono {
