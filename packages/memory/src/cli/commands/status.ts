@@ -1,5 +1,5 @@
 import type { RalphState } from '../../services/ralph'
-import { openDatabase, truncate } from '../utils'
+import { openDatabase } from '../utils'
 
 interface RalphLoopInfo {
   sessionId: string
@@ -208,40 +208,37 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
       if (activeLoops.length > 0) {
         console.log('')
         console.log('Active Ralph Loops:')
-        console.log('  WORKTREE           ITERATION    PHASE        DURATION     AUDIT')
+        console.log('')
 
         for (const loop of activeLoops) {
-          const name = truncate(loop.worktreeName, 19).padEnd(19)
-          const iteration = `${loop.iteration}/${loop.maxIterations}`.padEnd(11)
-          const phase = loop.phase.padEnd(11)
-
           const duration = Date.now() - new Date(loop.startedAt).getTime()
           const hours = Math.floor(duration / (1000 * 60 * 60))
           const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60))
-          const durationStr = `${hours}h ${minutes}m`.padEnd(11)
-
+          const durationStr = `${hours}h ${minutes}m`
+          const iterStr = `${loop.iteration}/${loop.maxIterations}`
           const audit = loop.audit ? 'Yes' : 'No'
-          console.log(`  ${name}   ${iteration}  ${phase}  ${durationStr}  ${audit}`)
+
+          console.log(`  ${loop.worktreeName}`)
+          console.log(`    Phase: ${loop.phase}  Iteration: ${iterStr}  Duration: ${durationStr}  Audit: ${audit}`)
+          console.log('')
         }
 
-        console.log('')
         console.log(`Total: ${activeLoops.length} active loop(s)`)
         console.log('')
       }
 
       if (recentLoops.length > 0) {
         console.log('Recently Completed:')
-        console.log('  WORKTREE           ITERATIONS   REASON           COMPLETED')
+        console.log('')
 
         for (const loop of recentLoops) {
-          const name = truncate(loop.state.worktreeName, 19).padEnd(19)
-          const iterations = `${loop.state.iteration}`.padEnd(11)
-          const reason = truncate(loop.state.terminationReason ?? 'unknown', 15).padEnd(15)
+          const reason = loop.state.terminationReason ?? 'unknown'
           const completed = new Date(loop.state.completedAt!).toLocaleString()
-          console.log(`  ${name}   ${iterations}  ${reason}  ${completed}`)
-        }
 
-        console.log('')
+          console.log(`  ${loop.state.worktreeName}`)
+          console.log(`    Iterations: ${loop.state.iteration}  Reason: ${reason}  Completed: ${completed}`)
+          console.log('')
+        }
       }
 
       if (activeLoops.length === 0 && recentLoops.length === 0) {

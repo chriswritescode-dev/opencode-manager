@@ -853,8 +853,6 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
-            maxIterations: z.number().optional().describe('Override max iterations (uses config default if not specified)'),
-            audit: z.boolean().optional().describe('Override audit setting (uses config default if not specified)'),
             inPlace: z.boolean().optional().default(false).describe('Run in current directory instead of creating a worktree'),
           },
           execute: async (args) => {
@@ -866,13 +864,14 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
             const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
             const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
+            const audit = config.ralph?.defaultAudit ?? true
 
             return setupRalphLoop({
               prompt: args.plan,
               sessionTitle: `Ralph: ${sessionTitle}`,
               completionPromise: DEFAULT_PLAN_COMPLETION_PROMISE,
-              maxIterations: args.maxIterations ?? config.ralph?.defaultMaxIterations ?? 0,
-              audit: args.audit ?? config.ralph?.defaultAudit ?? true,
+              maxIterations: config.ralph?.defaultMaxIterations ?? 0,
+              audit: audit,
               agent: 'code',
               model: ralphModel,
               inPlace: args.inPlace,
@@ -941,10 +940,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           description: 'Start a Ralph Wiggum iterative development loop. By default runs in an isolated git worktree. Set inPlace to true to run in the current directory instead.',
           args: {
             prompt: z.string().describe('The task prompt to iterate on'),
-            maxIterations: z.number().optional().describe('Override max iterations (uses config default if not specified)'),
             completionPromise: z.string().optional().describe('Phrase that signals completion when wrapped in <promise> tags'),
             name: z.string().optional().describe('Optional name for the worktree branch'),
-            audit: z.boolean().optional().describe('Override audit setting (uses config default if not specified)'),
             inPlace: z.boolean().optional().describe('Run in current directory instead of creating a worktree'),
           },
           execute: async (args) => {
@@ -962,8 +959,8 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               sessionTitle: `Ralph: ${titlePreview}`,
               worktreeName: args.name,
               completionPromise: args.completionPromise ?? null,
-              maxIterations: args.maxIterations ?? config.ralph?.defaultMaxIterations ?? 0,
-              audit: args.audit ?? config.ralph?.defaultAudit ?? true,
+              maxIterations: config.ralph?.defaultMaxIterations ?? 0,
+              audit: config.ralph?.defaultAudit ?? true,
               model: ralphModel,
               inPlace: args.inPlace,
               onLoopStarted: (id) => ralphHandler.startWatchdog(id),
@@ -1020,10 +1017,10 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           },
         }),
         'ralph-status': tool({
-          description: 'Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop. Use restart to resume a stopped loop.',
+          description: 'Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop. Use restart to resume an inactive loop.',
           args: {
             name: z.string().optional().describe('Worktree name to check for detailed status'),
-            restart: z.boolean().optional().describe('Restart a stopped loop by name'),
+            restart: z.boolean().optional().describe('Restart an inactive loop by name'),
           },
           execute: async (args) => {
             const active = ralphService.listActive()
@@ -1033,9 +1030,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
                 return 'Specify a loop name to restart. Use ralph-status to see available loops.'
               }
 
-              const stoppedState = ralphService.findByWorktreeNameAny(args.name)
+              const recent = ralphService.listRecent()
+              const stoppedState = [...active, ...recent].find((s) => s.worktreeName === args.name)
               if (!stoppedState) {
-                const recent = ralphService.listRecent()
                 const available = [...active, ...recent].map((s) => `- ${s.worktreeName}`).join('\n')
                 return `No Ralph loop found for "${args.name}".\n\nAvailable loops:\n${available}`
               }

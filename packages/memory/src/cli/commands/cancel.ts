@@ -1,7 +1,8 @@
 import type { RalphState } from '../../services/ralph'
 import { openDatabase, confirm } from '../utils'
-import { execSync } from 'child_process'
+import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
+import { resolve } from 'path'
 
 interface CancelOptions {
   projectId?: string
@@ -208,8 +209,12 @@ async function runCancel(
   if (options.cleanup && state.worktreeDir && !state.inPlace) {
     if (existsSync(state.worktreeDir)) {
       try {
-        const gitRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim()
-        execSync(`git worktree remove -f "${state.worktreeDir}"`, { encoding: 'utf-8', cwd: gitRoot })
+        const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
+        const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
+        const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
+        if (removeResult.status !== 0) {
+          throw new Error(removeResult.stderr || 'git worktree remove failed')
+        }
         console.log(`Removed worktree: ${state.worktreeDir}`)
       } catch {
         console.error(`Failed to remove worktree: ${state.worktreeDir}`)

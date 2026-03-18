@@ -105,15 +105,12 @@ Present plans with:
 
 - **plan**: The full implementation plan — must be **fully self-contained**.
 - **title**: Short descriptive label for the session list.
-- **maxIterations**: Optional, default 0 (unlimited). Set a limit if the plan has a clear scope.
-- **audit**: Optional, default true. Runs the auditor agent between iterations to catch issues.
 - **inPlace**: false
 
 **If "Ralph (in place)" was selected**, call memory-plan-ralph with:
 
 - **plan**: The full implementation plan — must be **fully self-contained**.
 - **title**: Short descriptive label for the session list.
-- **maxIterations**: Optional, default 0 (unlimited). Set a limit if the plan has a clear scope.
-- **audit**: Optional, default true. Runs the auditor agent between iterations to catch issues.
-- **inPlace**: true`,
+- **inPlace**: true
+`,
 }

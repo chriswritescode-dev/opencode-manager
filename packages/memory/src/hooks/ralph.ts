@@ -1,7 +1,7 @@
 import type { PluginInput } from '@opencode-ai/plugin'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { RalphService, RalphState } from '../services/ralph'
-import { MAX_RETRIES, STALL_TIMEOUT_MS, MAX_CONSECUTIVE_STALLS } from '../services/ralph'
+import { MAX_RETRIES, MAX_CONSECUTIVE_STALLS } from '../services/ralph'
 import type { Logger } from '../types'
 import { execSync, spawnSync } from 'child_process'
 import { resolve } from 'path'
@@ -405,22 +405,10 @@ export function createRalphEventHandler(
       logger.log(`Ralph audit clean at iteration ${state.iteration} (${newCleanAuditCount}/${minCleanAudits} clean audits)`)
     }
 
-    if (!auditFindings) {
-      if (newCleanAuditCount >= minCleanAudits) {
-        if (state.completionPromise) {
-          await terminateLoop(sessionId, state, 'completed')
-          logger.log(`Ralph loop completed after ${newCleanAuditCount} clean audits at iteration ${state.iteration}`)
-          return
-        }
-        if (state.maxIterations <= 0) {
-          await terminateLoop(sessionId, state, 'completed')
-          logger.log(`Ralph loop completed after ${newCleanAuditCount} clean audits at iteration ${state.iteration} (no completion promise, terminated by clean audits)`)
-          return
-        }
-      }
-      if (state.completionPromise) {
-        logger.log(`Ralph: clean audit but only ${newCleanAuditCount}/${minCleanAudits} needed, continuing`)
-      }
+    if (!auditFindings && newCleanAuditCount >= minCleanAudits) {
+      await terminateLoop(sessionId, state, 'completed')
+      logger.log(`Ralph loop completed after ${newCleanAuditCount} clean audits at iteration ${state.iteration}`)
+      return
     }
 
     if (state.maxIterations > 0 && nextIteration > state.maxIterations) {
