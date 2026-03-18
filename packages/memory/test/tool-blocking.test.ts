@@ -64,7 +64,7 @@ describe('Tool Blocking Logic', () => {
         phase: 'coding' as const,
         audit: false,
         errorCount: 0,
-        cleanAuditCount: 0,
+        auditCount: 0,
         inPlace: false,
       }
       ralphService.setState(sessionID, state)
@@ -95,7 +95,7 @@ describe('Tool Blocking Logic', () => {
         phase: 'coding' as const,
         audit: false,
         errorCount: 0,
-        cleanAuditCount: 0,
+        auditCount: 0,
         inPlace: false,
       }
       ralphService.setState(sessionID, inactiveState)

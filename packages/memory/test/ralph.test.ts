@@ -3,7 +3,6 @@ import { Database } from 'bun:sqlite'
 import { createKvQuery } from '../src/storage/kv-queries'
 import { createKvService } from '../src/services/kv'
 import { createRalphService } from '../src/services/ralph'
-import { hasAuditIssues } from '../src/hooks/ralph'
 
 const TEST_DIR = '/tmp/opencode-manager-ralph-test-' + Date.now()
 
@@ -64,7 +63,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     ralphService.setState('session-123', state)
@@ -96,7 +95,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     ralphService.setState('session-456', inactiveState)
@@ -156,7 +155,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const prompt = ralphService.buildContinuationPrompt(state)
@@ -180,7 +179,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const prompt = ralphService.buildContinuationPrompt(state)
@@ -203,7 +202,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const prompt = ralphService.buildContinuationPrompt(state)
@@ -226,7 +225,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const prompt = ralphService.buildContinuationPrompt(state)
@@ -249,7 +248,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     ralphService.setState('session-persist', state)
@@ -277,7 +276,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: true,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const prompt = ralphService.buildAuditPrompt(state)
@@ -302,7 +301,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: true,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const auditFindings = 'Found a bug in line 10'
@@ -329,7 +328,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: true,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const prompt = ralphService.buildContinuationPrompt(state)
@@ -354,7 +353,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const activeState2 = {
@@ -372,7 +371,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     const inactiveState = {
@@ -390,7 +389,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     ralphService.setState('active-1', activeState1)
@@ -420,7 +419,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
 
     ralphService.setState('session-1', state1)
@@ -432,7 +431,7 @@ describe('RalphService', () => {
     expect(notFound).toBeNull()
   })
 
-  test('state with errorCount and cleanAuditCount persists correctly', () => {
+  test('state with errorCount and auditCount persists correctly', () => {
     const state = {
       active: true,
       sessionId: 'session-err',
@@ -448,14 +447,14 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 2,
-      cleanAuditCount: 1,
+      auditCount: 1,
       terminationReason: undefined,
       parentSessionId: 'parent-session-123',
     }
     ralphService.setState('session-err', state)
     const retrieved = ralphService.getActiveState('session-err')
     expect(retrieved?.errorCount).toBe(2)
-    expect(retrieved?.cleanAuditCount).toBe(1)
+    expect(retrieved?.auditCount).toBe(1)
     expect(retrieved?.parentSessionId).toBe('parent-session-123')
   })
 
@@ -475,12 +474,12 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     }
     ralphService.setState('session-default', state)
     const retrieved = ralphService.getActiveState('session-default')
     expect(retrieved?.errorCount).toBe(0)
-    expect(retrieved?.cleanAuditCount).toBe(0)
+    expect(retrieved?.auditCount).toBe(0)
   })
 
   test('state with inPlace flag persists correctly', () => {
@@ -499,7 +498,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
       inPlace: true,
     }
     ralphService.setState('session-inplace', inPlaceState)
@@ -525,7 +524,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: true,
       errorCount: 0,
-      cleanAuditCount: 1,
+      auditCount: 1,
       inPlace: true,
     }
     ralphService.setState('session-inplace-2', inPlaceState)
@@ -550,7 +549,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
       inPlace: true,
     }
     const prompt = ralphService.buildContinuationPrompt(inPlaceState)
@@ -575,7 +574,7 @@ describe('RalphService', () => {
       phase: 'coding' as const,
       audit: true,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
       inPlace: true,
     }
     const auditFindings = 'Bug found in component'
@@ -585,63 +584,16 @@ describe('RalphService', () => {
     expect(prompt).toContain('The following issues were found by the code auditor')
     expect(prompt).toContain('Bug found in component')
   })
-})
 
-describe('hasAuditIssues', () => {
-  test('returns false for "No issues found"', () => {
-    expect(hasAuditIssues('No issues found')).toBe(false)
+  test('getMinAudits returns default when not configured', () => {
+    const minAudits = ralphService.getMinAudits()
+    expect(minAudits).toBe(1)
   })
 
-  test('returns false for "0 issues found"', () => {
-    expect(hasAuditIssues('0 issues found')).toBe(false)
-  })
-
-  test('returns true for severity: bug', () => {
-    expect(hasAuditIssues('**Severity**: bug\nFound a bug')).toBe(true)
-  })
-
-  test('returns true for severity: warning', () => {
-    expect(hasAuditIssues('severity: warning\nSome warning')).toBe(true)
-  })
-
-  test('returns true for "3 issues found"', () => {
-    expect(hasAuditIssues('3 issues found in the code')).toBe(true)
-  })
-
-  test('returns true for "1 bug found"', () => {
-    expect(hasAuditIssues('1 bug found on line 10')).toBe(true)
-  })
-
-  test('returns true for ### Issues section with content', () => {
-    const text = `### Issues
-
-- Missing error handling
-- Type safety issue`
-    expect(hasAuditIssues(text)).toBe(true)
-  })
-
-  test('returns false for ### Issues section with "None"', () => {
-    expect(hasAuditIssues('### Issues\n\nNone')).toBe(false)
-  })
-
-  test('returns false for ### Issues section with "N/A"', () => {
-    expect(hasAuditIssues('### Issues\n\nN/A')).toBe(false)
-  })
-
-  test('returns false for empty text', () => {
-    expect(hasAuditIssues('')).toBe(false)
-  })
-
-  test('returns false for text without any issue signals', () => {
-    expect(hasAuditIssues('Code looks good')).toBe(false)
-  })
-
-  test('returns true for severity:bug without space', () => {
-    expect(hasAuditIssues('severity:bug in function')).toBe(true)
-  })
-
-  test('returns true for **severity**: bug', () => {
-    expect(hasAuditIssues('**severity**: bug')).toBe(true)
+  test('getMinAudits returns configured value', () => {
+    const kvService = createKvService(db)
+    const customRalphService = createRalphService(kvService, projectId, createMockLogger(), { minAudits: 3 })
+    expect(customRalphService.getMinAudits()).toBe(3)
   })
 })
 
@@ -676,7 +628,8 @@ describe('Stall Detection', () => {
     } as any
 
     const { createRalphEventHandler } = require('../src/hooks/ralph')
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const info = handler.getStallInfo('test-session')
     expect(info).toBeNull()
@@ -712,7 +665,8 @@ describe('Stall Detection', () => {
     } as any
 
     const { createRalphEventHandler } = require('../src/hooks/ralph')
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
     ralphService.setState(sessionId, {
@@ -730,7 +684,7 @@ describe('Stall Detection', () => {
       phase: 'coding',
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     })
 
     handler.startWatchdog(sessionId)
@@ -772,7 +726,8 @@ describe('Stall Detection', () => {
     } as any
 
     const { createRalphEventHandler } = require('../src/hooks/ralph')
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const parentId = 'parent-session'
     const childId = 'child-session'
@@ -792,7 +747,7 @@ describe('Stall Detection', () => {
       phase: 'coding',
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     })
 
     handler.startWatchdog(parentId)
@@ -845,7 +800,8 @@ describe('Stall Detection', () => {
     } as any
 
     const { createRalphEventHandler } = require('../src/hooks/ralph')
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
     ralphService.setState(sessionId, {
@@ -863,7 +819,7 @@ describe('Stall Detection', () => {
       phase: 'coding',
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     })
 
     handler.startWatchdog(sessionId)
@@ -915,7 +871,8 @@ describe('Stall Detection', () => {
     } as any
 
     const { createRalphEventHandler } = require('../src/hooks/ralph')
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger())
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
     ralphService.setState(sessionId, {
@@ -933,7 +890,7 @@ describe('Stall Detection', () => {
       phase: 'coding',
       audit: false,
       errorCount: 0,
-      cleanAuditCount: 0,
+      auditCount: 0,
     })
 
     handler.startWatchdog(sessionId)
@@ -941,5 +898,14 @@ describe('Stall Detection', () => {
 
     handler.clearAllRetryTimeouts()
     expect(handler.getStallInfo(sessionId)).toBeNull()
+  })
+})
+
+describe('Minimum Audits', () => {
+  test('getMinAudits returns configured value', () => {
+    const db = createTestDb()
+    const kvService = createKvService(db)
+    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { minAudits: 2 })
+    expect(ralphService.getMinAudits()).toBe(2)
   })
 })

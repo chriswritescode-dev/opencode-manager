@@ -2,9 +2,9 @@ import type { KvService } from './kv'
 import type { Logger, RalphConfig } from '../types'
 
 export const MAX_RETRIES = 3
-export const DEFAULT_MIN_CLEAN_AUDITS = 2
 export const STALL_TIMEOUT_MS = 60_000
 export const MAX_CONSECUTIVE_STALLS = 5
+export const DEFAULT_MIN_AUDITS = 1
 
 export interface RalphState {
   active: boolean
@@ -22,7 +22,7 @@ export interface RalphState {
   audit: boolean
   lastAuditResult?: string
   errorCount: number
-  cleanAuditCount: number
+  auditCount: number
   terminationReason?: string
   completedAt?: string
   parentSessionId?: string
@@ -40,8 +40,8 @@ export interface RalphService {
   listActive(): RalphState[]
   listRecent(): RalphState[]
   findByWorktreeName(name: string): RalphState | null
-  getMinCleanAudits(): number
   getStallTimeoutMs(): number
+  getMinAudits(): number
   terminateAll(): void
 }
 
@@ -113,6 +113,7 @@ export function createRalphService(
       `Task context: ${taskSummary}`,
       '',
       'Review the code changes in this worktree. Focus on bugs, logic errors, missing error handling, and convention violations.',
+      'If you find bugs in related code that affect the correctness of this task, report them — even if the buggy code was not directly modified.',
       'If everything looks good, state "No issues found." clearly.',
     ].join('\n')
   }
@@ -136,12 +137,12 @@ export function createRalphService(
     return active.find((s) => s.worktreeName === name) ?? null
   }
 
-  function getMinCleanAudits(): number {
-    return ralphConfig?.minCleanAudits ?? DEFAULT_MIN_CLEAN_AUDITS
-  }
-
   function getStallTimeoutMs(): number {
     return ralphConfig?.stallTimeoutMs ?? STALL_TIMEOUT_MS
+  }
+
+  function getMinAudits(): number {
+    return ralphConfig?.minAudits ?? DEFAULT_MIN_AUDITS
   }
 
   function terminateAll(): void {
@@ -169,8 +170,8 @@ export function createRalphService(
     listActive,
     listRecent,
     findByWorktreeName,
-    getMinCleanAudits,
     getStallTimeoutMs,
+    getMinAudits,
     terminateAll,
   }
 }

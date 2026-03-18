@@ -174,7 +174,7 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
         console.log(`  Duration:        ${hours}h ${minutes}m ${seconds}s`)
         console.log(`  Audit:           ${state.audit ? 'Yes' : 'No'}`)
         console.log(`  Error Count:     ${state.errorCount}`)
-        console.log(`  Clean Audits:    ${state.cleanAuditCount}`)
+        console.log(`  Audit Count:     ${state.auditCount}`)
         console.log(`  Started:         ${new Date(state.startedAt).toISOString()}`)
         if (state.completionPromise) {
           console.log(`  Completion:      ${state.completionPromise}`)
