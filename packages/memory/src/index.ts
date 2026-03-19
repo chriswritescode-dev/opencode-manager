@@ -821,7 +821,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             title: z.string().describe('Short title for the session (shown in session list)'),
             inPlace: z.boolean().optional().default(false).describe('Run in current directory instead of creating a worktree'),
           },
-          execute: async (args) => {
+          execute: async (args, context) => {
             if (config.ralph?.enabled === false) {
               return 'Ralph loops are disabled in plugin config. Use memory-plan-execute instead.'
             }
@@ -841,6 +841,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               agent: 'code',
               model: ralphModel,
               inPlace: args.inPlace,
+              parentSessionId: context.sessionID,
               onLoopStarted: (id) => ralphHandler.startWatchdog(id),
             })
           },
@@ -910,7 +911,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             name: z.string().optional().describe('Optional name for the worktree branch'),
             inPlace: z.boolean().optional().describe('Run in current directory instead of creating a worktree'),
           },
-          execute: async (args) => {
+          execute: async (args, context) => {
             if (config.ralph?.enabled === false) {
               return 'Ralph loops are disabled in plugin config.'
             }
@@ -929,6 +930,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
               audit: config.ralph?.defaultAudit ?? true,
               model: ralphModel,
               inPlace: args.inPlace,
+              parentSessionId: context.sessionID,
               onLoopStarted: (id) => ralphHandler.startWatchdog(id),
             })
           },

@@ -40,6 +40,7 @@ export interface RalphService {
   listActive(): RalphState[]
   listRecent(): RalphState[]
   findByWorktreeName(name: string): RalphState | null
+  findByParentSessionId(parentId: string): RalphState[]
   getStallTimeoutMs(): number
   getMinAudits(): number
   terminateAll(): void
@@ -142,6 +143,10 @@ export function createRalphService(
     return active.find((s) => s.worktreeName === name) ?? null
   }
 
+  function findByParentSessionId(parentId: string): RalphState[] {
+    return listActive().filter((s) => s.parentSessionId === parentId)
+  }
+
   function getStallTimeoutMs(): number {
     return ralphConfig?.stallTimeoutMs ?? STALL_TIMEOUT_MS
   }
@@ -175,6 +180,7 @@ export function createRalphService(
     listActive,
     listRecent,
     findByWorktreeName,
+    findByParentSessionId,
     getStallTimeoutMs,
     getMinAudits,
     terminateAll,

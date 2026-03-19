@@ -182,6 +182,19 @@ export function createRalphEventHandler(
   }
 
   async function terminateLoop(sessionId: string, state: RalphState, reason: string): Promise<void> {
+    const children = childSessions.get(sessionId)
+    if (children) {
+      await Promise.all(
+        Array.from(children).map(async (childId) => {
+          try {
+            await v2Client.session.abort({ sessionID: childId })
+          } catch {
+            // Child session may already be idle
+          }
+        })
+      )
+    }
+
     stopWatchdog(sessionId)
 
     const retryTimeout = retryTimeouts.get(sessionId)
@@ -196,6 +209,13 @@ export function createRalphEventHandler(
       completedAt: new Date().toISOString(),
       terminationReason: reason,
     })
+
+    try {
+      await v2Client.session.abort({ sessionID: sessionId })
+    } catch {
+      // Session may already be idle
+    }
+
     logger.log(`Ralph loop terminated: reason="${reason}", worktree="${state.worktreeName}", iteration=${state.iteration}`)
 
     let commitResult: { committed: boolean; cleaned: boolean } | undefined
@@ -248,15 +268,21 @@ export function createRalphEventHandler(
   }
 
   async function handlePromptError(sessionId: string, state: RalphState, context: string, err: unknown, retryFn?: () => Promise<void>): Promise<void> {
-    const nextErrorCount = (state.errorCount ?? 0) + 1
+    const currentState = ralphService.getActiveState(sessionId)
+    if (!currentState?.active) {
+      logger.log(`Ralph: loop ${sessionId} already terminated, ignoring error: ${context}`)
+      return
+    }
+
+    const nextErrorCount = (currentState.errorCount ?? 0) + 1
     
     if (nextErrorCount < MAX_RETRIES) {
       logger.error(`Ralph: ${context} (attempt ${nextErrorCount}/${MAX_RETRIES}), will retry`, err)
-      ralphService.setState(sessionId, { ...state, errorCount: nextErrorCount })
+      ralphService.setState(sessionId, { ...currentState, errorCount: nextErrorCount })
       if (retryFn) {
         const retryTimeout = setTimeout(async () => {
-          const currentState = ralphService.getActiveState(sessionId)
-          if (!currentState?.active) {
+          const freshState = ralphService.getActiveState(sessionId)
+          if (!freshState?.active) {
             logger.log(`Ralph: loop cancelled, skipping retry`)
             retryTimeouts.delete(sessionId)
             return
@@ -264,14 +290,14 @@ export function createRalphEventHandler(
           try {
             await retryFn()
           } catch (retryErr) {
-            await handlePromptError(sessionId, { ...state, errorCount: nextErrorCount }, context, retryErr, retryFn)
+            await handlePromptError(sessionId, freshState, context, retryErr, retryFn)
           }
         }, 2000)
         retryTimeouts.set(sessionId, retryTimeout)
       }
     } else {
       logger.error(`Ralph: ${context} (attempt ${nextErrorCount}/${MAX_RETRIES}), giving up`, err)
-      await terminateLoop(sessionId, state, `error_max_retries: ${context}`)
+      await terminateLoop(sessionId, currentState, `error_max_retries: ${context}`)
     }
   }
 
@@ -303,8 +329,7 @@ export function createRalphEventHandler(
   }
 
   async function handleCodingPhase(sessionId: string, state: RalphState): Promise<void> {
-    // Re-fetch and validate state to catch aborts that happened during idle event processing
-    const currentState = ralphService.getActiveState(sessionId)
+    let currentState = ralphService.getActiveState(sessionId)
     if (!currentState?.active) {
       logger.log(`Ralph: loop ${sessionId} no longer active, skipping coding phase`)
       return
@@ -313,7 +338,6 @@ export function createRalphEventHandler(
     if (currentState.completionPromise) {
       const textContent = await getLastAssistantText(sessionId, currentState.worktreeDir)
       if (textContent && ralphService.checkCompletionPromise(textContent, currentState.completionPromise)) {
-        // Check if minimum audits have been performed
         const currentAuditCount = currentState.auditCount ?? 0
         if (!currentState.audit || currentAuditCount >= minAudits) {
           await terminateLoop(sessionId, currentState, 'completed')
@@ -375,9 +399,13 @@ export function createRalphEventHandler(
     const ralphModel = parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
 
     const sendContinuationPromptWithModel = async () => {
+      const freshState = ralphService.getActiveState(sessionId)
+      if (!freshState?.active) {
+        throw new Error('loop_cancelled')
+      }
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: currentState.worktreeDir,
+        directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
         model: ralphModel!,
       })
@@ -385,9 +413,13 @@ export function createRalphEventHandler(
     }
     
     const sendContinuationPromptWithoutModel = async () => {
+      const freshState = ralphService.getActiveState(sessionId)
+      if (!freshState?.active) {
+        throw new Error('loop_cancelled')
+      }
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: currentState.worktreeDir,
+        directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
       })
       return { data: result.data, error: result.error }
@@ -473,9 +505,13 @@ export function createRalphEventHandler(
     const ralphModel = parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
 
     const sendContinuationPromptWithModel = async () => {
+      const freshState = ralphService.getActiveState(sessionId)
+      if (!freshState?.active) {
+        throw new Error('loop_cancelled')
+      }
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: currentState.worktreeDir,
+        directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
         model: ralphModel!,
       })
@@ -483,9 +519,13 @@ export function createRalphEventHandler(
     }
     
     const sendContinuationPromptWithoutModel = async () => {
+      const freshState = ralphService.getActiveState(sessionId)
+      if (!freshState?.active) {
+        throw new Error('loop_cancelled')
+      }
       const result = await v2Client.session.promptAsync({
         sessionID: sessionId,
-        directory: currentState.worktreeDir,
+        directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
       })
       return { data: result.data, error: result.error }
@@ -500,6 +540,10 @@ export function createRalphEventHandler(
     
     if (promptResult.error) {
       const retryFn = async () => {
+        const freshState = ralphService.getActiveState(sessionId)
+        if (!freshState?.active) {
+          throw new Error('loop_cancelled')
+        }
         const result = await sendContinuationPromptWithoutModel()
         if (result.error) {
           throw result.error
@@ -565,22 +609,33 @@ export function createRalphEventHandler(
       }
     }
 
-    if (event.type === 'session.aborted' || event.type === 'session.stopped') {
-      const eventSessionId = event.properties?.sessionID as string
-      if (eventSessionId) {
-        const state = ralphService.getActiveState(eventSessionId)
-        if (state?.active) {
-          logger.log(`Ralph: session ${eventSessionId} aborted/stopped, terminating loop`)
-          await terminateLoop(eventSessionId, state, 'user_aborted')
-        }
+    if (event.type === 'session.error') {
+      const errorProps = event.properties as { sessionID?: string; error?: { name?: string } }
+      const eventSessionId = errorProps?.sessionID
+      const errorName = errorProps?.error?.name
+      const isAbort = errorName === 'MessageAbortedError' || errorName === 'AbortError'
+
+      if (!eventSessionId || !isAbort) return
+
+      const state = ralphService.getActiveState(eventSessionId)
+      if (state?.active) {
+        logger.log(`Ralph: session ${eventSessionId} aborted, terminating loop`)
+        await terminateLoop(eventSessionId, state, 'user_aborted')
       }
+
       const parentId = findRalphParent(eventSessionId)
       if (parentId) {
         const parentState = ralphService.getActiveState(parentId)
         if (parentState?.active) {
-          logger.log(`Ralph: parent session ${parentId} aborted/stopped, terminating loop`)
+          logger.log(`Ralph: child session abort detected, terminating parent loop ${parentId}`)
           await terminateLoop(parentId, parentState, 'user_aborted')
         }
+      }
+
+      const childLoops = ralphService.findByParentSessionId(eventSessionId)
+      for (const childLoop of childLoops) {
+        logger.log(`Ralph: launcher session ${eventSessionId} aborted, terminating child loop ${childLoop.sessionId}`)
+        await terminateLoop(childLoop.sessionId, childLoop, 'user_aborted')
       }
       return
     }
@@ -590,13 +645,13 @@ export function createRalphEventHandler(
     const sessionId = event.properties?.sessionID as string
     if (!sessionId) return
 
+    const state = ralphService.getActiveState(sessionId)
+    if (!state || !state.active) return
+
     const parentId = findRalphParent(sessionId)
     if (parentId) {
       recordActivity(parentId)
     }
-
-    const state = ralphService.getActiveState(sessionId)
-    if (!state || !state.active) return
 
     recordActivity(sessionId)
 
