@@ -90,27 +90,26 @@ Present plans with:
 
 ## After Approval
 
-**If "New session" was selected**, call memory-plan-execute with:
+All execution modes require a **title** — a short descriptive label for the session list.
 
-- **plan**: The full implementation plan — must be **fully self-contained** since the code agent has no access to this conversation. Include every file path, implementation details, code patterns to match, phase dependencies, verification steps, and gotchas. Do NOT summarize or abbreviate. Do NOT include any \`<promise>\` tags.
-- **title**: Short descriptive label for the session list.
+### New session (memory-plan-execute)
 
-**If "Execute here" was selected**, call memory-plan-execute with:
+- **plan**: The full implementation plan. Must be **fully self-contained** — the code agent starts with zero context from this conversation. Include every file path, implementation details, code patterns to match, phase dependencies, verification steps, and gotchas. Do NOT summarize, abbreviate, or include <promise> tags.
+- **inPlace**: omit (defaults to false)
 
-- **plan**: A brief reference (e.g., "See plan above") — the plan is already in the session context and will not be re-sent. The code agent continues with the existing conversation.
-- **title**: Short descriptive label for the subtask.
-- **inPlace**: true — switches to the code agent in the current session.
+### Execute here (memory-plan-execute, inPlace)
 
-**If "Ralph (worktree)" was selected**, call memory-plan-ralph with:
+- **plan**: A brief reference (e.g., "See plan above") — the code agent continues this session and already has the plan in context.
+- **inPlace**: true
 
-- **plan**: The full implementation plan — must be **fully self-contained**.
-- **title**: Short descriptive label for the session list.
+### Ralph — worktree (memory-plan-ralph)
+
+- **plan**: The full implementation plan — same self-contained requirements as "New session" above. Ralph runs in an isolated worktree with no prior context.
 - **inPlace**: false
 
-**If "Ralph (in place)" was selected**, call memory-plan-ralph with:
+### Ralph — in place (memory-plan-ralph)
 
-- **plan**: The full implementation plan — must be **fully self-contained**.
-- **title**: Short descriptive label for the session list.
+- **plan**: The full implementation plan — same self-contained requirements as "New session" above. Ralph runs in the current directory with no prior context.
 - **inPlace**: true
 `,
 }
