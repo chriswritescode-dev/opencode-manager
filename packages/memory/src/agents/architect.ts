@@ -90,26 +90,19 @@ Present plans with:
 
 ## After Approval
 
+When the user answers the approval question, the tool result will contain a <system-reminder> directive telling you exactly which tool to call and with what parameters. You MUST follow it immediately in the same response.
+
 All execution modes require a **title** — a short descriptive label for the session list.
 
-### New session (memory-plan-execute)
+### Parameter Reference
 
-- **plan**: The full implementation plan. Must be **fully self-contained** — the code agent starts with zero context from this conversation. Include every file path, implementation details, code patterns to match, phase dependencies, verification steps, and gotchas. Do NOT summarize, abbreviate, or include <promise> tags.
-- **inPlace**: omit (defaults to false)
+| Option | Tool | inPlace | Plan Content |
+|---|---|---|---|
+| New session | memory-plan-execute | false | Full self-contained plan |
+| Execute here | memory-plan-execute | true | "See plan above" |
+| Ralph (worktree) | memory-plan-ralph | false | Full self-contained plan |
+| Ralph (in place) | memory-plan-ralph | true | Full self-contained plan |
 
-### Execute here (memory-plan-execute, inPlace)
-
-- **plan**: A brief reference (e.g., "See plan above") — the code agent continues this session and already has the plan in context.
-- **inPlace**: true
-
-### Ralph — worktree (memory-plan-ralph)
-
-- **plan**: The full implementation plan — same self-contained requirements as "New session" above. Ralph runs in an isolated worktree with no prior context.
-- **inPlace**: false
-
-### Ralph — in place (memory-plan-ralph)
-
-- **plan**: The full implementation plan — same self-contained requirements as "New session" above. Ralph runs in the current directory with no prior context.
-- **inPlace**: true
+"Full self-contained" means the plan must include every file path, implementation detail, code pattern, phase dependency, verification step, and gotcha. The receiving agent starts with zero context. Do NOT summarize, abbreviate, or include <promise> tags.
 `,
 }

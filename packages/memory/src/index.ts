@@ -595,6 +595,39 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       'ralph-loop': 'The ralph-loop tool is not available during a Ralph loop. Focus on executing the current plan.',
     }
 
+    const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Ralph (worktree)', 'Ralph (in place)']
+
+    const PLAN_APPROVAL_DIRECTIVES: Record<string, string> = {
+      'New session': `<system-reminder>
+The user selected "New session". You MUST now call memory-plan-execute in this response with:
+- plan: The FULL self-contained implementation plan (the code agent starts with zero context)
+- title: A short descriptive title for the session
+- inPlace: false (or omit)
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+      'Execute here': `<system-reminder>
+The user selected "Execute here". You MUST now call memory-plan-execute in this response with:
+- plan: "See plan above" (the code agent continues this session and already has context)
+- title: A short descriptive title for the session
+- inPlace: true
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+      'Ralph (worktree)': `<system-reminder>
+The user selected "Ralph (worktree)". You MUST now call memory-plan-ralph in this response with:
+- plan: The FULL self-contained implementation plan (Ralph runs in an isolated worktree with no prior context)
+- title: A short descriptive title for the session
+- inPlace: false (or omit)
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+      'Ralph (in place)': `<system-reminder>
+The user selected "Ralph (in place)". You MUST now call memory-plan-ralph in this response with:
+- plan: The FULL self-contained implementation plan (Ralph runs in the current directory with no prior context)
+- title: A short descriptive title for the session
+- inPlace: true
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+    }
+
     return {
       getCleanup,
       tool: {
@@ -1296,6 +1329,23 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         input: { tool: string; sessionID: string; callID: string; args: unknown },
         output: { title: string; output: string; metadata: unknown }
       ) => {
+        if (input.tool === 'question') {
+          const args = input.args as { questions?: Array<{ options?: Array<{ label: string }> }> } | undefined
+          const options = args?.questions?.[0]?.options
+          if (options) {
+            const labels = options.map((o) => o.label)
+            const isPlanApproval = PLAN_APPROVAL_LABELS.every((l) => labels.includes(l))
+            if (isPlanApproval) {
+              const answer = output.output.trim()
+              const matchedLabel = PLAN_APPROVAL_LABELS.find((l) => answer === l || answer.startsWith(l))
+              const directive = matchedLabel ? PLAN_APPROVAL_DIRECTIVES[matchedLabel] : '<system-reminder>\nThe user cancelled or provided a custom response. Do NOT call memory-plan-execute or memory-plan-ralph.\n</system-reminder>'
+              output.output = `${output.output}\n\n${directive}`
+              logger.log(`Plan approval: detected "${matchedLabel ?? 'cancel/custom'}" answer, injected directive`)
+            }
+          }
+          return
+        }
+
         const state = ralphService.getActiveState(input.sessionID)
         if (!state?.active) return
 
