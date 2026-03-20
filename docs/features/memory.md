@@ -73,6 +73,7 @@ The file is only created if it does not already exist. The config is validated o
     "debug": false
   },
   "executionModel": "",
+  "auditorModel": "",
   "ralph": {
     "enabled": true,
     "defaultMaxIterations": 15,
@@ -80,8 +81,7 @@ The file is only created if it does not already exist. The config is validated o
     "defaultAudit": true,
     "model": "",
     "minAudits": 1
-  },
-  "auditorModel": ""
+  }
 }
 ```
 
@@ -138,7 +138,7 @@ Set `baseUrl` to point at any OpenAI-compatible self-hosted service (vLLM, Ollam
 | `ralph.defaultAudit` | Run auditor after each coding iteration | `true` |
 | `ralph.model` | Model override for Ralph sessions (`provider/model`), falls back to `executionModel` | — |
 | `ralph.minAudits` | Minimum audit iterations required before completion | `1` |
-| `auditorModel` | Model override for the auditor agent (`provider/model`). Falls back to `ralph.model`, then `executionModel`, then platform default. | — |
+| `auditorModel` | Model override for the auditor agent (`provider/model`). When set, overrides the auditor agent's default model. When not set, the auditor uses the platform default. | — |
 
 ---
 
@@ -197,12 +197,12 @@ The KV service is initialized on plugin startup and begins its cleanup interval 
 
 The Ralph service manages iterative development loops using the KV store for state persistence:
 
-- **State Management**: Each loop's state is stored in the KV store under `ralph:{sessionId}` with fields: `worktreeName`, `phase` (coding/auditing), `iteration`, `goal`, `status` (running/stopped), `audit`, `lastAuditResult`, `errorCount`, `auditCount`
+- **State Management**: Each loop's state is stored in the KV store under `ralph:{sessionId}` with fields: `active` (boolean), `sessionId`, `worktreeName`, `worktreeDir`, `worktreeBranch`, `workspaceId`, `iteration`, `maxIterations`, `completionPromise`, `startedAt`, `prompt`, `phase` (coding/auditing), `audit`, `lastAuditResult`, `errorCount`, `auditCount`, `terminationReason`, `completedAt`, `parentSessionId`, `inPlace`
 - **Two-Phase Cycle**: Alternates between coding (Code agent works on the task) and auditing (Auditor agent reviews changes). Audit findings feed back into the next coding iteration
-- **Completion Criteria**: Requires `minAudits` (default 1) audit iterations before marking the loop as completed
+- **Completion Criteria**: Requires the `completionPromise` to be detected in `<promise>` tags AND `minAudits` (default 1) audit iterations before marking the loop as completed. Without a `completionPromise`, the loop only terminates via other conditions (max iterations, errors, cancellation, etc.)
 - **Error Handling**: Tracks consecutive errors with `MAX_RETRIES` (3). If 3 consecutive iterations fail, the loop terminates with reason `error_max_retries`
 - **Worktree Management**: By default creates an isolated git worktree for each loop. Uses `git rev-parse --git-common-dir` to find the main repo root. On completion, auto-commits changes and removes the worktree (preserving the branch). Set `inPlace: true` to skip worktree isolation
-- **Termination Reasons**: `completed`, `max_iterations`, `error_max_retries`, `worktree_failed`, `cancelled`
+- **Termination Reasons**: `completed`, `max_iterations`, `error_max_retries`, `worktree_failed`, `cancelled`, `user_aborted`, `stall_timeout`, `shutdown`
 
 ### Vector Search
 
@@ -388,10 +388,11 @@ Create a new Code session and send an implementation plan as the first prompt. D
 |-----------|------|----------|-------------|
 | `plan` | string | Yes | The full implementation plan to send to the Code agent |
 | `title` | string | Yes | Short title for the session (shown in session list, max 60 chars) |
+| `inPlace` | boolean | No | Execute in the current session as a subtask instead of creating a new session (default: false) |
 
-Creates a new session via the OpenCode API and sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
+By default, creates a new session via the OpenCode API and sends the plan as the first message to the Code agent. When `inPlace` is true, switches to the Code agent in the current session instead. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
 
-The model used for the new Code session is determined by `executionModel` in the plugin config (format: `provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). If not set, OpenCode's default model resolution is used — typically the `model` field from `opencode.json`.
+The model used for execution is determined by `executionModel` in the plugin config (format: `provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). If not set, OpenCode's default model resolution is used — typically the `model` field from `opencode.json`.
 
 ### memory-kv-set
 
@@ -440,13 +441,9 @@ Start a Ralph iterative development loop. By default runs in an isolated git wor
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `prompt` | string | Yes | The task prompt to iterate on |
-| `maxIterations` | number | No | Max iterations before auto-stop (0 = unlimited, default: 15) |
 | `completionPromise` | string | No | Phrase that signals completion when wrapped in `<promise>` tags |
 | `name` | string | No | Name for the worktree branch |
-| `audit` | boolean | No | Run auditor after each iteration (default from config) |
 | `inPlace` | boolean | No | Run in current directory instead of creating a worktree |
-
-Creates a new session, initializes Ralph state in the KV store, and sends the prompt. The loop alternates between coding and auditing phases until completion criteria are met.
 
 ### ralph-cancel
 
@@ -474,11 +471,7 @@ Execute an architect plan using a Ralph iterative development loop. Designed to 
 |-----------|------|----------|-------------|
 | `plan` | string | Yes | The full implementation plan |
 | `title` | string | Yes | Short title for the session |
-| `maxIterations` | number | No | Max iterations (0 = unlimited, default: 15) |
-| `audit` | boolean | No | Run auditor after each iteration (default: true) |
 | `inPlace` | boolean | No | Run in current directory instead of worktree (default: false) |
-
-The model used is determined by `ralph.model` in the config, falling back to `executionModel`, then to OpenCode's default model. Only the Architect agent has access to this tool.
 
 !!! note "KV Store vs Memory"
     The KV store is designed for **ephemeral** project state that expires automatically (default 24 hours). Use `memory-write` for **durable** knowledge that should persist across sessions, such as conventions, decisions, and context.
@@ -536,11 +529,13 @@ The Ralph loop is an iterative development system that alternates between coding
     - **Coding phase** → If auditing is enabled, switches to auditing phase and runs the Auditor agent as a subtask
     - **Auditing phase** → Processes audit findings, switches back to coding phase, and sends a continuation prompt with the findings
 4. The loop repeats until one of these conditions is met:
-    - **Completion**: `minAudits` (default 1) audit iterations
-    - **Max iterations**: Reached `maxIterations` limit (if set)
+    - **Completion**: The `completionPromise` phrase is detected in `<promise>` tags AND `minAudits` (default 1) audit iterations have been performed. Without a `completionPromise`, the loop does not auto-complete.
+    - **Max iterations**: Reached `maxIterations` limit (if > 0)
     - **Error limit**: 3 consecutive failures (`MAX_RETRIES`)
+    - **Stall timeout**: 5 consecutive stalls detected by the watchdog (`MAX_CONSECUTIVE_STALLS`)
     - **Worktree failure**: The worktree becomes unavailable
     - **Cancelled**: User cancels via `ralph-cancel` or `/cancel-ralph`
+    - **User abort**: Session is aborted
 
 #### Worktree vs In-Place
 
@@ -724,22 +719,21 @@ Defense-in-depth companion to `tool.execute.before`. If a blocked tool somehow e
 
 ### permission.ask
 
-Auto-resolves file operation permissions during Ralph loops:
+Auto-resolves permissions during Ralph loops:
 
-- **Allow**: File operations (read, write, edit) within the Ralph worktree directory
 - **Deny**: `git push` operations (always denied during Ralph loops)
-- **Deny**: File operations outside the worktree directory (prevents `../` traversal via `resolve()` path normalization)
-
-For in-place Ralph loops, worktree-scoped permission checks are skipped (only git push is denied).
+- All other permission requests are passed through to the default handler
 
 ### session.idle (event handler)
 
 Drives the Ralph iteration loop by listening for `session.idle` events:
 
 1. Checks if the idle session belongs to an active Ralph loop
-2. If in **coding phase** and auditing is enabled: switches to auditing phase, runs the Auditor agent as a subtask
-3. If in **auditing phase**: processes audit findings, increments clean audit count (or resets on findings), switches back to coding phase, sends continuation prompt
-4. Checks termination conditions (clean audit threshold, max iterations, error limit)
+2. Records activity to reset the watchdog stall timer
+3. Re-fetches state as a safety check against race conditions
+4. Dispatches to the appropriate phase handler:
+   - **Coding phase**: If auditing is enabled, switches to auditing phase and runs the Auditor agent as a subtask. Checks for completion promise. Checks max iterations.
+   - **Auditing phase**: Processes audit results, increments `auditCount`, switches back to coding phase, sends continuation prompt with findings. Checks for completion promise. Checks max iterations.
 5. On completion: auto-commits changes (worktree mode), removes worktree (preserving branch), notifies parent session
 
 ### worktree.failed (event handler)

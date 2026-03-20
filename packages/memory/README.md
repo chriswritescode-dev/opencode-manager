@@ -223,6 +223,7 @@ You can edit this file to customize settings. The file is created only if it doe
     "debug": false
   },
   "executionModel": "",
+  "auditorModel": "",
   "ralph": {
     "enabled": true,
     "defaultMaxIterations": 15,
@@ -230,8 +231,7 @@ You can edit this file to customize settings. The file is created only if it doe
     "defaultAudit": true,
     "model": "",
     "minAudits": 1
-  },
-  "auditorModel": ""
+  }
 }
 ```
 
@@ -302,7 +302,7 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 - `ralph.minAudits` - Minimum audit iterations required before completion (default: `1`)
 
 #### Auditor
-- `auditorModel` - Model override for the auditor agent (`provider/model`). Falls back to `ralph.model`, then `executionModel`, then platform default (default: `""`)
+- `auditorModel` - Model override for the auditor agent (`provider/model`). When set, overrides the auditor agent's default model. When not set, uses platform default (default: `""`)
 
 ## architect → code Workflow
 
