@@ -107,32 +107,27 @@ describe('Tool Blocking Logic', () => {
 
   describe('Blocked tools list', () => {
     test('includes question tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph', 'ralph-loop']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
       expect(blockedTools).toContain('question')
     })
 
     test('includes memory-plan-execute tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph', 'ralph-loop']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
       expect(blockedTools).toContain('memory-plan-execute')
     })
 
     test('includes memory-plan-ralph tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph', 'ralph-loop']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
       expect(blockedTools).toContain('memory-plan-ralph')
     })
 
-    test('includes ralph-loop tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph', 'ralph-loop']
-      expect(blockedTools).toContain('ralph-loop')
-    })
-
     test('does not include memory-read tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph', 'ralph-loop']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
       expect(blockedTools).not.toContain('memory-read')
     })
 
     test('does not include memory-write tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph', 'ralph-loop']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
       expect(blockedTools).not.toContain('memory-write')
     })
   })
@@ -143,7 +138,6 @@ describe('Tool Blocking Logic', () => {
         'question': 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
         'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
         'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
-        'ralph-loop': 'The ralph-loop tool is not available during a Ralph loop. Focus on executing the current plan.',
       }
       expect(messages['question']).toContain('question tool is not available')
     })
@@ -153,7 +147,6 @@ describe('Tool Blocking Logic', () => {
         'question': 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
         'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
         'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
-        'ralph-loop': 'The ralph-loop tool is not available during a Ralph loop. Focus on executing the current plan.',
       }
       expect(messages['memory-plan-execute']).toContain('memory-plan-execute tool is not available')
     })

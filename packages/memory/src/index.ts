@@ -592,7 +592,6 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       question: 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
       'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
       'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
-      'ralph-loop': 'The ralph-loop tool is not available during a Ralph loop. Focus on executing the current plan.',
     }
 
     const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Ralph (worktree)', 'Ralph (in place)']
@@ -936,38 +935,7 @@ Do NOT output text without also making this tool call.
             return `${entries.length} active KV entries:\n\n${formatted.join('\n')}`
           },
         }),
-        'ralph-loop': tool({
-          description: 'Start a Ralph Wiggum iterative development loop. By default runs in an isolated git worktree. Set inPlace to true to run in the current directory instead.',
-          args: {
-            prompt: z.string().describe('The task prompt to iterate on'),
-            completionPromise: z.string().optional().describe('Phrase that signals completion when wrapped in <promise> tags'),
-            name: z.string().optional().describe('Optional name for the worktree branch'),
-            inPlace: z.boolean().optional().describe('Run in current directory instead of creating a worktree'),
-          },
-          execute: async (args, context) => {
-            if (config.ralph?.enabled === false) {
-              return 'Ralph loops are disabled in plugin config.'
-            }
 
-            logger.log(`ralph-loop: creating worktree for prompt="${args.prompt.substring(0, 80)}"`)
-
-            const titlePreview = args.prompt.length > 40 ? `${args.prompt.substring(0, 37)}...` : args.prompt
-            const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
-
-            return setupRalphLoop({
-              prompt: args.prompt,
-              sessionTitle: `Ralph: ${titlePreview}`,
-              worktreeName: args.name,
-              completionPromise: args.completionPromise ?? null,
-              maxIterations: config.ralph?.defaultMaxIterations ?? 0,
-              audit: config.ralph?.defaultAudit ?? true,
-              model: ralphModel,
-              inPlace: args.inPlace,
-              parentSessionId: context.sessionID,
-              onLoopStarted: (id) => ralphHandler.startWatchdog(id),
-            })
-          },
-        }),
         'ralph-cancel': tool({
           description: 'Cancel an active Ralph loop and optionally clean up the worktree.',
           args: {

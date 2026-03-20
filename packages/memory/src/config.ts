@@ -21,7 +21,7 @@ const PLUGIN_COMMANDS: Record<string, { template: string; description: string; a
     description: 'Start a Ralph iterative development loop in a worktree',
     agent: 'code',
     subtask: false,
-    template: 'Use the ralph-loop tool to start a Ralph loop with the following arguments: $ARGUMENTS',
+    template: 'Use the memory-plan-ralph tool to start a Ralph loop. Use the following as the plan: $ARGUMENTS. Derive a short title from the plan.',
   },
   'cancel-ralph': {
     description: 'Cancel the active Ralph loop',

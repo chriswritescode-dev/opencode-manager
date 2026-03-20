@@ -434,17 +434,6 @@ No parameters required.
 
 Returns a list of all stored keys with their values and expiration times. Useful for debugging or inspecting current project state.
 
-### ralph-loop
-
-Start a Ralph iterative development loop. By default runs in an isolated git worktree. Set `inPlace` to `true` to run in the current directory instead.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `prompt` | string | Yes | The task prompt to iterate on |
-| `completionPromise` | string | No | Phrase that signals completion when wrapped in `<promise>` tags |
-| `name` | string | No | Name for the worktree branch |
-| `inPlace` | boolean | No | Run in current directory instead of creating a worktree |
-
 ### ralph-cancel
 
 Cancel an active Ralph loop and optionally clean up the worktree.
@@ -551,7 +540,6 @@ During a Ralph loop, certain tools are blocked to keep the agent focused:
 - `question` — No interactive questions; work autonomously
 - `memory-plan-execute` — Cannot start new plan sessions
 - `memory-plan-ralph` — Cannot start nested Ralph loops
-- `ralph-loop` — Cannot start additional loops
 
 Blocking is enforced via `tool.execute.before` (throws error) with `tool.execute.after` as defense in depth.
 
@@ -566,7 +554,7 @@ Blocking is enforced via `tool.execute.before` (throws error) with `tool.execute
 
 | Command | Description |
 |---------|-------------|
-| `/ralph-loop <prompt>` | Start a Ralph loop via the Code agent |
+| `/ralph-loop <prompt>` | Start a Ralph loop (delegates to memory-plan-ralph) |
 | `/cancel-ralph` | Cancel the active Ralph loop |
 
 ---
@@ -654,7 +642,7 @@ The default agent is set to `code`.
 | Command | Description | Agent | Mode |
 |---------|-------------|-------|------|
 | `/review` | Run a code review on current changes | auditor | subtask |
-| `/ralph-loop` | Start a Ralph iterative development loop | code | direct |
+| `/ralph-loop` | Start a Ralph loop (delegates to memory-plan-ralph) | code | direct |
 | `/cancel-ralph` | Cancel the active Ralph loop | code | direct |
 
 ---
@@ -711,7 +699,7 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 
 ### tool.execute.before
 
-Blocks certain tools during active Ralph loops to keep the agent focused on the current task. Throws an error with a descriptive message when a blocked tool is called. Blocked tools: `question`, `memory-plan-execute`, `memory-plan-ralph`, `ralph-loop`.
+Blocks certain tools during active Ralph loops to keep the agent focused on the current task. Throws an error with a descriptive message when a blocked tool is called. Blocked tools: `question`, `memory-plan-execute`, `memory-plan-ralph`.
 
 ### tool.execute.after
 

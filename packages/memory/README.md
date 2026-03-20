@@ -82,7 +82,6 @@ Iterative development loops with automatic auditing. Runs in an isolated git wor
 
 | Tool | Description |
 |------|-------------|
-| `ralph-loop` | Start an iterative development loop with optional auditing |
 | `ralph-cancel` | Cancel an active Ralph loop and clean up the worktree |
 | `ralph-status` | Check status of active Ralph loops |
 | `memory-plan-ralph` | Execute an architect plan using a Ralph iterative loop |
@@ -92,7 +91,7 @@ Iterative development loops with automatic auditing. Runs in an isolated git wor
 | Command | Description | Agent |
 |---------|-------------|-------|
 | `/review` | Run a code review on current changes | auditor (subtask) |
-| `/ralph-loop` | Start a Ralph iterative development loop | code |
+| `/ralph-loop` | Start a Ralph loop (delegates to memory-plan-ralph) | code |
 | `/cancel-ralph` | Cancel the active Ralph loop | code |
 
 ## CLI
@@ -330,7 +329,7 @@ The loop completes when the Code agent outputs the completion promise. It auto-t
 
 By default, Ralph loops run in an isolated git worktree. Set `inPlace: true` to run in the current directory instead (skips worktree creation, auto-commit, and cleanup).
 
-See the [full documentation](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#ralph-loop) for details.
+See the [full documentation](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#ralph-loop) for details on the Ralph loop system.
 
 ## Documentation
 

@@ -132,7 +132,6 @@ Do NOT output text without also making this tool call.
       question: 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
       'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
       'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
-      'ralph-loop': 'The ralph-loop tool is not available during a Ralph loop. Focus on executing the current plan.',
     }
 
     if (!(tool in RALPH_BLOCKED_TOOLS)) return
@@ -346,15 +345,6 @@ Do NOT output text without also making this tool call.
 
     expect(output.title).toBe('Tool blocked')
     expect(output.output).toContain('memory-plan-ralph tool is not available')
-  })
-
-  test('Ralph blocking works for ralph-loop tool', () => {
-    const output = { title: '', output: 'test', metadata: {} }
-
-    simulateToolExecuteAfter('ralph-loop', {}, output, true)
-
-    expect(output.title).toBe('Tool blocked')
-    expect(output.output).toContain('ralph-loop tool is not available')
   })
 
   test('Ralph blocking does not affect non-blocked tools', () => {
