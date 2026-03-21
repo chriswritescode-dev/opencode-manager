@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   getRepoById: vi.fn(),
   createScheduleJob: vi.fn(),
   createScheduleRun: vi.fn(),
@@ -10,10 +10,10 @@ const mocks = vi.hoisted(() => ({
   getRunningScheduleRunByJob: vi.fn(),
   getScheduleRunById: vi.fn(),
   listDueScheduleJobs: vi.fn(),
+  listEnabledScheduleJobs: vi.fn(),
   listRunningScheduleRuns: vi.fn(),
   listScheduleJobsByRepo: vi.fn(),
   listScheduleRunsByJob: vi.fn(),
-  reserveScheduleJobNextRun: vi.fn(),
   updateScheduleJob: vi.fn(),
   updateScheduleJobRunState: vi.fn(),
   updateScheduleRun: vi.fn(),
@@ -21,12 +21,13 @@ const mocks = vi.hoisted(() => ({
   buildCreateSchedulePersistenceInput: vi.fn(),
   buildUpdatedSchedulePersistenceInput: vi.fn(),
   computeNextRunAtForJob: vi.fn(),
+  intervalMinutesToCronExpression: vi.fn(),
   resolveOpenCodeModel: vi.fn(),
   proxyToOpenCodeWithDirectory: vi.fn(),
   addClient: vi.fn(),
   onEvent: vi.fn(),
   loggerError: vi.fn(),
-}))
+}
 
 vi.mock('../../src/db/queries', () => ({
   getRepoById: mocks.getRepoById,
@@ -40,10 +41,10 @@ vi.mock('../../src/db/schedules', () => ({
   getRunningScheduleRunByJob: mocks.getRunningScheduleRunByJob,
   getScheduleRunById: mocks.getScheduleRunById,
   listDueScheduleJobs: mocks.listDueScheduleJobs,
+  listEnabledScheduleJobs: mocks.listEnabledScheduleJobs,
   listRunningScheduleRuns: mocks.listRunningScheduleRuns,
   listScheduleJobsByRepo: mocks.listScheduleJobsByRepo,
   listScheduleRunsByJob: mocks.listScheduleRunsByJob,
-  reserveScheduleJobNextRun: mocks.reserveScheduleJobNextRun,
   updateScheduleJob: mocks.updateScheduleJob,
   updateScheduleJobRunState: mocks.updateScheduleJobRunState,
   updateScheduleRun: mocks.updateScheduleRun,
@@ -54,6 +55,7 @@ vi.mock('../../src/services/schedule-config', () => ({
   buildCreateSchedulePersistenceInput: mocks.buildCreateSchedulePersistenceInput,
   buildUpdatedSchedulePersistenceInput: mocks.buildUpdatedSchedulePersistenceInput,
   computeNextRunAtForJob: mocks.computeNextRunAtForJob,
+  intervalMinutesToCronExpression: mocks.intervalMinutesToCronExpression,
 }))
 
 vi.mock('../../src/services/opencode-models', () => ({
@@ -77,6 +79,17 @@ vi.mock('../../src/utils/logger', () => ({
     info: vi.fn(),
     warn: vi.fn(),
   },
+}))
+
+const mockCronStop = vi.fn()
+const mockCronInstances: Array<{ callback: () => void; options: Record<string, unknown>; pattern: string; stop: typeof mockCronStop }> = []
+
+vi.mock('croner', () => ({
+  Cron: vi.fn().mockImplementation((pattern: string, options: Record<string, unknown>, callback: () => void) => {
+    const instance = { pattern, options, callback, stop: mockCronStop }
+    mockCronInstances.push(instance)
+    return instance
+  }),
 }))
 
 import { ScheduleRunner, ScheduleService } from '../../src/services/schedules'
@@ -701,70 +714,174 @@ describe('ScheduleService', () => {
 })
 
 describe('ScheduleRunner', () => {
-  it('recovers interrupted runs and starts due scheduled jobs during a tick', async () => {
-    const scheduleService = {
-      recoverRunningRuns: vi.fn().mockResolvedValue(undefined),
-      listDueJobs: vi.fn().mockReturnValue([{ id: 7, repoId: 42 }]),
-      runJob: vi.fn().mockResolvedValue(undefined),
-    }
-    const runner = new ScheduleRunner(scheduleService as never)
-
-    await (runner as unknown as { tick(): Promise<void> }).tick()
-
-    expect(scheduleService.recoverRunningRuns).toHaveBeenCalled()
-    expect(scheduleService.listDueJobs).toHaveBeenCalledWith(expect.any(Number))
-    expect(scheduleService.runJob).toHaveBeenCalledWith(42, 7, 'schedule')
+  beforeEach(() => {
+    mockCronInstances.length = 0
+    mockCronStop.mockClear()
   })
 
-  it('ignores overlapping ticks while a previous pass is still running', async () => {
-    let resolveRecovery: (() => void) | null = null
-    const scheduleService = {
-      recoverRunningRuns: vi.fn().mockImplementation(() => new Promise<void>((resolve) => {
-        resolveRecovery = resolve
-      })),
-      listDueJobs: vi.fn().mockReturnValue([]),
-      runJob: vi.fn(),
+  it('recovers running runs and registers all enabled jobs on start', async () => {
+    const mockJob: ScheduleJob = {
+      id: 1,
+      repoId: 10,
+      name: 'Test Job',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Test',
+      model: null,
+      skillMetadata: null,
+      nextRunAt: Date.now(),
+      lastRunAt: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     }
-    const runner = new ScheduleRunner(scheduleService as never)
+    mocks.listRunningScheduleRuns.mockReturnValue([])
+    mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
+    mocks.intervalMinutesToCronExpression.mockReturnValue('0 * * * *')
 
-    const firstTick = (runner as unknown as { tick(): Promise<void> }).tick()
-    const secondTick = (runner as unknown as { tick(): Promise<void> }).tick()
+    const service = new ScheduleService({} as never)
+    const runner = new ScheduleRunner(service)
+    await runner.start()
 
-    expect(scheduleService.recoverRunningRuns).toHaveBeenCalledTimes(1)
-
-    resolveRecovery?.()
-
-    await firstTick
-    await secondTick
+    expect(mocks.listRunningScheduleRuns).toHaveBeenCalled()
+    expect(mocks.listEnabledScheduleJobs).toHaveBeenCalled()
+    expect(mockCronInstances).toHaveLength(1)
   })
 
-  it('starts one interval and stops cleanly', async () => {
-    vi.useFakeTimers()
-
-    try {
-      const scheduleService = {
-        recoverRunningRuns: vi.fn().mockResolvedValue(undefined),
-        listDueJobs: vi.fn().mockReturnValue([]),
-        runJob: vi.fn(),
-      }
-      const runner = new ScheduleRunner(scheduleService as never)
-
-      runner.start()
-      runner.start()
-      await Promise.resolve()
-
-      expect(scheduleService.recoverRunningRuns).toHaveBeenCalledTimes(1)
-
-      await vi.advanceTimersByTimeAsync(30_000)
-      expect(scheduleService.recoverRunningRuns).toHaveBeenCalledTimes(2)
-
-      runner.stop()
-      runner.stop()
-      await vi.advanceTimersByTimeAsync(30_000)
-
-      expect(scheduleService.recoverRunningRuns).toHaveBeenCalledTimes(2)
-    } finally {
-      vi.useRealTimers()
+  it('registers a cron job with timezone', async () => {
+    const mockJob: ScheduleJob = {
+      id: 2,
+      repoId: 10,
+      name: 'Test Cron',
+      description: null,
+      enabled: true,
+      scheduleMode: 'cron',
+      cronExpression: '0 9 * * *',
+      timezone: 'America/New_York',
+      intervalMinutes: null,
+      agentSlug: null,
+      prompt: 'Test',
+      model: null,
+      skillMetadata: null,
+      nextRunAt: Date.now(),
+      lastRunAt: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
     }
+    mocks.listRunningScheduleRuns.mockReturnValue([])
+    mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
+
+    const service = new ScheduleService({} as never)
+    const runner = new ScheduleRunner(service)
+    await runner.start()
+
+    expect(mockCronInstances).toHaveLength(1)
+    expect(mockCronInstances[0].pattern).toBe('0 9 * * *')
+    expect(mockCronInstances[0].options).toEqual(expect.objectContaining({ timezone: 'America/New_York', protect: true }))
+  })
+
+  it('skips disabled jobs', async () => {
+    const mockJob: ScheduleJob = {
+      id: 3,
+      repoId: 10,
+      name: 'Disabled Job',
+      description: null,
+      enabled: false,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Test',
+      model: null,
+      skillMetadata: null,
+      nextRunAt: Date.now(),
+      lastRunAt: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    mocks.listRunningScheduleRuns.mockReturnValue([])
+    mocks.listEnabledScheduleJobs.mockReturnValue([])
+
+    const service = new ScheduleService({} as never)
+    const runner = new ScheduleRunner(service)
+    await runner.start()
+
+    runner.registerJob(mockJob)
+    expect(mockCronInstances).toHaveLength(0)
+  })
+
+  it('stops all cron instances on stop', async () => {
+    const mockJob: ScheduleJob = {
+      id: 4,
+      repoId: 10,
+      name: 'Stop Test',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 30,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Test',
+      model: null,
+      skillMetadata: null,
+      nextRunAt: Date.now(),
+      lastRunAt: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    mocks.listRunningScheduleRuns.mockReturnValue([])
+    mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
+    mocks.intervalMinutesToCronExpression.mockReturnValue('*/30 * * * *')
+
+    const service = new ScheduleService({} as never)
+    const runner = new ScheduleRunner(service)
+    await runner.start()
+
+    runner.stop()
+    expect(mockCronStop).toHaveBeenCalled()
+  })
+
+  it('unregisters and re-registers a job on update via onJobChange', async () => {
+    const mockJob: ScheduleJob = {
+      id: 5,
+      repoId: 10,
+      name: 'Update Test',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Test',
+      model: null,
+      skillMetadata: null,
+      nextRunAt: Date.now(),
+      lastRunAt: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    mocks.listRunningScheduleRuns.mockReturnValue([])
+    mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
+    mocks.intervalMinutesToCronExpression.mockReturnValue('0 * * * *')
+
+    const service = new ScheduleService({} as never)
+    const runner = new ScheduleRunner(service)
+    await runner.start()
+
+    expect(mockCronInstances).toHaveLength(1)
+
+    const updatedJob = { ...mockJob, intervalMinutes: 30 }
+    mocks.intervalMinutesToCronExpression.mockReturnValue('*/30 * * * *')
+    runner.registerJob(updatedJob)
+
+    expect(mockCronStop).toHaveBeenCalled()
+    expect(mockCronInstances).toHaveLength(2)
   })
 })

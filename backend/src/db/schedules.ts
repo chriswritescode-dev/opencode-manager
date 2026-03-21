@@ -126,6 +126,12 @@ export function listDueScheduleJobs(db: Database, now: number, limit: number = 2
   return rows.map(rowToScheduleJob)
 }
 
+export function listEnabledScheduleJobs(db: Database): ScheduleJob[] {
+  const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE enabled = 1 ORDER BY id ASC')
+  const rows = stmt.all() as ScheduleJobRow[]
+  return rows.map(rowToScheduleJob)
+}
+
 export function getScheduleJobById(db: Database, repoId: number, jobId: number): ScheduleJob | null {
   const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE repo_id = ? AND id = ?')
   const row = stmt.get(repoId, jobId) as ScheduleJobRow | undefined

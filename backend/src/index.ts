@@ -81,6 +81,7 @@ const requireAuth = createAuthMiddleware(auth)
 import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
+let scheduleRunnerInstance: ScheduleRunner | undefined
 const gitAuthService = new GitAuthService()
 
 async function ensureDefaultConfigExists(): Promise<void> {
@@ -211,8 +212,9 @@ try {
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
 
-  const scheduleRunner = new ScheduleRunner(new ScheduleService(db))
-  scheduleRunner.start()
+  const scheduleService = new ScheduleService(db)
+  scheduleRunnerInstance = new ScheduleRunner(scheduleService)
+  await scheduleRunnerInstance.start()
 
   await syncAdminFromEnv(auth, db)
 } catch (error) {
@@ -363,6 +365,8 @@ const shutdown = async (signal: string) => {
       await ipcServer.dispose()
       logger.info('Git IPC server stopped')
     }
+    scheduleRunnerInstance?.stop()
+    logger.info('Schedule runner stopped')
     await opencodeServerManager.stop()
     logger.info('OpenCode server stopped')
   } catch (error) {

@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite'
+import { Cron } from 'croner'
 import {
   type CreateScheduleJobRequest,
   type ScheduleJob,
@@ -14,11 +15,10 @@ import {
   getScheduleJobById,
   getRunningScheduleRunByJob,
   getScheduleRunById,
-  listDueScheduleJobs,
+  listEnabledScheduleJobs,
   listScheduleJobsByRepo,
   listRunningScheduleRuns,
   listScheduleRunsByJob,
-  reserveScheduleJobNextRun,
   updateScheduleJob,
   updateScheduleJobRunState,
   updateScheduleRun,
@@ -28,6 +28,7 @@ import {
   buildCreateSchedulePersistenceInput,
   buildUpdatedSchedulePersistenceInput,
   computeNextRunAtForJob,
+  intervalMinutesToCronExpression,
 } from './schedule-config'
 import { resolveOpenCodeModel } from './opencode-models'
 import { proxyToOpenCodeWithDirectory } from './proxy'
@@ -284,8 +285,17 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
 
 export class ScheduleService {
   private static activeRuns = new Set<number>()
+  private onJobChange: ((job: ScheduleJob | null, jobId: number) => void) | null = null
 
   constructor(private readonly db: Database) {}
+
+  setJobChangeHandler(handler: ((job: ScheduleJob | null, jobId: number) => void) | null): void {
+    this.onJobChange = handler
+  }
+
+  listAllEnabledJobs(): ScheduleJob[] {
+    return listEnabledScheduleJobs(this.db)
+  }
 
   async recoverRunningRuns(): Promise<void> {
     const runningRuns = listRunningScheduleRuns(this.db)
@@ -310,10 +320,6 @@ export class ScheduleService {
     return listScheduleJobsByRepo(this.db, repoId)
   }
 
-  listDueJobs(now: number): ScheduleJob[] {
-    return listDueScheduleJobs(this.db, now)
-  }
-
   getJob(repoId: number, jobId: number): ScheduleJob | null {
     return getScheduleJobById(this.db, repoId, jobId)
   }
@@ -322,7 +328,9 @@ export class ScheduleService {
     this.assertRepo(repoId)
 
     try {
-      return createScheduleJob(this.db, repoId, buildCreateSchedulePersistenceInput(input))
+      const job = createScheduleJob(this.db, repoId, buildCreateSchedulePersistenceInput(input))
+      this.onJobChange?.(job, job.id)
+      return job
     } catch (error) {
       throw new ScheduleServiceError(getErrorMessage(error), 400)
     }
@@ -342,6 +350,7 @@ export class ScheduleService {
     if (!job) {
       throw new ScheduleServiceError('Schedule not found', 404)
     }
+    this.onJobChange?.(job, job.id)
     return job
   }
 
@@ -351,6 +360,7 @@ export class ScheduleService {
     if (!deleted) {
       throw new ScheduleServiceError('Schedule not found', 404)
     }
+    this.onJobChange?.(null, jobId)
   }
 
   listRuns(repoId: number, jobId: number, limit: number = 20): ScheduleRun[] {
@@ -381,14 +391,6 @@ export class ScheduleService {
     }
 
     ScheduleService.activeRuns.add(jobId)
-
-    const reservedNextRunAt = triggerSource === 'schedule' && job.enabled
-      ? computeNextRunAtForJob(job, Date.now())
-      : job.nextRunAt
-
-    if (triggerSource === 'schedule' && reservedNextRunAt !== null) {
-      reserveScheduleJobNextRun(this.db, repoId, jobId, reservedNextRunAt)
-    }
 
     const startedAt = Date.now()
     const run = createScheduleRun(this.db, {
@@ -444,7 +446,6 @@ export class ScheduleService {
         sessionId: session.id,
         sessionTitle,
         triggerSource,
-        reservedNextRunAt,
         model,
         sessionMonitor,
       })
@@ -469,7 +470,7 @@ export class ScheduleService {
 
       updateScheduleJobRunState(this.db, repoId, jobId, {
         lastRunAt: finishedAt,
-        nextRunAt: triggerSource === 'manual' ? job.nextRunAt : reservedNextRunAt,
+        nextRunAt: triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
       })
 
       if (!failedRun) {
@@ -563,7 +564,6 @@ export class ScheduleService {
     sessionId: string
     sessionTitle: string
     triggerSource: ScheduleRunTriggerSource
-    reservedNextRunAt: number | null
     model: { providerID: string; modelID: string }
     sessionMonitor: SessionMonitor
   }): Promise<void> {
@@ -614,7 +614,7 @@ export class ScheduleService {
 
         updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
           lastRunAt: finishedAt,
-          nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : input.reservedNextRunAt,
+          nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
         })
 
         return
@@ -628,7 +628,6 @@ export class ScheduleService {
         sessionId: input.sessionId,
         sessionTitle: input.sessionTitle,
         triggerSource: input.triggerSource,
-        reservedNextRunAt: input.reservedNextRunAt,
       })
       return
     } catch (error) {
@@ -659,7 +658,7 @@ export class ScheduleService {
 
       updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
         lastRunAt: finishedAt,
-        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : input.reservedNextRunAt,
+        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
     } finally {
       input.sessionMonitor.dispose()
@@ -675,7 +674,6 @@ export class ScheduleService {
     sessionId: string
     sessionTitle: string
     triggerSource: ScheduleRunTriggerSource
-    reservedNextRunAt: number | null
   }): Promise<void> {
     try {
       const response = await this.waitForAssistantMessage(input.job, input.sessionId, input.sessionMonitor)
@@ -724,7 +722,7 @@ export class ScheduleService {
 
       updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
         lastRunAt: finishedAt,
-        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : input.reservedNextRunAt,
+        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
     } catch (error) {
       const finishedAt = Date.now()
@@ -754,7 +752,7 @@ export class ScheduleService {
 
       updateScheduleJobRunState(this.db, input.repoId, input.job.id, {
         lastRunAt: finishedAt,
-        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : input.reservedNextRunAt,
+        nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
     } finally {
       input.sessionMonitor.dispose()
@@ -799,7 +797,6 @@ export class ScheduleService {
           sessionId: run.sessionId,
           sessionTitle: run.sessionTitle ?? buildSessionTitle(job),
           triggerSource: run.triggerSource,
-          reservedNextRunAt: job.nextRunAt,
         })
         return
       }
@@ -943,52 +940,74 @@ export class ScheduleService {
 }
 
 export class ScheduleRunner {
-  private timer: ReturnType<typeof setInterval> | null = null
-  private running = false
+  private cronJobs = new Map<number, Cron>()
 
   constructor(private readonly scheduleService: ScheduleService) {}
 
-  start(): void {
-    if (this.timer) {
-      return
-    }
+  async start(): Promise<void> {
+    this.scheduleService.setJobChangeHandler((job, jobId) => {
+      if (job) {
+        this.registerJob(job)
+      } else {
+        this.unregisterJob(jobId)
+      }
+    })
 
-    this.timer = setInterval(() => {
-      void this.tick()
-    }, 30_000)
-
-    void this.tick()
+    await this.scheduleService.recoverRunningRuns()
+    this.registerAllEnabledJobs()
   }
 
   stop(): void {
-    if (!this.timer) {
-      return
+    this.scheduleService.setJobChangeHandler(null as never)
+    for (const cron of this.cronJobs.values()) {
+      cron.stop()
     }
-
-    clearInterval(this.timer)
-    this.timer = null
+    this.cronJobs.clear()
   }
 
-  private async tick(): Promise<void> {
-    if (this.running) {
+  registerJob(job: ScheduleJob): void {
+    this.unregisterJob(job.id)
+
+    if (!job.enabled) {
       return
     }
 
-    this.running = true
+    const cronExpression = job.scheduleMode === 'cron'
+      ? job.cronExpression!
+      : intervalMinutesToCronExpression(job.intervalMinutes!)
 
+    const options: Record<string, unknown> = { protect: true }
+    if (job.scheduleMode === 'cron' && job.timezone) {
+      options.timezone = job.timezone
+    }
+
+    const cron = new Cron(cronExpression, options, () => {
+      void this.executeJob(job.repoId, job.id)
+    })
+
+    this.cronJobs.set(job.id, cron)
+  }
+
+  unregisterJob(jobId: number): void {
+    const existing = this.cronJobs.get(jobId)
+    if (existing) {
+      existing.stop()
+      this.cronJobs.delete(jobId)
+    }
+  }
+
+  private async executeJob(repoId: number, jobId: number): Promise<void> {
     try {
-      await this.scheduleService.recoverRunningRuns()
-      const dueJobs = this.scheduleService.listDueJobs(Date.now())
+      await this.scheduleService.runJob(repoId, jobId, 'schedule')
+    } catch (error) {
+      logger.error(`Scheduled run failed for job ${jobId}:`, error)
+    }
+  }
 
-      for (const job of dueJobs) {
-        try {
-          await this.scheduleService.runJob(job.repoId, job.id, 'schedule')
-        } catch (error) {
-          logger.error(`Scheduled run failed for job ${job.id}:`, error)
-        }
-      }
-    } finally {
-      this.running = false
+  private registerAllEnabledJobs(): void {
+    const jobs = this.scheduleService.listAllEnabledJobs()
+    for (const job of jobs) {
+      this.registerJob(job)
     }
   }
 }

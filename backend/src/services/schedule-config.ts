@@ -1,4 +1,4 @@
-import { CronExpressionParser } from 'cron-parser'
+import { Cron } from 'croner'
 import type {
   CreateScheduleJobRequest,
   ScheduleJob,
@@ -34,12 +34,12 @@ function validateTimeZone(timezone: string): string {
 }
 
 function getCronNextRunAt(cronExpression: string, timezone: string, currentDate: number): number {
-  const interval = CronExpressionParser.parse(cronExpression, {
-    currentDate: new Date(currentDate),
-    tz: timezone,
-  })
-
-  return interval.next().getTime()
+  const cron = new Cron(cronExpression, { timezone })
+  const next = cron.nextRun(new Date(currentDate))
+  if (!next) {
+    throw new Error(`Cron expression "${cronExpression}" has no upcoming run`)
+  }
+  return next.getTime()
 }
 
 function normalizeCronConfig(cronExpression: string, timezone: string | null | undefined, currentDate: number) {
@@ -64,6 +64,25 @@ function normalizeIntervalConfig(intervalMinutes: number, currentDate: number) {
     timezone: null,
     nextRunAt: currentDate + intervalMinutes * 60_000,
   }
+}
+
+export function intervalMinutesToCronExpression(minutes: number): string {
+  if (minutes <= 0) {
+    throw new Error('Interval minutes must be greater than 0')
+  }
+  if (minutes < 60) {
+    return `*/${minutes} * * * *`
+  }
+  if (minutes === 60) {
+    return '0 * * * *'
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60
+    if (hours <= 24) {
+      return `0 */${hours} * * *`
+    }
+  }
+  return `*/${minutes} * * * *`
 }
 
 export function computeNextRunAtForJob(job: ScheduleJob, currentDate: number): number | null {
