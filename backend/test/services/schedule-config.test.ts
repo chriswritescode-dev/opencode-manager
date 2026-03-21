@@ -4,7 +4,6 @@ import {
   buildCreateSchedulePersistenceInput,
   buildUpdatedSchedulePersistenceInput,
   computeNextRunAtForJob,
-  intervalMinutesToCronExpression,
 } from '../../src/services/schedule-config'
 
 describe('schedule-config', () => {
@@ -180,40 +179,5 @@ describe('schedule-config', () => {
     }
 
     expect(computeNextRunAtForJob(job, Date.UTC(2026, 2, 9, 12, 0, 0))).toBeNull()
-  })
-})
-
-describe('intervalMinutesToCronExpression', () => {
-  it('converts 5 minutes to */5 * * * *', () => {
-    expect(intervalMinutesToCronExpression(5)).toBe('*/5 * * * *')
-  })
-
-  it('converts 15 minutes to */15 * * * *', () => {
-    expect(intervalMinutesToCronExpression(15)).toBe('*/15 * * * *')
-  })
-
-  it('converts 30 minutes to */30 * * * *', () => {
-    expect(intervalMinutesToCronExpression(30)).toBe('*/30 * * * *')
-  })
-
-  it('converts 60 minutes to 0 * * * *', () => {
-    expect(intervalMinutesToCronExpression(60)).toBe('0 * * * *')
-  })
-
-  it('converts 120 minutes to 0 */2 * * *', () => {
-    expect(intervalMinutesToCronExpression(120)).toBe('0 */2 * * *')
-  })
-
-  it('converts 1440 minutes to 0 */24 * * *', () => {
-    expect(intervalMinutesToCronExpression(1440)).toBe('0 */24 * * *')
-  })
-
-  it('throws for zero or negative minutes', () => {
-    expect(() => intervalMinutesToCronExpression(0)).toThrow()
-    expect(() => intervalMinutesToCronExpression(-5)).toThrow()
-  })
-
-  it('handles non-standard intervals like 45 minutes', () => {
-    expect(intervalMinutesToCronExpression(45)).toBe('*/45 * * * *')
   })
 })

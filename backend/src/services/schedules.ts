@@ -28,7 +28,6 @@ import {
   buildCreateSchedulePersistenceInput,
   buildUpdatedSchedulePersistenceInput,
   computeNextRunAtForJob,
-  intervalMinutesToCronExpression,
 } from './schedule-config'
 import { resolveOpenCodeModel } from './opencode-models'
 import { proxyToOpenCodeWithDirectory } from './proxy'
@@ -754,9 +753,6 @@ export class ScheduleService {
         lastRunAt: finishedAt,
         nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
-    } finally {
-      input.sessionMonitor.dispose()
-      ScheduleService.activeRuns.delete(input.job.id)
     }
   }
 
@@ -972,19 +968,30 @@ export class ScheduleRunner {
       return
     }
 
-    const cronExpression = job.scheduleMode === 'cron'
-      ? job.cronExpression!
-      : intervalMinutesToCronExpression(job.intervalMinutes!)
-
-    const options: Record<string, unknown> = { protect: true }
-    if (job.scheduleMode === 'cron' && job.timezone) {
-      options.timezone = job.timezone
+    if (job.scheduleMode === 'cron') {
+      if (!job.cronExpression) {
+        return
+      }
+      const options: Record<string, unknown> = { protect: true }
+      if (job.timezone) {
+        options.timezone = job.timezone
+      }
+      const cron = new Cron(job.cronExpression, options, () => {
+        void this.executeJob(job.repoId, job.id)
+      })
+      this.cronJobs.set(job.id, cron)
+      return
     }
 
-    const cron = new Cron(cronExpression, options, () => {
+    if (!job.intervalMinutes) {
+      return
+    }
+
+    const intervalSeconds = job.intervalMinutes * 60
+    const startAt = job.nextRunAt ? new Date(job.nextRunAt) : new Date()
+    const cron = new Cron(startAt, { interval: intervalSeconds, protect: true }, () => {
       void this.executeJob(job.repoId, job.id)
     })
-
     this.cronJobs.set(job.id, cron)
   }
 
@@ -1007,7 +1014,11 @@ export class ScheduleRunner {
   private registerAllEnabledJobs(): void {
     const jobs = this.scheduleService.listAllEnabledJobs()
     for (const job of jobs) {
-      this.registerJob(job)
+      try {
+        this.registerJob(job)
+      } catch (error) {
+        logger.error(`Failed to register job ${job.id}:`, error)
+      }
     }
   }
 }

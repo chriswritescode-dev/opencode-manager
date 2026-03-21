@@ -66,25 +66,6 @@ function normalizeIntervalConfig(intervalMinutes: number, currentDate: number) {
   }
 }
 
-export function intervalMinutesToCronExpression(minutes: number): string {
-  if (minutes <= 0) {
-    throw new Error('Interval minutes must be greater than 0')
-  }
-  if (minutes < 60) {
-    return `*/${minutes} * * * *`
-  }
-  if (minutes === 60) {
-    return '0 * * * *'
-  }
-  if (minutes % 60 === 0) {
-    const hours = minutes / 60
-    if (hours <= 24) {
-      return `0 */${hours} * * *`
-    }
-  }
-  return `*/${minutes} * * * *`
-}
-
 export function computeNextRunAtForJob(job: ScheduleJob, currentDate: number): number | null {
   if (!job.enabled) {
     return null

@@ -21,7 +21,7 @@ const mocks = {
   buildCreateSchedulePersistenceInput: vi.fn(),
   buildUpdatedSchedulePersistenceInput: vi.fn(),
   computeNextRunAtForJob: vi.fn(),
-  intervalMinutesToCronExpression: vi.fn(),
+
   resolveOpenCodeModel: vi.fn(),
   proxyToOpenCodeWithDirectory: vi.fn(),
   addClient: vi.fn(),
@@ -55,7 +55,6 @@ vi.mock('../../src/services/schedule-config', () => ({
   buildCreateSchedulePersistenceInput: mocks.buildCreateSchedulePersistenceInput,
   buildUpdatedSchedulePersistenceInput: mocks.buildUpdatedSchedulePersistenceInput,
   computeNextRunAtForJob: mocks.computeNextRunAtForJob,
-  intervalMinutesToCronExpression: mocks.intervalMinutesToCronExpression,
 }))
 
 vi.mock('../../src/services/opencode-models', () => ({
@@ -741,7 +740,6 @@ describe('ScheduleRunner', () => {
     }
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
-    mocks.intervalMinutesToCronExpression.mockReturnValue('0 * * * *')
 
     const service = new ScheduleService({} as never)
     const runner = new ScheduleRunner(service)
@@ -750,6 +748,7 @@ describe('ScheduleRunner', () => {
     expect(mocks.listRunningScheduleRuns).toHaveBeenCalled()
     expect(mocks.listEnabledScheduleJobs).toHaveBeenCalled()
     expect(mockCronInstances).toHaveLength(1)
+    expect(mockCronInstances[0]?.options).toEqual(expect.objectContaining({ interval: 3600, protect: true }))
   })
 
   it('registers a cron job with timezone', async () => {
@@ -780,8 +779,8 @@ describe('ScheduleRunner', () => {
     await runner.start()
 
     expect(mockCronInstances).toHaveLength(1)
-    expect(mockCronInstances[0].pattern).toBe('0 9 * * *')
-    expect(mockCronInstances[0].options).toEqual(expect.objectContaining({ timezone: 'America/New_York', protect: true }))
+    expect(mockCronInstances[0]?.pattern).toBe('0 9 * * *')
+    expect(mockCronInstances[0]?.options).toEqual(expect.objectContaining({ timezone: 'America/New_York', protect: true }))
   })
 
   it('skips disabled jobs', async () => {
@@ -837,7 +836,6 @@ describe('ScheduleRunner', () => {
     }
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
-    mocks.intervalMinutesToCronExpression.mockReturnValue('*/30 * * * *')
 
     const service = new ScheduleService({} as never)
     const runner = new ScheduleRunner(service)
@@ -869,7 +867,6 @@ describe('ScheduleRunner', () => {
     }
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
-    mocks.intervalMinutesToCronExpression.mockReturnValue('0 * * * *')
 
     const service = new ScheduleService({} as never)
     const runner = new ScheduleRunner(service)
@@ -878,7 +875,6 @@ describe('ScheduleRunner', () => {
     expect(mockCronInstances).toHaveLength(1)
 
     const updatedJob = { ...mockJob, intervalMinutes: 30 }
-    mocks.intervalMinutesToCronExpression.mockReturnValue('*/30 * * * *')
     runner.registerJob(updatedJob)
 
     expect(mockCronStop).toHaveBeenCalled()
