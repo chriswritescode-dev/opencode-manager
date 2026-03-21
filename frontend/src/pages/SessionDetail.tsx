@@ -138,7 +138,7 @@ export function SessionDetail() {
   const sessionStatus = useSessionStatusForSession(sessionId);
   const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
-  const lastAssistantText = lastAssistantMessage?.parts.filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
+  const lastAssistantText = (lastAssistantMessage?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const hasActiveStream = hasIncompleteMessages && isSessionActive;
 
