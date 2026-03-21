@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -477,7 +477,7 @@ export function OpenCodeConfigManager() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle className="text-base">{config.name}</CardTitle>
+                      <CardTitle className="text-sm sm:text-base">{config.name}</CardTitle>
                       {config.isDefault && (
                         <Badge variant="default" className="text-green-500 bg-green-500/10">
                           Current
@@ -572,7 +572,7 @@ export function OpenCodeConfigManager() {
                 <FileText className="h-4 w-4 text-blue-500" />
                 <h4 className="text-sm font-medium truncate">Global Agent Instructions (AGENTS.md)</h4>
               </div>
-              <Edit className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
+              <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
             </button>
             <div className={`${expandedSections.agentsMd ? 'block' : 'hidden'} border-t border-border`}>
               <div className="p-4">
@@ -581,7 +581,7 @@ export function OpenCodeConfigManager() {
             </div>
           </div>
 
-          <h3 className="text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
+          <h3 className="text-base sm:text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
           <p className="text-sm text-muted-foreground mb-6">
             Add custom commands, agents, and MCP servers to your OpenCode configurations. Select a configuration below to edit its settings.
           </p>
@@ -589,7 +589,7 @@ export function OpenCodeConfigManager() {
           {configs.length > 0 && (
             <div className="space-y-6">
               <div className='px-1'>
-                <Label className="text-base font-medium">Select Configuration to Edit</Label>
+                <Label className="text-sm sm:text-base font-medium">Select Configuration to Edit</Label>
                 <Select 
                   onValueChange={(value) => {
                     const config = configs.find(c => c.name === value)
@@ -632,7 +632,7 @@ export function OpenCodeConfigManager() {
                             {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length} configured
                           </span>
                         </div>
-                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-1 sm:p-4 max-h-[50vh] overflow-y-auto">
@@ -669,7 +669,7 @@ export function OpenCodeConfigManager() {
                             {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length} configured
                           </span>
                         </div>
-                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-4 max-h-[50vh] overflow-y-auto">
@@ -706,7 +706,7 @@ export function OpenCodeConfigManager() {
                             {Object.keys((selectedConfig.content?.mcp as Record<string, unknown> | undefined) ?? {}).length} configured
                           </span>
                         </div>
-                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.mcp ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-4 max-h-[50vh] overflow-y-auto">
