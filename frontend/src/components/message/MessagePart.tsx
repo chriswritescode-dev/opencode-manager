@@ -1,8 +1,7 @@
 import { memo } from 'react'
 import type { components } from '@/api/opencode-types'
-import { Volume2, Loader2 } from 'lucide-react'
+import { Volume2, VolumeX, Loader2 } from 'lucide-react'
 import { TextPart } from './TextPart'
-import { SquareFill } from '@/components/ui/square-fill'
 import { PatchPart } from './PatchPart'
 import { ToolCallPart } from './ToolCallPart'
 import { RetryPart } from './RetryPart'
@@ -59,14 +58,12 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
   }
 }
 
-
-
 interface TTSButtonProps {
   content: string
   className?: string
 }
 
-export function TTSButton({ content, className = "" }: TTSButtonProps) {
+function TTSButton({ content, className = "" }: TTSButtonProps) {
   const { speak, stop, isEnabled, isPlaying, isLoading, originalText } = useTTS()
   
   if (!isEnabled || !content.trim()) {
@@ -93,15 +90,13 @@ export function TTSButton({ content, className = "" }: TTSButtonProps) {
       {isLoading && isThisPlaying ? (
         <Loader2 className="w-4 h-4 animate-spin" />
       ) : isThisPlaying ? (
-        <SquareFill className="w-4 h-4" />
+        <VolumeX className="w-4 h-4" />
       ) : (
         <Volume2 className="w-4 h-4" />
       )}
     </button>
   )
 }
-
-
 
 export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent }: MessagePartProps) {
   const copyableContent = getCopyableContent(part, allParts)
