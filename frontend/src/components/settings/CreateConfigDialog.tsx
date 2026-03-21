@@ -104,7 +104,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl max-h-[90vh] sm:max-h-[85vh] flex flex-col">
+        <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Create OpenCode Config</DialogTitle>
         </DialogHeader>
@@ -160,14 +160,15 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 flex-shrink-0 pt-4 border-t">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <div className="flex flex-row sm:flex-row justify-end gap-2 flex-shrink-0 pt-4 border-t">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1 sm:flex-none">
             Cancel
           </Button>
           <Button 
             type="button"
             onClick={(e) => handleSubmit(e)} 
             disabled={isUpdating || !name.trim() || !content.trim()}
+            className="flex-1 sm:flex-none"
           >
             {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Create
