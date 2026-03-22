@@ -28,7 +28,6 @@ export function createRalphEventHandler(
   const lastActivityTime = new Map<string, number>()
   const stallWatchdogs = new Map<string, NodeJS.Timeout>()
   const consecutiveStalls = new Map<string, number>()
-  const childSessions = new Map<string, Set<string>>()
   async function commitAndCleanupWorktree(state: RalphState): Promise<{ committed: boolean; cleaned: boolean }> {
     if (state.inPlace) {
       logger.log(`Ralph: in-place mode, skipping commit and cleanup`)
@@ -81,19 +80,6 @@ export function createRalphEventHandler(
     return { committed, cleaned }
   }
 
-  function findRalphParent(childSessionId: string): string | undefined {
-    for (const [ralphId, children] of childSessions.entries()) {
-      if (children.has(childSessionId)) {
-        return ralphId
-      }
-    }
-    return undefined
-  }
-
-  function recordActivity(sessionId: string): void {
-    lastActivityTime.set(sessionId, Date.now())
-  }
-
   function stopWatchdog(sessionId: string): void {
     const interval = stallWatchdogs.get(sessionId)
     if (interval) {
@@ -102,7 +88,6 @@ export function createRalphEventHandler(
     }
     lastActivityTime.delete(sessionId)
     consecutiveStalls.delete(sessionId)
-    childSessions.delete(sessionId)
   }
 
   function startWatchdog(sessionId: string): void {
@@ -129,11 +114,8 @@ export function createRalphEventHandler(
         const statusResult = await v2Client.session.status()
         const statuses = (statusResult.data ?? {}) as Record<string, { type: string }>
 
-        const sessionIds = [sessionId, ...(childSessions.get(sessionId) ?? [])]
-        const hasActiveWork = sessionIds.some(id => {
-          const status = statuses[id]?.type
-          return status === 'busy' || status === 'retry' || status === 'compact'
-        })
+        const status = statuses[sessionId]?.type
+        const hasActiveWork = status === 'busy' || status === 'retry' || status === 'compact'
 
         if (hasActiveWork) {
           lastActivityTime.set(sessionId, Date.now())
@@ -182,19 +164,6 @@ export function createRalphEventHandler(
   }
 
   async function terminateLoop(sessionId: string, state: RalphState, reason: string): Promise<void> {
-    const children = childSessions.get(sessionId)
-    if (children) {
-      await Promise.all(
-        Array.from(children).map(async (childId) => {
-          try {
-            await v2Client.session.abort({ sessionID: childId })
-          } catch {
-            // Child session may already be idle
-          }
-        })
-      )
-    }
-
     stopWatchdog(sessionId)
 
     const retryTimeout = retryTimeouts.get(sessionId)
@@ -221,49 +190,6 @@ export function createRalphEventHandler(
     let commitResult: { committed: boolean; cleaned: boolean } | undefined
     if (reason === 'completed') {
       commitResult = await commitAndCleanupWorktree(state)
-    }
-
-    if (state.parentSessionId) {
-      try {
-        let notificationText: string
-        if (state.inPlace) {
-          if (reason === 'completed') {
-            notificationText = [
-              `Ralph loop "${state.worktreeName}" completed (in-place).`,
-              '',
-              `Iteration: ${state.iteration}`,
-              `Changes are in the current directory on branch: ${state.worktreeBranch}`,
-            ].join('\n')
-          } else {
-            notificationText = `Ralph loop "${state.worktreeName}" terminated (in-place).\n\nReason: ${reason}\nIteration: ${state.iteration}\nDirectory: ${state.worktreeDir}\nBranch: ${state.worktreeBranch}`
-          }
-        } else if (reason === 'completed' && commitResult) {
-          const parts = [`Ralph loop "${state.worktreeName}" completed.`, '', `Iteration: ${state.iteration}`]
-          if (commitResult.committed) {
-            parts.push(`Changes committed on branch: ${state.worktreeBranch}`)
-          }
-          if (commitResult.cleaned) {
-            parts.push(`Worktree removed. Use \`git merge ${state.worktreeBranch}\` or \`git checkout ${state.worktreeBranch}\` to access the changes.`)
-          } else {
-            parts.push(`Worktree: ${state.worktreeDir}`)
-          }
-          notificationText = parts.join('\n')
-        } else {
-          notificationText = `Ralph loop "${state.worktreeName}" terminated.\n\nReason: ${reason}\nIteration: ${state.iteration}\nWorktree: ${state.worktreeDir}\nBranch: ${state.worktreeBranch}`
-        }
-
-        await client.session.promptAsync({
-          path: { id: state.parentSessionId },
-          body: {
-            parts: [{
-              type: 'text' as const,
-              text: notificationText,
-            }],
-          },
-        })
-      } catch (err) {
-        logger.error(`Ralph: failed to notify parent session`, err)
-      }
     }
   }
 
@@ -580,35 +506,6 @@ export function createRalphEventHandler(
       return
     }
 
-    if (event.type === 'session.created' || event.type === 'session.updated') {
-      const info = event.properties?.info as { id?: string; parentID?: string } | undefined
-      if (info?.id && info?.parentID) {
-        const parentState = ralphService.getActiveState(info.parentID)
-        if (parentState?.active) {
-          let children = childSessions.get(info.parentID)
-          if (!children) {
-            children = new Set()
-            childSessions.set(info.parentID, children)
-          }
-          children.add(info.id)
-          recordActivity(info.parentID)
-        }
-      }
-    }
-
-    if (event.type === 'session.status') {
-      const eventSessionId = event.properties?.sessionID as string
-      if (eventSessionId) {
-        if (ralphService.getActiveState(eventSessionId)?.active) {
-          recordActivity(eventSessionId)
-        }
-        const parentId = findRalphParent(eventSessionId)
-        if (parentId) {
-          recordActivity(parentId)
-        }
-      }
-    }
-
     if (event.type === 'session.error') {
       const errorProps = event.properties as { sessionID?: string; error?: { name?: string } }
       const eventSessionId = errorProps?.sessionID
@@ -622,21 +519,6 @@ export function createRalphEventHandler(
         logger.log(`Ralph: session ${eventSessionId} aborted, terminating loop`)
         await terminateLoop(eventSessionId, state, 'user_aborted')
       }
-
-      const parentId = findRalphParent(eventSessionId)
-      if (parentId) {
-        const parentState = ralphService.getActiveState(parentId)
-        if (parentState?.active) {
-          logger.log(`Ralph: child session abort detected, terminating parent loop ${parentId}`)
-          await terminateLoop(parentId, parentState, 'user_aborted')
-        }
-      }
-
-      const childLoops = ralphService.findByParentSessionId(eventSessionId)
-      for (const childLoop of childLoops) {
-        logger.log(`Ralph: launcher session ${eventSessionId} aborted, terminating child loop ${childLoop.sessionId}`)
-        await terminateLoop(childLoop.sessionId, childLoop, 'user_aborted')
-      }
       return
     }
 
@@ -647,13 +529,6 @@ export function createRalphEventHandler(
 
     const state = ralphService.getActiveState(sessionId)
     if (!state || !state.active) return
-
-    const parentId = findRalphParent(sessionId)
-    if (parentId) {
-      recordActivity(parentId)
-    }
-
-    recordActivity(sessionId)
 
     try {
       // Re-check state right before calling phase handler as extra safety
@@ -689,7 +564,6 @@ export function createRalphEventHandler(
     }
     lastActivityTime.clear()
     consecutiveStalls.clear()
-    childSessions.clear()
     logger.log('Ralph: cleared all retry timeouts')
   }
 

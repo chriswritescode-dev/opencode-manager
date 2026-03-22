@@ -408,7 +408,6 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       audit: boolean
       agent?: string
       model?: { providerID: string; modelID: string }
-      parentSessionId?: string
       inPlace?: boolean
       onLoopStarted?: (sessionId: string) => void
     }
@@ -506,7 +505,6 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         audit: options.audit,
         errorCount: 0,
         auditCount: 0,
-        parentSessionId: options.parentSessionId,
         inPlace: options.inPlace,
       }
 
@@ -873,7 +871,6 @@ Do NOT output text without also making this tool call.
               agent: 'code',
               model: ralphModel,
               inPlace: args.inPlace,
-              parentSessionId: context.sessionID,
               onLoopStarted: (id) => ralphHandler.startWatchdog(id),
             })
           },
@@ -1045,7 +1042,6 @@ Do NOT output text without also making this tool call.
                 audit: stoppedState.audit,
                 errorCount: 0,
                 auditCount: 0,
-                parentSessionId: stoppedState.parentSessionId,
                 inPlace: stoppedState.inPlace,
               }
 
