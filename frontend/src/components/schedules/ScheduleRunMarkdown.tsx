@@ -10,8 +10,8 @@ type ScheduleRunMarkdownProps = {
 
 export function ScheduleRunMarkdown({ content }: ScheduleRunMarkdownProps) {
   return (
-    <div className="mt-4 overflow-hidden rounded-lg border border-border/60 bg-background/40">
-      <div className="prose prose-invert prose-enhanced max-w-none break-words p-4 text-foreground leading-snug">
+    <div className="overflow-hidden">
+      <div className="prose prose-invert prose-enhanced max-w-none break-words text-foreground leading-snug">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeHighlight, rehypeRaw]}

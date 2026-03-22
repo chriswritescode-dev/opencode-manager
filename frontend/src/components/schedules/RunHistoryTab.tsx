@@ -1,13 +1,14 @@
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ScheduleRunMarkdown } from '@/components/schedules/ScheduleRunMarkdown'
 import { getRunTone } from '@/components/schedules/schedule-utils'
-import { History, Loader2, Square, TerminalSquare } from 'lucide-react'
+import { Ban, CheckCircle2, ChevronDown, History, Loader2, XCircle } from 'lucide-react'
 
 interface RunHistoryTabProps {
   repoId: number
@@ -22,6 +23,82 @@ interface RunHistoryTabProps {
   cancelRunPending: boolean
 }
 
+interface RunDetailPanelProps {
+  repoId: number
+  activeRun: ScheduleRun | null
+  selectedRunLoading: boolean
+  onCancelRun: () => void
+  cancelRunPending: boolean
+}
+
+function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancelRun, cancelRunPending }: RunDetailPanelProps) {
+  const navigate = useNavigate()
+
+  if (selectedRunLoading && !activeRun) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    )
+  }
+
+  if (!activeRun) {
+    return <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a run to inspect logs and output.</div>
+  }
+
+  return (
+    <Tabs key={`${activeRun.id}-${String(activeRun.responseText ? 'response' : activeRun.errorText ? 'error' : 'log')}`} defaultValue={activeRun.responseText ? 'response' : activeRun.errorText ? 'error' : 'log'} className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="flex items-center justify-center gap-2 px-2 py-1.5">
+        <TabsList className="h-auto gap-0 rounded-none border-0 bg-transparent p-0">
+          <TabsTrigger value="log" className="rounded-none border-b-2 border-transparent px-3 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">Log</TabsTrigger>
+          <TabsTrigger value="response" disabled={!activeRun.responseText} className="rounded-none border-b-2 border-transparent px-3 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">Assistant Output</TabsTrigger>
+          <TabsTrigger value="error" disabled={!activeRun.errorText} className="rounded-none border-b-2 border-transparent px-3 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">{activeRun.status === 'cancelled' ? 'Details' : 'Error'}</TabsTrigger>
+        </TabsList>
+      </div>
+      {(activeRun.status === 'running' || activeRun.sessionId || activeRun.responseText) && (
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <div className="flex items-center gap-2">
+            {activeRun.sessionId && (
+              <Button variant="outline" size="sm" onClick={() => navigate(`/repos/${repoId}/sessions/${activeRun.sessionId}`)}>
+                Open session
+              </Button>
+            )}
+          </div>
+          <Button variant="outline" size="sm" onClick={onCancelRun} disabled={cancelRunPending || activeRun.status !== 'running'}>
+            {cancelRunPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+            Cancel run
+          </Button>
+        </div>
+      )}
+      <TabsContent value="log" className="mt-0 min-h-0 flex-1 overflow-y-auto px-0 py-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+        {selectedRunLoading && !activeRun ? (
+          <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : (
+          <pre className="whitespace-pre-wrap break-words text-sm font-mono leading-6">{activeRun.logText ?? 'No log text captured.'}</pre>
+        )}
+      </TabsContent>
+      <TabsContent value="response" className="mt-0 min-h-0 flex-1 flex flex-col overflow-hidden">
+        {selectedRunLoading && !activeRun ? (
+          <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : activeRun.responseText ? (
+          <div className="min-h-0 flex-1 overflow-y-auto px-0 py-2 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+            <ScheduleRunMarkdown content={activeRun.responseText} />
+          </div>
+        ) : (
+          <div className="p-3"><pre className="whitespace-pre-wrap break-words text-sm font-mono leading-6">No assistant output captured.</pre></div>
+        )}
+      </TabsContent>
+      <TabsContent value="error" className="mt-0 min-h-0 flex-1 overflow-y-auto px-0 py-3 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+        {selectedRunLoading && !activeRun ? (
+          <div className="flex items-center justify-center p-4"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+        ) : (
+          <pre className={`whitespace-pre-wrap break-words text-sm font-mono leading-6 ${activeRun.status === 'cancelled' ? 'text-muted-foreground' : 'text-red-300'}`}>{activeRun.errorText ?? 'No error recorded.'}</pre>
+        )}
+      </TabsContent>
+    </Tabs>
+  )
+}
+
 export function RunHistoryTab({
   repoId,
   selectedJob,
@@ -34,7 +111,27 @@ export function RunHistoryTab({
   onCancelRun,
   cancelRunPending,
 }: RunHistoryTabProps) {
-  const navigate = useNavigate()
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(selectedRunId)
+
+  useEffect(() => {
+    setExpandedRunId(selectedRunId)
+  }, [selectedRunId])
+
+  function getRunStatusIcon(status: ScheduleRun['status']) {
+    if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
+    if (status === 'failed') return <XCircle className="h-3.5 w-3.5 text-red-400" />
+    if (status === 'running') return <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-400" />
+    return <Ban className="h-3.5 w-3.5 text-muted-foreground" />
+  }
+
+  function handleCardClick(runId: number) {
+    if (expandedRunId === runId) {
+      setExpandedRunId(null)
+    } else {
+      setExpandedRunId(runId)
+      onSelectRun(runId)
+    }
+  }
 
   if (!selectedJob) {
     if (selectedRunLoading) {
@@ -58,13 +155,72 @@ export function RunHistoryTab({
   }
 
   return (
-    <Card className="flex min-h-0 flex-1 flex-col border-border/70">
-      <CardHeader>
-        <CardTitle className="text-base flex items-center gap-2"><TerminalSquare className="h-4 w-4" /> Run History</CardTitle>
-        <CardDescription>Inspect manual and scheduled executions, including assistant output and session handoff.</CardDescription>
-      </CardHeader>
-      <CardContent className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-rows-1 grid-rows-[minmax(0,180px)_minmax(0,1fr)]">
-        <div className="min-h-0 space-y-2 overflow-y-auto pr-1">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div className="min-h-0 flex-1 overflow-hidden pt-2 xl:gap-4 xl:grid xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-rows-1">
+
+        {/* Mobile: collapsible list (hidden on xl+) */}
+        <div className="xl:hidden flex flex-col min-h-0 flex-1 h-full">
+          <div className="min-h-0 flex-1 overflow-y-auto pt-4 pb-6 px-2 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+            {runsLoading ? (
+              <div className="flex items-center justify-center p-6"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : runs?.length ? runs.map((run, index) => (
+              <div
+                key={run.id}
+                className={`rounded-xl border overflow-hidden transition-all bg-card ${
+                  expandedRunId === run.id
+                    ? 'border-border/70'
+                    : 'border-border/70'
+                } ${index === 0 ? 'mt-0' : 'mt-2'}`}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleCardClick(run.id)}
+                  className="w-full px-3 py-2 text-left flex items-center justify-between gap-2"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {getRunStatusIcon(run.status)}
+                        <Badge className={getRunTone(run)}>{run.status}</Badge>
+                      </div>
+                      <span className="text-xs text-muted-foreground">{run.triggerSource}</span>
+                    </div>
+                    <p className="mt-2 truncate text-sm font-medium leading-tight">
+                      {run.sessionTitle ?? 'No session recorded'}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">{new Date(run.startedAt).toLocaleString()}</p>
+                    {run.errorText && (
+                      <p className="mt-0.5 truncate text-xs text-red-400/80">{run.errorText}</p>
+                    )}
+                  </div>
+                  <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform duration-200 ${expandedRunId === run.id ? 'rotate-180' : ''}`} />
+                </button>
+                {expandedRunId === run.id && (
+                  <div className="border-t border-border/60 flex flex-col" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+                    <div className="flex flex-col min-h-0 flex-1 overflow-hidden">
+                      <RunDetailPanel
+                        repoId={repoId}
+                        activeRun={activeRun}
+                        selectedRunLoading={selectedRunLoading}
+                        onCancelRun={onCancelRun}
+                        cancelRunPending={cancelRunPending}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )) : (
+              <Alert>
+                <History className="h-4 w-4" />
+                <AlertTitle>No runs yet</AlertTitle>
+                <AlertDescription>Use Run now to generate the first execution record and log bundle.</AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </div>
+
+        {/* Desktop: original two-column layout (hidden below xl) */}
+        <div className="hidden xl:block min-h-0 space-y-2 overflow-y-auto pr-1">
           {runsLoading ? (
             <div className="flex items-center justify-center p-6"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
           ) : runs?.length ? runs.map((run) => (
@@ -72,18 +228,26 @@ export function RunHistoryTab({
               key={run.id}
               type="button"
               onClick={() => onSelectRun(run.id)}
-              className={`w-full rounded-xl border-2 px-4 py-3 text-left transition-all ${
+              className={`w-full rounded-xl border px-4 py-3 text-left transition-all ${
                 selectedRunId === run.id
                   ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
                   : 'border-border/70 bg-background/60 hover:bg-accent/40'
               }`}
             >
               <div className="flex items-center justify-between gap-2">
-                <Badge className={getRunTone(run)}>{run.status}</Badge>
+                <div className="flex items-center gap-1.5">
+                  {getRunStatusIcon(run.status)}
+                  <Badge className={getRunTone(run)}>{run.status}</Badge>
+                </div>
                 <span className="text-xs text-muted-foreground">{run.triggerSource}</span>
               </div>
-              <p className="mt-3 text-sm font-medium">{new Date(run.startedAt).toLocaleString()}</p>
-              <p className="mt-1 truncate text-xs text-muted-foreground">{run.sessionTitle ?? run.errorText ?? 'No session metadata recorded'}</p>
+              <p className="mt-2 truncate text-sm font-medium leading-tight">
+                {run.sessionTitle ?? 'No session recorded'}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{new Date(run.startedAt).toLocaleString()}</p>
+              {run.errorText && (
+                <p className="mt-0.5 truncate text-xs text-red-400/80">{run.errorText}</p>
+              )}
             </button>
           )) : (
             <Alert>
@@ -94,69 +258,18 @@ export function RunHistoryTab({
           )}
         </div>
 
-        <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/60 p-4">
-          {activeRun ? (
-            <Tabs key={`${activeRun.id}-${String(activeRun.responseText ? 'response' : activeRun.errorText ? 'error' : 'log')}`} defaultValue={activeRun.responseText ? 'response' : activeRun.errorText ? 'error' : 'log'} className="flex min-h-0 flex-1 flex-col">
-              <div className="mb-3 flex flex-wrap items-center gap-2">
-                {activeRun.status === 'running' && (
-                  <Button variant="outline" size="sm" onClick={onCancelRun} disabled={cancelRunPending}>
-                    {cancelRunPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Square className="mr-2 h-4 w-4" />}
-                    Cancel run
-                  </Button>
-                )}
-                {activeRun.sessionId && (
-                  <Button variant="outline" size="sm" onClick={() => navigate(`/repos/${repoId}/sessions/${activeRun.sessionId}`)}>
-                    Open session
-                  </Button>
-                )}
-              </div>
-
-              <TabsList>
-                <TabsTrigger value="log">Log</TabsTrigger>
-                <TabsTrigger value="response" disabled={!activeRun.responseText}>Assistant Output</TabsTrigger>
-                <TabsTrigger value="error" disabled={!activeRun.errorText}>{activeRun.status === 'cancelled' ? 'Details' : 'Error'}</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="log" className="mt-4 min-h-0 flex-1 overflow-y-auto">
-                {selectedRunLoading && !activeRun ? (
-                  <div className="flex items-center justify-center p-6"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                ) : (
-                  <pre className="whitespace-pre-wrap break-words text-sm font-mono leading-6">{activeRun.logText ?? 'No log text captured.'}</pre>
-                )}
-              </TabsContent>
-              <TabsContent value="response" className="mt-4 min-h-0 flex-1 overflow-hidden">
-                {selectedRunLoading && !activeRun ? (
-                  <div className="flex items-center justify-center p-6"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                ) : activeRun.responseText ? (
-                  <Tabs defaultValue="preview" className="flex min-h-0 h-full flex-1 flex-col overflow-hidden">
-                    <TabsList>
-                      <TabsTrigger value="preview">Preview</TabsTrigger>
-                      <TabsTrigger value="markdown">Markdown</TabsTrigger>
-                    </TabsList>
-                    <TabsContent value="preview" className="mt-4 min-h-0 flex-1 overflow-y-auto">
-                      <ScheduleRunMarkdown content={activeRun.responseText} />
-                    </TabsContent>
-                    <TabsContent value="markdown" className="mt-4 min-h-0 flex-1 overflow-y-auto">
-                      <pre className="whitespace-pre-wrap break-words text-sm font-mono leading-6">{activeRun.responseText}</pre>
-                    </TabsContent>
-                  </Tabs>
-                ) : (
-                  <pre className="whitespace-pre-wrap break-words text-sm font-mono leading-6">No assistant output captured.</pre>
-                )}
-              </TabsContent>
-              <TabsContent value="error" className="mt-4 min-h-0 flex-1 overflow-y-auto">
-                {selectedRunLoading && !activeRun ? (
-                  <div className="flex items-center justify-center p-6"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-                ) : (
-                  <pre className={`whitespace-pre-wrap break-words text-sm font-mono leading-6 ${activeRun.status === 'cancelled' ? 'text-muted-foreground' : 'text-red-300'}`}>{activeRun.errorText ?? 'No error recorded.'}</pre>
-                )}
-              </TabsContent>
-            </Tabs>
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Select a run to inspect logs and output.</div>
-          )}
+        {/* Desktop: detail panel (hidden below xl) */}
+        <div className="hidden xl:flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/60 p-4">
+          <RunDetailPanel
+            repoId={repoId}
+            activeRun={activeRun}
+            selectedRunLoading={selectedRunLoading}
+            onCancelRun={onCancelRun}
+            cancelRunPending={cancelRunPending}
+          />
         </div>
-      </CardContent>
-    </Card>
+
+      </div>
+    </div>
   )
 }

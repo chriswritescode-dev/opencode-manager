@@ -216,7 +216,7 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
         {totalPending > 0 && children && <DropdownMenuSeparator />}
         {children}
         {children && <DropdownMenuSeparator />}
-        <DropdownMenuItem onClick={open} className="gap-2">
+        <DropdownMenuItem onClick={open} className="gap-2 bg-muted">
           <Settings className="w-4 h-4" />
           <span>Settings</span>
         </DropdownMenuItem>

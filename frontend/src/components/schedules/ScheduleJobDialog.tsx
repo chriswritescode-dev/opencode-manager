@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
+import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@opencode-manager/shared/types'
 import { getProvidersWithModels } from '@/api/providers'
+import { createOpenCodeClient } from '@/api/opencode'
+import { OPENCODE_API_ENDPOINT } from '@/config'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -18,13 +20,14 @@ import {
   formatDraftScheduleSummary,
   getLocalTimeZone,
   intervalOptions,
-  promptTemplateOptions,
   schedulePresetOptions,
-  type PromptTemplateOption,
   type SchedulePreset,
   weekdayOptions,
 } from '@/components/schedules/schedule-utils'
-import { Info, Loader2, Sparkles } from 'lucide-react'
+import { Check, Info, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
+import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
+import { PromptTemplateDialog } from './PromptTemplateDialog'
+import { DeleteDialog } from '@/components/ui/delete-dialog'
 
 type ScheduleJobDialogProps = {
   open: boolean
@@ -61,9 +64,15 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
   const [agentSlug, setAgentSlug] = useState('')
   const [model, setModel] = useState('')
   const [prompt, setPrompt] = useState('')
-  const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<string | null>(null)
+  const [selectedPromptTemplateId, setSelectedPromptTemplateId] = useState<number | null>(null)
   const [skillSlugs, setSkillSlugs] = useState('')
   const [skillNotes, setSkillNotes] = useState('')
+  const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
+  const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
+
+  const { data: templates = [] } = usePromptTemplates()
+  const deleteTemplateMutation = useDeletePromptTemplate()
 
   const { data: providerModels = [] } = useQuery({
     queryKey: ['providers-with-models', 'schedule-dialog'],
@@ -72,16 +81,66 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
     staleTime: 5 * 60 * 1000,
   })
 
+  const { data: agents = [] } = useQuery({
+    queryKey: ['opencode-agents', 'schedule-dialog'],
+    queryFn: async () => {
+      const client = createOpenCodeClient(OPENCODE_API_ENDPOINT)
+      return await client.listAgents()
+    },
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const { data: openCodeConfig } = useQuery({
+    queryKey: ['opencode-config', 'schedule-dialog'],
+    queryFn: async () => {
+      const client = createOpenCodeClient(OPENCODE_API_ENDPOINT)
+      return await client.getConfig()
+    },
+    enabled: open,
+    staleTime: 5 * 60 * 1000,
+  })
+
   const modelOptions = useMemo<ComboboxOption[]>(() => {
-    return providerModels.flatMap((provider) =>
-      provider.models.map((providerModel) => ({
-        value: `${provider.id}/${providerModel.id}`,
-        label: providerModel.name || providerModel.id,
-        description: `${provider.id}/${providerModel.id}`,
-        group: provider.name,
-      })),
+    const configuredModels: ComboboxOption[] = []
+    const configuredValues = new Set<string>()
+
+    for (const configModel of [openCodeConfig?.model, openCodeConfig?.small_model]) {
+      if (!configModel || configuredValues.has(configModel)) continue
+      configuredValues.add(configModel)
+      const [providerId, ...modelParts] = configModel.split('/')
+      const modelId = modelParts.join('/')
+      const provider = providerModels.find((p) => p.id === providerId)
+      const providerModel = provider?.models.find((m) => m.id === modelId)
+      configuredModels.push({
+        value: configModel,
+        label: providerModel?.name || modelId,
+        description: configModel,
+        group: 'Configured',
+      })
+    }
+
+    const allModels = providerModels.flatMap((provider) =>
+      provider.models
+        .filter((providerModel) => !configuredValues.has(`${provider.id}/${providerModel.id}`))
+        .map((providerModel) => ({
+          value: `${provider.id}/${providerModel.id}`,
+          label: providerModel.name || providerModel.id,
+          description: `${provider.id}/${providerModel.id}`,
+          group: provider.name,
+        })),
     )
-  }, [providerModels])
+
+    return [...configuredModels, ...allModels]
+  }, [providerModels, openCodeConfig])
+
+  const agentOptions = useMemo<ComboboxOption[]>(() => {
+    return agents.map((agent) => ({
+      value: agent.name,
+      label: agent.name,
+      description: agent.description,
+    }))
+  }, [agents])
 
   useEffect(() => {
     if (!open) {
@@ -103,12 +162,13 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
     setAgentSlug(job?.agentSlug ?? '')
     setModel(job?.model ?? '')
     setPrompt(job?.prompt ?? '')
-    setSelectedPromptTemplateId(promptTemplateOptions.find((template) => template.prompt === (job?.prompt ?? ''))?.id ?? null)
+    const matchingTemplate = templates.find((template) => template.prompt === (job?.prompt ?? ''))
+    setSelectedPromptTemplateId(matchingTemplate ? matchingTemplate.id : null)
     setSkillSlugs(job?.skillMetadata?.skillSlugs.join(', ') ?? '')
     setSkillNotes(job?.skillMetadata?.notes ?? '')
-  }, [job, open])
+  }, [job, open, templates])
 
-  const applyPromptTemplate = (template: PromptTemplateOption) => {
+  const applyPromptTemplate = (template: PromptTemplate) => {
     setSelectedPromptTemplateId(template.id)
     setName(template.suggestedName)
     setDescription(template.suggestedDescription)
@@ -167,9 +227,9 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="bg-black/80"
-        className="flex h-[calc(100dvh-1rem)] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh]"
+        className="flex h-dvh max-h-dvh w-full max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh] sm:w-[calc(100vw-1rem)]"
       >
-        <DialogHeader className="shrink-0 space-y-1 px-6 pt-6 pb-3 pr-14">
+        <DialogHeader className="shrink-0 space-y-1 px-3 sm:px-6 pt-6 pb-3 pr-14">
           <DialogTitle>{job ? 'Edit schedule' : 'New schedule'}</DialogTitle>
           <DialogDescription className="mt-0">
             Create a reusable repo job with a visual schedule builder, manual runs, and optional advanced metadata.
@@ -177,16 +237,16 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
         </DialogHeader>
 
         <Tabs defaultValue="basics" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <div className="border-b border-border px-6 pb-3">
+          <div className="border-b border-border px-3 sm:px-6 pb-3">
             <TabsList className="grid h-9 w-full grid-cols-4 bg-card p-0.5">
-              <TabsTrigger value="basics" className="h-8 px-2 text-xs sm:text-sm">General</TabsTrigger>
-              <TabsTrigger value="timing" className="h-8 px-2 text-xs sm:text-sm">Timing</TabsTrigger>
-              <TabsTrigger value="prompt" className="h-8 px-2 text-xs sm:text-sm">Prompt</TabsTrigger>
-              <TabsTrigger value="skills" className="h-8 px-2 text-xs sm:text-sm">Advanced</TabsTrigger>
+              <TabsTrigger value="basics" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">General</TabsTrigger>
+              <TabsTrigger value="timing" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Timing</TabsTrigger>
+              <TabsTrigger value="prompt" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Prompt</TabsTrigger>
+              <TabsTrigger value="skills" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Skills</TabsTrigger>
             </TabsList>
           </div>
 
-          <TabsContent value="basics" className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-5">
+          <TabsContent value="basics" className="mt-0 min-h-0 flex-1 overflow-y-auto pt-4 pb-5">
             <div className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -203,7 +263,14 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
               <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_220px] sm:items-end">
                 <div className="space-y-2">
                   <Label htmlFor="schedule-agent">Agent slug</Label>
-                  <Input id="schedule-agent" value={agentSlug} onChange={(event) => setAgentSlug(event.target.value)} placeholder="code" />
+                  <Combobox
+                    value={agentSlug}
+                    onChange={setAgentSlug}
+                    options={agentOptions}
+                    placeholder="Select an agent"
+                    allowCustomValue
+                    showClear
+                  />
                 </div>
 
                 <div className="space-y-2">
@@ -234,7 +301,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
             </div>
           </TabsContent>
 
-          <TabsContent value="timing" className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-5">
+          <TabsContent value="timing" className="px-3 mt-0 min-h-0 flex-1 overflow-y-auto sm:px-6 pt-4 pb-5">
             <div className="space-y-4">
               <div className="space-y-3 rounded-lg border border-border bg-card p-4">
                 <div>
@@ -410,35 +477,78 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
             </div>
           </TabsContent>
 
-          <TabsContent value="prompt" className="mt-0 min-h-0 flex-1 overflow-y-auto px-6 pt-4 pb-5">
+          <TabsContent value="prompt" className="mt-0 min-h-0 flex-1 overflow-y-auto px-3 pt-4 pb-5 sm:px-4">
             <div className="space-y-4">
               <div className="space-y-2">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center justify-center gap-2">
                   <Label>Prompt templates</Label>
-                  <p className="text-xs text-muted-foreground">Applying a template fills the name, description, and prompt.</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 gap-1 text-xs"
+                    onClick={() => { setEditingTemplate(undefined); setTemplateDialogOpen(true) }}
+                  >
+                    <Plus className="h-3 w-3" />
+                    New
+                  </Button>
                 </div>
 
                 <div className="grid gap-3 lg:grid-cols-2">
-                  {promptTemplateOptions.map((template) => {
+                  {templates.map((template) => {
                     const isSelected = selectedPromptTemplateId === template.id
 
                     return (
-                      <button
-                        key={template.id}
-                        type="button"
-                        onClick={() => applyPromptTemplate(template)}
-                        className={`rounded-xl border p-4 text-left transition-colors ${isSelected ? 'border-primary/30 bg-accent' : 'border-border bg-card hover:bg-accent/40'}`}
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Badge variant="outline" className="text-[10px] uppercase tracking-wide">{template.category}</Badge>
-                          <Badge variant="outline" className="text-[10px] uppercase tracking-wide">{template.cadenceHint}</Badge>
+                      <div key={template.id} className="relative group">
+                        <button
+                          type="button"
+                          onClick={() => applyPromptTemplate(template)}
+                          className={`w-full rounded-xl border-2 p-4 text-left transition-all ${
+                            isSelected
+                              ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+                              : 'border-border bg-card hover:bg-accent/40'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge className="text-[10px] uppercase tracking-wide border-transparent bg-orange-500 text-white">
+                              {template.category}
+                            </Badge>
+                            <Badge className="text-[10px] uppercase tracking-wide border-transparent bg-slate-600 text-white">
+                              {template.cadenceHint}
+                            </Badge>
+                          </div>
+                          <div className="mt-3">
+                            <p className="text-sm font-semibold">{template.title}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
+                          </div>
+                          <p className="mt-3 text-xs text-muted-foreground line-clamp-3">{template.suggestedDescription}</p>
+                          {isSelected && (
+                            <div className="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
+                              <Check className="h-3 w-3 text-primary-foreground" />
+                            </div>
+                          )}
+                        </button>
+                        <div className={`absolute top-2 right-10 flex gap-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={(e) => { e.stopPropagation(); setEditingTemplate(template); setTemplateDialogOpen(true) }}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-destructive hover:text-destructive"
+                            onClick={(e) => { e.stopPropagation(); setDeletingTemplateId(template.id) }}
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
                         </div>
-                        <div className="mt-3">
-                          <p className="text-sm font-semibold">{template.title}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
-                        </div>
-                        <p className="mt-3 text-xs text-muted-foreground line-clamp-3">{template.suggestedDescription}</p>
-                      </button>
+                      </div>
                     )
                   })}
                 </div>
@@ -489,14 +599,34 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
           </TabsContent>
         </Tabs>
 
-        <DialogFooter className="mt-0 shrink-0 border-t border-border px-6 py-4">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid}>
+        <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row gap-2 sm:justify-end">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">Cancel</Button>
+          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid} className="flex-1 sm:flex-none">
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isSaving ? 'Saving...' : job ? 'Save changes' : 'Create schedule'}
           </Button>
-        </DialogFooter>
+        </div>
       </DialogContent>
+      <PromptTemplateDialog
+        open={templateDialogOpen}
+        onOpenChange={setTemplateDialogOpen}
+        template={editingTemplate}
+      />
+      <DeleteDialog
+        open={deletingTemplateId !== null}
+        onOpenChange={(open) => { if (!open && !deleteTemplateMutation.isPending) setDeletingTemplateId(null) }}
+        onConfirm={() => {
+          if (deletingTemplateId !== null) {
+            deleteTemplateMutation.mutate(deletingTemplateId, {
+              onSuccess: () => setDeletingTemplateId(null),
+            })
+          }
+        }}
+        onCancel={() => { if (!deleteTemplateMutation.isPending) setDeletingTemplateId(null) }}
+        title="Delete template"
+        description="Are you sure you want to delete this template?"
+        isDeleting={deleteTemplateMutation.isPending}
+      />
     </Dialog>
   )
 }
