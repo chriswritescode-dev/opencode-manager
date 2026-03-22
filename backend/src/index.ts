@@ -36,6 +36,7 @@ import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
 import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
+import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -263,6 +264,7 @@ protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/memory', createMemoryRoutes(db))
+protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 
 app.route('/api', protectedApi)
 

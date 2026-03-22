@@ -101,4 +101,7 @@ export type {
   ScheduleRun,
   CreateScheduleJobRequest,
   UpdateScheduleJobRequest,
+  PromptTemplate,
+  CreatePromptTemplateRequest,
+  UpdatePromptTemplateRequest,
 } from '../schemas/schedule'

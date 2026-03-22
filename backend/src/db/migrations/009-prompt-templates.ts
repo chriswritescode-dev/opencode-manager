@@ -1,0 +1,315 @@
+import type { Migration } from '../migration-runner'
+
+const migration: Migration = {
+  version: 9,
+  name: '009-prompt-templates',
+
+  up(db) {
+    db.run(`
+      CREATE TABLE prompt_templates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        category TEXT NOT NULL,
+        cadence_hint TEXT NOT NULL,
+        suggested_name TEXT NOT NULL,
+        suggested_description TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        prompt TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `)
+
+    const now = Date.now()
+    const insert = db.prepare(`
+      INSERT INTO prompt_templates (title, category, cadence_hint, suggested_name, suggested_description, description, prompt, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+
+    insert.run(
+      'Repo Health Report',
+      'Health',
+      'Weekly',
+      'Weekly repo health report',
+      'Summarize code health, risk areas, and the next highest-leverage follow-ups.',
+      'A broad weekly review of project health, risks, and recommended next actions.',
+      [
+        'Review this repository and prepare a concise weekly health report.',
+        '',
+        'Focus on:',
+        '- overall code health and maintainability signals',
+        '- risky or stale areas in the codebase',
+        '- flaky, fragile, or untested workflows',
+        '- notable recent drift in tooling, scripts, or structure',
+        '',
+        'Do not modify files or create commits.',
+        '',
+        'Return the result in these sections:',
+        '1. Overall Status',
+        '2. Key Risks',
+        '3. What Changed or Drifted',
+        '4. Recommended Next Actions',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Dependency Watchlist',
+      'Maintenance',
+      'Weekly',
+      'Dependency watchlist',
+      'Review dependency health, upgrade pressure, and risky package drift.',
+      'Surfaces outdated, risky, or inconsistent dependencies and upgrade priorities.',
+      [
+        'Audit this repository for dependency risk and upgrade pressure.',
+        '',
+        'Inspect package manifests, lockfiles, build tooling, runtime dependencies, and obvious version drift.',
+        '',
+        'Focus on:',
+        '- outdated or inconsistent package versions',
+        '- packages that look risky, abandoned, duplicated, or unnecessary',
+        '- tooling mismatches that could cause local vs CI drift',
+        '- high-priority upgrades to tackle next',
+        '',
+        'Do not change files.',
+        '',
+        'Return:',
+        '1. Highest Priority Upgrades',
+        '2. Risky or Inconsistent Dependencies',
+        '3. Tooling Drift',
+        '4. Suggested Upgrade Order',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Release Readiness Review',
+      'Release',
+      'Before release',
+      'Release readiness review',
+      'Check whether the repo looks ready to ship and what could block release confidence.',
+      'A pre-release checkpoint for blockers, missing validation, and confidence gaps.',
+      [
+        'Review this repository for release readiness.',
+        '',
+        'Focus on anything that would reduce confidence in shipping soon, including:',
+        '- missing validation, tests, or smoke coverage',
+        '- fragile configuration or deployment assumptions',
+        '- unfinished, ambiguous, or risky recent work',
+        '- docs or scripts that appear stale relative to the implementation',
+        '',
+        'Do not edit files.',
+        '',
+        'Return:',
+        '1. Release Confidence',
+        '2. Blockers',
+        '3. Follow-ups Before Shipping',
+        '4. Nice-to-have Cleanup After Release',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Test Stability Audit',
+      'Quality',
+      'Weekly',
+      'Test stability audit',
+      'Find flaky areas, missing coverage signals, and brittle testing patterns.',
+      'Looks at test quality, slow paths, brittle coverage, and likely flaky areas.',
+      [
+        'Inspect this repository for test stability and coverage risk.',
+        '',
+        'Focus on:',
+        '- flaky or brittle test patterns',
+        '- important product areas with weak or missing coverage',
+        '- slow or overcomplicated test flows',
+        '- test setup/config problems that could cause false confidence',
+        '',
+        'Do not modify files.',
+        '',
+        'Return:',
+        '1. Confidence Gaps',
+        '2. Flaky or Fragile Areas',
+        '3. Coverage Priorities',
+        '4. Suggested Test Improvements',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Docs Drift Review',
+      'Docs',
+      'Biweekly',
+      'Docs drift review',
+      'Check whether README, setup steps, and docs still match the current repo.',
+      'Finds README/setup/documentation drift relative to the actual codebase.',
+      [
+        'Review this repository for documentation drift.',
+        '',
+        'Compare README files, setup instructions, scripts, and other repo docs against the actual implementation and project structure.',
+        '',
+        'Focus on:',
+        '- stale setup or run instructions',
+        '- missing documentation for important workflows',
+        '- docs that no longer match the codebase structure or tooling',
+        '- confusing or duplicated documentation',
+        '',
+        'Do not edit files.',
+        '',
+        'Return:',
+        '1. Docs That Look Stale',
+        '2. Missing Documentation',
+        '3. Confusing or Conflicting Guidance',
+        '4. Suggested Documentation Updates',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Tech Debt Triage',
+      'Planning',
+      'Weekly',
+      'Tech debt triage',
+      'Identify the most expensive sources of drag and rank cleanup opportunities.',
+      'Ranks the most valuable cleanup and refactor opportunities in the repo.',
+      [
+        'Review this repository and identify the most important technical debt to address next.',
+        '',
+        'Focus on debt that creates drag for delivery, reliability, or maintainability, such as:',
+        '- duplicated logic or tangled ownership',
+        '- brittle architecture seams',
+        '- outdated patterns or confusing abstractions',
+        '- hotspots that are hard to safely change',
+        '',
+        'Do not make changes.',
+        '',
+        'Return:',
+        '1. Top Technical Debt Items',
+        '2. Why Each Item Matters',
+        '3. Cost vs Impact',
+        '4. Recommended Cleanup Order',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Security and Config Review',
+      'Security',
+      'Weekly',
+      'Security and config review',
+      'Inspect obvious security, secrets, and environment/config handling risks.',
+      'Looks for obvious secrets, auth, and configuration handling issues.',
+      [
+        'Inspect this repository for obvious security and configuration handling risks.',
+        '',
+        'Focus on:',
+        '- secrets or credentials handling problems',
+        '- risky defaults in environment or auth configuration',
+        '- places where permission checks or trust assumptions look weak',
+        '- config sprawl that could cause unsafe deployments',
+        '',
+        'Stay read-only. Do not modify files.',
+        '',
+        'Return:',
+        '1. High-Risk Findings',
+        '2. Medium-Risk Findings',
+        '3. Configuration Concerns',
+        '4. Recommended Fixes',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'CI and Ops Review',
+      'Operations',
+      'Weekly',
+      'CI and ops review',
+      'Check CI, scripts, and operational workflows for fragility or drift.',
+      'Surfaces friction or fragility in CI, automation, and repo operations.',
+      [
+        'Review this repository for CI, automation, and operational workflow issues.',
+        '',
+        'Focus on:',
+        '- brittle build or test assumptions',
+        '- scripts that look stale, redundant, or inconsistent',
+        '- automation that appears slow, noisy, or easy to break',
+        '- workflow gaps that could hurt developer reliability',
+        '',
+        'Do not edit files.',
+        '',
+        'Return:',
+        '1. Operational Risks',
+        '2. CI or Automation Drift',
+        '3. Reliability Improvements',
+        '4. Highest-Leverage Next Steps',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Onboarding Brief',
+      'Knowledge',
+      'Monthly',
+      'Onboarding brief refresh',
+      'Produce a concise orientation summary for someone new to the repo.',
+      'Creates a concise orientation guide for engineers who are new to the repo.',
+      [
+        'Prepare an onboarding brief for an engineer who is new to this repository.',
+        '',
+        'Focus on:',
+        '- the repo structure and major areas of responsibility',
+        '- the core development workflows and important commands',
+        '- risky or confusing areas worth knowing early',
+        '- where a new engineer should start reading or exploring',
+        '',
+        'Do not modify files.',
+        '',
+        'Return:',
+        '1. What This Repo Does',
+        '2. Important Areas to Know',
+        '3. Local Workflow Cheatsheet',
+        '4. Common Pitfalls and First Reading List',
+      ].join('\n'),
+      now,
+      now,
+    )
+
+    insert.run(
+      'Memory Candidate Review',
+      'Knowledge',
+      'Biweekly',
+      'Memory candidate review',
+      'Identify stable conventions, decisions, and context worth preserving as memory.',
+      'Great for repos using durable memory or team conventions that should be captured.',
+      [
+        'Review this repository and identify durable knowledge worth preserving as long-lived memory.',
+        '',
+        'Focus on conventions, architectural decisions, recurring workflows, and stable context that future sessions should know.',
+        '',
+        'Do not create or update memory directly. Just recommend candidates.',
+        '',
+        'Return:',
+        '1. Candidate Conventions',
+        '2. Candidate Decisions',
+        '3. Candidate Context',
+        '4. Why Each Item Should Be Preserved',
+      ].join('\n'),
+      now,
+      now,
+    )
+  },
+
+  down(db) {
+    db.run('DROP TABLE IF EXISTS prompt_templates')
+  },
+}
+
+export default migration

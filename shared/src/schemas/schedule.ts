@@ -90,3 +90,31 @@ export const UpdateScheduleJobRequestSchema = z.object({
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
 })
 export type UpdateScheduleJobRequest = z.infer<typeof UpdateScheduleJobRequestSchema>
+
+export const PromptTemplateSchema = z.object({
+  id: z.number(),
+  title: z.string(),
+  category: z.string(),
+  cadenceHint: z.string(),
+  suggestedName: z.string(),
+  suggestedDescription: z.string(),
+  description: z.string(),
+  prompt: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+})
+export type PromptTemplate = z.infer<typeof PromptTemplateSchema>
+
+export const CreatePromptTemplateRequestSchema = z.object({
+  title: z.string().min(1).max(120).transform((s) => s.trim()),
+  category: z.string().min(1).max(60).transform((s) => s.trim()),
+  cadenceHint: z.string().min(1).max(60).transform((s) => s.trim()),
+  suggestedName: z.string().min(1).max(120).transform((s) => s.trim()),
+  suggestedDescription: z.string().max(500).default('').transform((s) => s.trim()),
+  description: z.string().max(500).default('').transform((s) => s.trim()),
+  prompt: z.string().min(1).max(20000).transform((s) => s.trim()),
+})
+export type CreatePromptTemplateRequest = z.infer<typeof CreatePromptTemplateRequestSchema>
+
+export const UpdatePromptTemplateRequestSchema = CreatePromptTemplateRequestSchema.partial()
+export type UpdatePromptTemplateRequest = z.infer<typeof UpdatePromptTemplateRequestSchema>
