@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, Check, Loader2, Minus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { QuestionRequest, QuestionInfo } from '@/api/types'
@@ -10,19 +10,25 @@ interface QuestionPromptProps {
   question: QuestionRequest
   onReply: (requestID: string, answers: string[][]) => Promise<void>
   onReject: (requestID: string) => Promise<void>
+  onMinimize?: () => void
 }
 
-export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptProps) {
+export function QuestionPrompt({ question, onReply, onReject, onMinimize }: QuestionPromptProps) {
   const questions = question.questions
   const isSingleSelect = questions.length === 1 && !questions[0]?.multiple
   const totalSteps = isSingleSelect ? 1 : questions.length + 1
 
+  const [isMinimized, setIsMinimized] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<string[][]>(() => questions.map(() => []))
   const [customInputs, setCustomInputs] = useState<string[]>(() => questions.map(() => ''))
   const [confirmedCustoms, setConfirmedCustoms] = useState<string[]>(() => questions.map(() => ''))
   const [expandedOther, setExpandedOther] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  const handleMinimize = useCallback(() => {
+    setIsMinimized(true)
+  }, [])
 
   const isConfirmStep = !isSingleSelect && currentIndex === questions.length
   const currentQuestion = isConfirmStep ? null : questions[currentIndex]
@@ -177,6 +183,19 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
 
   const allQuestionsAnswered = questions.every((_, i) => hasAnswerForQuestion(i))
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isMinimized && !expandedOther) {
+        handleMinimize()
+        onMinimize?.()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isMinimized, expandedOther, handleMinimize, onMinimize])
+
   return (
     <div 
       className="w-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-950 dark:to-blue-900 border-2 border-blue-300 dark:border-blue-700 rounded-xl shadow-lg shadow-blue-500/20 mb-3 overflow-hidden"
@@ -209,38 +228,52 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
             </button>
           )}
         </div>
-        <button
-          onClick={handleReject}
-          disabled={isSubmitting}
-          className="p-1 sm:p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
-        >
-          <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              handleMinimize()
+              onMinimize?.()
+            }}
+            disabled={isSubmitting}
+            className="p-1 sm:p-1.5 rounded-lg hover:bg-blue-500/20 text-muted-foreground hover:text-blue-500 transition-colors"
+          >
+            <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+          <button
+            onClick={handleReject}
+            disabled={isSubmitting}
+            className="p-1 sm:p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
+          >
+            <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+          </button>
+        </div>
       </div>
 
-      <div className="p-2 sm:p-3 max-h-[50vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden bg-background/60 dark:bg-black/30">
-        {isConfirmStep ? (
-          <ConfirmStep 
-            questions={questions} 
-            answers={answers} 
-            onEditQuestion={setCurrentIndex}
-          />
-        ) : currentQuestion && (
-          <QuestionStep
-            question={currentQuestion}
-            answers={answers[currentIndex] ?? []}
-            customInput={customInputs[currentIndex] ?? ''}
-            confirmedCustom={confirmedCustoms[currentIndex] ?? ''}
-            expandedOther={expandedOther === currentIndex}
-            isMultiSelect={isMultiSelect}
-            onSelectOption={(label) => selectOption(currentIndex, label)}
-            onExpandOther={() => handleExpandOther(currentIndex)}
-            onCustomInputChange={(value) => handleCustomInput(currentIndex, value)}
-            onConfirmCustomInput={() => confirmCustomInput(currentIndex)}
-            onCollapseOther={() => setExpandedOther(null)}
-          />
-        )}
-      </div>
+      {!isMinimized ? (
+        <div className="p-2 sm:p-3 max-h-[50vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden bg-background/60 dark:bg-black/30">
+          {isConfirmStep ? (
+            <ConfirmStep 
+              questions={questions} 
+              answers={answers} 
+              onEditQuestion={setCurrentIndex}
+            />
+          ) : currentQuestion && (
+            <QuestionStep
+              question={currentQuestion}
+              answers={answers[currentIndex] ?? []}
+              customInput={customInputs[currentIndex] ?? ''}
+              confirmedCustom={confirmedCustoms[currentIndex] ?? ''}
+              expandedOther={expandedOther === currentIndex}
+              isMultiSelect={isMultiSelect}
+              onSelectOption={(label) => selectOption(currentIndex, label)}
+              onExpandOther={() => handleExpandOther(currentIndex)}
+              onCustomInputChange={(value) => handleCustomInput(currentIndex, value)}
+              onConfirmCustomInput={() => confirmCustomInput(currentIndex)}
+              onCollapseOther={() => setExpandedOther(null)}
+            />
+          )}
+        </div>
+      ) : null}
 
       {totalSteps > 1 && (
         <div className="flex justify-center gap-1 sm:gap-1.5 py-1.5 sm:py-2 border-t border-blue-200 dark:border-blue-800">

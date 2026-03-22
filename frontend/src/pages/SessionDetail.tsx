@@ -42,6 +42,7 @@ import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import { useQuestions } from "@/contexts/EventContext";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
+import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
 import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
@@ -73,6 +74,7 @@ export function SessionDetail() {
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
+  const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
   
   const handleSwipeBack = useCallback(() => {
     navigate(`/repos/${repoId}`);
@@ -147,6 +149,20 @@ export function SessionDetail() {
   const handleShowModelsDialog = useCallback(() => setModelDialogOpen(true), []);
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowHelpDialog = useCallback(() => openSettings(), [openSettings]);
+
+  const handleMinimizeQuestion = useCallback((question: QuestionRequest) => {
+    setMinimizedQuestion(question)
+  }, [])
+  
+  const handleRestoreQuestion = useCallback(() => {
+    setMinimizedQuestion(null)
+  }, [])
+
+  useEffect(() => {
+    if (minimizedQuestion && minimizedQuestion.sessionID !== sessionId) {
+      setMinimizedQuestion(null)
+    }
+  }, [sessionId, minimizedQuestion])
 
   const handleNewSession = useCallback(async () => {
     try {
@@ -517,12 +533,20 @@ export function SessionDetail() {
               {ttsEnabled && lastAssistantText && !hasPromptContent && !hasActiveStream && (
                 <FloatingTTSButton content={lastAssistantText} />
               )}
-              {currentQuestion && currentQuestion.sessionID === sessionId && (
+              {minimizedQuestion && minimizedQuestion.sessionID === sessionId && (
+                <MinimizedQuestionIndicator
+                  question={minimizedQuestion}
+                  onRestore={handleRestoreQuestion}
+                  onDismiss={() => rejectQuestion(minimizedQuestion.id)}
+                />
+              )}
+              {!minimizedQuestion && currentQuestion && currentQuestion.sessionID === sessionId && (
                 <QuestionPrompt
                   key={currentQuestion.id}
                   question={currentQuestion}
                   onReply={replyToQuestion}
                   onReject={rejectQuestion}
+                  onMinimize={() => handleMinimizeQuestion(currentQuestion)}
                 />
               )}
               <PromptInput
