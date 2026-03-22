@@ -1,4 +1,4 @@
-import { ChevronUp, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import type { QuestionRequest } from '@/api/types'
 
 interface MinimizedQuestionIndicatorProps {
@@ -16,31 +16,23 @@ export function MinimizedQuestionIndicator({
   const firstQuestionHeader = question.questions[0]?.header
   
   return (
-    <div className="w-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-950 dark:to-blue-900 border-2 border-blue-300 dark:border-blue-700 rounded-xl shadow-lg mb-3 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2">
-        <div className="flex items-center gap-2">
-          <ChevronUp className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-          <span className="text-sm font-semibold text-blue-600 dark:text-white">
-            {questionCount === 1 
-              ? (firstQuestionHeader || 'Question pending')
-              : `${questionCount} questions pending`
-            }
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={onRestore}
-            className="p-1.5 rounded-lg hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 transition-colors"
-          >
-            <ChevronUp className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onDismiss}
-            className="p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <div className="w-full bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-950 dark:to-orange-900 border-2 border-orange-300 dark:border-orange-700 rounded-lg shadow-lg mb-2 overflow-hidden">
+      <div className="flex items-center px-3 py-2 sm:px-4 sm:py-2.5 border-b border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/50">
+        <button
+          onClick={onRestore}
+          className="flex-1 text-left text-xs font-semibold text-orange-600 dark:text-white"
+        >
+          {questionCount === 1 
+            ? `Question: ${firstQuestionHeader || 'Question pending'}`
+            : `${questionCount} questions pending`
+          }
+        </button>
+        <button
+          onClick={onDismiss}
+          className="p-1.5 hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors hidden sm:block"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
     </div>
   )

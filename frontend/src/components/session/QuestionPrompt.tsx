@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, ChevronLeft, ChevronRight, Check, Loader2, Minus } from 'lucide-react'
+import { X, ChevronRight, ChevronDown, ChevronUp, Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { QuestionRequest, QuestionInfo } from '@/api/types'
@@ -25,9 +25,29 @@ export function QuestionPrompt({ question, onReply, onReject, onMinimize }: Ques
   const [confirmedCustoms, setConfirmedCustoms] = useState<string[]>(() => questions.map(() => ''))
   const [expandedOther, setExpandedOther] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [touchStartY, setTouchStartY] = useState<number | null>(null)
 
   const handleMinimize = useCallback(() => {
     setIsMinimized(true)
+    onMinimize?.()
+  }, [onMinimize])
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    setTouchStartY(e.touches[0].clientY)
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (touchStartY === null) return
+    const touchY = e.touches[0].clientY
+    const diff = touchY - touchStartY
+    if (diff > 100) {
+      handleMinimize()
+      setTouchStartY(null)
+    }
+  }, [touchStartY, handleMinimize])
+
+  const handleTouchEnd = useCallback(() => {
+    setTouchStartY(null)
   }, [])
 
   const isConfirmStep = !isSingleSelect && currentIndex === questions.length
@@ -40,13 +60,6 @@ export function QuestionPrompt({ question, onReply, onReject, onMinimize }: Ques
       setExpandedOther(null)
     }
   }, [currentIndex, totalSteps])
-
-  const goToPrev = useCallback(() => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1)
-      setExpandedOther(null)
-    }
-  }, [currentIndex])
 
   const handleSubmitSingle = useCallback(async (label: string) => {
     setIsSubmitting(true)
@@ -198,59 +211,35 @@ export function QuestionPrompt({ question, onReply, onReject, onMinimize }: Ques
 
   return (
     <div 
-      className="w-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-950 dark:to-blue-900 border-2 border-blue-300 dark:border-blue-700 rounded-xl shadow-lg shadow-blue-500/20 mb-3 overflow-hidden"
+      className="w-full bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-950 dark:to-blue-900 border-2 border-blue-300 dark:border-blue-700 rounded-xl shadow-lg shadow-blue-500/20 mb-1 overflow-hidden"
     >
-      <div className="flex items-center justify-between px-2 py-1.5 sm:px-3 sm:py-2 border-b border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/50">
-        <div className="flex items-center gap-2">
-          {totalSteps > 1 && (
-            <button
-              onClick={goToPrev}
-              disabled={currentIndex === 0}
-              className="p-0.5 sm:p-1 rounded hover:bg-blue-200 dark:hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400" />
-            </button>
-          )}
-          <span className="text-xs sm:text-sm font-semibold text-blue-600 dark:text-white">
-            {isConfirmStep ? 'Review' : (
-              totalSteps > 1 
-                ? `Question ${currentIndex + 1}/${questions.length}` 
-                : (currentQuestion?.header || 'Question')
-            )}
-          </span>
-          {totalSteps > 1 && (
-            <button
-              onClick={goToNext}
-              disabled={currentIndex === totalSteps - 1}
-              className="p-0.5 sm:p-1 rounded hover:bg-blue-200 dark:hover:bg-blue-800 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            >
-              <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 dark:text-blue-400" />
-            </button>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => {
-              handleMinimize()
-              onMinimize?.()
-            }}
-            disabled={isSubmitting}
-            className="p-1 sm:p-1.5 rounded-lg hover:bg-blue-500/20 text-muted-foreground hover:text-blue-500 transition-colors"
-          >
-            <Minus className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </button>
-          <button
-            onClick={handleReject}
-            disabled={isSubmitting}
-            className="p-1 sm:p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
-          >
-            <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-          </button>
-        </div>
+      <div className="flex items-center px-3 py-2 sm:px-4 sm:py-2.5 border-b border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/50">
+        <button
+          onClick={() => isMinimized ? setIsMinimized(false) : handleMinimize()}
+          className="flex items-center gap-1.5 flex-1 text-left text-xs sm:text-sm font-semibold text-blue-600 dark:text-white"
+        >
+          {isMinimized
+            ? <ChevronUp className="w-3 h-3 opacity-60 flex-shrink-0" />
+            : <ChevronDown className="w-3 h-3 opacity-60 flex-shrink-0" />
+          }
+          {isConfirmStep ? 'Review' : (currentQuestion?.header || 'Question')}
+        </button>
+        <button
+          onClick={handleReject}
+          disabled={isSubmitting}
+          className="p-1.5 sm:p-2 hover:bg-red-500/20 text-muted-foreground hover:text-red-500 transition-colors"
+        >
+          <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+        </button>
       </div>
 
       {!isMinimized ? (
-        <div className="p-2 sm:p-3 max-h-[50vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden bg-background/60 dark:bg-black/30">
+        <div 
+          className="p-2 sm:p-3 max-h-[50vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden bg-background/60 dark:bg-black/30"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           {isConfirmStep ? (
             <ConfirmStep 
               questions={questions} 
@@ -275,29 +264,7 @@ export function QuestionPrompt({ question, onReply, onReject, onMinimize }: Ques
         </div>
       ) : null}
 
-      {totalSteps > 1 && (
-        <div className="flex justify-center gap-1 sm:gap-1.5 py-1.5 sm:py-2 border-t border-blue-200 dark:border-blue-800">
-          {Array.from({ length: totalSteps }).map((_, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                setCurrentIndex(i)
-                setExpandedOther(null)
-              }}
-              className={cn(
-                "w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full transition-all duration-200",
-                i === currentIndex 
-                  ? "bg-blue-500 scale-125" 
-                  : i < questions.length && hasAnswerForQuestion(i)
-                    ? "bg-green-500/70 hover:bg-green-500"
-                    : "bg-blue-500/30 hover:bg-blue-500/50"
-              )}
-            />
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-1.5 sm:gap-2 px-2 py-2 sm:px-3 sm:py-3">
+      <div className="flex gap-1.5 sm:gap-2 px-2 py-2 sm:px-3 sm:py-3 border-t border-blue-200 dark:border-blue-800">
         <Button
           size="sm"
           onClick={handleReject}
@@ -324,12 +291,10 @@ export function QuestionPrompt({ question, onReply, onReject, onMinimize }: Ques
             <Button
               size="sm"
               onClick={handleNext}
-              disabled={currentIndex === totalSteps - 1 || (expandedOther === currentIndex && !customInputs[currentIndex]?.trim())}
+              disabled={isSubmitting || (expandedOther === currentIndex && !customInputs[currentIndex]?.trim())}
               className="flex-1 h-8 sm:h-10 text-xs sm:text-sm bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              <span className="hidden sm:inline">{expandedOther === currentIndex ? 'Confirm' : (currentIndex === questions.length - 1 ? 'Review' : 'Next')}</span>
-              <span className="sm:hidden">{expandedOther === currentIndex ? 'OK' : (currentIndex === questions.length - 1 ? 'Review' : '→')}</span>
-              <ChevronRight className="hidden sm:block w-4 h-4 ml-1" />
+              {expandedOther === currentIndex ? 'Confirm' : 'Next'}
             </Button>
           )
         )}
