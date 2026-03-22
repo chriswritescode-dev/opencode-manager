@@ -14,8 +14,7 @@ import {
   useRunRepoSchedule,
   useUpdateRepoSchedule,
 } from '@/hooks/useSchedules'
-import { ScheduleJobDialog } from '@/components/schedules/ScheduleJobDialog'
-import { JobsTab, JobDetailTab, RunHistoryTab } from '@/components/schedules'
+import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
 import { toUpdateScheduleRequest, getJobStatusTone } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
@@ -23,7 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { getRepoDisplayName, cn } from '@/lib/utils'
-import { CalendarClock, History, Info, Loader2, Plus } from 'lucide-react'
+import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
   const { id } = useParams<{ id: string }>()
@@ -270,47 +269,7 @@ export function Schedules() {
       </div>
 
       {hasJobs && (
-        <div className="flex border-t border-border bg-card/80 backdrop-blur-sm pb-[env(safe-area-inset-bottom)]">
-          <button
-            type="button"
-            className={cn(
-              'flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors',
-              activeTab === 'jobs'
-                ? 'bg-primary/10 text-primary'
-                : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
-            )}
-            onClick={() => setActiveTab('jobs')}
-          >
-            <CalendarClock className="h-5 w-5" />
-            <span>Jobs</span>
-          </button>
-          <button
-            type="button"
-            className={cn(
-              'flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors',
-              activeTab === 'detail'
-                ? 'bg-primary/10 text-primary'
-                : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
-            )}
-            onClick={() => setActiveTab('detail')}
-          >
-            <Info className="h-5 w-5" />
-            <span>Detail</span>
-          </button>
-          <button
-            type="button"
-            className={cn(
-              'flex-1 flex flex-col items-center gap-1 py-2 text-xs font-medium transition-colors',
-              activeTab === 'runs'
-                ? 'bg-primary/10 text-primary'
-                : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50'
-            )}
-            onClick={() => setActiveTab('runs')}
-          >
-            <History className="h-5 w-5" />
-            <span>Run History</span>
-          </button>
-        </div>
+        <ScheduleTabMenu activeTab={activeTab} onTabChange={setActiveTab} />
       )}
 
       <ScheduleJobDialog

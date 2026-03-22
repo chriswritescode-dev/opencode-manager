@@ -1,5 +1,5 @@
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -111,11 +111,8 @@ export function RunHistoryTab({
   onCancelRun,
   cancelRunPending,
 }: RunHistoryTabProps) {
-  const [expandedRunId, setExpandedRunId] = useState<number | null>(selectedRunId)
+  const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
 
-  useEffect(() => {
-    setExpandedRunId(selectedRunId)
-  }, [selectedRunId])
 
   function getRunStatusIcon(status: ScheduleRun['status']) {
     if (status === 'completed') return <CheckCircle2 className="h-3.5 w-3.5 text-green-400" />
@@ -193,7 +190,7 @@ export function RunHistoryTab({
                       <p className="mt-0.5 truncate text-xs text-red-400/80">{run.errorText}</p>
                     )}
                   </div>
-                  <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform duration-200 ${expandedRunId === run.id ? 'rotate-180' : ''}`} />
+                  <ChevronDown className={`h-6 w-6 flex-shrink-0 text-muted-foreground transition-transform duration-200 self-start ${expandedRunId === run.id ? 'rotate-180' : ''}`} />
                 </button>
                 {expandedRunId === run.id && (
                   <div className="border-t border-border/60 flex flex-col" style={{ maxHeight: 'calc(100vh - 200px)' }}>

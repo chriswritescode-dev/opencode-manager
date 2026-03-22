@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Combobox, type ComboboxOption } from '@/components/ui/combobox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { MultiSelect } from '@/components/ui/multi-select'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -26,7 +27,6 @@ import {
   weekdayOptions,
 } from '@/components/schedules/schedule-utils'
 import { Check, Info, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
-import { cn } from '@/lib/utils'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
@@ -613,36 +613,12 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
                   <p className="text-sm text-muted-foreground">No skills discovered. Configure skill paths in Settings to make skills available here.</p>
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {skills.map((skill) => (
-                    <button
-                      key={skill.name}
-                      type="button"
-                      onClick={() => {
-                        setSkillSlugs(prev =>
-                          prev.includes(skill.name)
-                            ? prev.filter(s => s !== skill.name)
-                            : [...prev, skill.name]
-                        )
-                      }}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors',
-                        skillSlugs.includes(skill.name)
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'border-border bg-card text-muted-foreground hover:bg-accent hover:text-foreground'
-                      )}
-                    >
-                      {skillSlugs.includes(skill.name) && <Check className="h-3 w-3" />}
-                      {skill.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {skillSlugs.length > 0 && (
-                <div className="text-xs text-muted-foreground">
-                  {skillSlugs.length} skill{skillSlugs.length !== 1 ? 's' : ''} selected
-                </div>
+                <MultiSelect
+                  value={skillSlugs}
+                  onChange={setSkillSlugs}
+                  options={skills.map(s => ({ value: s.name, label: s.name, description: s.description }))}
+                  placeholder="Search and select skills..."
+                />
               )}
 
               <div className="space-y-2">

@@ -12,7 +12,7 @@ interface JobsTabProps {
 
 export function JobsTab({ jobs, selectedJobId, onSelectJob }: JobsTabProps) {
   return (
-    <div className="h-full overflow-y-auto space-y-2 py-2">
+    <div className="h-full overflow-y-auto space-y-2 pt-2">
       {jobs.map((job) => (
         <button
           key={job.id}
