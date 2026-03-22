@@ -381,16 +381,20 @@ export interface ScheduleJobWithRepo extends ScheduleJob {
 }
 
 interface ScheduleJobWithRepoRow extends ScheduleJobRow {
-  repo_name: string
   repo_url: string
   repo_path: string
+}
+
+function repoNameFromPath(repoPath: string): string {
+  if (!repoPath || repoPath === '/') return 'Unknown'
+  return repoPath.split(/[\\/]/).pop() ?? repoPath
 }
 
 function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithRepo {
   const job = rowToScheduleJob(row)
   return {
     ...job,
-    repoName: row.repo_name,
+    repoName: repoNameFromPath(row.repo_path),
     repoPath: row.repo_path,
     repoUrl: row.repo_url,
   }
@@ -398,10 +402,10 @@ function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithR
 
 export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[] {
   const stmt = db.prepare(`
-    SELECT sj.*, r.name as repo_name, r.repo_url, r.local_path as repo_path
+    SELECT sj.*, r.repo_url, r.local_path as repo_path
     FROM schedule_jobs sj
     JOIN repos r ON sj.repo_id = r.id
-    ORDER BY r.name, sj.name
+    ORDER BY r.local_path, sj.name
   `)
   const rows = stmt.all() as ScheduleJobWithRepoRow[]
   return rows.map(rowToScheduleJobWithRepo)

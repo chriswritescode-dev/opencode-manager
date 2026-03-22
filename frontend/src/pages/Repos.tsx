@@ -34,13 +34,21 @@ export function Repos() {
             <FolderOpen className="w-4 h-4" />
           </Button>
           <Button
+            variant="ghost"
+            onClick={() => navigate('/schedules')}
+            size="icon"
+            className="sm:hidden text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+          >
+            <CalendarClock className="w-4 h-4" />
+          </Button>
+          <Button
             variant="outline"
             onClick={() => navigate('/schedules')}
             size="sm"
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+            className="hidden sm:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
           >
-            <CalendarClock className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">All Schedules</span>
+            <CalendarClock className="w-4 h-4 mr-2" />
+            All Schedules
           </Button>
           <Button onClick={() => setAddRepoOpen(true)} size="sm">
             <Plus className="w-4 h-4 mr-1" />

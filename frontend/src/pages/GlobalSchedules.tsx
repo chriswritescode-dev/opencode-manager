@@ -7,11 +7,12 @@ import type { CreateScheduleJobRequest } from '@opencode-manager/shared/types'
 import { toUpdateScheduleRequest, formatScheduleShortLabel, getJobStatusTone, formatTimestamp } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { CalendarClock, Loader2, Plus, ArrowLeft, Play, Pencil, Trash2, Pause, PlayCircle, Clock3, History } from 'lucide-react'
-import { cn } from '@/lib/utils'
+import { CalendarClock, Loader2, Plus, ArrowLeft, Play, Pencil, Trash2, Pause, PlayCircle, Clock3, History, SlidersHorizontal } from 'lucide-react'
+
 import type { ScheduleJobWithRepo } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
 
@@ -21,7 +22,6 @@ type SortOption = 'nextRun' | 'name' | 'repo'
 
 export function GlobalSchedules() {
   const navigate = useNavigate()
-  const [selectedJob, setSelectedJob] = useState<ScheduleJobWithRepo | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingJob, setEditingJob] = useState<ScheduleJobWithRepo | null>(null)
   const [deleteJobId, setDeleteJobId] = useState<number | null>(null)
@@ -124,38 +124,26 @@ export function GlobalSchedules() {
   ], [])
 
   const handleDelete = () => {
-    if (deleteJobId === null || !selectedJob) {
+    if (deleteJobId === null) {
       return
     }
 
     deleteMutation.mutate(deleteJobId, {
       onSuccess: () => {
-        setSelectedJob(null)
         setDeleteJobId(null)
       },
     })
   }
 
   const handleToggleEnabled = (job: ScheduleJobWithRepo) => {
-    updateMutation.mutate(
-      {
-        jobId: job.id,
-        data: { enabled: !job.enabled },
-      },
-      {
-        onSuccess: () => {
-          setSelectedJob({ ...job, enabled: !job.enabled })
-        },
-      }
-    )
+    updateMutation.mutate({
+      jobId: job.id,
+      data: { enabled: !job.enabled },
+    })
   }
 
   const handleRunNow = (job: ScheduleJobWithRepo) => {
-    runMutation.mutate(job.id, {
-      onSuccess: () => {
-        setSelectedJob(job)
-      },
-    })
+    runMutation.mutate(job.id)
   }
 
   const handleEdit = (job: ScheduleJobWithRepo) => {
@@ -225,7 +213,7 @@ export function GlobalSchedules() {
         <Header.BackButton to="/" />
         <Header.Title>Schedules</Header.Title>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="h-6 rounded-full px-2 text-xs">
+          <Badge variant="outline" className="hidden sm:inline-flex h-6 rounded-full px-2 text-xs">
             {stats.total} total
           </Badge>
           <Badge variant="outline" className="h-6 rounded-full px-2 text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
@@ -251,19 +239,105 @@ export function GlobalSchedules() {
         </div>
       </Header>
 
-      <div className="border-b border-border px-4 py-3 space-y-3">
-        <div className="flex flex-wrap gap-2">
-          <div className="flex items-center gap-2 min-w-[150px]">
-            <span className="text-xs text-muted-foreground whitespace-nowrap">Filter by repo:</span>
-            <Combobox
-              value={repoFilter}
-              onChange={setRepoFilter}
-              options={repoOptions}
-              placeholder="Select repo"
-              className="flex-1"
-            />
-          </div>
-          <div className="flex items-center gap-2">
+      <div className="border-b border-border px-4 py-3 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline">Filter by repo:</span>
+          <Combobox
+            value={repoFilter}
+            onChange={setRepoFilter}
+            options={repoOptions}
+            placeholder="All Repos"
+            className="flex-1 sm:flex-none sm:min-w-[150px]"
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="sm:hidden h-8 w-8 shrink-0 relative">
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                {(statusFilter !== 'all' || scheduleModeFilter !== 'all') && (
+                  <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary" />
+                )}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem
+                onClick={() => {
+                  setStatusFilter('all')
+                  setScheduleModeFilter('all')
+                  setRepoFilter('all')
+                  setSortOption('nextRun')
+                }}
+                className="text-xs text-muted-foreground"
+              >
+                Clear all filters
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Status</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={statusFilter === 'all'}
+                onCheckedChange={() => setStatusFilter('all')}
+                onSelect={(e) => e.preventDefault()}
+              >
+                All Status
+              </DropdownMenuCheckboxItem>
+              {statusOptions.filter((opt) => opt.value !== 'all').map((opt) => (
+                <DropdownMenuCheckboxItem
+                  key={opt.value}
+                  checked={statusFilter === opt.value}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setStatusFilter(opt.value as StatusFilter)
+                    } else {
+                      setStatusFilter('all')
+                    }
+                  }}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  {opt.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Mode</DropdownMenuLabel>
+              <DropdownMenuCheckboxItem
+                checked={scheduleModeFilter === 'all'}
+                onCheckedChange={() => setScheduleModeFilter('all')}
+                onSelect={(e) => e.preventDefault()}
+              >
+                All Modes
+              </DropdownMenuCheckboxItem>
+              {modeOptions.filter((opt) => opt.value !== 'all').map((opt) => (
+                <DropdownMenuCheckboxItem
+                  key={opt.value}
+                  checked={scheduleModeFilter === opt.value}
+                  onCheckedChange={(checked) => {
+                    if (checked) {
+                      setScheduleModeFilter(opt.value as ScheduleModeFilter)
+                    } else {
+                      setScheduleModeFilter('all')
+                    }
+                  }}
+                  onSelect={(e) => e.preventDefault()}
+                >
+                  {opt.label}
+                </DropdownMenuCheckboxItem>
+              ))}
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Sort</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={sortOption} onValueChange={(v) => setSortOption(v as SortOption)}>
+                {sortOptions.map((opt) => (
+                  <DropdownMenuRadioItem
+                    key={opt.value}
+                    value={opt.value}
+                    onSelect={(e) => e.preventDefault()}
+                  >
+                    {opt.label}
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+        <div className="hidden sm:flex flex-wrap gap-x-4 gap-y-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Status:</span>
             <div className="flex gap-1">
               {statusOptions.map((opt) => (
@@ -279,7 +353,7 @@ export function GlobalSchedules() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Mode:</span>
             <div className="flex gap-1">
               {modeOptions.map((opt) => (
@@ -295,7 +369,7 @@ export function GlobalSchedules() {
               ))}
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <span className="text-xs text-muted-foreground whitespace-nowrap">Sort:</span>
             <div className="flex gap-1">
               {sortOptions.map((opt) => (
@@ -366,11 +440,8 @@ export function GlobalSchedules() {
             {filteredAndSortedJobs.map((job) => (
               <Card
                 key={job.id}
-                className={cn(
-                  'group cursor-pointer transition-all hover:shadow-md border-border/70 bg-card/60',
-                  selectedJob?.id === job.id && 'ring-2 ring-primary border-primary'
-                )}
-                onClick={() => setSelectedJob(job)}
+                className="group cursor-pointer transition-all hover:shadow-md border-border/70 bg-card/60"
+                onClick={() => navigate(`/repos/${job.repoId}/schedules`)}
               >
                 <CardContent className="p-4 space-y-3">
                   <div className="flex items-start justify-between gap-2">
@@ -386,7 +457,7 @@ export function GlobalSchedules() {
                         {job.repoName}
                       </button>
                       <h3 className="font-medium truncate">{job.name}</h3>
-                      <p className="mt-1 text-xs text-muted-foreground truncate">
+                      <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
                         {job.description || 'No description'}
                       </p>
                     </div>
@@ -485,7 +556,7 @@ export function GlobalSchedules() {
             setEditingJob(null)
           }
         }}
-        job={editingJob}
+        job={editingJob ?? undefined}
         isSaving={updateMutation.isPending}
         onSubmit={editingJob ? handleUpdate : handleCreate}
       />
