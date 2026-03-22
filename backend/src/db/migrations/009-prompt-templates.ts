@@ -1,8 +1,8 @@
 import type { Migration } from '../migration-runner'
 
 const migration: Migration = {
-  version: 9,
-  name: '009-prompt-templates',
+  version: 10,
+  name: '010-prompt-templates',
 
   up(db) {
     db.run(`

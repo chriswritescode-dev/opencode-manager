@@ -86,6 +86,17 @@ export const MessagesTransformConfigSchema = z.object({
 })
 export type MessagesTransformConfig = z.infer<typeof MessagesTransformConfigSchema>
 
+export const RalphConfigSchema = z.object({
+  enabled: z.boolean().optional(),
+  defaultMaxIterations: z.number().optional(),
+  cleanupWorktree: z.boolean().optional(),
+  defaultAudit: z.boolean().optional(),
+  model: z.string().optional(),
+  minAudits: z.number().optional(),
+  stallTimeoutMs: z.number().optional(),
+})
+export type RalphConfig = z.infer<typeof RalphConfigSchema>
+
 export const PluginConfigSchema = z.object({
   dataDir: z.string().optional(),
   embedding: EmbeddingConfigSchema,
@@ -95,5 +106,36 @@ export const PluginConfigSchema = z.object({
   memoryInjection: MemoryInjectionConfigSchema.optional(),
   messagesTransform: MessagesTransformConfigSchema.optional(),
   executionModel: z.string().optional(),
+  auditorModel: z.string().optional(),
+  ralph: RalphConfigSchema.optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>
+
+export const KvEntrySchema = z.object({
+  key: z.string(),
+  data: z.unknown(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  expiresAt: z.number(),
+})
+export type KvEntry = z.infer<typeof KvEntrySchema>
+
+export const KvListQuerySchema = z.object({
+  projectId: z.string(),
+  prefix: z.string().optional(),
+})
+export type KvListQuery = z.infer<typeof KvListQuerySchema>
+
+export const CreateKvEntryRequestSchema = z.object({
+  projectId: z.string(),
+  key: z.string(),
+  data: z.unknown(),
+  ttlMs: z.number().optional(),
+})
+export type CreateKvEntryRequest = z.infer<typeof CreateKvEntryRequestSchema>
+
+export const UpdateKvEntryRequestSchema = z.object({
+  data: z.unknown(),
+  ttlMs: z.number().optional(),
+})
+export type UpdateKvEntryRequest = z.infer<typeof UpdateKvEntryRequestSchema>

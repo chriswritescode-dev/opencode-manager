@@ -2,8 +2,10 @@ import type { Database } from 'bun:sqlite'
 import { join } from 'path'
 import type { VecService } from './vec-types'
 import type { Logger } from '../types'
+import { cleanupOrphanedWorkers } from './vec-client'
 
 export type { VecService, VecSearchResult } from './vec-types'
+export { cleanupOrphanedWorkers }
 
 export async function createVecService(_db: Database, dataDir: string, dimensions: number, logger?: Logger): Promise<VecService> {
   try {

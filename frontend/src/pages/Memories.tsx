@@ -2,20 +2,23 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
-import { useProjectSummary } from '@/hooks/useMemories'
+import { useProjectSummary, useKvEntries } from '@/hooks/useMemories'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, Plus, Brain } from 'lucide-react'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
+import { Loader2, Plus, Brain, Key } from 'lucide-react'
 import { getRepoDisplayName } from '@/lib/utils'
 import { MemoryList } from '@/components/memory/MemoryList'
 import { MemoryFormDialog } from '@/components/memory/MemoryFormDialog'
+import { KvList } from '@/components/memory/KvList'
 
 export function Memories() {
   const { id } = useParams<{ id: string }>()
   const repoId = id ? Number(id) : undefined
   const [createOpen, setCreateOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('memories')
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ['repo', repoId],
@@ -24,6 +27,7 @@ export function Memories() {
   })
 
   const { data: projectSummary, isLoading: projectSummaryLoading } = useProjectSummary(repoId)
+  const { data: kvEntries } = useKvEntries(projectSummary?.projectId ?? undefined)
 
   const projectId = projectSummary?.projectId ?? null
   const stats = projectSummary?.stats ?? null
@@ -64,20 +68,24 @@ export function Memories() {
         <Header.BackButton to={`/repos/${repoId}`} />
         <div className="min-w-0 flex-1 flex justify-center ml-2">
           <Header.Title className="hidden sm:flex ">
-            Memory: {getRepoDisplayName(repo.repoUrl, repo.localPath)}
+            Memory: {getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
           </Header.Title>
           <Header.Title className="sm:hidden truncate">
-            {getRepoDisplayName(repo.repoUrl, repo.localPath)}
+            {getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
           </Header.Title>
         </div>
         <Header.Actions>
-          <Button onClick={() => setCreateOpen(true)} size="sm" className="hidden sm:flex">
-            <Plus className="w-4 h-4 mr-2" />
-            New Memory
-          </Button>
-          <Button onClick={() => setCreateOpen(true)} size="sm" className="sm:hidden">
-            <Plus className="w-4 h-4" />
-          </Button>
+          {activeTab === 'memories' && (
+            <>
+              <Button onClick={() => setCreateOpen(true)} size="sm" className="hidden sm:flex">
+                <Plus className="w-4 h-4 mr-2" />
+                New Memory
+              </Button>
+              <Button onClick={() => setCreateOpen(true)} size="sm" className="sm:hidden">
+                <Plus className="w-4 h-4" />
+              </Button>
+            </>
+          )}
         </Header.Actions>
       </Header>
 
@@ -98,11 +106,33 @@ export function Memories() {
                   ))}
                 </div>
               )}
+              {kvEntries && kvEntries.length > 0 && (
+                <Badge variant="outline" className="text-sm">
+                  KV Entries: {kvEntries.length}
+                </Badge>
+              )}
             </CardContent>
           </Card>
         )}
 
-        <MemoryList projectId={projectId} showFilters={true} />
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList>
+            <TabsTrigger value="memories">
+              <Brain className="w-4 h-4 mr-2" />
+              Memories
+            </TabsTrigger>
+            <TabsTrigger value="kv">
+              <Key className="w-4 h-4 mr-2" />
+              Key-Value
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="memories">
+            <MemoryList projectId={projectId} showFilters={true} />
+          </TabsContent>
+          <TabsContent value="kv">
+            <KvList projectId={projectId ?? undefined} />
+          </TabsContent>
+        </Tabs>
       </div>
 
       <MemoryFormDialog

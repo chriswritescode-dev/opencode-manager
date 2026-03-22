@@ -9,7 +9,7 @@ import {
 } from "@opencode-manager/shared/schemas";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
-import { getRepoByLocalPath } from "../db/queries";
+import { getRepoByLocalPath, getRepoBySourcePath } from "../db/queries";
 import { getReposPath } from "@opencode-manager/shared/config/env";
 import path from "path";
 
@@ -221,7 +221,7 @@ export class NotificationService {
       if (_directory) {
         const reposBasePath = getReposPath();
         const localPath = path.relative(reposBasePath, _directory);
-        const repo = getRepoByLocalPath(this.db, localPath);
+        const repo = getRepoBySourcePath(this.db, path.resolve(_directory)) ?? getRepoByLocalPath(this.db, localPath);
 
         if (repo) {
           repoId = repo.id;

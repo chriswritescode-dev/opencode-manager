@@ -50,19 +50,34 @@ Before chatting, you need to configure at least one AI provider:
 4. Enter your **API key** or click **Add OAuth** for supported providers
 5. Click **Save**
 
-## 4. Clone a Repository
+## 4. Add Repositories
+
+Choose the onboarding flow that matches your setup:
+
+### Clone a Remote Repository
 
 1. Click the **folder icon** in the sidebar
-2. Click **Clone Repository**
-3. Paste a repository URL (HTTPS or SSH)
-4. Click **Clone**
+2. Click **Add Repository**
+3. Select **Remote Repository**
+4. Paste a repository URL (HTTPS or SSH)
+5. Click **Add Repository**
+
+### Discover Existing Local Repositories
+
+1. Click the **folder icon** in the sidebar
+2. Click **Add Repository**
+3. Select **Folder Discovery**
+4. Enter a parent folder such as `/Users/you/Development`
+5. Click **Discover Repositories**
+
+If you already used standalone OpenCode in those repositories, existing chats appear as soon as the discovered repo path matches the original OpenCode path.
 
 !!! note "Private Repositories"
     For private repos, configure a GitHub Personal Access Token in Settings > Credentials first.
 
 ## 5. Start Chatting
 
-1. Select your cloned repository from the sidebar
+1. Select your repository from the sidebar
 2. Click **New Session** or type `/new`
 3. Type your message
 4. Press **Enter** to send

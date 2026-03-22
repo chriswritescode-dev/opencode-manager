@@ -173,7 +173,7 @@ function HeaderActions({ children, className }: { children: ReactNode; className
 
 function HeaderMobileDropdown({ children, className }: { children: ReactNode; className?: string }) {
   const isMobile = useMobile();
-  const { pendingCount: permissionCount, setShowDialog } = usePermissions();
+  const { pendingCount: permissionCount, setShowDialog, navigateToCurrent: navigateToPermission } = usePermissions();
   const { pendingCount: questionCount, navigateToCurrent } = useQuestions();
   const { open } = useSettingsDialog();
 
@@ -202,7 +202,7 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {permissionCount > 0 && (
-          <DropdownMenuItem onClick={() => setShowDialog(true)} className="gap-2">
+          <DropdownMenuItem onClick={() => { navigateToPermission(); setShowDialog(true); }} className="gap-2">
             <Bell className="w-4 h-4 text-orange-500" />
             <span>{permissionCount} pending permission{permissionCount > 1 ? 's' : ''}</span>
           </DropdownMenuItem>

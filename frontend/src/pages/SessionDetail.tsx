@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
-import { X, VolumeX, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff } from "lucide-react";
+import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
+import { X, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff, Code } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
@@ -34,6 +35,8 @@ import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
+import { LspStatusButton } from "@/components/repo/LspStatusButton";
+import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import { useQuestions } from "@/contexts/EventContext";
@@ -61,6 +64,7 @@ export function SessionDetail() {
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [lspDialogOpen, setLspDialogOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
   const [sourceControlOpen, setSourceControlOpen] = useState(false);
   const [resetPermissionsOpen, setResetPermissionsOpen] = useState(false);
@@ -127,13 +131,14 @@ export function SessionDetail() {
   const isTitleGenerating = useTitleGenerating(sessionId);
   const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
-  const { isPlaying, stop } = useTTS();
+  const { isEnabled: ttsEnabled } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion } = useQuestions();
 
   const sessionStatus = useSessionStatusForSession(sessionId);
   const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
+  const lastAssistantText = (lastAssistantMessage?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const hasActiveStream = hasIncompleteMessages && isSessionActive;
 
@@ -352,7 +357,7 @@ export function SessionDetail() {
           <Header.EditableTitle
             value={session?.title || "Untitled Session"}
             onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
+            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>}
             generating={isTitleGenerating}
           />
         </div>
@@ -376,6 +381,11 @@ export function SessionDetail() {
             <FolderOpen className="w-4 h-4 sm:mr-2" />
             <span className="hidden sm:inline">Files</span>
           </Button>
+          <LspStatusButton
+            opcodeUrl={opcodeUrl}
+            directory={repoDirectory}
+            onClick={() => setLspDialogOpen(true)}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -430,6 +440,9 @@ export function SessionDetail() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
               <Plug className="w-4 h-4 mr-2" /> MCP
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLspDialogOpen(true)}>
+              <Code className="w-4 h-4 mr-2" /> LSP
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setResetPermissionsOpen(true)}>
               <ShieldOff className="w-4 h-4 mr-2" /> Reset Permissions
@@ -486,20 +499,9 @@ export function SessionDetail() {
                   <span className="text-sm font-medium">Waiting for shortcut key...</span>
                 </div>
               )}
-              {isPlaying && !leaderActive && (
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onTouchEnd={(e) => {
-                    e.preventDefault()
-                    stop()
-                  }}
-                  onClick={stop}
-                  className="absolute -top-12 left-0 md:left-4 z-50 flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-br from-red-700 to-red-800 hover:from-red-600 hover:to-red-700 text-destructive-foreground border-2 border-red-600/80 hover:border-red-500 shadow-2xl shadow-red-600/40 hover:shadow-red-600/60 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-2 ring-red-600/30 hover:ring-red-600/50 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"
-                  aria-label="Stop Audio"
-                >
-                  <VolumeX className="w-6 h-6" />
-                  <span className="text-sm font-medium hidden sm:inline">Stop Audio</span>
-                </button>
+
+              {ttsEnabled && lastAssistantText && !hasPromptContent && !hasActiveStream && (
+                <FloatingTTSButton content={lastAssistantText} />
               )}
               {currentQuestion && currentQuestion.sessionID === sessionId && (
                 <QuestionPrompt
@@ -514,6 +516,7 @@ export function SessionDetail() {
                 opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 sessionID={sessionId}
+                repoId={repoId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton}
                 hasActiveStream={hasActiveStream}
@@ -561,9 +564,16 @@ export function SessionDetail() {
         isOpen={fileBrowserOpen}
         onClose={handleFileBrowserClose}
         basePath={repo.localPath}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
         repoId={repoId}
         initialSelectedFile={selectedFilePath}
+      />
+
+      <RepoLspDialog
+        open={lspDialogOpen}
+        onOpenChange={setLspDialogOpen}
+        opcodeUrl={opcodeUrl}
+        directory={repoDirectory}
       />
 
       <RepoMcpDialog
@@ -577,7 +587,7 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
       />
 
       <ResetPermissionsDialog

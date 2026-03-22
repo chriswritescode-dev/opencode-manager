@@ -84,13 +84,13 @@ export function AgentsMdEditor() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <p className="text-sm text-muted-foreground">
             Global instructions for AI agents. This file is merged with repository-specific AGENTS.md files.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-shrink-0">
           <Button
             variant="outline"
             size="sm"
@@ -122,7 +122,7 @@ export function AgentsMdEditor() {
       <Textarea
         value={content}
         onChange={(e) => handleContentChange(e.target.value)}
-        className="font-mono md:text-sm min-h-[300px] resize-y"
+        className="font-mono text-xs sm:text-sm min-h-[300px] resize-y"
         placeholder="# Agent Instructions&#10;&#10;Add global instructions for AI agents here..."
       />
       

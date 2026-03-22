@@ -1,24 +1,32 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { loadPluginConfig, resolveConfigPath } from '../src/setup'
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs'
+import { mkdirSync, rmSync, writeFileSync, existsSync, copyFileSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
 const TEST_DIR = '/tmp/opencode-manager-memory-setup-test-' + Date.now()
 
 describe('loadPluginConfig', () => {
-  let testDir: string
+  let testConfigDir: string
+  let testDataDir: string
 
   beforeEach(() => {
-    testDir = TEST_DIR + '-' + Math.random().toString(36).slice(2)
-    mkdirSync(testDir, { recursive: true })
-    process.env['XDG_DATA_HOME'] = testDir
+    testConfigDir = TEST_DIR + '-config-' + Math.random().toString(36).slice(2)
+    testDataDir = TEST_DIR + '-data-' + Math.random().toString(36).slice(2)
+    mkdirSync(testConfigDir, { recursive: true })
+    mkdirSync(testDataDir, { recursive: true })
+    process.env['XDG_CONFIG_HOME'] = testConfigDir
+    process.env['XDG_DATA_HOME'] = testDataDir
   })
 
   afterEach(() => {
+    delete process.env['XDG_CONFIG_HOME']
     delete process.env['XDG_DATA_HOME']
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true })
+    if (existsSync(testConfigDir)) {
+      rmSync(testConfigDir, { recursive: true, force: true })
+    }
+    if (existsSync(testDataDir)) {
+      rmSync(testDataDir, { recursive: true, force: true })
     }
   })
 
@@ -30,8 +38,8 @@ describe('loadPluginConfig', () => {
   })
 
   test('reads and parses valid config file', () => {
-    const configPath = join(testDir, 'opencode', 'memory', 'config.json')
-    mkdirSync(join(testDir, 'opencode', 'memory'), { recursive: true })
+    const configPath = join(testConfigDir, 'opencode', 'memory-config.jsonc')
+    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
     const validConfig = {
       embedding: {
@@ -55,8 +63,8 @@ describe('loadPluginConfig', () => {
   })
 
   test('returns defaults when file contains invalid JSON', () => {
-    const configPath = join(testDir, 'opencode', 'memory', 'config.json')
-    mkdirSync(join(testDir, 'opencode', 'memory'), { recursive: true })
+    const configPath = join(testConfigDir, 'opencode', 'memory-config.jsonc')
+    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
     writeFileSync(configPath, 'invalid json content')
 
@@ -65,8 +73,8 @@ describe('loadPluginConfig', () => {
   })
 
   test('returns defaults when file has wrong structure', () => {
-    const configPath = join(testDir, 'opencode', 'memory', 'config.json')
-    mkdirSync(join(testDir, 'opencode', 'memory'), { recursive: true })
+    const configPath = join(testConfigDir, 'opencode', 'memory-config.jsonc')
+    mkdirSync(join(testConfigDir, 'opencode'), { recursive: true })
 
     const invalidConfig = {
       embedding: {
@@ -81,32 +89,59 @@ describe('loadPluginConfig', () => {
     const config = loadPluginConfig()
     expect(config.embedding.provider).toBe('local')
   })
+
+  test('migrates config from old data dir location to new config dir location', () => {
+    const oldConfigPath = join(testDataDir, 'opencode', 'memory', 'config.json')
+    const newConfigPath = join(testConfigDir, 'opencode', 'memory-config.jsonc')
+    
+    mkdirSync(join(testDataDir, 'opencode', 'memory'), { recursive: true })
+
+    const oldConfig = {
+      embedding: {
+        provider: 'voyage',
+        model: 'voyage-code-3',
+        dimensions: 1024,
+      },
+      dedupThreshold: 0.35,
+    }
+
+    writeFileSync(oldConfigPath, JSON.stringify(oldConfig))
+
+    const config = loadPluginConfig()
+    
+    expect(config.embedding.provider).toBe('voyage')
+    expect(config.embedding.model).toBe('voyage-code-3')
+    expect(config.dedupThreshold).toBe(0.35)
+    
+    expect(existsSync(newConfigPath)).toBe(true)
+  })
 })
 
 describe('resolveConfigPath', () => {
-  let testDir: string
+  let testConfigDir: string
 
   beforeEach(() => {
-    testDir = TEST_DIR + '-' + Math.random().toString(36).slice(2)
+    testConfigDir = TEST_DIR + '-configpath-' + Math.random().toString(36).slice(2)
+    mkdirSync(testConfigDir, { recursive: true })
   })
 
   afterEach(() => {
-    delete process.env['XDG_DATA_HOME']
-    if (existsSync(testDir)) {
-      rmSync(testDir, { recursive: true, force: true })
+    delete process.env['XDG_CONFIG_HOME']
+    if (existsSync(testConfigDir)) {
+      rmSync(testConfigDir, { recursive: true, force: true })
     }
   })
 
-  test('returns correct path based on XDG_DATA_HOME', () => {
-    process.env['XDG_DATA_HOME'] = testDir
+  test('returns correct path based on XDG_CONFIG_HOME', () => {
+    process.env['XDG_CONFIG_HOME'] = testConfigDir
     const configPath = resolveConfigPath()
-    expect(configPath).toBe(join(testDir, 'opencode', 'memory', 'config.json'))
+    expect(configPath).toBe(join(testConfigDir, 'opencode', 'memory-config.jsonc'))
   })
 
-  test('falls back to ~/.local/share when XDG_DATA_HOME is unset', () => {
-    delete process.env['XDG_DATA_HOME']
+  test('falls back to ~/.config when XDG_CONFIG_HOME is unset', () => {
+    delete process.env['XDG_CONFIG_HOME']
     const configPath = resolveConfigPath()
-    const expectedDefault = join(homedir(), '.local', 'share', 'opencode', 'memory', 'config.json')
+    const expectedDefault = join(homedir(), '.config', 'opencode', 'memory-config.jsonc')
     expect(configPath).toBe(expectedDefault)
   })
 })

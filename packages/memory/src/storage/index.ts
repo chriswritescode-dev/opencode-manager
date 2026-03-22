@@ -1,5 +1,5 @@
 export { initializeDatabase, closeDatabase, resolveDataDir, resolveLogPath } from './database'
-export { createVecService } from './vec'
+export { createVecService, cleanupOrphanedWorkers } from './vec'
 export type { VecService, VecSearchResult, TableDimensionsResult } from './vec-types'
 export { createMemoryQuery } from './memory-queries'
 export { createMetadataQuery } from './metadata-queries'

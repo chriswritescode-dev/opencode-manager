@@ -1,8 +1,8 @@
 /* eslint-disable no-empty */
-import { promises as fs } from 'fs'
-import { execFile } from 'child_process'
-import { randomBytes } from 'crypto'
-import { join } from 'path'
+import fs from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
+import { join } from 'node:path'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 const SSH_KEYS_DIR = join(getWorkspacePath(), '.ssh-keys')

@@ -27,6 +27,15 @@ interface DbMemoryRow {
   updated_at: number
 }
 
+interface DbKvRow {
+  project_id: string
+  key: string
+  data: string
+  expires_at: number
+  created_at: number
+  updated_at: number
+}
+
 interface MemoryFilters {
   scope?: 'convention' | 'decision' | 'context'
   content?: string
@@ -49,6 +58,22 @@ function mapRowToMemory(row: DbMemoryRow): PluginMemory {
     lastAccessedAt: row.last_accessed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+function mapRowToKvEntry(row: DbKvRow): { key: string; data: unknown; createdAt: number; updatedAt: number; expiresAt: number } {
+  let data: unknown = null
+  try {
+    data = JSON.parse(row.data)
+  } catch {
+    data = row.data
+  }
+  return {
+    key: row.key,
+    data,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    expiresAt: row.expires_at,
   }
 }
 
@@ -231,6 +256,73 @@ export class PluginMemoryService {
     }
 
     return { projectId, total, byScope }
+  }
+
+  listKv(projectId: string, prefix?: string): { key: string; data: unknown; createdAt: number; updatedAt: number; expiresAt: number }[] {
+    const db = this.getDb()
+    if (!db) return []
+
+    const now = Date.now()
+    let sql = 'SELECT project_id, key, data, expires_at, created_at, updated_at FROM project_kv WHERE project_id = ? AND expires_at > ?'
+    const params: (string | number)[] = [projectId, now]
+
+    if (prefix) {
+      sql += ' AND key LIKE ?'
+      params.push(`${prefix}%`)
+    }
+
+    sql += ' ORDER BY updated_at DESC'
+
+    const stmt = db.prepare(sql)
+    const rows = stmt.all(...params) as DbKvRow[]
+    return rows.map(mapRowToKvEntry)
+  }
+
+  getKv(projectId: string, key: string): { key: string; data: unknown; createdAt: number; updatedAt: number; expiresAt: number } | undefined {
+    const db = this.getDb()
+    if (!db) return undefined
+
+    const stmt = db.prepare(
+      'SELECT project_id, key, data, expires_at, created_at, updated_at FROM project_kv WHERE project_id = ? AND key = ? AND expires_at > ?'
+    )
+    const row = stmt.get(projectId, key, Date.now()) as DbKvRow | undefined
+    return row ? mapRowToKvEntry(row) : undefined
+  }
+
+  setKv(projectId: string, key: string, data: unknown, ttlMs?: number): void {
+    const db = this.getDb()
+    if (!db) throw new Error('Plugin database not available')
+
+    const now = Date.now()
+    const expiresAt = ttlMs ? now + ttlMs : Number.MAX_SAFE_INTEGER
+    const serializedData = JSON.stringify(data)
+
+    const stmt = db.prepare(`
+      INSERT INTO project_kv (project_id, key, data, expires_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(project_id, key) DO UPDATE SET
+        data = excluded.data,
+        expires_at = excluded.expires_at,
+        updated_at = excluded.updated_at
+    `)
+    stmt.run(projectId, key, serializedData, expiresAt, now, now)
+  }
+
+  deleteKv(projectId: string, key: string): void {
+    const db = this.getDb()
+    if (!db) throw new Error('Plugin database not available')
+
+    const stmt = db.prepare('DELETE FROM project_kv WHERE project_id = ? AND key = ?')
+    stmt.run(projectId, key)
+  }
+
+  getKvCount(projectId: string): number {
+    const db = this.getDb()
+    if (!db) return 0
+
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM project_kv WHERE project_id = ? AND expires_at > ?')
+    const result = stmt.get(projectId, Date.now()) as { count: number }
+    return result.count
   }
 
   close(): void {

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useMemo } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { DndContext, closestCenter, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from "@dnd-kit/sortable"
@@ -13,6 +13,7 @@ import type { GitStatusResponse } from "@/types/git"
 import { RepoCard } from "./RepoCard"
 import { RepoCardSkeleton } from "./RepoCardSkeleton"
 import { useMobile } from "@/hooks/useMobile"
+import { getRepoDisplayName } from "@/lib/utils"
 
 interface RepoCardWrapperProps {
   repo: Repo
@@ -104,6 +105,19 @@ export function RepoList() {
     queryKey: ["repos"],
     queryFn: listRepos,
   })
+
+  const repoForDelete = useMemo(() => {
+    return repoToDelete ? repos?.find(r => r.id === repoToDelete) : null
+  }, [repoToDelete, repos])
+
+  const { hasLocalRepos, hasClonedRepos } = useMemo(() => {
+    if (!repos) return { hasLocalRepos: false, hasClonedRepos: false }
+    const selectedRepoObjects = repos.filter(r => selectedRepos.has(r.id))
+    return {
+      hasLocalRepos: selectedRepoObjects.some(r => r.isLocal),
+      hasClonedRepos: selectedRepoObjects.some(r => !r.isLocal),
+    }
+  }, [selectedRepos, repos])
 
   const repoIds = repos?.map((repo) => repo.id) || []
 
@@ -242,8 +256,8 @@ export function RepoList() {
     if (repo.isWorktree) {
       acc.push(repo)
     } else {
-      const key = repo.repoUrl || repo.localPath
-      const existing = acc.find((r) => (r.repoUrl || r.localPath) === key && !r.isWorktree)
+      const key = repo.repoUrl || repo.sourcePath || repo.localPath
+      const existing = acc.find((r) => (r.repoUrl || r.sourcePath || r.localPath) === key && !r.isWorktree)
 
       if (!existing) {
         acc.push(repo)
@@ -254,10 +268,8 @@ export function RepoList() {
   }, [] as Repo[])
 
   const filteredRepos = dedupedRepos.filter((repo) => {
-    const repoName = repo.repoUrl
-      ? repo.repoUrl.split("/").slice(-1)[0].replace(".git", "")
-      : repo.localPath
-    const searchTarget = repo.repoUrl || repo.localPath || ""
+    const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
+    const searchTarget = repo.repoUrl || repo.sourcePath || repo.localPath || ""
     return (
       repoName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       searchTarget.toLowerCase().includes(searchQuery.toLowerCase())
@@ -398,13 +410,36 @@ export function RepoList() {
         }}
         title={
           selectedRepos.size > 0
-            ? "Delete Multiple Repositories"
-            : "Delete Repository"
+            ? hasLocalRepos && !hasClonedRepos
+              ? "Unlink Multiple Repositories"
+              : "Delete Multiple Repositories"
+            : repoForDelete
+              ? repoForDelete.isLocal
+                ? "Unlink Repository"
+                : "Delete Repository"
+              : "Delete Repository"
         }
         description={
           selectedRepos.size > 0
-            ? `Are you sure you want to delete ${selectedRepos.size} repositor${selectedRepos.size === 1 ? "y" : "ies"}? This will remove all local files. This action cannot be undone.`
-            : "Are you sure you want to delete this repository? This will remove all local files. This action cannot be undone."
+            ? hasClonedRepos && !hasLocalRepos
+              ? `Are you sure you want to delete ${selectedRepos.size} repositor${selectedRepos.size === 1 ? "y" : "ies"}? This will remove all local files. This action cannot be undone.`
+              : hasLocalRepos && !hasClonedRepos
+                ? `Are you sure you want to unlink ${selectedRepos.size} repositor${selectedRepos.size === 1 ? "y" : "ies"}? Only workspace references will be removed. Your original files will not be affected.`
+                : `Are you sure you want to delete ${selectedRepos.size} repositor${selectedRepos.size === 1 ? "y" : "ies"}? Cloned repositories will have their local files removed. Locally discovered repositories will only have their workspace references removed — original files will not be affected.`
+            : repoForDelete?.isLocal
+              ? (
+                <>
+                  Are you sure you want to unlink this repository? Only the workspace reference will be removed.
+                  {repoForDelete.sourcePath && (
+                    <>
+                      {" "}Your original files at{" "}
+                      <span className="font-mono text-xs">{repoForDelete.sourcePath}</span>{" "}
+                      will not be affected.
+                    </>
+                  )}
+                </>
+              )
+              : "Are you sure you want to delete this repository? This will remove all local files. This action cannot be undone."
         }
         isDeleting={deleteMutation.isPending || batchDeleteMutation.isPending}
       />

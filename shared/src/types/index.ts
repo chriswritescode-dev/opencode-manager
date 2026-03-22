@@ -13,6 +13,8 @@ import {
 import {
   RepoSchema,
   CreateRepoRequestSchema,
+  DiscoverReposRequestSchema,
+  DiscoverReposResponseSchema,
   RepoStatusSchema,
 } from '../schemas/repo'
 import {
@@ -48,6 +50,8 @@ export type OpenCodeConfigResponse = z.infer<typeof OpenCodeConfigResponseSchema
 
 export type Repo = z.infer<typeof RepoSchema>
 export type CreateRepoRequest = z.infer<typeof CreateRepoRequestSchema>
+export type DiscoverReposRequest = z.infer<typeof DiscoverReposRequestSchema>
+export type DiscoverReposResponse = z.infer<typeof DiscoverReposResponseSchema>
 export type RepoStatus = z.infer<typeof RepoStatusSchema>
 
 export type FileInfo = z.infer<typeof FileInfoSchema>
@@ -90,6 +94,10 @@ export type {
   MemoryInjectionConfig,
   MessagesTransformConfig,
   PluginConfig,
+  KvEntry,
+  KvListQuery,
+  CreateKvEntryRequest,
+  UpdateKvEntryRequest,
 } from '../schemas/memory'
 
 export type {

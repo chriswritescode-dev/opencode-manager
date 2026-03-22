@@ -19,7 +19,7 @@ Open [http://localhost:5003](http://localhost:5003) and create your admin accoun
 
 OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing you to:
 
-- **Manage repositories** - Clone, browse, and work with multiple git repos
+- **Manage repositories** - Clone repos or discover existing local repos from a parent folder
 - **Chat with AI** - Real-time streaming chat with file mentions and slash commands
 - **Run recurring jobs** - Schedule repo reviews, health checks, and other reusable prompts
 - **View diffs** - See code changes with syntax highlighting
@@ -28,7 +28,7 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 
 ## Key Features
 
-- **Multi-Repository Support** - Clone and manage multiple git repos with private repo support
+- **Multi-Repository Support** - Clone repos, discover local repo folders, and reconnect existing OpenCode chats
 - **Git Integration** - View diffs, manage branches, create PRs directly from the UI
 - **Real-time Chat** - Stream responses with file mentions and custom slash commands
 - **Scheduled Repo Jobs** - Run recurring prompts with linked sessions, logs, and reviewable output

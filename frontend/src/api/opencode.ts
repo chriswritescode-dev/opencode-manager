@@ -15,8 +15,10 @@ type ShellRequest = NonNullable<paths['/session/{sessionID}/shell']['post']['req
 type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
 type QuestionListResponse = paths['/question']['get']['responses']['200']['content']['application/json']
 type SendPromptResponse = paths['/session/{sessionID}/message']['post']['responses']['200']['content']['application/json']
+type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['application/json']
+type LspStatus = LspStatusResponse[number]
 
-export type { SendPromptResponse }
+export type { SendPromptResponse, LspStatus }
 
 export class OpenCodeClient {
   private baseURL: string
@@ -119,6 +121,12 @@ export class OpenCodeClient {
 
   async getConfig() {
     return fetchWrapper<ConfigResponse>(`${this.baseURL}/config`, {
+      params: this.getParams(),
+    })
+  }
+
+  async getLSPStatus() {
+    return fetchWrapper<LspStatusResponse>(`${this.baseURL}/lsp`, {
       params: this.getParams(),
     })
   }

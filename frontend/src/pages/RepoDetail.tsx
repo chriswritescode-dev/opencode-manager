@@ -110,7 +110,7 @@ export function RepoDetail() {
     );
   }
 
-  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath);
+  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
   const branchToDisplay = repo.currentBranch || repo.branch;
   const displayName = branchToDisplay ? `${repoName} (${branchToDisplay})` : repoName;
   const currentBranch = repo.currentBranch || repo.branch || "main";

@@ -16,11 +16,11 @@ export interface KvService {
   set<T = unknown>(projectId: string, key: string, data: T, ttlMs?: number): void
   delete(projectId: string, key: string): void
   list(projectId: string): KvEntry[]
+  listByPrefix(projectId: string, prefix: string): KvEntry[]
 }
 
 export function createKvService(db: Database, logger?: Logger): KvService {
   const queries = createKvQuery(db)
-  queries.deleteExpired()
 
   return {
     get<T = unknown>(projectId: string, key: string): T | null {
@@ -45,6 +45,23 @@ export function createKvService(db: Database, logger?: Logger): KvService {
 
     list(projectId: string): KvEntry[] {
       const rows = queries.list(projectId)
+      return rows.map((row) => {
+        let data: unknown = null
+        try {
+          data = JSON.parse(row.data)
+        } catch {
+        }
+        return {
+          key: row.key,
+          data,
+          updatedAt: row.updatedAt,
+          expiresAt: row.expiresAt,
+        }
+      })
+    },
+
+    listByPrefix(projectId: string, prefix: string): KvEntry[] {
+      const rows = queries.listByPrefix(projectId, prefix)
       return rows.map((row) => {
         let data: unknown = null
         try {

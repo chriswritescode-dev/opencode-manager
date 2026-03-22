@@ -3,7 +3,7 @@ import { PendingActionBadge } from '@/components/ui/pending-action-badge'
 import { usePermissions, useQuestions } from '@/contexts/EventContext'
 
 export function PendingActionsGroup() {
-  const { pendingCount: permissionCount, setShowDialog } = usePermissions()
+  const { pendingCount: permissionCount, setShowDialog, navigateToCurrent: navigateToPermission } = usePermissions()
   const { pendingCount: questionCount, navigateToCurrent } = useQuestions()
 
   return (
@@ -12,7 +12,10 @@ export function PendingActionsGroup() {
         count={permissionCount}
         icon={Bell}
         color="orange"
-        onClick={() => setShowDialog(true)}
+        onClick={() => {
+          navigateToPermission()
+          setShowDialog(true)
+        }}
         label="permission"
       />
       <PendingActionBadge

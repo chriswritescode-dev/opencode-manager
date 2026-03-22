@@ -32,12 +32,14 @@ Then register the plugin in your `opencode.json`:
 
 ## Configuration
 
-On first run, the plugin copies a bundled `config.json` to the global data directory:
+On first run, the plugin copies a bundled `config.jsonc` to the global config directory:
 
-- `~/.local/share/opencode/memory/config.json`
-- Falls back to `$XDG_DATA_HOME/opencode/memory/config.json`
+- `~/.config/opencode/memory-config.jsonc`
+- Falls back to: `$XDG_CONFIG_HOME/opencode/memory-config.jsonc`
 
-The file is only created if it does not already exist. The config is validated on load — if it fails validation, defaults are used automatically.
+The plugin supports JSONC format, allowing comments with `//` and `/* */`.
+
+The file is only created if it does not already exist. The config is validated on load — if it fails validation, defaults are used automatically. If a config exists at the old location (`~/.local/share/opencode/memory/config.json`), it will be automatically migrated to the new location.
 
 ### Full Default Config
 
@@ -70,7 +72,16 @@ The file is only created if it does not already exist. The config is validated o
     "enabled": true,
     "debug": false
   },
-  "executionModel": ""
+  "executionModel": "",
+  "auditorModel": "",
+  "ralph": {
+    "enabled": true,
+    "defaultMaxIterations": 15,
+    "cleanupWorktree": false,
+    "defaultAudit": true,
+    "model": "",
+    "minAudits": 1
+  }
 }
 ```
 
@@ -121,6 +132,13 @@ Set `baseUrl` to point at any OpenAI-compatible self-hosted service (vLLM, Ollam
 | `messagesTransform.enabled` | Enable the messages transform hook (memory injection + Architect enforcement) | `true` |
 | `messagesTransform.debug` | Enable debug logging for messages transform | `false` |
 | `executionModel` | Model override for plan execution sessions (`provider/model`). Falls back to OpenCode's default model. | — |
+| `ralph.enabled` | Enable Ralph iterative development loops | `true` |
+| `ralph.defaultMaxIterations` | Default max iterations (0 = unlimited) | `15` |
+| `ralph.cleanupWorktree` | Auto-remove worktree on cancel | `false` |
+| `ralph.defaultAudit` | Run auditor after each coding iteration | `true` |
+| `ralph.model` | Model override for Ralph sessions (`provider/model`), falls back to `executionModel` | — |
+| `ralph.minAudits` | Minimum audit iterations required before completion | `1` |
+| `auditorModel` | Model override for the auditor agent (`provider/model`). When set, overrides the auditor agent's default model. When not set, the auditor uses the platform default. | — |
 
 ---
 
@@ -139,9 +157,9 @@ The plugin is composed of several subsystems that work together:
 │  Embedding   │   Vec Search   │   Cache          │
 │  Service     │   (sqlite-vec) │   (In-Memory)    │
 ├──────────────┴────────────────┬───────────────────┤
-│         KV Service            │   Auto-Cleanup    │
-│   (ephemeral state + TTL)     │   (30min interval)│
-├──────────────┴────────────────┴───────────────────┤
+│   KV Service    │  Ralph Service  │  Auto-Cleanup │
+│   (TTL state)   │  (loop mgmt)    │  (30min)      │
+├─────────────────┴─────────────────┴───────────────┤
 │              SQLite Database (WAL)                 │
 │   memories | metadata | project_kv (TTL indexed)  │
 └──────────────────────────────────────────────────┘
@@ -174,6 +192,17 @@ The KV store provides ephemeral project state management with automatic TTL-base
 - **Use Cases**: Planning progress, code review patterns, session context, temporary state
 
 The KV service is initialized on plugin startup and begins its cleanup interval automatically. Call `kvService.destroy()` during cleanup to stop the interval.
+
+### Ralph Service
+
+The Ralph service manages iterative development loops using the KV store for state persistence:
+
+- **State Management**: Each loop's state is stored in the KV store under `ralph:{sessionId}` with fields: `active` (boolean), `sessionId`, `worktreeName`, `worktreeDir`, `worktreeBranch`, `workspaceId`, `iteration`, `maxIterations`, `completionPromise`, `startedAt`, `prompt`, `phase` (coding/auditing), `audit`, `lastAuditResult`, `errorCount`, `auditCount`, `terminationReason`, `completedAt`, `parentSessionId`, `inPlace`
+- **Two-Phase Cycle**: Alternates between coding (Code agent works on the task) and auditing (Auditor agent reviews changes). Audit findings feed back into the next coding iteration
+- **Completion Criteria**: Requires the `completionPromise` to be detected in `<promise>` tags AND `minAudits` (default 1) audit iterations before marking the loop as completed. Without a `completionPromise`, the loop only terminates via other conditions (max iterations, errors, cancellation, etc.)
+- **Error Handling**: Tracks consecutive errors with `MAX_RETRIES` (3). If 3 consecutive iterations fail, the loop terminates with reason `error_max_retries`
+- **Worktree Management**: By default creates an isolated git worktree for each loop. Uses `git rev-parse --git-common-dir` to find the main repo root. On completion, auto-commits changes and removes the worktree (preserving the branch). Set `inPlace: true` to skip worktree isolation
+- **Termination Reasons**: `completed`, `max_iterations`, `error_max_retries`, `worktree_failed`, `cancelled`, `user_aborted`, `stall_timeout`, `shutdown`
 
 ### Vector Search
 
@@ -275,7 +304,7 @@ When deduplication triggers, the existing memory's ID is returned instead of cre
 
 ## Tools
 
-The plugin registers thirteen tools that the AI agent can call:
+The plugin registers seventeen tools that the AI agent can call:
 
 ### memory-read
 
@@ -324,7 +353,7 @@ Check plugin health or trigger a reindex of all embeddings.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `action` | enum | No | `check` (default) or `reindex` |
+| `action` | enum | No | `check` (default), `reindex`, or `upgrade` |
 
 **Check** returns:
 
@@ -342,6 +371,12 @@ Check plugin health or trigger a reindex of all embeddings.
 - Updates the `plugin_metadata` table on success
 - Reports total, success, and failure counts
 
+**Upgrade** installs the latest version of the plugin:
+
+- Checks npm registry for the latest available version
+- Installs via `bun add --force --no-cache --exact @opencode-manager/memory@latest`
+- Reports the old and new version numbers
+
 !!! warning "Model Changes Require Reindex"
     If you change `embedding.model` or `embedding.dimensions`, existing embeddings will have mismatched dimensions. Auto-validation handles this on startup, but you can also trigger it manually with `memory-health reindex`.
 
@@ -353,10 +388,11 @@ Create a new Code session and send an implementation plan as the first prompt. D
 |-----------|------|----------|-------------|
 | `plan` | string | Yes | The full implementation plan to send to the Code agent |
 | `title` | string | Yes | Short title for the session (shown in session list, max 60 chars) |
+| `inPlace` | boolean | No | Execute in the current session as a subtask instead of creating a new session (default: false) |
 
-Creates a new session via the OpenCode API and sends the plan as the first message to the Code agent. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
+By default, creates a new session via the OpenCode API and sends the plan as the first message to the Code agent. When `inPlace` is true, switches to the Code agent in the current session instead. Returns the session ID and title. Only the Architect agent has access to this tool — it is excluded from Code and Memory agents.
 
-The model used for the new Code session is determined by `executionModel` in the plugin config (format: `provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). If not set, OpenCode's default model resolution is used — typically the `model` field from `opencode.json`.
+The model used for execution is determined by `executionModel` in the plugin config (format: `provider/model`, e.g. `anthropic/claude-sonnet-4-20250514`). If not set, OpenCode's default model resolution is used — typically the `model` field from `opencode.json`.
 
 ### memory-kv-set
 
@@ -398,6 +434,34 @@ No parameters required.
 
 Returns a list of all stored keys with their values and expiration times. Useful for debugging or inspecting current project state.
 
+### ralph-cancel
+
+Cancel an active Ralph loop and optionally clean up the worktree.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Worktree name of the loop to cancel (auto-selects if only one active) |
+
+### ralph-status
+
+Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `name` | string | No | Worktree name for detailed status |
+
+Returns iteration count, current phase, audit results, model configuration, and termination status.
+
+### memory-plan-ralph
+
+Execute an architect plan using a Ralph iterative development loop. Designed to be called by the Architect agent after the user approves a plan with the "Execute with Ralph loop" or "Ralph in place" option.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `plan` | string | Yes | The full implementation plan |
+| `title` | string | Yes | Short title for the session |
+| `inPlace` | boolean | No | Run in current directory instead of worktree (default: false) |
+
 !!! note "KV Store vs Memory"
     The KV store is designed for **ephemeral** project state that expires automatically (default 24 hours). Use `memory-write` for **durable** knowledge that should persist across sessions, such as conventions, decisions, and context.
 
@@ -414,7 +478,11 @@ The Architect and Code agents work together in a plan-then-execute pattern. The 
 1. **Switch to the Architect agent** using the agent selector in the chat header
 2. **Describe your task** — the Architect researches the codebase, checks memory for conventions and decisions, and designs a plan
 3. **Review the plan** — the Architect presents a structured plan with objectives, phases, and decisions for your approval
-4. **Approve the plan** — the Architect calls `memory-plan-execute`, which creates a new Code session and sends the full plan as context
+4. **Approve the plan** — choose an execution mode:
+    - **Approve plan** → `memory-plan-execute` creates a new Code session with the plan
+    - **Execute with Ralph loop** → `memory-plan-ralph` runs the plan in an isolated worktree with iterative coding/auditing
+    - **Ralph in place** → Same as Ralph loop but in the current directory (no worktree isolation)
+    - **Reject plan** → Cancel
 5. **Switch to the new session** — the Code agent executes the plan phase by phase
 
 The Architect operates in read-only mode — it cannot edit files. This separation ensures planning is thorough before any code changes are made.
@@ -425,7 +493,7 @@ Planning requires strong reasoning — use a smart model (e.g., `claude-opus-4-6
 
 This gives you the best of both worlds: high-quality plans at the reasoning tier, fast execution at a fraction of the cost.
 
-**Configure the execution model** in the memory plugin config (`~/.local/share/opencode/memory/config.json`):
+**Configure the execution model** in the memory plugin config (`~/.config/opencode/memory-config.jsonc`):
 
 ```json
 {
@@ -437,6 +505,57 @@ Or set it from the UI: **Settings > Memory Plugin > Execution Model**.
 
 !!! tip "Cost Optimization"
     With this setup, only the planning phase uses the expensive model. The Code session — which typically consumes far more tokens implementing the plan — runs on the cheaper model. The Architect's plan provides enough structure and detail that the Code agent doesn't need the same level of reasoning capability.
+
+### Ralph Loop
+
+The Ralph loop is an iterative development system that alternates between coding and auditing phases until the task is complete.
+
+#### How It Works
+
+1. A new session is created (in a worktree or in-place)
+2. The Code agent receives the task prompt and works on it
+3. When the session goes idle, the Ralph handler checks the phase:
+    - **Coding phase** → If auditing is enabled, switches to auditing phase and runs the Auditor agent as a subtask
+    - **Auditing phase** → Processes audit findings, switches back to coding phase, and sends a continuation prompt with the findings
+4. The loop repeats until one of these conditions is met:
+    - **Completion**: The `completionPromise` phrase is detected in `<promise>` tags AND `minAudits` (default 1) audit iterations have been performed. Without a `completionPromise`, the loop does not auto-complete.
+    - **Max iterations**: Reached `maxIterations` limit (if > 0)
+    - **Error limit**: 3 consecutive failures (`MAX_RETRIES`)
+    - **Stall timeout**: 5 consecutive stalls detected by the watchdog (`MAX_CONSECUTIVE_STALLS`)
+    - **Worktree failure**: The worktree becomes unavailable
+    - **Cancelled**: User cancels via `ralph-cancel` or `/cancel-ralph`
+    - **User abort**: Session is aborted
+
+#### Worktree vs In-Place
+
+| Mode | Isolation | Auto-Commit | Cleanup | Permission Scoping |
+|------|-----------|-------------|---------|-------------------|
+| Worktree (default) | Isolated git worktree | Yes, on completion | Worktree removed, branch preserved | File ops scoped to worktree, git push denied |
+| In-place (`inPlace: true`) | None — runs in current directory | No | None | Git push denied only |
+
+#### Tool Blocking
+
+During a Ralph loop, certain tools are blocked to keep the agent focused:
+
+- `question` — No interactive questions; work autonomously
+- `memory-plan-execute` — Cannot start new plan sessions
+- `memory-plan-ralph` — Cannot start nested Ralph loops
+
+Blocking is enforced via `tool.execute.before` (throws error) with `tool.execute.after` as defense in depth.
+
+#### Model Configuration
+
+| Config Key | Purpose | Fallback |
+|------------|---------|----------|
+| `ralph.model` | Model for Ralph coding sessions | `executionModel` → platform default |
+| `auditorModel` | Model for the auditor agent | Platform default (no fallback chain) |
+
+#### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/ralph-loop <prompt>` | Start a Ralph loop (delegates to memory-plan-ralph) |
+| `/cancel-ralph` | Cancel the active Ralph loop |
 
 ---
 
@@ -454,17 +573,19 @@ The Code agent's system prompt instructs it to:
 
 - Check memory before modifying unfamiliar code areas or making architectural decisions
 - Store durable knowledge with rationale (not just "we use X" but "we use X because Y")
-- Use the @Memory subagent for complex memory operations (multi-query research, contradiction resolution, bulk curation)
+- Use the @Librarian subagent for complex memory operations (multi-query research, contradiction resolution, bulk curation)
 - Check for duplicates with `memory-read` before writing new memories
 - Update stale memories with `memory-edit` rather than creating duplicates
 
-### Memory Agent (subagent)
+### Librarian Agent (subagent)
 
-- **Display name:** `Memory`
+- **Display name:** `librarian`
+- **ID:** `ocm-librarian`
 - **Mode:** `subagent`
+- **Temperature:** 0.0
 - **Role:** Institutional memory manager
 
-The Memory agent handles:
+The Librarian agent handles:
 
 - Strategic retrieval across scopes with prioritized results
 - Storage with proper scope categorization and rationale
@@ -485,20 +606,23 @@ The Architect agent follows a Research → Design → Plan → Execute workflow:
 1. **Research** — Reads relevant files, searches the codebase, checks memory for conventions and decisions
 2. **Design** — Considers approaches, weighs tradeoffs, asks clarifying questions
 3. **Plan** — Presents a structured plan with objectives, phases, decisions, conventions, and key context
-4. **Execute** — When the user approves, calls `memory-plan-execute` with the plan and title.
+4. **Execute** — When the user approves via the question tool, calls `memory-plan-execute` or `memory-plan-ralph` depending on the chosen execution mode.
 
-The Architect is the only agent with access to the `memory-plan-execute` tool. Plans must be fully self-contained since the Code agent receiving them has no access to the Architect's conversation.
+The Architect is the only agent with access to `memory-plan-execute` and `memory-plan-ralph`. Plans must be fully self-contained since the Code agent receiving them has no access to the Architect's conversation.
 
-### Code Review Agent (subagent)
+### Auditor Agent (subagent)
 
-- **Display name:** `Code Review`
+- **Display name:** `auditor`
+- **ID:** `ocm-auditor`
 - **Mode:** `subagent`
 - **Temperature:** 0.0 (deterministic)
 - **Role:** Convention-aware code reviewer with memory access
 
-The Code Review agent is a read-only subagent invoked by other agents via the Task tool to review diffs, commits, branches, or PRs. It checks changes against stored project conventions and decisions, then returns a structured review summary with issues (bug/warning/suggestion) and observations.
+The Auditor agent is a read-only subagent invoked by other agents via the Task tool to review diffs, commits, branches, or PRs. It checks changes against stored project conventions and decisions, then returns a structured review summary with issues (bug/warning/suggestion), observations, and next steps.
 
-The agent can read memory (`memory-read`) but cannot write, edit, or delete memories. It also cannot execute plans — `memory-plan-execute`, `memory-write`, `memory-edit`, and `memory-delete` are excluded.
+The agent can read memory (`memory-read`) but cannot write, edit, or delete memories. It also cannot execute plans — `memory-plan-execute`, `memory-plan-ralph`, `memory-health`, `memory-write`, `memory-edit`, and `memory-delete` are excluded.
+
+The Auditor persists review findings to the KV store (key pattern: `review-finding:<file_path>:<line_number>`) and retrieves past findings at the start of every review for continuity.
 
 The `/review` slash command triggers this agent as a subtask with the template: "Review the current code changes."
 
@@ -511,13 +635,15 @@ The plugin also modifies built-in OpenCode agents:
 | `plan` | Gets access to `memory-read` tool |
 | `build` | Hidden (replaced by the Code agent) |
 
-The default agent is set to `Code`.
+The default agent is set to `code`.
 
-!!! note "Removed Features"
-    The following features were removed in a recent refactor:
-    - Keyword activation (regex-based detection of "remember this", "recall", etc.)
-    - LLM parameter adjustment based on detected modes (temperature, thinking budget, maxSteps)
-    - `resumeAfterCompaction` config option
+### Slash Commands
+
+| Command | Description | Agent | Mode |
+|---------|-------------|-------|------|
+| `/review` | Run a code review on current changes | auditor | subtask |
+| `/ralph-loop` | Start a Ralph loop (delegates to memory-plan-ralph) | code | direct |
+| `/cancel-ralph` | Cancel the active Ralph loop | code | direct |
 
 ---
 
@@ -571,6 +697,37 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 2. If so, appends a synthetic `<system-reminder>` part enforcing read-only mode
 3. This provides message-level enforcement on top of the agent's `edit: { '*': 'deny' }` permission config
 
+### tool.execute.before
+
+Blocks certain tools during active Ralph loops to keep the agent focused on the current task. Throws an error with a descriptive message when a blocked tool is called. Blocked tools: `question`, `memory-plan-execute`, `memory-plan-ralph`.
+
+### tool.execute.after
+
+Defense-in-depth companion to `tool.execute.before`. If a blocked tool somehow executes during a Ralph loop, this hook overrides the output with the denial message.
+
+### permission.ask
+
+Auto-resolves permissions during Ralph loops:
+
+- **Deny**: `git push` operations (always denied during Ralph loops)
+- All other permission requests are passed through to the default handler
+
+### session.idle (event handler)
+
+Drives the Ralph iteration loop by listening for `session.idle` events:
+
+1. Checks if the idle session belongs to an active Ralph loop
+2. Records activity to reset the watchdog stall timer
+3. Re-fetches state as a safety check against race conditions
+4. Dispatches to the appropriate phase handler:
+   - **Coding phase**: If auditing is enabled, switches to auditing phase and runs the Auditor agent as a subtask. Checks for completion promise. Checks max iterations.
+   - **Auditing phase**: Processes audit results, increments `auditCount`, switches back to coding phase, sends continuation prompt with findings. Checks for completion promise. Checks max iterations.
+5. On completion: auto-commits changes (worktree mode), removes worktree (preserving branch), notifies parent session
+
+### worktree.failed (event handler)
+
+Terminates any Ralph loop associated with a failed worktree. Sets the loop status to stopped with reason `worktree_failed`.
+
 ---
 
 ## Data Lifecycle
@@ -583,7 +740,8 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 4. Initialize SQLite database with WAL mode
 5. Create memory service with no-op vec service
 6. Initialize KV service and start auto-cleanup interval (30 minutes)
-7. Initialize vec service asynchronously:
+7. Initialize Ralph service (uses KV store for state persistence)
+8. Initialize vec service asynchronously:
     - If available: sync missing embeddings, auto-validate model drift
     - If unavailable: continue with no-op (semantic search degraded)
 
@@ -591,11 +749,12 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 
 On process exit, `SIGINT`, or `SIGTERM`:
 
-1. Stop KV cleanup interval
-2. Dispose vec service
-3. Destroy in-memory cache
-4. Dispose embedding provider (disconnect from shared server or release model)
-5. Close SQLite database
+1. Stop any active Ralph loops
+2. Stop KV cleanup interval
+3. Dispose vec service
+4. Destroy in-memory cache
+5. Dispose embedding provider (disconnect from shared server or release model)
+6. Close SQLite database
 
 The cleanup function is idempotent — calling it multiple times is safe.
 
@@ -604,12 +763,14 @@ The cleanup function is idempotent — calling it multiple times is safe.
 | File | Location | Purpose |
 |------|----------|---------|
 | `memory.db` | `{dataDir}/` | SQLite database with all memories |
-| `config.json` | `{dataDir}/` | Plugin configuration |
+| `memory-config.jsonc` | `{configDir}/` | Plugin configuration (JSONC format, supports comments) |
 | `embedding.sock` | `{dataDir}/` | Unix socket for shared embedding server |
 | `embedding.pid` | `{dataDir}/` | PID file for the embedding server process |
 | `embedding.startup.lock` | `{dataDir}/` | Directory-based lock to prevent duplicate server starts |
 | `memory.log` | `{dataDir}/logs/` | Debug log (when logging is enabled) |
 | `models/` | `{dataDir}/` | Hugging Face model cache for local embeddings |
+
+Where `{dataDir}` is `~/.local/share/opencode/memory` (or `$XDG_DATA_HOME/opencode/memory`) and `{configDir}` is `~/.config/opencode` (or `$XDG_CONFIG_HOME/opencode`).
 
 ---
 

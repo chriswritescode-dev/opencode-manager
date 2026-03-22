@@ -1,10 +1,11 @@
 import type { Plugin, PluginInput, Hooks } from '@opencode-ai/plugin'
 import { tool } from '@opencode-ai/plugin'
+import { createOpencodeClient as createV2Client } from '@opencode-ai/sdk/v2'
 import { agents } from './agents'
 import { createConfigHandler } from './config'
 import { VERSION } from './version'
-import { createSessionHooks, createMemoryInjectionHook } from './hooks'
-import { join } from 'path'
+import { createSessionHooks, createMemoryInjectionHook, createRalphEventHandler } from './hooks'
+import { join, resolve } from 'path'
 import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery } from './storage'
 import type { MemoryService } from './services/memory'
 import { createVecService } from './storage/vec'
@@ -12,18 +13,25 @@ import { createEmbeddingProvider, checkServerHealth, isServerRunning, killEmbedd
 import { createMemoryService } from './services/memory'
 import { createEmbeddingSyncService } from './services/embedding-sync'
 import { createKvService } from './services/kv'
+import { createRalphService, type RalphState } from './services/ralph'
 import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
-import { createLogger } from './utils/logger'
+import { createLogger, slugify } from './utils/logger'
+import { stripPromiseTags } from './utils/strip-promise-tags'
 import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig, HealthStatus, Logger } from './types'
 import type { EmbeddingProvider } from './embedding'
 import type { VecService } from './storage/vec-types'
 import { createNoopVecService } from './storage/vec'
 import { checkForUpdate, formatUpgradeCheck, performUpgrade } from './utils/upgrade'
-
+import { MAX_RETRIES } from './services/ralph'
+import { parseModelString, retryWithModelFallback } from './utils/model-fallback'
+import { execSync, spawnSync } from 'child_process'
+import { existsSync } from 'fs'
 
 const z = tool.schema
+
+const DEFAULT_PLAN_COMPLETION_PROMISE = 'All phases of the plan have been completed successfully'
 
 async function getHealthStatus(
   projectId: string,
@@ -248,20 +256,12 @@ async function autoValidateOnLoad(
   logger.log('Auto-validate: reindex complete')
 }
 
-function parseModelString(modelStr?: string): { providerID: string; modelID: string } | undefined {
-  if (!modelStr) return undefined
-  const slashIndex = modelStr.indexOf('/')
-  if (slashIndex <= 0 || slashIndex === modelStr.length - 1) return undefined
-  return {
-    providerID: modelStr.substring(0, slashIndex),
-    modelID: modelStr.substring(slashIndex + 1),
-  }
-}
-
 export function createMemoryPlugin(config: PluginConfig): Plugin {
   return async (input: PluginInput): Promise<Hooks> => {
     const { directory, project, client } = input
     const projectId = project.id
+
+    const v2 = createV2Client({ baseUrl: input.serverUrl.toString(), directory })
 
     const loggingConfig = config.logging
     const logger = createLogger({
@@ -296,6 +296,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
     }
 
     const kvService = createKvService(db, logger)
+
+    const ralphService = createRalphService(kvService, projectId, logger, config.ralph)
+    const ralphHandler = createRalphEventHandler(ralphService, client, v2, logger, () => config)
 
     const mismatchState: DimensionMismatchState = {
       detected: false,
@@ -375,6 +378,15 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       if (cleaned) return
       cleaned = true
       logger.log('Cleaning up plugin resources...')
+      
+      // First, stop all active Ralph loops
+      ralphHandler.terminateAll()
+      logger.log('Ralph: all active loops terminated')
+      
+      // Clear all retry timeouts to prevent callbacks after cleanup
+      ralphHandler.clearAllRetryTimeouts()
+      
+      // Then proceed with remaining cleanup
       memoryInjection.destroy()
       await memoryService.destroy()
       closeDatabase(db)
@@ -386,6 +398,234 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
     process.once('SIGTERM', cleanup)
 
     const getCleanup = cleanup
+
+    interface RalphSetupOptions {
+      prompt: string
+      sessionTitle: string
+      worktreeName?: string
+      completionPromise: string | null
+      maxIterations: number
+      audit: boolean
+      agent?: string
+      model?: { providerID: string; modelID: string }
+      parentSessionId?: string
+      inPlace?: boolean
+      onLoopStarted?: (sessionId: string) => void
+    }
+
+    async function setupRalphLoop(options: RalphSetupOptions): Promise<string> {
+      const autoWorktreeName = options.worktreeName ?? `ralph-${slugify(options.sessionTitle.replace(/^Ralph:\s*/i, ''))}`
+      const projectDir = directory
+      const maxIter = options.maxIterations ?? config.ralph?.defaultMaxIterations ?? 0
+
+      interface LoopContext {
+        sessionId: string
+        directory: string
+        branch: string
+        workspaceId?: string
+        inPlace: boolean
+      }
+
+      let loopContext: LoopContext
+
+      if (options.inPlace) {
+        let currentBranch: string
+        try {
+          currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim()
+        } catch (err) {
+          logger.error(`ralph: failed to get current branch`, err)
+          return 'Failed to determine current git branch.'
+        }
+
+        const createResult = await v2.session.create({
+          title: options.sessionTitle,
+          directory: projectDir,
+        })
+
+        if (createResult.error || !createResult.data) {
+          logger.error(`ralph: failed to create session`, createResult.error)
+          return 'Failed to create Ralph session.'
+        }
+
+        loopContext = {
+          sessionId: createResult.data.id,
+          directory: projectDir,
+          branch: currentBranch,
+          inPlace: true,
+        }
+      } else {
+        const worktreeResult = await v2.worktree.create({
+          worktreeCreateInput: { name: autoWorktreeName },
+        })
+
+        if (worktreeResult.error || !worktreeResult.data) {
+          logger.error(`ralph: failed to create worktree`, worktreeResult.error)
+          return 'Failed to create worktree.'
+        }
+
+        const worktreeInfo = worktreeResult.data
+        logger.log(`ralph: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
+
+        const createResult = await v2.session.create({
+          title: options.sessionTitle,
+          directory: worktreeInfo.directory,
+        })
+
+        if (createResult.error || !createResult.data) {
+          logger.error(`ralph: failed to create session`, createResult.error)
+          try {
+            await v2.worktree.remove({ worktreeRemoveInput: { directory: worktreeInfo.directory } })
+          } catch (cleanupErr) {
+            logger.error(`ralph: failed to cleanup worktree`, cleanupErr)
+          }
+          return 'Failed to create Ralph session.'
+        }
+
+        loopContext = {
+          sessionId: createResult.data.id,
+          directory: worktreeInfo.directory,
+          branch: worktreeInfo.branch,
+          workspaceId: `wrk-${autoWorktreeName}`,
+          inPlace: false,
+        }
+      }
+
+      const state: RalphState = {
+        active: true,
+        sessionId: loopContext.sessionId,
+        worktreeName: autoWorktreeName,
+        worktreeDir: loopContext.directory,
+        worktreeBranch: loopContext.branch,
+        workspaceId: loopContext.workspaceId ?? '',
+        iteration: 1,
+        maxIterations: maxIter,
+        completionPromise: options.completionPromise,
+        startedAt: new Date().toISOString(),
+        prompt: options.prompt,
+        phase: 'coding',
+        audit: options.audit,
+        errorCount: 0,
+        auditCount: 0,
+        parentSessionId: options.parentSessionId,
+        inPlace: options.inPlace,
+      }
+
+      ralphService.setState(loopContext.sessionId, state)
+      logger.log(`ralph: state stored for session=${loopContext.sessionId}`)
+
+      let promptText = options.prompt
+      if (options.completionPromise) {
+        promptText += `\n\n---\n\n**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully, you MUST output the following tag exactly: <promise>${options.completionPromise}</promise>\n\nDo NOT output this tag until every phase is truly complete. The loop will continue until this signal is detected.`
+      }
+
+      const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
+        () => v2.session.promptAsync({
+          sessionID: loopContext.sessionId,
+          directory: loopContext.directory,
+          parts: [{ type: 'text' as const, text: promptText }],
+          ...(options.agent && { agent: options.agent }),
+          model: options.model!,
+        }),
+        () => v2.session.promptAsync({
+          sessionID: loopContext.sessionId,
+          directory: loopContext.directory,
+          parts: [{ type: 'text' as const, text: promptText }],
+          ...(options.agent && { agent: options.agent }),
+        }),
+        options.model,
+        logger,
+      )
+
+      if (promptResult.error) {
+        logger.error(`ralph: failed to send prompt`, promptResult.error)
+        ralphService.deleteState(loopContext.sessionId)
+        if (!options.inPlace && loopContext.workspaceId) {
+          try {
+            await v2.worktree.remove({ worktreeRemoveInput: { directory: loopContext.directory } })
+          } catch (cleanupErr) {
+            logger.error(`ralph: failed to cleanup worktree`, cleanupErr)
+          }
+        }
+        return options.inPlace
+          ? 'Ralph session created but failed to send prompt.'
+          : 'Ralph session created but failed to send prompt. Cleaned up.'
+      }
+
+      options.onLoopStarted?.(loopContext.sessionId)
+
+      const maxInfo = maxIter > 0 ? maxIter.toString() : 'unlimited'
+      const auditInfo = options.audit ? 'enabled' : 'disabled'
+      const modelInfo = actualModel ? `${actualModel.providerID}/${actualModel.modelID}` : 'default'
+
+      const lines: string[] = [
+        options.inPlace ? 'Ralph loop activated! (in-place mode)' : 'Ralph loop activated!',
+        '',
+        `Session: ${loopContext.sessionId}`,
+        `Title: ${options.sessionTitle}`,
+      ]
+
+      if (options.inPlace) {
+        lines.push(`Directory: ${loopContext.directory}`)
+        lines.push(`Branch: ${loopContext.branch} (in-place)`)
+      } else {
+        lines.push(`Workspace: ${loopContext.workspaceId}`)
+        lines.push(`Worktree name: ${autoWorktreeName}`)
+        lines.push(`Worktree: ${loopContext.directory}`)
+        lines.push(`Branch: ${loopContext.branch}`)
+      }
+
+      lines.push(
+        `Model: ${modelInfo}`,
+        `Max iterations: ${maxInfo}`,
+        `Completion promise: ${options.completionPromise ?? 'none'}`,
+        `Audit: ${auditInfo}`,
+        '',
+        'The loop will automatically continue when the session goes idle.',
+        'Your job is done — just confirm to the user that the loop has been launched.',
+        'The user can run ralph-status or ralph-cancel later if needed.',
+      )
+
+      return lines.join('\n')
+    }
+
+    const RALPH_BLOCKED_TOOLS: Record<string, string> = {
+      question: 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
+      'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
+      'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
+    }
+
+    const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Ralph (worktree)', 'Ralph (in place)']
+
+    const PLAN_APPROVAL_DIRECTIVES: Record<string, string> = {
+      'New session': `<system-reminder>
+The user selected "New session". You MUST now call memory-plan-execute in this response with:
+- plan: The FULL self-contained implementation plan (the code agent starts with zero context)
+- title: A short descriptive title for the session
+- inPlace: false (or omit)
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+      'Execute here': `<system-reminder>
+The user selected "Execute here". You MUST now call memory-plan-execute in this response with:
+- plan: "See plan above" (the code agent continues this session and already has context)
+- title: A short descriptive title for the session
+- inPlace: true
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+      'Ralph (worktree)': `<system-reminder>
+The user selected "Ralph (worktree)". You MUST now call memory-plan-ralph in this response with:
+- plan: The FULL self-contained implementation plan (Ralph runs in an isolated worktree with no prior context)
+- title: A short descriptive title for the session
+- inPlace: false (or omit)
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+      'Ralph (in place)': `<system-reminder>
+The user selected "Ralph (in place)". You MUST now call memory-plan-ralph in this response with:
+- plan: The FULL self-contained implementation plan (Ralph runs in the current directory with no prior context)
+- title: A short descriptive title for the session
+- inPlace: true
+Do NOT output text without also making this tool call.
+</system-reminder>`,
+    }
 
     return {
       getCleanup,
@@ -519,18 +759,54 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           },
         }),
         'memory-plan-execute': tool({
-          description: 'Create a new Code session and send the plan as the first prompt. Call this after the user approves the plan.',
+          description: 'Send the plan to the Code agent for execution. By default creates a new session. Set inPlace to true to switch to the code agent in the current session (plan is already in context).',
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
+            inPlace: z.boolean().optional().default(false).describe('Execute in the current session as a subtask instead of creating a new session'),
           },
-          execute: async (args) => {
-            logger.log(`memory-plan-execute: creating session titled "${args.title}"`)
+          execute: async (args, context) => {
+            logger.log(`memory-plan-execute: ${args.inPlace ? 'switching to code agent' : 'creating session'} titled "${args.title}"`)
 
             const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
+            const executionModel = parseModelString(config.executionModel)
 
-            const createResult = await client.session.create({
-              body: { title: sessionTitle },
+            if (args.inPlace) {
+              const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
+                () => v2.session.promptAsync({
+                  sessionID: context.sessionID,
+                  directory,
+                  agent: 'code',
+                  parts: [{ type: 'text' as const, text: args.plan }],
+                  ...(executionModel ? { model: executionModel } : {}),
+                }),
+                () => v2.session.promptAsync({
+                  sessionID: context.sessionID,
+                  directory,
+                  agent: 'code',
+                  parts: [{ type: 'text' as const, text: args.plan }],
+                }),
+                executionModel,
+                logger,
+              )
+
+              if (promptResult.error) {
+                logger.error(`memory-plan-execute: in-place agent switch failed`, promptResult.error)
+                return `Failed to switch to code agent. Error: ${JSON.stringify(promptResult.error)}`
+              }
+
+              const modelInfo = actualModel ? `${actualModel.providerID}/${actualModel.modelID}` : 'default'
+              return `Switching to code agent for execution.\n\nTitle: ${sessionTitle}\nModel: ${modelInfo}\nAgent: code`
+            }
+
+            const { cleaned: planText, stripped } = stripPromiseTags(args.plan)
+            if (stripped) {
+              logger.log(`memory-plan-execute: stripped <promise> tags from plan text`)
+            }
+
+            const createResult = await v2.session.create({
+              title: sessionTitle,
+              directory,
             })
 
             if (createResult.error || !createResult.data) {
@@ -541,16 +817,23 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             const newSessionId = createResult.data.id
             logger.log(`memory-plan-execute: created session=${newSessionId}`)
 
-            const executionModel = parseModelString(config.executionModel)
-
-            const promptResult = await client.session.promptAsync({
-              path: { id: newSessionId },
-              body: {
-                parts: [{ type: 'text' as const, text: args.plan }],
+            const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
+              () => v2.session.promptAsync({
+                sessionID: newSessionId,
+                directory,
+                parts: [{ type: 'text' as const, text: planText }],
                 agent: 'code',
-                ...(executionModel && { model: executionModel }),
-              },
-            })
+                model: executionModel!,
+              }),
+              () => v2.session.promptAsync({
+                sessionID: newSessionId,
+                directory,
+                parts: [{ type: 'text' as const, text: planText }],
+                agent: 'code',
+              }),
+              executionModel,
+              logger,
+            )
 
             if (promptResult.error) {
               logger.error(`memory-plan-execute: failed to prompt session`, promptResult.error)
@@ -559,8 +842,40 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
             logger.log(`memory-plan-execute: prompted session=${newSessionId}`)
 
-            const modelInfo = executionModel ? `${executionModel.providerID}/${executionModel.modelID}` : 'default'
+            const modelInfo = actualModel ? `${actualModel.providerID}/${actualModel.modelID}` : 'default'
             return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\nModel: ${modelInfo}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
+          },
+        }),
+        'memory-plan-ralph': tool({
+          description: 'Execute a plan using a Ralph iterative development loop. By default runs in an isolated git worktree. Set inPlace to true to run in the current directory instead.',
+          args: {
+            plan: z.string().describe('The full implementation plan to send to the Code agent'),
+            title: z.string().describe('Short title for the session (shown in session list)'),
+            inPlace: z.boolean().optional().default(false).describe('Run in current directory instead of creating a worktree'),
+          },
+          execute: async (args, context) => {
+            if (config.ralph?.enabled === false) {
+              return 'Ralph loops are disabled in plugin config. Use memory-plan-execute instead.'
+            }
+
+            logger.log(`memory-plan-ralph: creating worktree for plan="${args.title}"`)
+
+            const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
+            const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
+            const audit = config.ralph?.defaultAudit ?? true
+
+            return setupRalphLoop({
+              prompt: args.plan,
+              sessionTitle: `Ralph: ${sessionTitle}`,
+              completionPromise: DEFAULT_PLAN_COMPLETION_PROMISE,
+              maxIterations: config.ralph?.defaultMaxIterations ?? 0,
+              audit: audit,
+              agent: 'code',
+              model: ralphModel,
+              inPlace: args.inPlace,
+              parentSessionId: context.sessionID,
+              onLoopStarted: (id) => ralphHandler.startWatchdog(id),
+            })
           },
         }),
         'memory-kv-set': tool({
@@ -612,23 +927,414 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
             }
             const formatted = entries.map((e) => {
               const expiresIn = Math.round((e.expiresAt - Date.now()) / 60000)
-              const dataPreview = typeof e.data === 'string' ? e.data.substring(0, 100) : JSON.stringify(e.data).substring(0, 100)
-              return `- **${e.key}** (expires in ${expiresIn}m)\n  ${dataPreview}${dataPreview.length >= 100 ? '...' : ''}`
+              const dataStr = typeof e.data === 'string' ? e.data : JSON.stringify(e.data)
+              const preview = dataStr.substring(0, 50).replace(/\n/g, ' ')
+              return `- **${e.key}** (expires in ${expiresIn}m): ${preview}${dataStr.length > 50 ? '...' : ''}`
             })
             logger.log(`memory-kv-list: ${entries.length} entries`)
             return `${entries.length} active KV entries:\n\n${formatted.join('\n')}`
           },
         }),
+
+        'ralph-cancel': tool({
+          description: 'Cancel an active Ralph loop and optionally clean up the worktree.',
+          args: {
+            name: z.string().optional().describe('Worktree name of the Ralph loop to cancel'),
+          },
+          execute: async (args) => {
+            let state: RalphState | null = null
+
+            if (args.name) {
+              state = ralphService.findByWorktreeName(args.name)
+              if (!state) {
+                return `No active Ralph loop found for worktree "${args.name}".`
+              }
+            } else {
+              const active = ralphService.listActive()
+              if (active.length === 0) return 'No active Ralph loops.'
+              if (active.length === 1) {
+                state = active[0]
+              } else {
+                return `Multiple active Ralph loops. Specify a name:\n${active.map((s) => `- ${s.worktreeName} (iteration ${s.iteration})`).join('\n')}`
+              }
+            }
+
+            await ralphHandler.cancelBySessionId(state.sessionId)
+            logger.log(`ralph-cancel: cancelled loop for session=${state.sessionId} at iteration ${state.iteration}`)
+
+            if (config.ralph?.cleanupWorktree && !state.inPlace) {
+              try {
+                const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
+                const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
+                const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
+                if (removeResult.status !== 0) {
+                  throw new Error(removeResult.stderr || 'git worktree remove failed')
+                }
+                logger.log(`ralph-cancel: removed worktree ${state.worktreeDir}`)
+              } catch (err) {
+                logger.error(`ralph-cancel: failed to remove worktree`, err)
+              }
+            }
+
+            const modeInfo = state.inPlace ? ' (in-place)' : ''
+            return `Cancelled Ralph loop "${state.worktreeName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir}\nBranch: ${state.worktreeBranch}`
+          },
+        }),
+        'ralph-status': tool({
+          description: 'Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop. Use restart to resume an inactive loop.',
+          args: {
+            name: z.string().optional().describe('Worktree name to check for detailed status'),
+            restart: z.boolean().optional().describe('Restart an inactive loop by name'),
+          },
+          execute: async (args) => {
+            const active = ralphService.listActive()
+
+            if (args.restart) {
+              if (!args.name) {
+                return 'Specify a loop name to restart. Use ralph-status to see available loops.'
+              }
+
+              const recent = ralphService.listRecent()
+              const stoppedState = [...active, ...recent].find((s) => s.worktreeName === args.name)
+              if (!stoppedState) {
+                const available = [...active, ...recent].map((s) => `- ${s.worktreeName}`).join('\n')
+                return `No Ralph loop found for "${args.name}".\n\nAvailable loops:\n${available}`
+              }
+
+              if (stoppedState.active) {
+                return `Loop "${stoppedState.worktreeName}" is already active. Nothing to restart.`
+              }
+
+              if (stoppedState.terminationReason === 'completed') {
+                return `Loop "${stoppedState.worktreeName}" completed successfully and cannot be restarted.`
+              }
+
+              if (!stoppedState.inPlace) {
+                if (!existsSync(stoppedState.worktreeDir)) {
+                  return `Cannot restart "${stoppedState.worktreeName}": worktree directory no longer exists at ${stoppedState.worktreeDir}. The worktree may have been cleaned up.`
+                }
+              }
+
+              const createResult = await v2.session.create({
+                title: stoppedState.worktreeName,
+                directory: stoppedState.worktreeDir,
+              })
+
+              if (createResult.error || !createResult.data) {
+                logger.error(`ralph-restart: failed to create session`, createResult.error)
+                return `Failed to create new session for restart.`
+              }
+
+              const newSessionId = createResult.data.id
+
+              ralphService.deleteState(stoppedState.sessionId)
+
+              const newState: RalphState = {
+                active: true,
+                sessionId: newSessionId,
+                worktreeName: stoppedState.worktreeName,
+                worktreeDir: stoppedState.worktreeDir,
+                worktreeBranch: stoppedState.worktreeBranch,
+                workspaceId: stoppedState.workspaceId,
+                iteration: stoppedState.iteration,
+                maxIterations: stoppedState.maxIterations,
+                completionPromise: stoppedState.completionPromise,
+                startedAt: new Date().toISOString(),
+                prompt: stoppedState.prompt,
+                phase: 'coding',
+                audit: stoppedState.audit,
+                errorCount: 0,
+                auditCount: 0,
+                parentSessionId: stoppedState.parentSessionId,
+                inPlace: stoppedState.inPlace,
+              }
+
+              ralphService.setState(newSessionId, newState)
+
+              let promptText = stoppedState.prompt
+              if (stoppedState.completionPromise) {
+                promptText += `\n\n---\n\n**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully, you MUST output the following tag exactly: <promise>${stoppedState.completionPromise}</promise>\n\nDo NOT output this tag until every phase is truly complete. The loop will continue until this signal is detected.`
+              }
+
+              const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
+
+              const { result: promptResult } = await retryWithModelFallback(
+                () => v2.session.promptAsync({
+                  sessionID: newSessionId,
+                  directory: stoppedState.worktreeDir,
+                  parts: [{ type: 'text' as const, text: promptText }],
+                  agent: 'code',
+                  model: ralphModel!,
+                }),
+                () => v2.session.promptAsync({
+                  sessionID: newSessionId,
+                  directory: stoppedState.worktreeDir,
+                  parts: [{ type: 'text' as const, text: promptText }],
+                  agent: 'code',
+                }),
+                ralphModel,
+                logger,
+              )
+
+              if (promptResult.error) {
+                logger.error(`ralph-restart: failed to send prompt`, promptResult.error)
+                ralphService.deleteState(newSessionId)
+                return `Restart failed: could not send prompt to new session.`
+              }
+
+              ralphHandler.startWatchdog(newSessionId)
+
+              const modeInfo = stoppedState.inPlace ? ' (in-place)' : ''
+              return [
+                `Restarted Ralph loop "${stoppedState.worktreeName}"${modeInfo}`,
+                '',
+                `New session: ${newSessionId}`,
+                `Continuing from iteration: ${stoppedState.iteration}`,
+                `Previous termination: ${stoppedState.terminationReason}`,
+                `Directory: ${stoppedState.worktreeDir}`,
+                `Branch: ${stoppedState.worktreeBranch}`,
+                `Audit: ${stoppedState.audit ? 'enabled' : 'disabled'}`,
+              ].join('\n')
+            }
+
+            if (!args.name) {
+              const recent = ralphService.listRecent()
+
+              if (active.length === 0) {
+                if (recent.length === 0) return 'No Ralph loops found.'
+
+                const lines: string[] = ['Recently Completed Ralph Loops', '']
+                recent.forEach((s, i) => {
+                  const duration = s.completedAt
+                    ? Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)
+                    : 0
+                  const minutes = Math.floor(duration / 60)
+                  const seconds = duration % 60
+                  const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+                  lines.push(`${i + 1}. ${s.worktreeName}`)
+                  lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt}`)
+                  lines.push('')
+                })
+                lines.push('Use ralph-status <name> for detailed info.')
+                return lines.join('\n')
+              }
+
+              let statuses: Record<string, { type: string; attempt?: number; message?: string; next?: number }> = {}
+              try {
+                const statusResult = await v2.session.status()
+                statuses = (statusResult.data ?? {}) as typeof statuses
+              } catch {
+              }
+
+              const lines: string[] = [`Active Ralph Loops (${active.length})`, '']
+              active.forEach((s, i) => {
+                const elapsed = Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000)
+                const minutes = Math.floor(elapsed / 60)
+                const seconds = elapsed % 60
+                const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+                const iterInfo = s.maxIterations > 0 ? `${s.iteration} / ${s.maxIterations}` : `${s.iteration} (unlimited)`
+                const sessionStatus = statuses[s.sessionId]?.type ?? 'unknown'
+                const modeIndicator = s.inPlace ? ' (in-place)' : ''
+                const stallInfo = ralphHandler.getStallInfo(s.sessionId)
+                const stallCount = stallInfo?.consecutiveStalls ?? 0
+                const stallSuffix = stallCount > 0 ? ` | Stalls: ${stallCount}` : ''
+                lines.push(`${i + 1}. ${s.worktreeName}${modeIndicator}`)
+                lines.push(`   Phase: ${s.phase} | Iteration: ${iterInfo} | Duration: ${duration} | Status: ${sessionStatus}${stallSuffix}`)
+                lines.push('')
+              })
+
+              if (recent.length > 0) {
+                lines.push('Recently Completed:')
+                lines.push('')
+                recent.forEach((s, i) => {
+                  const duration = s.completedAt
+                    ? Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)
+                    : 0
+                  const minutes = Math.floor(duration / 60)
+                  const seconds = duration % 60
+                  const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+                  lines.push(`${i + 1}. ${s.worktreeName}`)
+                  lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt}`)
+                  lines.push('')
+                })
+              }
+
+              lines.push('Use ralph-status <name> for detailed info, or ralph-cancel <name> to stop a loop.')
+              return lines.join('\n')
+            }
+
+            const state = ralphService.findByWorktreeName(args.name)
+            if (!state) {
+              const recent = ralphService.listRecent()
+              const foundRecent = recent.find((s) => s.worktreeName === args.name)
+              if (foundRecent) {
+                const maxInfo = foundRecent.maxIterations > 0 ? `${foundRecent.iteration} / ${foundRecent.maxIterations}` : `${foundRecent.iteration} (unlimited)`
+                const duration = foundRecent.completedAt
+                  ? Math.round((new Date(foundRecent.completedAt).getTime() - new Date(foundRecent.startedAt).getTime()) / 1000)
+                  : 0
+                const minutes = Math.floor(duration / 60)
+                const seconds = duration % 60
+                const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+
+                const completedLines: string[] = [
+                  'Ralph Loop Status (Completed)',
+                  '',
+                  `Name: ${foundRecent.worktreeName}`,
+                  `Session: ${foundRecent.sessionId}`,
+                ]
+                if (foundRecent.inPlace) {
+                  completedLines.push(`Mode: in-place (completed) | Directory: ${foundRecent.worktreeDir}`)
+                } else {
+                  completedLines.push(`Workspace: ${foundRecent.workspaceId}`)
+                  completedLines.push(`Worktree: ${foundRecent.worktreeDir}`)
+                }
+                completedLines.push(
+                  `Iteration: ${maxInfo}`,
+                  `Duration: ${durationStr}`,
+                  `Reason: ${foundRecent.terminationReason ?? 'unknown'}`,
+                  `Branch: ${foundRecent.worktreeBranch}`,
+                  `Started: ${foundRecent.startedAt}`,
+                  `Completed: ${foundRecent.completedAt}`,
+                )
+                return completedLines.join('\n')
+              }
+              return `No Ralph loop found for worktree "${args.name}".`
+            }
+
+            const maxInfo = state.maxIterations > 0 ? `${state.iteration} / ${state.maxIterations}` : `${state.iteration} (unlimited)`
+            const promptPreview = state.prompt.length > 100 ? `${state.prompt.substring(0, 97)}...` : state.prompt
+
+            let sessionStatus = 'unknown'
+            try {
+              const statusResult = await v2.session.status()
+              const statuses = statusResult.data as Record<string, { type: string; attempt?: number; message?: string; next?: number }> | undefined
+              const status = statuses?.[state.sessionId]
+              if (status) {
+                sessionStatus = status.type === 'retry'
+                  ? `retry (attempt ${status.attempt}, next in ${Math.round(((status.next ?? 0) - Date.now()) / 1000)}s)`
+                  : status.type
+              }
+            } catch {
+              sessionStatus = 'unavailable'
+            }
+
+            const elapsed = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000)
+            const minutes = Math.floor(elapsed / 60)
+            const seconds = elapsed % 60
+            const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
+
+            const stallInfo = ralphHandler.getStallInfo(state.sessionId)
+            const secondsSinceActivity = stallInfo
+              ? Math.round((Date.now() - stallInfo.lastActivityTime) / 1000)
+              : null
+            const stallCount = stallInfo?.consecutiveStalls ?? 0
+
+            const statusLines: string[] = [
+              'Ralph Loop Status',
+              '',
+              `Name: ${state.worktreeName}`,
+              `Session: ${state.sessionId}`,
+            ]
+            if (state.inPlace) {
+              statusLines.push(`Mode: in-place | Directory: ${state.worktreeDir}`)
+            } else {
+              statusLines.push(`Workspace: ${state.workspaceId}`)
+              statusLines.push(`Worktree: ${state.worktreeDir}`)
+            }
+            statusLines.push(
+              `Status: ${sessionStatus}`,
+              `Phase: ${state.phase}`,
+              `Iteration: ${maxInfo}`,
+              `Duration: ${duration}`,
+              `Audit: ${state.audit ? 'enabled' : 'disabled'}`,
+              `Branch: ${state.worktreeBranch}`,
+              `Completion promise: ${state.completionPromise ?? 'none'}`,
+              `Started: ${state.startedAt}`,
+              ...(state.errorCount > 0 ? [`Error count: ${state.errorCount} (retries before termination: ${MAX_RETRIES})`] : []),
+              `Audit count: ${state.auditCount ?? 0}`,
+              `Model: ${config.ralph?.model || config.executionModel || 'default'}`,
+              `Auditor model: ${config.auditorModel || 'default'}`,
+              ...(stallCount > 0 ? [`Stalls: ${stallCount}`] : []),
+              ...(secondsSinceActivity !== null ? [`Last activity: ${secondsSinceActivity}s ago`] : []),
+              '',
+              `Prompt: ${promptPreview}`,
+            )
+            return statusLines.join('\n')
+          },
+        }),
       },
-      config: createConfigHandler(agents),
-      'chat.message': sessionHooks.onMessage,
+      config: createConfigHandler(
+        config.auditorModel
+          ? { ...agents, auditor: { ...agents.auditor, defaultModel: config.auditorModel } }
+          : agents
+      ),
+      'chat.message': async (input, output) => {
+        await sessionHooks.onMessage(input, output)
+      },
       event: async (input) => {
         const eventInput = input as { event: { type: string; properties?: Record<string, unknown> } }
         if (eventInput.event?.type === 'server.instance.disposed') {
           cleanup()
           return
         }
+        await ralphHandler.onEvent(eventInput)
         await sessionHooks.onEvent(eventInput)
+      },
+      'tool.execute.before': async (
+        input: { tool: string; sessionID: string; callID: string },
+        output: { args: unknown }
+      ) => {
+        const state = ralphService.getActiveState(input.sessionID)
+        if (!state?.active) return
+
+        if (!(input.tool in RALPH_BLOCKED_TOOLS)) return
+
+        logger.log(`Ralph: blocking ${input.tool} tool before execution in ${state.phase} phase for session ${input.sessionID}`)
+
+        throw new Error(RALPH_BLOCKED_TOOLS[input.tool]!)
+      },
+      'tool.execute.after': async (
+        input: { tool: string; sessionID: string; callID: string; args: unknown },
+        output: { title: string; output: string; metadata: unknown }
+      ) => {
+        if (input.tool === 'question') {
+          const args = input.args as { questions?: Array<{ options?: Array<{ label: string }> }> } | undefined
+          const options = args?.questions?.[0]?.options
+          if (options) {
+            const labels = options.map((o) => o.label)
+            const isPlanApproval = PLAN_APPROVAL_LABELS.every((l) => labels.includes(l))
+            if (isPlanApproval) {
+              const metadata = output.metadata as { answers?: string[][] } | undefined
+              const answer = metadata?.answers?.[0]?.[0]?.trim() ?? output.output.trim()
+              const matchedLabel = PLAN_APPROVAL_LABELS.find((l) => answer === l || answer.startsWith(l))
+              const directive = matchedLabel ? PLAN_APPROVAL_DIRECTIVES[matchedLabel] : '<system-reminder>\nThe user provided a custom response instead of selecting a predefined option. Review their answer and respond accordingly. If they want to proceed with execution, use the appropriate tool (memory-plan-execute or memory-plan-ralph) based on their intent. If they want to cancel or revise the plan, help them with that instead.\n</system-reminder>'
+              output.output = `${output.output}\n\n${directive}`
+              logger.log(`Plan approval: detected "${matchedLabel ?? 'cancel/custom'}" answer, injected directive`)
+            }
+          }
+          return
+        }
+
+        const state = ralphService.getActiveState(input.sessionID)
+        if (!state?.active) return
+
+        if (!(input.tool in RALPH_BLOCKED_TOOLS)) return
+
+        logger.log(`Ralph: blocked ${input.tool} tool in ${state.phase} phase for session ${input.sessionID}`)
+        
+        output.title = 'Tool blocked'
+        output.output = RALPH_BLOCKED_TOOLS[input.tool]!
+      },
+      'permission.ask': async (input, output) => {
+        const req = input as unknown as { sessionID: string; patterns: string[] }
+        const state = ralphService.getActiveState(req.sessionID)
+        if (!state?.active) return
+
+        if (req.patterns.some((p) => p.startsWith('git push'))) {
+          logger.log(`Ralph: denied git push for session ${req.sessionID}`)
+          output.status = 'deny'
+          return
+        }
       },
       'experimental.session.compacting': async (input, output) => {
         logger.log(`Compacting triggered`)
@@ -695,9 +1401,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           text: `<system-reminder>
 Plan mode is active. You MUST NOT make any file edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
-You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list), and mcp_question.
+You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list), mcp_question, memory-plan-execute, and memory-plan-ralph.
 
-You MUST get explicit approval via mcp_question before calling memory-plan-execute. Never execute a plan without approval.
+You MUST get explicit approval via mcp_question before calling memory-plan-execute or memory-plan-ralph. Never execute a plan without approval.
 </system-reminder>`,
           synthetic: true,
         })

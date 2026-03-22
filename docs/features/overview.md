@@ -68,6 +68,7 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Automatic Extraction** - Durable knowledge extracted after session compaction
 - **Compaction Awareness** - Injects project memories into compaction context
 - **Architect → Code** - Plan with a smart model, execute with a fast model for cost-optimized workflows
+- **Ralph Loops** - Iterative development with automatic auditing in isolated worktrees
 
 [Learn more →](memory.md)
 
