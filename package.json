@@ -8,7 +8,7 @@
     "memory": "pnpm --filter @opencode-manager/memory cli",
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
-    "dev:backend": "bun --watch backend/src/index.ts",
+    "dev:backend": "bun --watch-path backend/src --watch backend/src/index.ts",
     "dev:frontend": "pnpm --filter frontend dev",
     "build": "pnpm run build:memory && pnpm run build:backend && pnpm run build:frontend",
     "build:memory": "pnpm --filter @opencode-manager/memory build",
