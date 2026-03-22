@@ -289,4 +289,172 @@ describe('schedule database queries', () => {
 
     expect(run).toMatchObject({ id: 8, sessionId: 'ses-1' })
   })
+
+  it('lists due schedule jobs ordered by next run time', () => {
+    const now = Date.now()
+    const limit = 10
+    const jobRow = makeJobRow()
+    const stmt = {
+      all: vi.fn().mockReturnValue([jobRow]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const jobs = schedulesDb.listDueScheduleJobs(mockDb, now, limit)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('WHERE enabled = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?'))
+    expect(stmt.all).toHaveBeenCalledWith(now, limit)
+    expect(jobs).toHaveLength(1)
+    expect(jobs.at(0)?.id).toBe(7)
+  })
+
+  it('lists enabled schedule jobs ordered by id', () => {
+    const jobRow = makeJobRow()
+    const stmt = {
+      all: vi.fn().mockReturnValue([jobRow]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const jobs = schedulesDb.listEnabledScheduleJobs(mockDb)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE enabled = 1 ORDER BY id ASC')
+    expect(stmt.all).toHaveBeenCalledWith()
+    expect(jobs).toHaveLength(1)
+    expect(jobs.at(0)?.enabled).toBe(true)
+  })
+
+  it('gets a schedule job by id when found', () => {
+    const jobRow = makeJobRow()
+    const stmt = {
+      get: vi.fn().mockReturnValue(jobRow),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const job = schedulesDb.getScheduleJobById(mockDb, 42, 7)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(stmt.get).toHaveBeenCalledWith(42, 7)
+    expect(job).toMatchObject({ id: 7, repoId: 42, name: 'Weekly engineering summary' })
+  })
+
+  it('returns null when schedule job is not found', () => {
+    const stmt = {
+      get: vi.fn().mockReturnValue(undefined),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const job = schedulesDb.getScheduleJobById(mockDb, 42, 7)
+
+    expect(job).toBeNull()
+  })
+
+  it('deletes a schedule job successfully', () => {
+    const stmt = {
+      run: vi.fn().mockReturnValue({ changes: 1 }),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const result = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(stmt.run).toHaveBeenCalledWith(42, 7)
+    expect(result).toBe(true)
+  })
+
+  it('returns false when deleting a non-existent schedule job', () => {
+    const stmt = {
+      run: vi.fn().mockReturnValue({ changes: 0 }),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const result = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
+
+    expect(result).toBe(false)
+  })
+
+  it('reserves the next run time for a schedule job', () => {
+    const nextRunAt = Date.now() + 3600000
+    const stmt = {
+      run: vi.fn(),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    schedulesDb.reserveScheduleJobNextRun(mockDb, 42, 7, nextRunAt)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('UPDATE schedule_jobs SET next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
+    expect(stmt.run).toHaveBeenCalledWith(nextRunAt, expect.any(Number), 42, 7)
+  })
+
+  it('updates the run state of a schedule job', () => {
+    const lastRunAt = Date.now()
+    const nextRunAt = Date.now() + 3600000
+    const stmt = {
+      run: vi.fn(),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    schedulesDb.updateScheduleJobRunState(mockDb, 42, 7, { lastRunAt, nextRunAt })
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
+    expect(stmt.run).toHaveBeenCalledWith(lastRunAt, nextRunAt, expect.any(Number), 42, 7)
+  })
+
+  it('updates a schedule run and reloads the result', () => {
+    const updateStmt = {
+      run: vi.fn(),
+    }
+    const selectStmt = {
+      get: vi.fn().mockReturnValue(makeRunRow({ status: 'completed', response_text: 'Completed' })),
+    }
+
+    mockDb.prepare.mockReturnValueOnce(updateStmt).mockReturnValueOnce(selectStmt)
+
+    const run = schedulesDb.updateScheduleRun(mockDb, 42, 7, 5, {
+      status: 'completed',
+      finishedAt: Date.now(),
+      sessionId: 'ses-1',
+      sessionTitle: 'Updated title',
+      logText: 'Log output',
+      responseText: 'Completed',
+      errorText: null,
+    })
+
+    expect(updateStmt.run).toHaveBeenCalledWith(
+      'completed',
+      expect.any(Number),
+      'ses-1',
+      'Updated title',
+      'Log output',
+      'Completed',
+      null,
+      42,
+      7,
+      5,
+    )
+    expect(run).toMatchObject({ status: 'completed', responseText: 'Completed' })
+  })
+
+  it('gets a schedule run by id when found', () => {
+    const runRow = makeRunRow()
+    const stmt = {
+      get: vi.fn().mockReturnValue(runRow),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const run = schedulesDb.getScheduleRunById(mockDb, 42, 7, 5)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    expect(stmt.get).toHaveBeenCalledWith(42, 7, 5)
+    expect(run).toMatchObject({ id: 5, jobId: 7, repoId: 42, status: 'running' })
+  })
+
+  it('returns null when schedule run is not found', () => {
+    const stmt = {
+      get: vi.fn().mockReturnValue(undefined),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const run = schedulesDb.getScheduleRunById(mockDb, 42, 7, 5)
+
+    expect(run).toBeNull()
+  })
 })

@@ -194,25 +194,25 @@ export function RepoDetail() {
           <span className="hidden sm:inline">Schedules</span>
         </Button>
         <Header.MobileDropdown>
-          <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/schedules`)}>
-            <CalendarClock className="w-4 h-4 mr-2" /> Schedules
+          <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
+            <FolderOpen className="w-4 h-4 mr-2" /> Files
           </DropdownMenuItem>
           {memoryPluginStatus?.memoryPluginEnabled && (
             <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/memories`)}>
               <Brain className="w-4 h-4 mr-2" /> Memory
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
-            <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
             <Plug className="w-4 h-4 mr-2" /> MCP
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
-            <FolderOpen className="w-4 h-4 mr-2" /> Files
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setResetPermissionsOpen(true)}>
             <ShieldOff className="w-4 h-4 mr-2" /> Reset Permissions
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/schedules`)}>
+            <CalendarClock className="w-4 h-4 mr-2" /> Schedules
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
+            <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
           </DropdownMenuItem>
         </Header.MobileDropdown>
         <Button

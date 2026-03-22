@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
 
-const mocks = {
+const mocks = vi.hoisted(() => ({
   getRepoById: vi.fn(),
   createScheduleJob: vi.fn(),
   createScheduleRun: vi.fn(),
@@ -27,7 +27,7 @@ const mocks = {
   addClient: vi.fn(),
   onEvent: vi.fn(),
   loggerError: vi.fn(),
-}
+}))
 
 vi.mock('../../src/db/queries', () => ({
   getRepoById: mocks.getRepoById,
@@ -748,7 +748,8 @@ describe('ScheduleRunner', () => {
     expect(mocks.listRunningScheduleRuns).toHaveBeenCalled()
     expect(mocks.listEnabledScheduleJobs).toHaveBeenCalled()
     expect(mockCronInstances).toHaveLength(1)
-    expect(mockCronInstances[0]?.options).toEqual(expect.objectContaining({ interval: 3600, protect: true }))
+    expect(mockCronInstances[0]?.pattern).toBe('*/60 * * * *')
+    expect(mockCronInstances[0]?.options).toEqual(expect.objectContaining({ protect: true }))
   })
 
   it('registers a cron job with timezone', async () => {

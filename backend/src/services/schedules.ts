@@ -467,10 +467,14 @@ export class ScheduleService {
         }),
       })
 
-      updateScheduleJobRunState(this.db, repoId, jobId, {
-        lastRunAt: finishedAt,
-        nextRunAt: triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
-      })
+      try {
+        updateScheduleJobRunState(this.db, repoId, jobId, {
+          lastRunAt: finishedAt,
+          nextRunAt: triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
+        })
+      } catch (updateError) {
+        logger.error(`Failed to update job state for job ${jobId}:`, updateError)
+      }
 
       if (!failedRun) {
         ScheduleService.activeRuns.delete(jobId)
@@ -673,8 +677,50 @@ export class ScheduleService {
     sessionId: string
     sessionTitle: string
     triggerSource: ScheduleRunTriggerSource
+    initialSessionStatus?: SessionStatus
   }): Promise<void> {
     try {
+      const sessionStatus = input.initialSessionStatus
+      if (sessionStatus && sessionStatus.type === 'idle') {
+        const repo = this.assertRepo(input.repoId)
+        const messages = await this.listSessionMessages(repo.fullPath, input.sessionId)
+        const assistantState = getAssistantMessageState(messages)
+        if (assistantState?.completed || assistantState?.errorText) {
+          this.finalizeRecoveredRun(input.job, {
+            id: input.runId,
+            repoId: input.repoId,
+            jobId: input.job.id,
+            sessionId: input.sessionId,
+            sessionTitle: input.sessionTitle,
+            triggerSource: input.triggerSource,
+          } as ScheduleRun, {
+            status: assistantState.errorText ? 'failed' : 'completed',
+            responseText: assistantState.responseText,
+            errorText: assistantState.errorText,
+          })
+          return
+        }
+      }
+
+      const repo = this.assertRepo(input.repoId)
+      const currentMessages = await this.listSessionMessages(repo.fullPath, input.sessionId)
+      const currentAssistantState = getAssistantMessageState(currentMessages)
+      if (currentAssistantState?.completed || currentAssistantState?.errorText) {
+        this.finalizeRecoveredRun(input.job, {
+          id: input.runId,
+          repoId: input.repoId,
+          jobId: input.job.id,
+          sessionId: input.sessionId,
+          sessionTitle: input.sessionTitle,
+          triggerSource: input.triggerSource,
+        } as ScheduleRun, {
+          status: currentAssistantState.errorText ? 'failed' : 'completed',
+          responseText: currentAssistantState.responseText,
+          errorText: currentAssistantState.errorText,
+        })
+        return
+      }
+
       const response = await this.waitForAssistantMessage(input.job, input.sessionId, input.sessionMonitor)
       const currentRun = getScheduleRunById(this.db, input.repoId, input.job.id, input.runId)
       if (!currentRun || currentRun.status !== 'running') {
@@ -753,6 +799,9 @@ export class ScheduleService {
         lastRunAt: finishedAt,
         nextRunAt: input.triggerSource === 'manual' ? input.job.nextRunAt : computeNextRunAtForJob(input.job, finishedAt),
       })
+    } finally {
+      input.sessionMonitor.dispose()
+      ScheduleService.activeRuns.delete(input.job.id)
     }
   }
 
@@ -793,6 +842,7 @@ export class ScheduleService {
           sessionId: run.sessionId,
           sessionTitle: run.sessionTitle ?? buildSessionTitle(job),
           triggerSource: run.triggerSource,
+          initialSessionStatus: sessionStatus,
         })
         return
       }
@@ -843,7 +893,7 @@ export class ScheduleService {
 
     updateScheduleJobRunState(this.db, run.repoId, run.jobId, {
       lastRunAt: finishedAt,
-      nextRunAt: job.nextRunAt,
+      nextRunAt: run.triggerSource === 'manual' ? job.nextRunAt : computeNextRunAtForJob(job, finishedAt),
     })
 
     ScheduleService.activeRuns.delete(job.id)
@@ -977,9 +1027,11 @@ export class ScheduleRunner {
         options.timezone = job.timezone
       }
       const cron = new Cron(job.cronExpression, options, () => {
+        logger.info(`Cron triggered for job ${job.id}: ${job.name}`)
         void this.executeJob(job.repoId, job.id)
       })
       this.cronJobs.set(job.id, cron)
+      logger.info(`Cron job created for ${job.id}: next run at ${cron.nextRun()?.toISOString()}`)
       return
     }
 
@@ -987,12 +1039,32 @@ export class ScheduleRunner {
       return
     }
 
-    const intervalSeconds = job.intervalMinutes * 60
-    const startAt = job.nextRunAt ? new Date(job.nextRunAt) : new Date()
-    const cron = new Cron(startAt, { interval: intervalSeconds, protect: true }, () => {
+    if (!job.nextRunAt) {
+      return
+    }
+
+    const cronExpression = `*/${job.intervalMinutes} * * * *`
+    const options: Record<string, unknown> = { protect: true }
+    if (job.timezone) {
+      options.timezone = job.timezone
+    }
+    const cron = new Cron(cronExpression, options, () => {
+      logger.info(`Cron triggered for job ${job.id}: ${job.name}`)
       void this.executeJob(job.repoId, job.id)
     })
-    this.cronJobs.set(job.id, cron)
+
+    const now = Date.now()
+    const delay = job.nextRunAt - now
+    if (delay > 0) {
+      const timeout = setTimeout(() => {
+        logger.info(`Interval timer triggered for job ${job.id}: ${job.name}`)
+        void this.executeJob(job.repoId, job.id)
+        this.cronJobs.set(job.id, cron)
+      }, delay)
+      this.cronJobs.set(job.id, { stop: () => clearTimeout(timeout) } as unknown as Cron)
+    } else {
+      this.cronJobs.set(job.id, cron)
+    }
   }
 
   unregisterJob(jobId: number): void {
@@ -1013,9 +1085,12 @@ export class ScheduleRunner {
 
   private registerAllEnabledJobs(): void {
     const jobs = this.scheduleService.listAllEnabledJobs()
+    logger.info(`Registering ${jobs.length} enabled schedule jobs`)
     for (const job of jobs) {
       try {
+        logger.info(`Registering job ${job.id}: ${job.name} (mode=${job.scheduleMode}, cron=${job.cronExpression}, tz=${job.timezone})`)
         this.registerJob(job)
+        logger.info(`Job ${job.id} registered, cron jobs map size: ${this.cronJobs.size}`)
       } catch (error) {
         logger.error(`Failed to register job ${job.id}:`, error)
       }

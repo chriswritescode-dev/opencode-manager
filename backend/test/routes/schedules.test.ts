@@ -192,4 +192,40 @@ describe('Schedule Routes', () => {
     expect(response.status).toBe(200)
     expect(mocks.scheduleService.listRuns).toHaveBeenCalledWith(42, 7, 100)
   })
+
+  it('returns 404 when schedule job is not found', async () => {
+    mocks.scheduleService.getJob.mockReturnValue(null)
+
+    const response = await app.request('/repos/42/schedules/7')
+    const body = await response.json() as { error: string }
+
+    expect(response.status).toBe(404)
+    expect(body.error).toBe('Schedule not found')
+  })
+
+  it('creates a cron schedule from a valid request body', async () => {
+    mocks.scheduleService.createJob.mockReturnValue({ id: 8, name: 'Morning report' })
+
+    const response = await app.request('/repos/42/schedules', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Morning report',
+        enabled: true,
+        scheduleMode: 'cron',
+        cronExpression: '0 9 * * *',
+        timezone: 'America/New_York',
+        prompt: 'Generate the daily report.',
+      }),
+    })
+    const body = await response.json() as { job: { id: number } }
+
+    expect(response.status).toBe(201)
+    expect(body.job.id).toBe(8)
+    expect(mocks.scheduleService.createJob).toHaveBeenCalledWith(42, expect.objectContaining({
+      scheduleMode: 'cron',
+      cronExpression: '0 9 * * *',
+      timezone: 'America/New_York',
+    }))
+  })
 })
