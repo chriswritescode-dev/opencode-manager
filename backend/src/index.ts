@@ -45,6 +45,7 @@ import { opencodeServerManager } from './services/opencode-single-server'
 import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
+import { migrateGlobalSkills } from './services/skills'
 
 import { logger } from './utils/logger'
 import { 
@@ -305,6 +306,8 @@ try {
 
   const settingsService = new SettingsService(db)
   settingsService.initializeLastKnownGoodConfig()
+
+  await migrateGlobalSkills()
 
   ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
   await gitAuthService.initialize(ipcServer, db)

@@ -3,11 +3,70 @@ import path from 'path'
 import type { Database } from 'bun:sqlite'
 import type { SkillFileInfo, SkillScope, CreateSkillRequest, UpdateSkillRequest } from '@opencode-manager/shared'
 import { SKILL_NAME_REGEX } from '@opencode-manager/shared'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { getRepoById, listRepos } from '../db/queries'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory } from './file-operations'
 import { logger } from '../utils/logger'
 
-const GLOBAL_SKILLS_PATH = path.join(os.homedir(), '.config', 'opencode', 'skills')
+function getGlobalSkillsPath(): string {
+  return path.join(getWorkspacePath(), '.config', 'opencode', 'skills')
+}
+
+function getOldGlobalSkillsPath(): string {
+  return path.join(os.homedir(), '.config', 'opencode', 'skills')
+}
+
+export async function migrateGlobalSkills(): Promise<void> {
+  const oldSkillsPath = getOldGlobalSkillsPath()
+  const newSkillsPath = getGlobalSkillsPath()
+  
+  const oldSkillsExist = await fileExists(oldSkillsPath)
+  if (!oldSkillsExist) {
+    logger.debug('No old global skills found to migrate')
+    return
+  }
+  
+  const entries = await listDirectory(oldSkillsPath)
+  const skillDirs = entries.filter(entry => entry.isDirectory)
+  
+  if (skillDirs.length === 0) {
+    logger.debug('No skill directories found in old location')
+    return
+  }
+  
+  let migratedCount = 0
+  let skippedCount = 0
+  
+  for (const entry of skillDirs) {
+    const oldSkillPath = path.join(entry.path, 'SKILL.md')
+    const newSkillPath = path.join(newSkillsPath, entry.name, 'SKILL.md')
+    
+    const alreadyMigrated = await fileExists(newSkillPath)
+    if (alreadyMigrated) {
+      skippedCount++
+      continue
+    }
+    
+    const skillExists = await fileExists(oldSkillPath)
+    if (!skillExists) {
+      logger.warn(`Skill ${entry.name} has no SKILL.md file, skipping`)
+      continue
+    }
+    
+    try {
+      const content = await readFileContent(oldSkillPath)
+      await writeFileContent(newSkillPath, content)
+      logger.info(`Migrated skill ${entry.name} from ${oldSkillsPath} to ${newSkillsPath}`)
+      migratedCount++
+    } catch (error) {
+      logger.error(`Failed to migrate skill ${entry.name}:`, error)
+    }
+  }
+  
+  if (migratedCount > 0 || skippedCount > 0) {
+    logger.info(`Skill migration complete: ${migratedCount} migrated, ${skippedCount} skipped (already existed)`)
+  }
+}
 
 interface ParsedSkillFile {
   frontmatter: {
@@ -115,7 +174,7 @@ function generateSkillFrontmatter(
 
 function getSkillDirectoryPath(db: Database, scope: SkillScope, repoId?: number): string {
   if (scope === 'global') {
-    return GLOBAL_SKILLS_PATH
+    return getGlobalSkillsPath()
   }
   
   if (!repoId) {
@@ -145,7 +204,7 @@ function getSkillFilePath(db: Database, scope: SkillScope, name: string, repoId?
 export async function listManagedSkills(db: Database, repoId?: number): Promise<SkillFileInfo[]> {
   const skills: SkillFileInfo[] = []
   
-  const globalSkillsDir = GLOBAL_SKILLS_PATH
+  const globalSkillsDir = getGlobalSkillsPath()
   const globalSkillsExist = await fileExists(globalSkillsDir)
   
   if (globalSkillsExist) {

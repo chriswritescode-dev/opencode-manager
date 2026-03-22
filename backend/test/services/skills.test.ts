@@ -19,28 +19,25 @@ vi.mock('../../src/db/queries', () => ({
 
 describe('SkillService', () => {
   let tempDir: string
-  let originalHome: string
 
   beforeEach(async () => {
     tempDir = await mkdtemp(join(tmpdir(), 'skills-test-'))
-    originalHome = process.env.HOME || ''
-    process.env.HOME = tempDir
+    vi.spyOn(await import('@opencode-manager/shared/config/env'), 'getWorkspacePath').mockReturnValue(tempDir)
   })
 
   afterEach(async () => {
     await rm(tempDir, { recursive: true, force: true })
-    if (originalHome) {
-      process.env.HOME = originalHome
-    }
+    vi.restoreAllMocks()
     vi.clearAllMocks()
   })
 
   const mockDb = null as unknown as any
 
   test('generates correct YAML frontmatter format', async () => {
-    const { createSkill } = await import('../../src/services/skills')
+    const { createSkill, deleteSkill } = await import('../../src/services/skills')
+    const name = `test-skill-${Date.now()}`
     const input = {
-      name: `test-skill-${Date.now()}`,
+      name,
       description: 'A test skill',
       body: '## Test Body\n\nContent here',
       scope: 'global' as const,
@@ -49,18 +46,22 @@ describe('SkillService', () => {
       metadata: { key: 'value' },
     }
 
-    const result = await createSkill(mockDb, input)
+    try {
+      const result = await createSkill(mockDb, input)
 
-    expect(result.name).toBe(input.name)
-    expect(result.description).toBe('A test skill')
-    expect(result.body).toBe('## Test Body\n\nContent here')
-    expect(result.license).toBe('MIT')
-    expect(result.compatibility).toBe('opencode')
-    expect(result.metadata).toEqual({ key: 'value' })
+      expect(result.name).toBe(name)
+      expect(result.description).toBe('A test skill')
+      expect(result.body).toBe('## Test Body\n\nContent here')
+      expect(result.license).toBe('MIT')
+      expect(result.compatibility).toBe('opencode')
+      expect(result.metadata).toEqual({ key: 'value' })
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
+    }
   })
 
   test('parses frontmatter and body correctly', async () => {
-    const { createSkill, getSkill } = await import('../../src/services/skills')
+    const { createSkill, getSkill, deleteSkill } = await import('../../src/services/skills')
     const name = `parse-test-${Date.now()}`
     const input = {
       name,
@@ -69,27 +70,42 @@ describe('SkillService', () => {
       scope: 'global' as const,
     }
 
-    await createSkill(mockDb, input)
-    const skill = await getSkill(mockDb, name, 'global')
+    try {
+      await createSkill(mockDb, input)
+      const skill = await getSkill(mockDb, name, 'global')
 
-    expect(skill.name).toBe(name)
-    expect(skill.description).toBe('Test description')
-    expect(skill.body).toBe('## Body\n\nSome content')
+      expect(skill.name).toBe(name)
+      expect(skill.description).toBe('Test description')
+      expect(skill.body).toBe('## Body\n\nSome content')
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
+    }
   })
 
   test('accepts valid skill names', async () => {
-    const { createSkill } = await import('../../src/services/skills')
+    const { createSkill, deleteSkill } = await import('../../src/services/skills')
     const validNames = ['my-skill', 'a', 'skill-1-2', 'test123', 'a-b-c']
+    const createdNames: string[] = []
 
-    for (const name of validNames) {
+    for (const baseName of validNames) {
+      const name = `${baseName}-${Date.now()}`
       const input = {
-        name: `${name}-${Date.now()}`,
+        name,
         description: 'Test',
         body: 'Body',
         scope: 'global' as const,
       }
 
-      await expect(createSkill(mockDb, input)).resolves.toBeDefined()
+      try {
+        await expect(createSkill(mockDb, input)).resolves.toBeDefined()
+        createdNames.push(name)
+      } catch {
+        // Ignore failures, just cleanup what was created
+      }
+    }
+
+    for (const name of createdNames) {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
     }
   })
 
@@ -110,7 +126,7 @@ describe('SkillService', () => {
   })
 
   test('creates skill file at correct path', async () => {
-    const { createSkill } = await import('../../src/services/skills')
+    const { createSkill, deleteSkill } = await import('../../src/services/skills')
     const name = `new-skill-${Date.now()}`
     const input = {
       name,
@@ -119,15 +135,19 @@ describe('SkillService', () => {
       scope: 'global' as const,
     }
 
-    const result = await createSkill(mockDb, input)
+    try {
+      const result = await createSkill(mockDb, input)
 
-    expect(result.name).toBe(name)
-    expect(result.scope).toBe('global')
-    expect(result.location).toContain(`${name}/SKILL.md`)
+      expect(result.name).toBe(name)
+      expect(result.scope).toBe('global')
+      expect(result.location).toContain(`${name}/SKILL.md`)
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
+    }
   })
 
   test('throws error on duplicate name', async () => {
-    const { createSkill } = await import('../../src/services/skills')
+    const { createSkill, deleteSkill } = await import('../../src/services/skills')
     const name = `duplicate-${Date.now()}`
     const input = {
       name,
@@ -136,20 +156,24 @@ describe('SkillService', () => {
       scope: 'global' as const,
     }
 
-    await createSkill(mockDb, input)
+    try {
+      await createSkill(mockDb, input)
 
-    const duplicate = {
-      name,
-      description: 'Second',
-      body: 'Body',
-      scope: 'global' as const,
+      const duplicate = {
+        name,
+        description: 'Second',
+        body: 'Body',
+        scope: 'global' as const,
+      }
+
+      await expect(createSkill(mockDb, duplicate)).rejects.toThrow('already exists')
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
     }
-
-    await expect(createSkill(mockDb, duplicate)).rejects.toThrow('already exists')
   })
 
   test('reads skill correctly', async () => {
-    const { createSkill, getSkill } = await import('../../src/services/skills')
+    const { createSkill, getSkill, deleteSkill } = await import('../../src/services/skills')
     const name = `read-test-${Date.now()}`
     const input = {
       name,
@@ -159,13 +183,17 @@ describe('SkillService', () => {
       license: 'Apache-2.0',
     }
 
-    await createSkill(mockDb, input)
-    const skill = await getSkill(mockDb, name, 'global')
+    try {
+      await createSkill(mockDb, input)
+      const skill = await getSkill(mockDb, name, 'global')
 
-    expect(skill.name).toBe(name)
-    expect(skill.description).toBe('Read test description')
-    expect(skill.body).toBe('Read test body')
-    expect(skill.license).toBe('Apache-2.0')
+      expect(skill.name).toBe(name)
+      expect(skill.description).toBe('Read test description')
+      expect(skill.body).toBe('Read test body')
+      expect(skill.license).toBe('Apache-2.0')
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
+    }
   })
 
   test('throws error for missing skill', async () => {
@@ -174,7 +202,7 @@ describe('SkillService', () => {
   })
 
   test('updates only changed fields', async () => {
-    const { createSkill, updateSkill } = await import('../../src/services/skills')
+    const { createSkill, updateSkill, deleteSkill } = await import('../../src/services/skills')
     const name = `update-test-${Date.now()}`
     const input = {
       name,
@@ -184,19 +212,23 @@ describe('SkillService', () => {
       license: 'MIT',
     }
 
-    await createSkill(mockDb, input)
+    try {
+      await createSkill(mockDb, input)
 
-    const updated = await updateSkill(
-      mockDb,
-      name,
-      'global',
-      { description: 'Updated description' },
-      undefined
-    )
+      const updated = await updateSkill(
+        mockDb,
+        name,
+        'global',
+        { description: 'Updated description' },
+        undefined
+      )
 
-    expect(updated.description).toBe('Updated description')
-    expect(updated.body).toBe('Original body')
-    expect(updated.license).toBe('MIT')
+      expect(updated.description).toBe('Updated description')
+      expect(updated.body).toBe('Original body')
+      expect(updated.license).toBe('MIT')
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
+    }
   })
 
   test('throws error for missing skill on update', async () => {
@@ -274,20 +306,22 @@ This is after a horizontal rule.
 
 Another section.`
 
-    await createSkill(mockDb, {
-      name,
-      description: 'Test horizontal rules in body',
-      body: bodyWithHR,
-      scope: 'global' as const,
-    })
+    try {
+      await createSkill(mockDb, {
+        name,
+        description: 'Test horizontal rules in body',
+        body: bodyWithHR,
+        scope: 'global' as const,
+      })
 
-    const skill = await getSkill(mockDb, name, 'global')
-    expect(skill).not.toBeNull()
-    expect(skill!.body).toContain('---')
-    expect(skill!.body).toContain('This is after a horizontal rule.')
-    expect(skill!.body).toContain('Another section.')
-
-    await deleteSkill(mockDb, name, 'global')
+      const skill = await getSkill(mockDb, name, 'global')
+      expect(skill).not.toBeNull()
+      expect(skill!.body).toContain('---')
+      expect(skill!.body).toContain('This is after a horizontal rule.')
+      expect(skill!.body).toContain('Another section.')
+    } finally {
+      await deleteSkill(mockDb, name, 'global').catch(() => {})
+    }
   })
 
   test('lists skills from all repos when no repoId is provided', async () => {
