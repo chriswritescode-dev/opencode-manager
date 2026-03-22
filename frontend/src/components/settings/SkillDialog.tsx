@@ -115,7 +115,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
+      <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 pb-safe">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle>{editingSkill ? 'Edit Skill' : 'Create Skill'}</DialogTitle>
         </DialogHeader>
@@ -270,7 +270,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
           </Form>
         </div>
 
-        <DialogFooter className="p-3 sm:p-4 border-t gap-2 pb-4">
+        <DialogFooter className="flex flex-row gap-2 pt-2 border-t border-border sm:justify-end pb-4 p-3">
           <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 sm:flex-none">
             Cancel
           </Button>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Loader2, Pencil, ChevronDown, ChevronRight, Save, X } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, Save, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 
 interface SkillsEditorProps {
   skills?: OpenCodeConfigInput['skills']
+  managedSkills?: SkillFileInfo[]
   onChange?: (skills: OpenCodeConfigInput['skills']) => void
 }
 
@@ -77,7 +78,7 @@ function SkillPathEditor({ items, onChange, onAddItem, onRemoveItem, label, plac
   )
 }
 
-export function SkillsEditor({ skills, onChange }: SkillsEditorProps) {
+export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEditorProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingSkill, setEditingSkill] = useState<SkillFileInfo | null>(null)
   const [collapsiblesOpen, setCollapsiblesOpen] = useState({
@@ -97,12 +98,6 @@ export function SkillsEditor({ skills, onChange }: SkillsEditorProps) {
   }, [skills?.paths, skills?.urls, hasUnsavedChanges])
 
   const queryClient = useQueryClient()
-
-  const { data: managedSkills = [], isLoading: isLoadingManaged } = useQuery({
-    queryKey: ['managed-skills'],
-    queryFn: () => settingsApi.listManagedSkills(),
-    staleTime: 5 * 60 * 1000,
-  })
 
   const createMutation = useMutation({
     mutationFn: (data: CreateSkillRequest) => settingsApi.createSkill(data),
@@ -238,11 +233,7 @@ export function SkillsEditor({ skills, onChange }: SkillsEditorProps) {
 
       {collapsiblesOpen.managed && (
         <>
-          {isLoadingManaged ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            </div>
-          ) : managedSkills.length === 0 ? (
+          {managedSkills.length === 0 ? (
             <Card>
               <CardContent className="p-6">
                 <div className="flex items-center gap-2 mb-2">

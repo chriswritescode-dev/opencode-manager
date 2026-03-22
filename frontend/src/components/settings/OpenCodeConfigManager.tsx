@@ -17,7 +17,7 @@ import { SkillsEditor } from './SkillsEditor'
 import { VersionSelectDialog } from './VersionSelectDialog'
 import { MemoryPluginConfig } from './MemoryPluginConfig'
 import { settingsApi } from '@/api/settings'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
@@ -77,6 +77,12 @@ export function OpenCodeConfigManager() {
   const skillsRef = useRef<HTMLButtonElement>(null)
   const mcpRef = useRef<HTMLButtonElement>(null)
   
+  const { data: managedSkills = [] } = useQuery({
+    queryKey: ['managed-skills'],
+    queryFn: () => settingsApi.listManagedSkills(),
+    staleTime: 5 * 60 * 1000,
+  })
+
   const scrollToSection = (ref: React.RefObject<HTMLButtonElement | null>) => {
     if (ref.current) {
       ref.current.scrollIntoView({ 
@@ -563,7 +569,7 @@ export function OpenCodeConfigManager() {
           <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0 mb-6">
             <button
               ref={agentsMdRef}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+              className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.agentsMd ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
               onClick={() => {
                 const isExpanding = !expandedSections.agentsMd
                 setExpandedSections(prev => ({ ...prev, agentsMd: isExpanding }))
@@ -620,7 +626,7 @@ export function OpenCodeConfigManager() {
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={commandsRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.commands ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.commands
                           setExpandedSections(prev => ({ ...prev, commands: isExpanding }))
@@ -657,7 +663,7 @@ export function OpenCodeConfigManager() {
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={agentsRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.agents ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.agents
                           setExpandedSections(prev => ({ ...prev, agents: isExpanding }))
@@ -694,7 +700,7 @@ export function OpenCodeConfigManager() {
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={skillsRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.skills ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.skills
                           setExpandedSections(prev => ({ ...prev, skills: isExpanding }))
@@ -706,33 +712,34 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Skills</h4>
                           <span className="text-xs text-muted-foreground">
-                            {(selectedConfig.content?.skills?.paths?.length ?? 0) + (selectedConfig.content?.skills?.urls?.length ?? 0)} configured
+                            {managedSkills.length + (selectedConfig.content?.skills?.paths?.length ?? 0) + (selectedConfig.content?.skills?.urls?.length ?? 0)} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.skills ? 'rotate-90' : ''}`} />
                       </button>
-                      <div className={`${expandedSections.skills ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-4 max-h-[50vh] overflow-y-auto">
-                          <SkillsEditor
-                            skills={selectedConfig.content?.skills}
-                            onChange={(skills) => {
-                              const paths = skills?.paths?.filter(Boolean)
-                              const urls = skills?.urls?.filter(Boolean)
-                              const updatedContent = {
-                                ...selectedConfig.content,
-                                skills: (paths?.length || urls?.length) ? { paths: paths?.length ? paths : undefined, urls: urls?.length ? urls : undefined } : undefined
-                              }
-                              updateConfigContent(selectedConfig.name, updatedContent)
-                            }}
-                          />
+                        <div className={`${expandedSections.skills ? 'block' : 'hidden'} border-t border-border`}>
+                          <div className="p-4 max-h-[50vh] overflow-y-auto">
+                            <SkillsEditor
+                              skills={selectedConfig.content?.skills}
+                              managedSkills={managedSkills}
+                              onChange={(skills) => {
+                                const paths = skills?.paths?.filter(Boolean)
+                                const urls = skills?.urls?.filter(Boolean)
+                                const updatedContent = {
+                                  ...selectedConfig.content,
+                                  skills: (paths?.length || urls?.length) ? { paths: paths?.length ? paths : undefined, urls: urls?.length ? urls : undefined } : undefined
+                                }
+                                updateConfigContent(selectedConfig.name, updatedContent)
+                              }}
+                            />
+                          </div>
                         </div>
-                      </div>
                     </div>
 
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={mcpRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.mcp ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.mcp
                           setExpandedSections(prev => ({ ...prev, mcp: isExpanding }))
