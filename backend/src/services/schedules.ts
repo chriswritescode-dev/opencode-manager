@@ -107,6 +107,69 @@ function buildSessionTitle(job: ScheduleJob): string {
   return `Scheduled: ${job.name}`
 }
 
+type SkillInfo = {
+  name: string
+  description: string
+  location: string
+  content: string
+}
+
+async function fetchSkillContent(slugs: string[], repoPath: string): Promise<string[]> {
+  try {
+    const response = await proxyToOpenCodeWithDirectory('/skill', 'GET', repoPath)
+    if (!response.ok) {
+      logger.warn(`Failed to fetch skills from OpenCode (${response.status}), falling back to name-only injection`)
+      return []
+    }
+    const skills = await response.json() as SkillInfo[]
+    
+    const skillBlocks = slugs
+      .map((slug) => {
+        const skill = skills.find((s) => s.name === slug || s.name.endsWith(`/${slug}`) || s.name.endsWith(`-${slug}`))
+        if (!skill) {
+          logger.warn(`Skill "${slug}" not found in OpenCode skill list`)
+          return null
+        }
+        return [
+          `<skill_content name="${skill.name}">`,
+          `# Skill: ${skill.name}`,
+          '',
+          skill.content.trim(),
+          '</skill_content>',
+        ].join('\n')
+      })
+      .filter((block): block is string => block !== null)
+    
+    const foundCount = skillBlocks.length
+    if (foundCount < slugs.length) {
+      logger.warn(`Only ${foundCount} of ${slugs.length} requested skills were found`)
+    }
+    
+    return skillBlocks
+  } catch (error) {
+    logger.warn('Error fetching skills from OpenCode, falling back to name-only injection:', error)
+    return []
+  }
+}
+
+async function buildPromptWithSkills(
+  prompt: string,
+  skillMetadata: ScheduleJob['skillMetadata'],
+  repoPath: string
+): Promise<string> {
+  if (!skillMetadata || !skillMetadata.skillSlugs || skillMetadata.skillSlugs.length === 0) return prompt
+
+  const skillBlocks = await fetchSkillContent(skillMetadata.skillSlugs, repoPath)
+  const notesLine = skillMetadata.notes ? `\nSkill notes: ${skillMetadata.notes}` : ''
+
+  if (skillBlocks.length === 0) {
+    const skillList = skillMetadata.skillSlugs.join(', ')
+    return `${prompt}\n\nFor this task, use the following skills: ${skillList}${notesLine}`
+  }
+
+  return `${prompt}\n\nThe following skills have been loaded for this task:\n\n${skillBlocks.join('\n\n')}${notesLine}`
+}
+
 function buildRunLog(input: {
   job: ScheduleJob
   triggerSource: ScheduleRunTriggerSource
@@ -578,7 +641,7 @@ export class ScheduleService {
         'POST',
         repo.fullPath,
         JSON.stringify({
-          parts: [{ type: 'text', text: input.job.prompt }],
+          parts: [{ type: 'text', text: await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, repo.fullPath) }],
           model: input.model,
         }),
       )

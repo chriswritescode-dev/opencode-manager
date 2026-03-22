@@ -708,6 +708,235 @@ describe('ScheduleService', () => {
       expect.objectContaining({ status: 'completed', responseText: 'Completed summary' }),
     )
   })
+
+  describe('skill injection in prompt', () => {
+    it('appends skill content to the prompt when skillSlugs are set', async () => {
+      const service = new ScheduleService({} as never)
+      const jobWithSkills: ScheduleJob = {
+        ...job,
+        skillMetadata: { skillSlugs: ['git-release', 'code-review'], notes: undefined },
+      }
+      mocks.getScheduleJobById.mockReturnValue(jobWithSkills)
+
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-skills-1',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+
+      let capturedPromptBody: string | undefined
+      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+        if (path === '/skill' && method === 'GET') {
+          return Promise.resolve(jsonResponse([
+            { name: 'git-release', description: 'Git release workflow', location: '/path/SKILL.md', content: 'Release instructions here' },
+            { name: 'code-review', description: 'Code review workflow', location: '/path/SKILL.md', content: 'Review instructions here' },
+          ]))
+        }
+        if (path === '/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ id: 'ses-skills-1' }))
+        }
+        if (path === '/session/ses-skills-1/message' && method === 'POST') {
+          capturedPromptBody = body
+          return Promise.resolve(textResponse(JSON.stringify({
+            parts: [{ type: 'text', text: 'Done.' }],
+          })))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(capturedPromptBody).toBeDefined()
+      })
+
+      const parsed = JSON.parse(capturedPromptBody!)
+      expect(parsed.parts[0].text).toContain('<skill_content name="git-release">')
+      expect(parsed.parts[0].text).toContain('<skill_content name="code-review">')
+      expect(parsed.parts[0].text).toContain('Release instructions here')
+      expect(parsed.parts[0].text).toContain('Review instructions here')
+    })
+
+    it('appends skill notes when provided', async () => {
+      const service = new ScheduleService({} as never)
+      const jobWithSkillsAndNotes: ScheduleJob = {
+        ...job,
+        skillMetadata: { skillSlugs: ['git-release'], notes: 'Focus on changelog' },
+      }
+      mocks.getScheduleJobById.mockReturnValue(jobWithSkillsAndNotes)
+
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-skills-2',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+
+      let capturedPromptBody: string | undefined
+      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+        if (path === '/skill' && method === 'GET') {
+          return Promise.resolve(jsonResponse([
+            { name: 'git-release', description: 'Git release workflow', location: '/path/SKILL.md', content: 'Release instructions here' },
+          ]))
+        }
+        if (path === '/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ id: 'ses-skills-2' }))
+        }
+        if (path === '/session/ses-skills-2/message' && method === 'POST') {
+          capturedPromptBody = body
+          return Promise.resolve(textResponse(JSON.stringify({
+            parts: [{ type: 'text', text: 'Done.' }],
+          })))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(capturedPromptBody).toBeDefined()
+      })
+
+      const parsed = JSON.parse(capturedPromptBody!)
+      expect(parsed.parts[0].text).toContain('<skill_content name="git-release">')
+      expect(parsed.parts[0].text).toContain('Release instructions here')
+      expect(parsed.parts[0].text).toContain('\nSkill notes: Focus on changelog')
+    })
+
+    it('does not modify the prompt when skillSlugs is empty', async () => {
+      const service = new ScheduleService({} as never)
+      const jobWithEmptySkills: ScheduleJob = {
+        ...job,
+        skillMetadata: { skillSlugs: [], notes: 'some notes' },
+      }
+      mocks.getScheduleJobById.mockReturnValue(jobWithEmptySkills)
+
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-skills-3',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+
+      let capturedPromptBody: string | undefined
+      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+        if (path === '/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ id: 'ses-skills-3' }))
+        }
+        if (path === '/session/ses-skills-3/message' && method === 'POST') {
+          capturedPromptBody = body
+          return Promise.resolve(textResponse(JSON.stringify({
+            parts: [{ type: 'text', text: 'Done.' }],
+          })))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(capturedPromptBody).toBeDefined()
+      })
+
+      const parsed = JSON.parse(capturedPromptBody!)
+      expect(parsed.parts[0].text).toBe(job.prompt)
+    })
+
+    it('falls back to name-only injection when skill endpoint fails', async () => {
+      const service = new ScheduleService({} as never)
+      const jobWithSkills: ScheduleJob = {
+        ...job,
+        skillMetadata: { skillSlugs: ['git-release'], notes: undefined },
+      }
+      mocks.getScheduleJobById.mockReturnValue(jobWithSkills)
+
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-skills-4',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+
+      let capturedPromptBody: string | undefined
+      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+        if (path === '/skill' && method === 'GET') {
+          return Promise.resolve(new Response('error', { status: 500 }))
+        }
+        if (path === '/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ id: 'ses-skills-4' }))
+        }
+        if (path === '/session/ses-skills-4/message' && method === 'POST') {
+          capturedPromptBody = body
+          return Promise.resolve(textResponse(JSON.stringify({
+            parts: [{ type: 'text', text: 'Done.' }],
+          })))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(capturedPromptBody).toBeDefined()
+      })
+
+      const parsed = JSON.parse(capturedPromptBody!)
+      expect(parsed.parts[0].text).toContain('For this task, use the following skills: git-release')
+    })
+
+    it('falls back gracefully when a skill slug is not found in the list', async () => {
+      const service = new ScheduleService({} as never)
+      const jobWithUnknownSkill: ScheduleJob = {
+        ...job,
+        skillMetadata: { skillSlugs: ['unknown-skill'], notes: undefined },
+      }
+      mocks.getScheduleJobById.mockReturnValue(jobWithUnknownSkill)
+
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-skills-5',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+
+      let capturedPromptBody: string | undefined
+      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+        if (path === '/skill' && method === 'GET') {
+          return Promise.resolve(jsonResponse([]))
+        }
+        if (path === '/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ id: 'ses-skills-5' }))
+        }
+        if (path === '/session/ses-skills-5/message' && method === 'POST') {
+          capturedPromptBody = body
+          return Promise.resolve(textResponse(JSON.stringify({
+            parts: [{ type: 'text', text: 'Done.' }],
+          })))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(capturedPromptBody).toBeDefined()
+      })
+
+      const parsed = JSON.parse(capturedPromptBody!)
+      expect(parsed.parts[0].text).toContain('For this task, use the following skills: unknown-skill')
+    })
+  })
 })
 
 describe('ScheduleRunner', () => {
