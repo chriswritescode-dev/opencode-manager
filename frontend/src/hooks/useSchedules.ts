@@ -6,12 +6,24 @@ import {
   deleteRepoSchedule,
   getRepoSchedule,
   getRepoScheduleRun,
+  listAllSchedules,
   listRepoScheduleRuns,
   listRepoSchedules,
   runRepoSchedule,
   updateRepoSchedule,
 } from '@/api/schedules'
 import { showToast } from '@/lib/toast'
+import type { ScheduleJobWithRepo } from '@/api/schedules'
+
+export function useAllSchedules() {
+  return useQuery({
+    queryKey: ['all-schedules'],
+    queryFn: async () => {
+      const response = await listAllSchedules()
+      return response.jobs as ScheduleJobWithRepo[]
+    },
+  })
+}
 
 export function useRepoSchedules(repoId: number | undefined) {
   return useQuery({

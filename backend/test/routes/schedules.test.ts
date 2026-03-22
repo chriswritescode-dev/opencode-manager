@@ -231,4 +231,23 @@ describe('Schedule Routes', () => {
       timezone: 'America/New_York',
     }))
   })
+
+  it('lists all schedules across all repos', async () => {
+    mocks.scheduleService.listAllJobsWithRepos.mockReturnValue([
+      { id: 1, name: 'Job 1', repoName: 'Repo A', repoPath: '/path/a', repoUrl: 'https://repo-a' },
+      { id: 2, name: 'Job 2', repoName: 'Repo B', repoPath: '/path/b', repoUrl: 'https://repo-b' },
+    ])
+
+    const response = await app.request('/repos/42/schedules/all')
+    const body = await response.json() as { jobs: Array<{ id: number; name: string; repoName: string }> }
+
+    expect(response.status).toBe(200)
+    expect(body.jobs).toHaveLength(2)
+    expect(body.jobs[0]).toEqual(expect.objectContaining({
+      id: 1,
+      name: 'Job 1',
+      repoName: 'Repo A',
+    }))
+    expect(mocks.scheduleService.listAllJobsWithRepos).toHaveBeenCalled()
+  })
 })

@@ -8,6 +8,7 @@ import {
   type UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
 import { getRepoById } from '../db/queries'
+import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
   createScheduleJob,
   createScheduleRun,
@@ -15,6 +16,7 @@ import {
   getScheduleJobById,
   getRunningScheduleRunByJob,
   getScheduleRunById,
+  listAllScheduleJobsWithRepos,
   listEnabledScheduleJobs,
   listScheduleJobsByRepo,
   listRunningScheduleRuns,
@@ -357,6 +359,10 @@ export class ScheduleService {
 
   listAllEnabledJobs(): ScheduleJob[] {
     return listEnabledScheduleJobs(this.db)
+  }
+
+  listAllJobsWithRepos(): ScheduleJobWithRepo[] {
+    return listAllScheduleJobsWithRepos(this.db)
   }
 
   async recoverRunningRuns(): Promise<void> {

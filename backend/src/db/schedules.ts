@@ -373,3 +373,36 @@ export function listScheduleRunsByJob(db: Database, repoId: number, jobId: numbe
   const rows = stmt.all(repoId, jobId, limit) as ScheduleRunRow[]
   return rows.map(rowToScheduleRun)
 }
+
+export interface ScheduleJobWithRepo extends ScheduleJob {
+  repoName: string
+  repoPath: string
+  repoUrl: string
+}
+
+interface ScheduleJobWithRepoRow extends ScheduleJobRow {
+  repo_name: string
+  repo_url: string
+  repo_path: string
+}
+
+function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithRepo {
+  const job = rowToScheduleJob(row)
+  return {
+    ...job,
+    repoName: row.repo_name,
+    repoPath: row.repo_path,
+    repoUrl: row.repo_url,
+  }
+}
+
+export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[] {
+  const stmt = db.prepare(`
+    SELECT sj.*, r.name as repo_name, r.repo_url, r.local_path as repo_path
+    FROM schedule_jobs sj
+    JOIN repos r ON sj.repo_id = r.id
+    ORDER BY r.name, sj.name
+  `)
+  const rows = stmt.all() as ScheduleJobWithRepoRow[]
+  return rows.map(rowToScheduleJobWithRepo)
+}

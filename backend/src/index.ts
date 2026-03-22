@@ -15,6 +15,7 @@ import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
+import { createScheduleRoutes } from './routes/schedules'
 
 async function getAppVersion(): Promise<string> {
   try {
@@ -370,6 +371,7 @@ protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/memory', createMemoryRoutes(db))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
+protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 
 app.route('/api', protectedApi)
 

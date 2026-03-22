@@ -35,6 +35,15 @@ function parseRunListLimit(value: string | undefined): number {
 export function createScheduleRoutes(scheduleService: ScheduleService) {
   const app = new Hono()
 
+  app.get('/all', (c) => {
+    try {
+      const jobs = scheduleService.listAllJobsWithRepos()
+      return c.json({ jobs })
+    } catch (error) {
+      return handleScheduleError(c, error, 'Failed to list all schedules')
+    }
+  })
+
   app.get('/', (c) => {
     try {
       const repoId = parseId(c.req.param('id'), 'repo id')

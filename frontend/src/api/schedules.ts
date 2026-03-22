@@ -7,8 +7,43 @@ import type {
   UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
 
+export interface ScheduleJobWithRepo extends ScheduleJob {
+  repoName: string
+  repoPath: string
+  repoUrl: string
+}
+
+export interface ScheduleCount {
+  total: number
+  enabled: number
+}
+
+export async function listAllSchedules(): Promise<{ jobs: ScheduleJobWithRepo[] }> {
+  return fetchWrapper(`${API_BASE_URL}/api/schedules/all`)
+}
+
 export async function listRepoSchedules(repoId: number): Promise<{ jobs: ScheduleJob[] }> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/schedules`)
+}
+
+export async function getScheduleCounts(): Promise<Map<number, ScheduleCount>> {
+  const response = await fetchWrapper(`${API_BASE_URL}/api/schedules/all`)
+  const jobs = response.jobs as ScheduleJobWithRepo[]
+  const counts = new Map<number, ScheduleCount>()
+
+  jobs.forEach((job) => {
+    const existing = counts.get(job.repoId)
+    if (existing) {
+      existing.total += 1
+      if (job.enabled) {
+        existing.enabled += 1
+      }
+    } else {
+      counts.set(job.repoId, { total: 1, enabled: job.enabled ? 1 : 0 })
+    }
+  })
+
+  return counts
 }
 
 export async function getRepoSchedule(repoId: number, jobId: number): Promise<{ job: ScheduleJob }> {
