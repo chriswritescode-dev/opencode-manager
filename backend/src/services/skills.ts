@@ -3,7 +3,7 @@ import path from 'path'
 import type { Database } from 'bun:sqlite'
 import type { SkillFileInfo, SkillScope, CreateSkillRequest, UpdateSkillRequest } from '@opencode-manager/shared'
 import { SKILL_NAME_REGEX } from '@opencode-manager/shared'
-import { getRepoById } from '../db/queries'
+import { getRepoById, listRepos } from '../db/queries'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory } from './file-operations'
 import { logger } from '../utils/logger'
 
@@ -178,6 +178,28 @@ export async function listManagedSkills(db: Database, repoId?: number): Promise<
             const skillExists = await fileExists(skillPath)
             if (skillExists) {
               const skillInfo = await readSkillFile(db, 'project', entry.name, repoId)
+              if (skillInfo) {
+                skills.push(skillInfo)
+              }
+            }
+          }
+        }
+      }
+    }
+  } else {
+    const allRepos = listRepos(db)
+    for (const repo of allRepos) {
+      const projectSkillsDir = path.join(repo.fullPath, '.opencode', 'skills')
+      const projectSkillsExist = await fileExists(projectSkillsDir)
+      
+      if (projectSkillsExist) {
+        const entries = await listDirectory(projectSkillsDir)
+        for (const entry of entries) {
+          if (entry.isDirectory) {
+            const skillPath = path.join(entry.path, 'SKILL.md')
+            const skillExists = await fileExists(skillPath)
+            if (skillExists) {
+              const skillInfo = await readSkillFile(db, 'project', entry.name, repo.id)
               if (skillInfo) {
                 skills.push(skillInfo)
               }

@@ -5,7 +5,7 @@ import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff, Code } from "lucide-react";
+import { X, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff, Code, Sparkles } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
@@ -37,6 +37,7 @@ import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { LspStatusButton } from "@/components/repo/LspStatusButton";
 import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
+import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import { useQuestions } from "@/contexts/EventContext";
@@ -66,6 +67,7 @@ export function SessionDetail() {
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [lspDialogOpen, setLspDialogOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const [sourceControlOpen, setSourceControlOpen] = useState(false);
   const [resetPermissionsOpen, setResetPermissionsOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
@@ -389,6 +391,15 @@ export function SessionDetail() {
           <Button
             variant="outline"
             size="sm"
+            onClick={() => setSkillsDialogOpen(true)}
+            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+          >
+            <Sparkles className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Skills</span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={() => setMcpDialogOpen(true)}
             className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
           >
@@ -440,6 +451,9 @@ export function SessionDetail() {
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
               <Plug className="w-4 h-4 mr-2" /> MCP
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSkillsDialogOpen(true)}>
+              <Sparkles className="w-4 h-4 mr-2" /> Skills
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setLspDialogOpen(true)}>
               <Code className="w-4 h-4 mr-2" /> LSP
@@ -574,6 +588,12 @@ export function SessionDetail() {
         onOpenChange={setLspDialogOpen}
         opcodeUrl={opcodeUrl}
         directory={repoDirectory}
+      />
+
+      <RepoSkillsDialog
+        open={skillsDialogOpen}
+        onOpenChange={setSkillsDialogOpen}
+        repoId={repoId}
       />
 
       <RepoMcpDialog

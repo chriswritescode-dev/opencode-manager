@@ -8,6 +8,7 @@ import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
+import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useSSE } from "@/hooks/useSSE";
@@ -16,7 +17,7 @@ import { useSwipeBack } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2, CalendarClock } from "lucide-react";
+import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2, CalendarClock, Sparkles } from "lucide-react";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
@@ -29,6 +30,7 @@ export function RepoDetail() {
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [switchConfigOpen, setSwitchConfigOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const [sourceControlOpen, setSourceControlOpen] = useState(false);
   const [resetPermissionsOpen, setResetPermissionsOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -148,6 +150,15 @@ export function RepoDetail() {
         </Button>
         <Button
           variant="outline"
+          onClick={() => setSkillsDialogOpen(true)}
+          size="sm"
+          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+        >
+          <Sparkles className="w-4 h-4 sm:mr-2" />
+          <span className="hidden sm:inline">Skills</span>
+        </Button>
+        <Button
+          variant="outline"
           onClick={() => setSourceControlOpen(true)}
           size="sm"
           className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
@@ -205,6 +216,9 @@ export function RepoDetail() {
           <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
             <Plug className="w-4 h-4 mr-2" /> MCP
           </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => setSkillsDialogOpen(true)}>
+            <Sparkles className="w-4 h-4 mr-2" /> Skills
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => setResetPermissionsOpen(true)}>
             <ShieldOff className="w-4 h-4 mr-2" /> Reset Permissions
           </DropdownMenuItem>
@@ -249,6 +263,12 @@ export function RepoDetail() {
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
         directory={repoDirectory}
+      />
+
+      <RepoSkillsDialog
+        open={skillsDialogOpen}
+        onOpenChange={setSkillsDialogOpen}
+        repoId={repoId}
       />
 
       <SourceControlPanel

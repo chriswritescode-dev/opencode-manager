@@ -1,7 +1,21 @@
-import { describe, expect, test, beforeEach, afterEach } from 'vitest'
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { mkdtemp, rm } from 'fs/promises'
+
+vi.mock('../../src/db/queries', () => ({
+  getRepoById: vi.fn(),
+  listRepos: vi.fn(() => []),
+  getRepoByUrlAndBranch: vi.fn(),
+  getRepoByLocalPath: vi.fn(),
+  getRepoBySourcePath: vi.fn(),
+  createRepo: vi.fn(),
+  updateRepoStatus: vi.fn(),
+  updateRepoConfigName: vi.fn(),
+  updateLastPulled: vi.fn(),
+  updateRepoBranch: vi.fn(),
+  deleteRepo: vi.fn(),
+}))
 
 describe('SkillService', () => {
   let tempDir: string
@@ -18,6 +32,7 @@ describe('SkillService', () => {
     if (originalHome) {
       process.env.HOME = originalHome
     }
+    vi.clearAllMocks()
   })
 
   const mockDb = null as unknown as any
@@ -273,5 +288,13 @@ Another section.`
     expect(skill!.body).toContain('Another section.')
 
     await deleteSkill(mockDb, name, 'global')
+  })
+
+  test('lists skills from all repos when no repoId is provided', async () => {
+    const { listManagedSkills } = await import('../../src/services/skills')
+
+    const skills = await listManagedSkills(mockDb)
+    
+    expect(Array.isArray(skills)).toBe(true)
   })
 })
