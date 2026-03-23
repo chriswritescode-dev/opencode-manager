@@ -19,6 +19,11 @@ FROM debian:bookworm-slim
 COPY --from=builder /nix /nix
 ENV PATH="/nix/var/nix/profiles/default/bin:${PATH}"
 
+# Install CA certificates for HTTPS
+RUN apt-get update && \
+    apt-get install -y ca-certificates curl && \
+    rm -rf /var/lib/apt/lists/*
+
 # Create vscode user
 RUN useradd -m -s /bin/bash vscode && \
     mkdir -p /workspace && \
@@ -31,7 +36,6 @@ RUN curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path && \
 
 # Install Docker client (for DinD communication)
 RUN apt-get update && \
-    apt-get install -y ca-certificates curl && \
     install -m 0755 -d /etc/apt/keyrings && \
     curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list && \

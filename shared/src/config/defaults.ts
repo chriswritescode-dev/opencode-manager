@@ -16,12 +16,14 @@ export const DEFAULTS = {
   },
 
   DATABASE: {
-    PATH: './data/opencode.db',
+    PATH: './data/ocm.db',
   },
 
   WORKSPACE: {
-    BASE_PATH: './workspace',
+    BASE_PATH: '/ocm',
     REPOS_DIR: 'repos',
+    WORKSPACES_DIR: 'workspace',
+    SHARED_DIR: 'shared',
     CONFIG_DIR: '.config/opencode',
     AUTH_FILE: '.opencode/state/opencode/auth.json',
   },

@@ -34,11 +34,21 @@ function isFileDiff(data: unknown): data is FileDiffData {
 }
 
 export function getRelativePath(filePath: string): string {
+  const ocmWorkspaceIndex = filePath.indexOf('/ocm/workspace/')
+  if (ocmWorkspaceIndex !== -1) {
+    return filePath.substring(ocmWorkspaceIndex + 15)
+  }
+
+  const ocmReposIndex = filePath.indexOf('/ocm/repos/')
+  if (ocmReposIndex !== -1) {
+    return filePath.substring(ocmReposIndex + 10)
+  }
+
   const reposIndex = filePath.indexOf('/repos/')
   if (reposIndex !== -1) {
     return filePath.substring(reposIndex + 7)
   }
-  
+
   const workspaceIndex = filePath.indexOf('/workspace/')
   if (workspaceIndex !== -1) {
     return filePath.substring(workspaceIndex + 11)

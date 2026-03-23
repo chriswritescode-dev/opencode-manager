@@ -2,6 +2,7 @@ import { useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { MiniScanner } from "@/components/ui/mini-scanner";
+import { Badge } from "@/components/ui/badge";
 import { Trash2, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
@@ -28,6 +29,20 @@ export const SessionCard = ({
 }: SessionCardProps) => {
   const cardRef = useRef<HTMLDivElement>(null);
   const { bind, swipeOffset, isOpen, isSwipingBack, close, swipeStyles } = useSwipe();
+  const lifecycleStatus = (session as { status?: string }).status;
+
+  const renderStatusBadge = (status?: string) => {
+    if (!status) return null;
+    const normalized = status.toLowerCase();
+    const variant = normalized === "error" ? "destructive" : normalized === "running" ? "secondary" : "outline";
+    const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+
+    return (
+      <Badge className="text-[10px] px-1.5 py-0" variant={variant}>
+        {label}
+      </Badge>
+    );
+  };
 
   useEffect(() => {
     if (cardRef.current) {
@@ -95,6 +110,7 @@ export const SessionCard = ({
                     <h3 className="text-base font-semibold text-orange-600 dark:text-orange-400 truncate">
                       {session.title || "Untitled Session"}
                     </h3>
+                    {renderStatusBadge(lifecycleStatus)}
                   </div>
                   <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
@@ -108,9 +124,12 @@ export const SessionCard = ({
               </div>
             ) : (
               <div className="flex flex-col flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
-                  {session.title || "Untitled Session"}
-                </h3>
+                <div className="flex items-center gap-1">
+                  <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
+                    {session.title || "Untitled Session"}
+                  </h3>
+                  {renderStatusBadge(lifecycleStatus)}
+                </div>
                 <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
                   <span className="flex items-center">
                     <Clock className="w-3 h-3 mr-1" />

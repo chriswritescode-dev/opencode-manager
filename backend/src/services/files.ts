@@ -13,11 +13,12 @@ import {
   getFileStats, 
   listDirectory 
 } from './file-operations'
-import { getReposPath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
 import { ALLOWED_MIME_TYPES, type AllowedMimeType } from '@opencode-manager/shared'
 import type { ChunkedFileInfo, PatchOperation } from '@opencode-manager/shared'
 
-const SHARED_WORKSPACE_BASE = getReposPath()
+const SHARED_WORKSPACE_BASE = getWorkspacePath()
+const INTERNAL_WORKSPACE_DIRS = new Set(['code-server', 'docker'])
 
 interface FileInfo {
   name: string
@@ -61,6 +62,9 @@ export async function getRawFileContent(userPath: string): Promise<Buffer> {
 }
 
 export async function getFile(userPath: string): Promise<FileInfo> {
+  if (isInternalWorkspacePath(userPath)) {
+    throw { message: 'File or directory not found', statusCode: 404 }
+  }
   const validatedPath = validatePath(userPath)
   logger.info(`Getting file for path: ${userPath} -> ${validatedPath}`)
   
@@ -79,7 +83,11 @@ export async function getFile(userPath: string): Promise<FileInfo> {
       const entries = await listDirectory(validatedPath)
       const children: FileInfo[] = []
       
+      const workspaceRoot = getWorkspaceRootName(userPath)
       for (const entry of entries) {
+        if (workspaceRoot && INTERNAL_WORKSPACE_DIRS.has(entry.name)) {
+          continue
+        }
         children.push({
           name: entry.name,
           path: path.join(userPath, entry.name),
@@ -235,6 +243,9 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
 function validatePath(userPath: string): string {
   const trimmed = userPath.trim()
   const normalized = path.normalize(trimmed).replace(/^(\.\.(\/|\\|$))+/, '')
+  if (isInternalWorkspacePath(normalized)) {
+    throw { message: 'File or directory not found', statusCode: 404 }
+  }
   const fullPath = path.join(SHARED_WORKSPACE_BASE, normalized)
   const resolved = path.resolve(fullPath)
   
@@ -244,6 +255,24 @@ function validatePath(userPath: string): string {
   }
   
   return resolved
+}
+
+function getWorkspaceRootName(userPath: string): string | null {
+  const normalized = userPath.replace(/\\/g, '/')
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length >= 2 && parts[0] === 'workspace') {
+    return parts[1]
+  }
+  return null
+}
+
+function isInternalWorkspacePath(userPath: string): boolean {
+  const normalized = userPath.replace(/\\/g, '/')
+  const parts = normalized.split('/').filter(Boolean)
+  if (parts.length >= 3 && parts[0] === 'workspace') {
+    return INTERNAL_WORKSPACE_DIRS.has(parts[2])
+  }
+  return false
 }
 
 function getMimeType(filePath: string): AllowedMimeType {

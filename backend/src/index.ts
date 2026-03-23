@@ -51,6 +51,8 @@ import { logger } from './utils/logger'
 import { 
   getWorkspacePath, 
   getReposPath, 
+  getWorkspacesPath,
+  getSharedPath,
   getConfigPath,
   getOpenCodeConfigFilePath,
   getAgentsMdPath,
@@ -79,7 +81,7 @@ app.use('/*', cors({
 
 const db = initializeDatabase(DB_PATH)
 const auth = createAuth(db)
-const requireAuth = createAuthMiddleware(auth)
+const requireAuth = ENV.AUTH.DISABLED ? async (_c, next) => next() : createAuthMiddleware(auth)
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -196,6 +198,8 @@ try {
 
   await ensureDirectoryExists(getWorkspacePath())
   await ensureDirectoryExists(getReposPath())
+  await ensureDirectoryExists(getWorkspacesPath())
+  await ensureDirectoryExists(getSharedPath())
   await ensureDirectoryExists(getConfigPath())
   logger.info('Workspace directories initialized')
 
@@ -223,7 +227,9 @@ try {
   await opencodeServerManager.start()
   logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
 
-  await syncAdminFromEnv(auth, db)
+  if (!ENV.AUTH.DISABLED) {
+    await syncAdminFromEnv(auth, db)
+  }
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }
@@ -259,7 +265,7 @@ protectedApi.use('/*', requireAuth)
 
 protectedApi.route('/health', createHealthRoutes(db))
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService))
-protectedApi.route('/sessions', createSessionRoutes(db))
+protectedApi.route('/sessions', createSessionRoutes(db, gitAuthService))
 protectedApi.route('/devcontainers', createDevcontainerRoutes(db, devcontainerManager))
 protectedApi.route('/settings', createSettingsRoutes(db))
 protectedApi.route('/files', createFileRoutes())

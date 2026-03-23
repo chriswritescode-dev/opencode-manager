@@ -72,11 +72,11 @@ export function RepoDetail() {
     const session = await createSessionMutation.mutateAsync({
       agent: options?.agentSlug,
     });
-    navigate(`/repos/${repoId}/sessions/${session.id}`);
+    navigate(`/workspace/${repoId}/sessions/${session.id}`);
   };
 
   const handleSelectSession = (sessionId: string) => {
-    navigate(`/repos/${repoId}/sessions/${sessionId}`);
+    navigate(`/workspace/${repoId}/sessions/${sessionId}`);
   };
 
   if (repoLoading) {
@@ -228,7 +228,7 @@ export function RepoDetail() {
       <FileBrowserSheet
         isOpen={fileBrowserOpen}
         onClose={() => setFileBrowserOpen(false)}
-        basePath={repo.localPath}
+        basePath={`repos/${repo.localPath}`}
         repoName={displayName}
         repoId={repoId}
       />

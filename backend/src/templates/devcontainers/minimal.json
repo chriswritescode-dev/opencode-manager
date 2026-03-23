@@ -1,19 +1,19 @@
 {
   "name": "Minimal",
   "version": "1.0.0",
-  "description": "Minimal development environment with git only",
+  "description": "Baseline development environment with common CLI tools",
   "build": {
     "dockerfile": "Dockerfile.nix",
     "context": ".",
     "args": {
-      "NIX_PACKAGES": "git curl"
+      "NIX_PACKAGES": "nixpkgs.git nixpkgs.bash nixpkgs.curl nixpkgs.wget nixpkgs.openssh nixpkgs.rsync nixpkgs.less nixpkgs.file nixpkgs.jq nixpkgs.tree nixpkgs.unzip nixpkgs.zip nixpkgs.gzip nixpkgs.bzip2 nixpkgs.xz nixpkgs.zstd nixpkgs.python3 nixpkgs.nodejs_22 nixpkgs.ripgrep"
     }
   },
   "containerEnv": {},
   "postCreateCommand": "opencode serve --port 5551 --hostname 0.0.0.0",
   "remoteUser": "vscode",
   "metadata": {
-    "tags": ["minimal", "git"],
+    "tags": ["baseline", "cli", "git"],
     "author": "opencode-manager",
     "createdAt": "2025-03-07"
   }

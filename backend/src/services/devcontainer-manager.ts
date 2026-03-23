@@ -6,9 +6,11 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { createHash } from 'crypto'
 import path from 'path'
 import { execCommand } from '../utils/process'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 const BUILT_IN_TEMPLATES_PATH = path.join(__dirname, '../templates/devcontainers')
-const DEVCONTAINERS_PATH = '/workspace/devcontainers'
+const WORKSPACE_BASE = getWorkspacePath()
+const DEVCONTAINERS_PATH = path.join(WORKSPACE_BASE, 'devcontainers')
 
 export class DevcontainerManager {
   private db: Database
@@ -75,9 +77,6 @@ Templates are automatically version-controlled with git.
     for (const templateName of builtInTemplates) {
       try {
         const existing = db.getDevcontainerTemplate(this.db, templateName)
-        if (existing && existing.isBuiltIn) {
-          continue
-        }
 
         const configPath = path.join(BUILT_IN_TEMPLATES_PATH, `${templateName}.json`)
         const configContent = await readFile(configPath, 'utf-8')
@@ -93,8 +92,14 @@ Templates are automatically version-controlled with git.
         }
 
         if (existing) {
-          db.updateDevcontainerTemplate(this.db, templateName, config)
-          logger.info(`Updated built-in template: ${templateName}`)
+          const existingConfig = JSON.stringify(existing.config)
+          const nextConfig = JSON.stringify(config)
+          if (existingConfig !== nextConfig || !existing.isBuiltIn) {
+            db.updateDevcontainerTemplate(this.db, templateName, config)
+            logger.info(`Updated built-in template: ${templateName}`)
+          } else {
+            logger.info(`Built-in template unchanged: ${templateName}`)
+          }
         } else {
           db.createDevcontainerTemplate(this.db, template)
           logger.info(`Loaded built-in template: ${templateName}`)

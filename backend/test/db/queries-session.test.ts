@@ -231,6 +231,66 @@ describe('Session Database Queries', () => {
       expect(updated?.status).toBe('running')
     })
 
+    it('should update public opencode url', () => {
+      const session: Session = {
+        id: 'public-test',
+        name: 'public-test',
+        repoMappings: [],
+        status: 'creating',
+        opencodeContainerId: null,
+        dindContainerId: null,
+        codeServerContainerId: null,
+        internalHostname: 'public-test.oc',
+        opencodeUrl: 'http://public-test-opencode.oc:5551',
+        codeServerUrl: 'https://public-test-code.localhost',
+        sessionPath: '/workspace/sessions/public-test',
+        opencodeStatePath: '/workspace/sessions/public-test/state',
+        dindDataPath: '/workspace/sessions/public-test/docker',
+        codeServerConfigPath: '/workspace/sessions/public-test/code-server',
+        devcontainerTemplate: 'minimal',
+        devcontainerConfigHash: 'hash',
+        createdAt: Date.now(),
+        lastActiveAt: Date.now(),
+        metadata: {},
+      }
+
+      db.createSession(database, session)
+      db.updateSessionPublicOpencodeUrl(database, 'public-test', 'https://public-test.localhost')
+
+      const updated = db.getSessionById(database, 'public-test')
+      expect(updated?.publicOpencodeUrl).toBe('https://public-test.localhost')
+    })
+
+    it('should update devcontainer template', () => {
+      const session: Session = {
+        id: 'template-test',
+        name: 'template-test',
+        repoMappings: [],
+        status: 'creating',
+        opencodeContainerId: null,
+        dindContainerId: null,
+        codeServerContainerId: null,
+        internalHostname: 'template-test.oc',
+        opencodeUrl: 'http://template-test-opencode.oc:5551',
+        codeServerUrl: 'https://template-test-code.localhost',
+        sessionPath: '/workspace/sessions/template-test',
+        opencodeStatePath: '/workspace/sessions/template-test/state',
+        dindDataPath: '/workspace/sessions/template-test/docker',
+        codeServerConfigPath: '/workspace/sessions/template-test/code-server',
+        devcontainerTemplate: 'minimal',
+        devcontainerConfigHash: 'hash',
+        createdAt: Date.now(),
+        lastActiveAt: Date.now(),
+        metadata: {},
+      }
+
+      db.createSession(database, session)
+      db.updateSessionDevcontainerTemplate(database, 'template-test', 'custom-template')
+
+      const updated = db.getSessionById(database, 'template-test')
+      expect(updated?.devcontainerTemplate).toBe('custom-template')
+    })
+
     it('should update container IDs', () => {
       const session: Session = {
         id: 'container-test',

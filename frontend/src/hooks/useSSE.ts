@@ -52,6 +52,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
   const batcherRef = useRef<ReturnType<typeof createPartsBatcher> | null>(null)
+  const eventSourceRef = useRef<EventSource | null>(null)
 
   useEffect(() => {
     if (!opcodeUrl) {
@@ -342,11 +343,35 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       }
     }
 
-    const directoryCleanup = directory ? addSSEDirectory(directory) : undefined
+    const isSessionProxy = Boolean(opcodeUrl && opcodeUrl.includes('/api/sessions/'))
 
-    const unsubscribe = subscribeToSSE(handleMessage, handleStatusChange)
+    if (isSessionProxy && opcodeUrl) {
+      const url = new URL(`${opcodeUrl}/event`, window.location.origin)
+      if (directory) {
+        url.searchParams.set('directory', directory)
+      }
+
+      const eventSource = new EventSource(url.toString(), { withCredentials: true })
+      eventSourceRef.current = eventSource
+
+      eventSource.onopen = () => handleStatusChange(true)
+      eventSource.onerror = () => handleStatusChange(false)
+      eventSource.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          handleMessage(data)
+        } catch {
+          // Ignore parse errors
+        }
+      }
+    }
+
+    const directoryCleanup = !isSessionProxy && directory ? addSSEDirectory(directory) : undefined
+
+    const unsubscribe = isSessionProxy ? () => {} : subscribeToSSE(handleMessage, handleStatusChange)
 
     const handleReconnect = () => {
+      if (isSessionProxy) return
       reconnectSSE()
     }
 
@@ -365,6 +390,10 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       window.removeEventListener('online', handleReconnect)
       unsubscribe()
       directoryCleanup?.()
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close()
+        eventSourceRef.current = null
+      }
     }
   }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData])
 

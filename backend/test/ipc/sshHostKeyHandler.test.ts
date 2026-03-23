@@ -83,7 +83,10 @@ describe('SSHHostKeyHandler', () => {
       const publicKey = `${host} ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIQQ/test@example.com`
       
       const mockRun = vi.fn()
-      mockPrepare.mockReturnValue({ run: mockRun })
+      mockPrepare.mockReturnValue({
+        run: mockRun,
+        get: vi.fn().mockReturnValue(null),
+      })
       
       handler['saveTrustedHost'](host, publicKey)
       

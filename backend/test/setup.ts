@@ -5,6 +5,7 @@ beforeAll(() => {
   vi.stubEnv('PORT', '3001')
   vi.stubEnv('DATABASE_PATH', ':memory:')
   vi.stubEnv('AUTH_SECRET', 'test-secret-for-encryption')
+  vi.stubEnv('NODE_NO_WARNINGS', '1')
 })
 
 afterAll(() => {

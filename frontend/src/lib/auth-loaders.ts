@@ -6,6 +6,7 @@ export interface AuthConfig {
   registrationEnabled: boolean
   isFirstUser: boolean
   adminConfigured: boolean
+  authDisabled: boolean
 }
 
 async function fetchAuthConfig(): Promise<AuthConfig> {
@@ -14,6 +15,7 @@ async function fetchAuthConfig(): Promise<AuthConfig> {
     registrationEnabled: true,
     isFirstUser: false,
     adminConfigured: false,
+    authDisabled: false,
   }
   const response = await fetch('/api/auth-info/config')
   if (!response.ok) {
@@ -36,6 +38,10 @@ export async function loginLoader() {
     return redirect('/')
   }
 
+  if (config.authDisabled) {
+    return redirect('/')
+  }
+
   if (config.isFirstUser && !config.adminConfigured) {
     return redirect('/setup')
   }
@@ -50,6 +56,10 @@ export async function setupLoader() {
   ])
 
   if (session.data?.user) {
+    return redirect('/')
+  }
+
+  if (config.authDisabled) {
     return redirect('/')
   }
 
@@ -70,6 +80,10 @@ export async function registerLoader() {
     return redirect('/')
   }
 
+  if (config.authDisabled) {
+    return redirect('/')
+  }
+
   if (!config.registrationEnabled) {
     return redirect('/login')
   }
@@ -82,9 +96,12 @@ export async function registerLoader() {
 }
 
 export async function protectedLoader() {
-  const session = await getSession()
+  const [config, session] = await Promise.all([
+    fetchAuthConfig(),
+    getSession(),
+  ])
 
-  if (!session.data?.user) {
+  if (!config.authDisabled && !session.data?.user) {
     return redirect('/login')
   }
 

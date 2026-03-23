@@ -24,28 +24,31 @@ export class GitService {
         throw new Error(`Repository not found`)
       }
 
-      const repoPath = repo.fullPath
-      const env = this.gitAuthService.getGitEnvironment()
-
-      const [branch, branchStatus, porcelainOutput] = await Promise.all([
-        this.getCurrentBranch(repoPath, env),
-        this.getBranchStatusFromPath(repoPath, env),
-        executeCommand(['git', '-C', repoPath, 'status', '--porcelain'], { env })
-      ])
-
-      const files = this.parsePorcelainOutput(porcelainOutput)
-      const hasChanges = files.length > 0
-
-      return {
-        branch,
-        ahead: branchStatus.ahead,
-        behind: branchStatus.behind,
-        files,
-        hasChanges
-      }
+      return this.getStatusForPath(repo.fullPath)
     } catch (error: unknown) {
       logger.error(`Failed to get status for repo ${repoId}:`, error)
       throw error
+    }
+  }
+
+  async getStatusForPath(repoPath: string): Promise<GitStatusResponse> {
+    const env = this.gitAuthService.getGitEnvironment()
+
+    const [branch, branchStatus, porcelainOutput] = await Promise.all([
+      this.getCurrentBranch(repoPath, env),
+      this.getBranchStatusFromPath(repoPath, env),
+      executeCommand(['git', '-C', repoPath, 'status', '--porcelain'], { env })
+    ])
+
+    const files = this.parsePorcelainOutput(porcelainOutput)
+    const hasChanges = files.length > 0
+
+    return {
+      branch,
+      ahead: branchStatus.ahead,
+      behind: branchStatus.behind,
+      files,
+      hasChanges
     }
   }
 

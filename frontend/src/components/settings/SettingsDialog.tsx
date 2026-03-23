@@ -7,14 +7,22 @@ import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
+import { ReposSettings } from '@/components/settings/ReposSettings'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
+import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X, FolderOpen } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 
-type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
+type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications' | 'repos'
+
+type MenuItem = {
+  id: SettingsView
+  icon: typeof Settings2
+  label: string
+  description: string
+}
 
 export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
@@ -50,7 +58,7 @@ export function SettingsDialog() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, close])
 
-  const menuItems = [
+  const menuItems: MenuItem[] = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
     { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
     { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Push notification preferences' },
@@ -59,6 +67,7 @@ export function SettingsDialog() {
     { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', description: 'Customize keyboard shortcuts' },
     { id: 'opencode', icon: Code, label: 'OpenCode Config', description: 'Manage OpenCode configurations, commands, and agents' },
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
+    { id: 'repos', icon: FolderOpen, label: 'Repos', description: 'Manage repositories' },
   ]
 
   const handleTabChange = (tab: string) => {
@@ -74,22 +83,22 @@ export function SettingsDialog() {
          fullscreen
        >
          <div className="hidden sm:flex sm:flex-col sm:h-full">
-           <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
-             <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-               Settings
-             </h2>
-             <Button
-               variant="ghost"
-               size="icon"
-               onClick={close}
-               className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
-             >
-               <X className="w-5 h-5" />
-             </Button>
-           </div>
+            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
+              <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
+                Settings
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={close}
+                className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
+              >
+                <X className="w-5 h-5" />
+              </Button>
+            </div>
           <Tabs defaultValue="account" value={activeTab} onValueChange={handleTabChange} className="w-full flex flex-col flex-1 min-h-0">
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
-              <TabsList className="grid w-full grid-cols-8 bg-card p-1">
+              <TabsList className="grid w-full grid-cols-9 bg-card p-1">
                 <TabsTrigger value="account" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   Account
                 </TabsTrigger>
@@ -114,6 +123,9 @@ export function SettingsDialog() {
                 <TabsTrigger value="providers" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
                   Providers
                 </TabsTrigger>
+                <TabsTrigger value="repos" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
+                  Repos
+                </TabsTrigger>
               </TabsList>
             </div>
 
@@ -127,6 +139,7 @@ export function SettingsDialog() {
                 <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
                 <TabsContent key="opencode" value="opencode" className="mt-0"><OpenCodeConfigManager /></TabsContent>
                 <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
+                <TabsContent key="repos" value="repos" className="mt-0"><ReposSettings /></TabsContent>
               </div>
             </div>
           </Tabs>
@@ -162,15 +175,15 @@ export function SettingsDialog() {
            <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-32">
              {mobileView === 'menu' && (
                <div className="space-y-3">
-                 {menuItems.map((item) => (
-                   <button
-                     key={item.id}
-                     onClick={() => {
-                       setMobileView(item.id as SettingsView)
-                       setActiveTab(item.id as SettingsView)
-                     }}
-                     className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
-                   >
+                  {menuItems.map((item) => (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setMobileView(item.id as SettingsView)
+                        setActiveTab(item.id as SettingsView)
+                      }}
+                      className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
+                    >
                      <div className="flex items-center gap-4">
                        <div className="p-3 bg-accent rounded-lg">
                          <item.icon className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -192,8 +205,9 @@ export function SettingsDialog() {
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}
              {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
              {mobileView === 'opencode' && <div key="opencode"><OpenCodeConfigManager /></div>}
-             {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
-           </div>
+              {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
+              {mobileView === 'repos' && <div key="repos"><ReposSettings /></div>}
+            </div>
         </div>
       </DialogContent>
     </Dialog>

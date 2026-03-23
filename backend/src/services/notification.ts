@@ -227,9 +227,9 @@ export class NotificationService {
           repoId = repo.id;
           repoName = path.basename(repo.localPath);
           if (sessionId) {
-            notificationUrl = `/repos/${repo.id}/sessions/${sessionId}`;
+            notificationUrl = `/workspace/${sessionId}`;
           } else {
-            notificationUrl = `/repos/${repo.id}`;
+            notificationUrl = '/workspace';
           }
         }
       }

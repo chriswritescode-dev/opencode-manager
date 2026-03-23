@@ -8,6 +8,7 @@ interface AuthConfig {
   registrationEnabled: boolean
   isFirstUser: boolean
   adminConfigured: boolean
+  authDisabled: boolean
 }
 
 interface AuthContextValue {
@@ -52,6 +53,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
           registrationEnabled: true,
           isFirstUser: true,
           adminConfigured: false,
+          authDisabled: false,
         })
       }
     }
@@ -127,7 +129,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const value: AuthContextValue = {
     user: session?.user ?? null,
-    isAuthenticated: !!session?.user,
+    isAuthenticated: config?.authDisabled ? true : !!session?.user,
     isLoading: isPending,
     config,
     signInWithEmail,

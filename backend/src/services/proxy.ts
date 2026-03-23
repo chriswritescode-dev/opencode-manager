@@ -138,6 +138,50 @@ export async function proxyRequest(request: Request) {
   }
 }
 
+export async function proxyRequestToTarget(
+  request: Request,
+  targetBaseUrl: string,
+  prefix: string
+): Promise<Response> {
+  const url = new URL(request.url)
+  const cleanPathname = url.pathname.replace(prefix, '') || '/'
+  const targetUrl = `${targetBaseUrl}${cleanPathname}${url.search}`
+
+  try {
+    const headers: Record<string, string> = {}
+    request.headers.forEach((value, key) => {
+      if (!['host', 'connection'].includes(key.toLowerCase())) {
+        headers[key] = value
+      }
+    })
+
+    const response = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined,
+    })
+
+    const responseHeaders: Record<string, string> = {}
+    response.headers.forEach((value, key) => {
+      if (!['connection', 'transfer-encoding'].includes(key.toLowerCase())) {
+        responseHeaders[key] = value
+      }
+    })
+
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    })
+  } catch (error) {
+    logger.error(`Proxy request failed for ${url.pathname}${url.search}:`, error)
+    return new Response(JSON.stringify({ error: 'Proxy request failed' }), {
+      status: 502,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+}
+
 export async function proxyToOpenCodeWithDirectory(
   path: string,
   method: string,
@@ -240,4 +284,3 @@ export async function proxyMcpAuthAuthenticate(
     })
   }
 }
-

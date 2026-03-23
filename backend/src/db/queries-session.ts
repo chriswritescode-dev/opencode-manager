@@ -51,6 +51,26 @@ interface DevcontainerTemplateRow {
   metadata: string | null
 }
 
+interface TemplateUsageRow {
+  id: number
+  template_name: string
+  session_id: string
+  started_at: number
+  ended_at: number | null
+}
+
+interface DevcontainerRequestRow {
+  id: number
+  session_id: string
+  template_name: string | null
+  requested_by: string
+  changes: string
+  reason: string | null
+  action: string | null
+  status: string
+  created_at: number
+}
+
 function rowToSession(row: SessionRow, repoMappings: RepoMapping[]): Session {
   return {
     id: row.id,
@@ -213,6 +233,71 @@ export function updateSessionStatus(db: Database, sessionId: string, status: Ses
     .run(status, Date.now(), sessionId)
 }
 
+export function updateSessionDevcontainerConfigHash(db: Database, sessionId: string, hash: string): void {
+  db.prepare('UPDATE sessions SET devcontainer_config_hash = ?, last_active_at = ? WHERE id = ?')
+    .run(hash, Date.now(), sessionId)
+}
+
+export function updateSessionDevcontainerTemplate(db: Database, sessionId: string, templateName: string): void {
+  db.prepare('UPDATE sessions SET devcontainer_template = ?, last_active_at = ? WHERE id = ?')
+    .run(templateName, Date.now(), sessionId)
+}
+
+export function updateSessionPublicOpencodeUrl(db: Database, sessionId: string, url: string | null): void {
+  db.prepare('UPDATE sessions SET public_opencode_url = ?, last_active_at = ? WHERE id = ?')
+    .run(url, Date.now(), sessionId)
+}
+
+export function updateSessionMetadata(db: Database, sessionId: string, metadata: Record<string, unknown>): void {
+  db.prepare('UPDATE sessions SET metadata = ?, last_active_at = ? WHERE id = ?')
+    .run(JSON.stringify(metadata), Date.now(), sessionId)
+}
+
+export function createDevcontainerRequest(
+  db: Database,
+  request: {
+    sessionId: string
+    templateName?: string | null
+    requestedBy: string
+    changes: string
+    reason?: string | null
+    action?: string | null
+    status: string
+    createdAt: number
+  }
+): number {
+  const result = db.prepare(`
+    INSERT INTO devcontainer_requests (
+      session_id, template_name, requested_by, changes, reason, action, status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    request.sessionId,
+    request.templateName || null,
+    request.requestedBy,
+    request.changes,
+    request.reason || null,
+    request.action || null,
+    request.status,
+    request.createdAt
+  )
+
+  return Number(result.lastInsertRowid)
+}
+
+export function getDevcontainerRequestById(db: Database, id: number): DevcontainerRequestRow | null {
+  return db.prepare('SELECT * FROM devcontainer_requests WHERE id = ?').get(id) as DevcontainerRequestRow | null
+}
+
+export function listDevcontainerRequestsBySession(db: Database, sessionId: string): DevcontainerRequestRow[] {
+  return db.prepare('SELECT * FROM devcontainer_requests WHERE session_id = ? ORDER BY created_at DESC')
+    .all(sessionId) as DevcontainerRequestRow[]
+}
+
+export function updateDevcontainerRequestStatus(db: Database, id: number, status: string): void {
+  db.prepare('UPDATE devcontainer_requests SET status = ? WHERE id = ?')
+    .run(status, id)
+}
+
 export function updateSessionContainerIds(
   db: Database, 
   sessionId: string, 
@@ -303,4 +388,22 @@ export function getSessionsByTemplate(db: Database, templateName: string): Sessi
     }))
     return rowToSession(row, repoMappings)
   })
+}
+
+export function createTemplateUsage(db: Database, templateName: string, sessionId: string): void {
+  db.prepare(`
+    INSERT INTO template_usage (
+      template_name, session_id, started_at
+    ) VALUES (?, ?, ?)
+  `).run(templateName, sessionId, Date.now())
+}
+
+export function endTemplateUsageForSession(db: Database, sessionId: string): void {
+  db.prepare('UPDATE template_usage SET ended_at = ? WHERE session_id = ? AND ended_at IS NULL')
+    .run(Date.now(), sessionId)
+}
+
+export function getTemplateUsageForSession(db: Database, sessionId: string): TemplateUsageRow[] {
+  return db.prepare('SELECT * FROM template_usage WHERE session_id = ? ORDER BY started_at DESC')
+    .all(sessionId) as TemplateUsageRow[]
 }

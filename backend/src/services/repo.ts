@@ -73,7 +73,7 @@ async function copyRepoToWorkspace(sourcePath: string, targetName: string, env: 
   const targetPath = path.join(reposPath, targetName)
   
   logger.info(`Copying repo from ${sourcePath} to ${targetPath}`)
-  await executeCommand(['git', 'clone', '--local', sourcePath, targetName], { cwd: reposPath, env })
+  await executeCommand(['git', 'clone', '--bare', '--local', sourcePath, targetName], { cwd: reposPath, env })
   logger.info(`Successfully copied repo to ${targetPath}`)
 }
 
@@ -218,10 +218,10 @@ export async function initLocalRepo(
       logger.info(`Created directory for local repo: ${targetPath}`)
       
       logger.info(`Initializing git repository: ${targetPath}`)
-      await executeCommand(['git', 'init'], { cwd: targetPath })
+      await executeCommand(['git', 'init', '--bare'], { cwd: targetPath })
       
       if (branch && branch !== 'main') {
-        await executeCommand(['git', '-C', targetPath, 'checkout', '-b', branch])
+        await executeCommand(['git', '-C', targetPath, 'symbolic-ref', 'HEAD', `refs/heads/${branch}`])
       }
     } else {
       if (branch) {
@@ -275,6 +275,7 @@ export async function initLocalRepo(
   }
 }
 
+
 export async function cloneRepo(
   database: Database,
   gitAuthService: GitAuthService,
@@ -289,14 +290,11 @@ export async function cloneRepo(
   const hasSSHCredential = await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
 
   const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(effectiveUrl, preserveSSH)
-  const baseRepoDirName = repoName
-  const worktreeDirName = branch && useWorktree ? `${repoName}-${branch.replace(/[\\/]/g, '-')}` : repoName
-  const localPath = worktreeDirName
+  const localPath = repoName
 
-  const existing = db.getRepoByUrlAndBranch(database, normalizedRepoUrl, branch)
-
+  const existing = db.getRepoByLocalPath(database, localPath)
   if (existing) {
-    logger.info(`Repo branch already exists: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`)
+    logger.info(`Repo already exists: ${normalizedRepoUrl}`)
     if (hasSSHCredential) {
       await gitAuthService.cleanupSSHKey()
     }
@@ -304,9 +302,7 @@ export async function cloneRepo(
   }
 
   await ensureDirectoryExists(getReposPath())
-  const baseRepoExists = await executeCommand(['bash', '-c', `test -d ${baseRepoDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
-
-  const shouldUseWorktree = useWorktree && branch && baseRepoExists.trim() === 'exists'
+  const baseRepoExists = await executeCommand(['bash', '-c', `test -d ${repoName} && echo exists || echo missing`], path.resolve(getReposPath()))
 
   const createRepoInput: CreateRepoInput = {
     repoUrl: normalizedRepoUrl,
@@ -316,11 +312,7 @@ export async function cloneRepo(
     cloneStatus: 'cloning',
     clonedAt: Date.now(),
   }
-  
-  if (shouldUseWorktree) {
-    createRepoInput.isWorktree = true
-  }
-  
+
   const repo = db.createRepo(database, createRepoInput)
 
   try {
@@ -329,192 +321,62 @@ export async function cloneRepo(
       ...(isSSH ? gitAuthService.getSSHEnvironment() : {})
     }
 
-    if (shouldUseWorktree) {
-      logger.info(`Creating worktree for branch: ${branch}`)
-      
-      const baseRepoPath = path.resolve(getReposPath(), baseRepoDirName)
-      const worktreePath = path.resolve(getReposPath(), worktreeDirName)
-      
-       await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env })
-
-      
-       await createWorktreeSafely(baseRepoPath, worktreePath, branch, env)
-      
-      const worktreeVerified = await executeCommand(['test', '-d', worktreePath])
-        .then(() => true)
-        .catch(() => false)
-      
-      if (!worktreeVerified) {
-        throw new Error(`Worktree directory was not created at: ${worktreePath}`)
-      }
-      
-      logger.info(`Worktree verified at: ${worktreePath}`)
-      
-    } else if (branch && baseRepoExists.trim() === 'exists' && useWorktree) {
-      logger.info(`Base repo exists but worktree creation failed, cloning branch separately`)
-      
-      const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], path.resolve(getReposPath()))
-      if (worktreeExists.trim() === 'exists') {
-        logger.info(`Workspace directory exists, removing it: ${worktreeDirName}`)
-        try {
-          await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
-          const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-          if (verifyRemoved.trim() === 'exists') {
-            throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
-          }
-        } catch (cleanupError: unknown) {
-          logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
-          throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
-        }
-      }
-      
-      try {
-        await executeCommand(['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
-      } catch (error: unknown) {
-        if (getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
-          logger.error(`Clone failed: directory still exists after cleanup attempt`)
-          throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
-        }
-        
-        if (branch && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
-          logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
-          try {
-            await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
-          } catch (cloneError: unknown) {
-            throw enhanceCloneError(cloneError, normalizedRepoUrl, getErrorMessage(cloneError))
-          }
-          
-          let localBranchExists = 'missing'
-          try {
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
-            localBranchExists = 'exists'
-          } catch {
-            localBranchExists = 'missing'
-          }
-          
-          if (localBranchExists.trim() === 'missing') {
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', '-b', branch])
-          } else {
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
-          }
-        } else {
-          throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
-        }
-      }
+    const baseRepoPath = path.resolve(getReposPath(), repoName)
+    if (baseRepoExists.trim() == 'exists') {
+      await executeCommand(['git', '--git-dir', baseRepoPath, 'fetch', '--all'], { env })
     } else {
-      if (baseRepoExists.trim() === 'exists') {
-        logger.info(`Repository directory already exists, verifying it's a valid git repo: ${baseRepoDirName}`)
-        const isValidRepo = await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--git-dir'], path.resolve(getReposPath())).then(() => 'valid').catch(() => 'invalid')
-        
-        if (isValidRepo.trim() === 'valid') {
-          logger.info(`Valid repository found: ${normalizedRepoUrl}`)
-          
-          if (branch) {
-            logger.info(`Switching to branch: ${branch}`)
-             await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'fetch', '--all'], { cwd: getReposPath(), env })
+      const cloneCmd = branch
+        ? ['git', 'clone', '--bare', '--branch', branch, normalizedRepoUrl, repoName]
+        : ['git', 'clone', '--bare', normalizedRepoUrl, repoName]
 
-            
-            let remoteBranchExists = false
-            try {
-              await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--verify', `refs/remotes/origin/${branch}`])
-              remoteBranchExists = true
-            } catch {
-              remoteBranchExists = false
-            }
-            
-            let localBranchExists = false
-            try {
-              await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
-              localBranchExists = true
-            } catch {
-              localBranchExists = false
-            }
-            
-            if (localBranchExists) {
-              logger.info(`Checking out existing local branch: ${branch}`)
-              await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'checkout', branch])
-            } else if (remoteBranchExists) {
-              logger.info(`Checking out remote branch: ${branch}`)
-              await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'checkout', '-b', branch, `origin/${branch}`])
-            } else {
-              logger.info(`Creating new branch: ${branch}`)
-              await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'checkout', '-b', branch])
-            }
-          }
-          
-          db.updateRepoStatus(database, repo.id, 'ready')
-          return { ...repo, cloneStatus: 'ready' }
-        } else {
-          logger.warn(`Invalid repository directory found, removing and recloning: ${baseRepoDirName}`)
-          await executeCommand(['rm', '-rf', baseRepoDirName], getReposPath())
-        }
-      }
-      
-      logger.info(`Cloning repo: ${normalizedRepoUrl}${branch ? ` to branch ${branch}` : ''}`)
-      
-      const worktreeExists = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo missing`], getReposPath())
-      if (worktreeExists.trim() === 'exists') {
-        logger.info(`Workspace directory exists, removing it: ${worktreeDirName}`)
-        try {
-          await executeCommand(['rm', '-rf', worktreeDirName], getReposPath())
-          const verifyRemoved = await executeCommand(['bash', '-c', `test -d ${worktreeDirName} && echo exists || echo removed`], getReposPath())
-        if (verifyRemoved.trim() === 'exists') {
-          throw new Error(`Failed to remove existing directory: ${worktreeDirName}`)
-        }
-      } catch (cleanupError: unknown) {
-        logger.error(`Failed to clean up existing directory: ${worktreeDirName}`, cleanupError)
-        throw new Error(`Cannot clone: directory ${worktreeDirName} exists and could not be removed`)
-      }
-    }
-    
       try {
-        const cloneCmd = branch
-          ? ['git', 'clone', '-b', branch, normalizedRepoUrl, worktreeDirName]
-          : ['git', 'clone', normalizedRepoUrl, worktreeDirName]
-        
         await executeCommand(cloneCmd, { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
       } catch (error: unknown) {
-        if (getErrorMessage(error).includes('destination path') && getErrorMessage(error).includes('already exists')) {
-          logger.error(`Clone failed: directory still exists after cleanup attempt`)
-          throw new Error(`Workspace directory ${worktreeDirName} already exists. Please delete it manually or contact support.`)
-        }
-        
         if (branch && (getErrorMessage(error).includes('Remote branch') || getErrorMessage(error).includes('not found'))) {
-          logger.info(`Branch '${branch}' not found, cloning default branch and creating branch locally`)
-          try {
-            await executeCommand(['git', 'clone', normalizedRepoUrl, worktreeDirName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
-          } catch (cloneError: unknown) {
-            throw enhanceCloneError(cloneError, normalizedRepoUrl, getErrorMessage(cloneError))
-          }
-          
-          let localBranchExists = 'missing'
-          try {
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'rev-parse', '--verify', `refs/heads/${branch}`])
-            localBranchExists = 'exists'
-          } catch {
-            localBranchExists = 'missing'
-          }
-          
-          if (localBranchExists.trim() === 'missing') {
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', '-b', branch])
-          } else {
-            await executeCommand(['git', '-C', path.resolve(getReposPath(), worktreeDirName), 'checkout', branch])
-          }
+          await executeCommand(['git', 'clone', '--bare', normalizedRepoUrl, repoName], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
         } else {
           throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
         }
       }
     }
-    
+
     db.updateRepoStatus(database, repo.id, 'ready')
-    logger.info(`Repo ready: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}${shouldUseWorktree ? ' (worktree)' : ''}`)
+    logger.info(`Repository cloned successfully: ${normalizedRepoUrl}`)
+
+    if (hasSSHCredential) {
+      await gitAuthService.cleanupSSHKey()
+    }
+
     return { ...repo, cloneStatus: 'ready' }
   } catch (error: unknown) {
-    logger.error(`Failed to create repo: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`, error)
-    db.deleteRepo(database, repo.id)
-    throw error
-  } finally {
-    await gitAuthService.cleanupSSHKey()
+    logger.error(`Failed to clone repo: ${normalizedRepoUrl}`, error)
+
+    try {
+      db.deleteRepo(database, repo.id)
+      logger.info(`Deleted repo record due to clone failure: ${repo.id}`)
+    } catch (dbError: unknown) {
+      logger.error(`Failed to delete repo record after clone failure: ${repo.id}`, dbError)
+    }
+
+    try {
+      await executeCommand(['rm', '-rf', localPath], getReposPath())
+    } catch (cleanupError: unknown) {
+      logger.error(`Failed to clean up repo directory after clone failure: ${localPath}`, cleanupError)
+    }
+
+    if (hasSSHCredential) {
+      await gitAuthService.cleanupSSHKey()
+    }
+
+    if (error instanceof Error && error.message.includes('Repository not found')) {
+      throw new Error(`Repository not found: ${normalizedRepoUrl}. Please check that the repository exists and you have access.`)
+    }
+
+    if (error instanceof Error && error.message.includes('Authentication failed')) {
+      throw new Error(`Authentication failed for ${normalizedRepoUrl}. Please check your credentials.`)
+    }
+
+    throw enhanceCloneError(error, normalizedRepoUrl, getErrorMessage(error))
   }
 }
 

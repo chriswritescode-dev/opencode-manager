@@ -1,11 +1,13 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider, Outlet, useNavigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, useNavigate, Navigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
+import { SessionManagerDetail } from './pages/SessionManagerDetail'
+import { SessionManager } from './pages/SessionManager'
 import { Memories } from './pages/Memories'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
@@ -118,6 +120,11 @@ const router = createBrowserRouter([
       },
       {
         path: '/',
+        element: <Navigate to="/workspace" replace />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/repos',
         element: <Repos />,
         loader: protectedLoader,
       },
@@ -127,13 +134,23 @@ const router = createBrowserRouter([
         loader: protectedLoader,
       },
       {
-        path: '/repos/:id/sessions/:sessionId',
+        path: '/workspace/:id/sessions/:sessionId',
         element: <SessionDetail />,
         loader: protectedLoader,
       },
       {
         path: '/repos/:id/memories',
         element: <Memories />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/workspace',
+        element: <SessionManager />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/workspace/:id',
+        element: <SessionManagerDetail />,
         loader: protectedLoader,
       },
     ],

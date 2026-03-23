@@ -3,7 +3,17 @@ import { Database } from 'bun:sqlite'
 import { initializeDatabase } from '../../src/db/schema'
 import { SessionManager } from '../../src/services/session-manager'
 import { DockerOrchestrator } from '../../src/services/docker-orchestrator'
-import type { CreateSessionInput } from '@opencode-manager/shared'
+import type { WorktreeManager } from '../../src/services/worktree-manager'
+import type { ImageBuilder } from '../../src/services/image-builder'
+import type { CodeServerManager } from '../../src/services/code-server-manager'
+import type { TraefikManager } from '../../src/services/traefik-manager'
+import type { CreateSessionInput, DevcontainerConfig } from '@opencode-manager/shared'
+import * as db from '../../src/db/queries'
+
+vi.mock('fs/promises', () => ({
+  mkdir: vi.fn().mockResolvedValue(undefined),
+  rm: vi.fn().mockResolvedValue(undefined),
+}))
 
 vi.mock('../../src/services/docker-orchestrator')
 
@@ -11,13 +21,78 @@ describe('SessionManager', () => {
   let database: Database
   let dockerOrchestrator: DockerOrchestrator
   let sessionManager: SessionManager
+  let worktreeManager: WorktreeManager
+  let imageBuilder: ImageBuilder
+  let codeServerManager: CodeServerManager
+  let traefikManager: TraefikManager
 
   beforeEach(() => {
     database = initializeDatabase(':memory:')
     dockerOrchestrator = new DockerOrchestrator()
-    sessionManager = new SessionManager(database, dockerOrchestrator)
+    worktreeManager = {
+      createWorktreeForSession: vi.fn(),
+      removeWorktree: vi.fn(),
+    } as unknown as WorktreeManager
+    imageBuilder = {
+      ensureImage: vi.fn().mockResolvedValue('opencode-session:minimal-hash'),
+    } as unknown as ImageBuilder
+    codeServerManager = {
+      prepareSession: vi.fn().mockResolvedValue(undefined),
+    } as unknown as CodeServerManager
+    traefikManager = {
+      ensureTraefik: vi.fn().mockResolvedValue(undefined),
+      syncRoutes: vi.fn().mockResolvedValue(undefined),
+    } as unknown as TraefikManager
+    sessionManager = new SessionManager(
+      database,
+      dockerOrchestrator,
+      worktreeManager,
+      undefined,
+      imageBuilder,
+      codeServerManager,
+      traefikManager
+    )
+
+    const minimalConfig: DevcontainerConfig = {
+      name: 'minimal',
+      build: {
+        dockerfile: 'Dockerfile.nix',
+        context: '.',
+        args: {
+          NIX_PACKAGES: 'git',
+        },
+      },
+    }
+
+    const fullstackConfig: DevcontainerConfig = {
+      name: 'nodejs-fullstack',
+      build: {
+        dockerfile: 'Dockerfile.nix',
+        context: '.',
+        args: {
+          NIX_PACKAGES: 'git nodejs_22',
+        },
+      },
+    }
+
+    db.createDevcontainerTemplate(database, {
+      name: 'minimal',
+      config: minimalConfig,
+      isBuiltIn: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
+
+    db.createDevcontainerTemplate(database, {
+      name: 'nodejs-fullstack',
+      config: fullstackConfig,
+      isBuiltIn: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    })
 
     vi.mocked(dockerOrchestrator.createSessionPod).mockResolvedValue()
+    vi.mocked(dockerOrchestrator.waitForContainersHealthy).mockResolvedValue()
     vi.mocked(dockerOrchestrator.stopSessionPod).mockResolvedValue()
     vi.mocked(dockerOrchestrator.destroySessionPod).mockResolvedValue()
     vi.mocked(dockerOrchestrator.getContainerId).mockResolvedValue('container-123')
@@ -101,6 +176,40 @@ describe('SessionManager', () => {
       expect(session.metadata.tags).toEqual(['test', 'feature'])
       expect(session.metadata.assignee).toBe('user@example.com')
     })
+
+    it('should create worktrees for repos', async () => {
+      const repo = db.createRepo(database, {
+        localPath: 'repo-1',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+        isLocal: true,
+      })
+
+      vi.mocked(worktreeManager.createWorktreeForSession).mockResolvedValue({
+        repoId: repo.id,
+        repoName: repo.localPath,
+        worktreePath: `/workspace/repos/${repo.localPath}/session-worktree`,
+        symlinkPath: `/workspace/sessions/session-worktree/${repo.localPath}`,
+        containerPath: `/workspace/${repo.localPath}`,
+        branch: 'feature',
+      })
+
+      const input: CreateSessionInput = {
+        name: 'session-worktree',
+        repos: [{ repoId: repo.id, branch: 'feature' }],
+      }
+
+      const session = await sessionManager.createSession(input)
+
+      expect(worktreeManager.createWorktreeForSession).toHaveBeenCalledWith(
+        repo,
+        'session-worktree',
+        'feature'
+      )
+      expect(session.repoMappings).toHaveLength(1)
+      expect(session.repoMappings[0]?.repoId).toBe(repo.id)
+    })
   })
 
   describe('getSession', () => {
@@ -121,6 +230,30 @@ describe('SessionManager', () => {
     it('should return null for non-existent session', async () => {
       const retrieved = await sessionManager.getSession('non-existent-id')
       expect(retrieved).toBeNull()
+    })
+  })
+
+  describe('getSessionDetail', () => {
+    it('should return session with container status', async () => {
+      const input: CreateSessionInput = {
+        name: 'detail-test',
+        repos: [],
+      }
+
+      const session = await sessionManager.createSession(input)
+
+      vi.mocked(dockerOrchestrator.getContainerStatus)
+        .mockResolvedValueOnce({ id: 'opencode', name: 'opencode', state: 'running' })
+        .mockResolvedValueOnce({ id: 'dind', name: 'dind', state: 'running' })
+        .mockResolvedValueOnce({ id: 'code', name: 'code', state: 'running' })
+
+      const detail = await sessionManager.getSessionDetail(session.id)
+
+      expect(detail).not.toBeNull()
+      expect(detail?.containers.opencode?.state).toBe('running')
+      expect(detail?.containers.dind?.state).toBe('running')
+      expect(detail?.containers.codeServer?.state).toBe('running')
+      expect(detail?.repos).toEqual(detail?.repoMappings)
     })
   })
 
@@ -168,6 +301,21 @@ describe('SessionManager', () => {
     })
   })
 
+  describe('setPublicAccess', () => {
+    it('should update public opencode url and sync routes', async () => {
+      const input: CreateSessionInput = {
+        name: 'public-access',
+        repos: [],
+      }
+
+      const session = await sessionManager.createSession(input)
+      const updated = await sessionManager.setPublicAccess(session.id, true)
+
+      expect(updated?.publicOpencodeUrl).toContain('public-access')
+      expect(traefikManager.syncRoutes).toHaveBeenCalled()
+    })
+  })
+
   describe('updateSessionStatus', () => {
     it('should update session status', async () => {
       const input: CreateSessionInput = {
@@ -193,11 +341,56 @@ describe('SessionManager', () => {
       const session = await sessionManager.createSession(input)
       await sessionManager.startSession(session.id)
 
+      expect(traefikManager.ensureTraefik).toHaveBeenCalled()
+      expect(codeServerManager.prepareSession).toHaveBeenCalledWith(
+        expect.any(Object),
+        expect.objectContaining({ name: 'minimal' })
+      )
       expect(dockerOrchestrator.createSessionPod).toHaveBeenCalledWith(
         expect.objectContaining({
           sessionName: 'start-test',
         })
       )
+      expect(dockerOrchestrator.waitForContainersHealthy).toHaveBeenCalledWith([
+        'start-test-dind',
+        'start-test-opencode',
+        'start-test-code',
+      ])
+      expect(traefikManager.syncRoutes).toHaveBeenCalled()
+    })
+
+    it('should pass template NIX packages to compose config', async () => {
+      const input: CreateSessionInput = {
+        name: 'nix-packages-test',
+        repos: [],
+        devcontainerTemplate: 'nodejs-fullstack',
+      }
+
+      const session = await sessionManager.createSession(input)
+      await sessionManager.startSession(session.id)
+
+      expect(dockerOrchestrator.createSessionPod).toHaveBeenCalledWith(
+        expect.objectContaining({
+          nixPackages: 'git nodejs_22',
+          devcontainerTemplate: 'nodejs-fullstack',
+          imageId: 'opencode-session:minimal-hash',
+        })
+      )
+    })
+
+    it('should track template usage on start', async () => {
+      const input: CreateSessionInput = {
+        name: 'usage-start',
+        repos: [],
+      }
+
+      const session = await sessionManager.createSession(input)
+      await sessionManager.startSession(session.id)
+
+      const usage = db.getTemplateUsageForSession(database, session.id)
+      expect(usage.length).toBe(1)
+      expect(usage[0]?.template_name).toBe('minimal')
+      expect(usage[0]?.ended_at).toBeNull()
     })
 
     it('should update status to running on successful start', async () => {
@@ -207,8 +400,10 @@ describe('SessionManager', () => {
       }
 
       const session = await sessionManager.createSession(input)
+      const statusSpy = vi.spyOn(db, 'updateSessionStatus')
       await sessionManager.startSession(session.id)
 
+      expect(statusSpy).toHaveBeenCalledWith(database, session.id, 'building')
       const updated = await sessionManager.getSession(session.id)
       expect(updated?.status).toBe('running')
     })
@@ -264,6 +459,9 @@ describe('SessionManager', () => {
 
       const updated = await sessionManager.getSession(session.id)
       expect(updated?.status).toBe('stopped')
+
+      const usage = db.getTemplateUsageForSession(database, session.id)
+      expect(usage[0]?.ended_at).not.toBeNull()
     })
   })
 
@@ -280,6 +478,23 @@ describe('SessionManager', () => {
 
       expect(dockerOrchestrator.stopSessionPod).toHaveBeenCalled()
       expect(dockerOrchestrator.createSessionPod).toHaveBeenCalled()
+    })
+
+    it('should end and restart template usage', async () => {
+      const input: CreateSessionInput = {
+        name: 'restart-usage',
+        repos: [],
+      }
+
+      const session = await sessionManager.createSession(input)
+      await sessionManager.startSession(session.id)
+
+      await sessionManager.restartSession(session.id)
+
+      const usage = db.getTemplateUsageForSession(database, session.id)
+      expect(usage.length).toBeGreaterThanOrEqual(2)
+      expect(usage[0]?.ended_at).toBeNull()
+      expect(usage[1]?.ended_at).not.toBeNull()
     })
   })
 

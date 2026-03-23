@@ -12,10 +12,12 @@ import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
 import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating, useCreateSession } from "@/hooks/useOpenCode";
-import { OPENCODE_API_ENDPOINT } from "@/config";
+import { useSessionDetail as useWorkspaceDetail } from "@/hooks/useSessions";
+import { OPENCODE_API_ENDPOINT, getSessionOpenCodeEndpoint } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
 import { useUIState } from "@/stores/uiStateStore";
 import { useSettings } from "@/hooks/useSettings";
@@ -31,7 +33,6 @@ import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import type { MessageWithParts } from "@/api/types";
 import { showToast } from "@/lib/toast";
-import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
@@ -50,9 +51,8 @@ const compareMessageIds = (id1: string, id2: string): number => {
 }
 
 export function SessionDetail() {
-  const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
+  const { id: workspaceId, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
-  const repoId = Number(id) || 0;
   const { preferences, updateSettings } = useSettings();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
@@ -68,8 +68,8 @@ export function SessionDetail() {
   const [hasPromptContent, setHasPromptContent] = useState(false);
   
   const handleSwipeBack = useCallback(() => {
-    navigate(`/repos/${repoId}`);
-  }, [navigate, repoId]);
+    navigate('/workspace');
+  }, [navigate]);
   
   const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
     enabled: !fileBrowserOpen && !modelDialogOpen && !sessionsDialogOpen,
@@ -83,15 +83,25 @@ export function SessionDetail() {
     return bindSwipe(pageRef.current);
   }, [bindSwipe]);
 
+  const { data: workspace, isLoading: workspaceLoading } = useWorkspaceDetail(workspaceId || '')
+  const primaryRepo = workspace?.repos?.[0]
+  const fallbackRepoId = Number(workspaceId) || 0
+  const repoId = primaryRepo?.repoId || fallbackRepoId
+
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
     enabled: !!repoId,
   });
 
-  const opcodeUrl = OPENCODE_API_ENDPOINT;
+  const opcodeUrl = workspaceId ? getSessionOpenCodeEndpoint(workspaceId) : OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = repo?.fullPath;
+  const workspaceRoot = workspace?.workspaceHostPath || workspace?.sessionPath || repo?.fullPath || ''
+  const repoDirectory = workspace?.workspaceContainerPath || workspaceRoot
+  const workspaceBackTarget = '/workspace'
+  const repoDisplayName = workspace?.name || 'Workspace'
+  const repoBasePath = workspace?.name ? `workspace/${workspace.name}` : workspaceRoot
+  const workspaceName = workspace?.name || 'Workspace'
 
   const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
   const { data: session, isLoading: sessionLoading } = useSession(
@@ -145,12 +155,14 @@ export function SessionDetail() {
     try {
       const newSession = await createSession.mutateAsync({ agent: undefined });
       if (newSession?.id) {
-        navigate(`/repos/${repoId}/sessions/${newSession.id}`);
+        if (workspaceId) {
+          navigate(`/workspace/${workspaceId}/sessions/${newSession.id}`);
+        }
       }
     } catch {
       showToast.error('Failed to create new session');
     }
-  }, [createSession, navigate, repoId]);
+  }, [createSession, navigate, workspaceId]);
 
   const handleCompact = useCallback(async () => {
     if (!opcodeUrl || !sessionId) return;
@@ -197,17 +209,19 @@ export function SessionDetail() {
       const client = createOpenCodeClient(opcodeUrl, repoDirectory);
       const forkedSession = await client.forkSession(sessionId);
       if (forkedSession?.id) {
-        navigate(`/repos/${repoId}/sessions/${forkedSession.id}`);
+        if (workspaceId) {
+          navigate(`/workspace/${workspaceId}/sessions/${forkedSession.id}`);
+        }
         showToast.success('Session forked');
       }
     } catch (error) {
       showToast.error(`Fork failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId]);
+  }, [opcodeUrl, sessionId, repoDirectory, navigate, workspaceId]);
 
   const handleCloseSession = useCallback(() => {
-    navigate(`/repos/${repoId}`);
-  }, [navigate, repoId]);
+    navigate('/workspace');
+  }, [navigate]);
 
   const { leaderActive } = useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
@@ -268,14 +282,18 @@ export function SessionDetail() {
   }, []);
 
   const handleChildSessionClick = useCallback((childSessionId: string) => {
-    navigate(`/repos/${repoId}/sessions/${childSessionId}`)
-  }, [navigate, repoId]);
+    if (workspaceId) {
+      navigate(`/workspace/${workspaceId}/sessions/${childSessionId}`)
+    }
+  }, [navigate, workspaceId]);
 
   const handleParentSessionClick = useCallback(() => {
     if (session?.parentID) {
-      navigate(`/repos/${repoId}/sessions/${session.parentID}`)
+      if (workspaceId) {
+        navigate(`/workspace/${workspaceId}/sessions/${session.parentID}`)
+      }
     }
-  }, [navigate, repoId, session?.parentID]);
+  }, [navigate, workspaceId, session?.parentID]);
 
   const handleToggleDetails = useCallback(() => {
     const newValue = !preferences?.expandToolCalls
@@ -311,12 +329,28 @@ export function SessionDetail() {
     return <Navigate to="/" replace />;
   }
 
-  if (!repo) {
+  if (!workspaceLoading && !workspace && repoId === 0) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
-          <div className="w-8 h-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-          <span className="text-muted-foreground">Loading repository...</span>
+          <span className="text-muted-foreground">Workspace not found</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (!repo && !primaryRepo) {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
+        <div className="flex flex-col items-center gap-2">
+          {workspaceLoading || repoLoading ? (
+            <>
+              <div className="w-8 h-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
+              <span className="text-muted-foreground">Loading workspace...</span>
+            </>
+          ) : (
+            <span className="text-muted-foreground">No repositories in workspace</span>
+          )}
         </div>
       </div>
     );
@@ -343,18 +377,21 @@ export function SessionDetail() {
                 <span className="hidden sm:inline text-xs">Parent</span>
               </Button>
               <div className="hidden sm:block">
-                <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
+                <Header.BackButton to={workspaceBackTarget} className="text-xs sm:text-sm" />
               </div>
             </>
           ) : (
-            <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
+            <Header.BackButton to={workspaceBackTarget} className="text-xs sm:text-sm" />
           )}
-          <Header.EditableTitle
-            value={session?.title || "Untitled Session"}
-            onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
-            generating={isTitleGenerating}
-          />
+            <div className="flex flex-col min-w-0 flex-1">
+              <Badge variant="secondary" className="w-fit mb-1 text-[10px]">Workspace Session</Badge>
+              <Header.EditableTitle
+              value={session?.title || "Untitled Session"}
+              onChange={handleSessionTitleUpdate}
+              subtitle={<span className="text-[10px] text-muted-foreground">Workspace: {workspaceName}</span>}
+              generating={isTitleGenerating}
+            />
+            </div>
         </div>
         <Header.Actions className="gap-2 sm:gap-4">
           <div className="hidden sm:flex items-center gap-1">
@@ -548,7 +585,9 @@ export function SessionDetail() {
                 directory={repoDirectory}
                 activeSessionID={sessionId || undefined}
                 onSelectSession={(sessionID) => {
-                  navigate(`/repos/${repoId}/sessions/${sessionID}`)
+                  if (workspaceId) {
+                    navigate(`/workspace/${workspaceId}/sessions/${sessionID}`)
+                  }
                   setSessionsDialogOpen(false)
                 }}
               />
@@ -557,14 +596,14 @@ export function SessionDetail() {
         </DialogContent>
       </Dialog>
 
-      <FileBrowserSheet
-        isOpen={fileBrowserOpen}
-        onClose={handleFileBrowserClose}
-        basePath={repo.localPath}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
-        repoId={repoId}
-        initialSelectedFile={selectedFilePath}
-      />
+        <FileBrowserSheet
+          isOpen={fileBrowserOpen}
+          onClose={handleFileBrowserClose}
+          basePath={repoBasePath}
+          repoName={repoDisplayName}
+          repoId={repoId}
+          initialSelectedFile={selectedFilePath}
+        />
 
       <RepoMcpDialog
         open={mcpDialogOpen}
@@ -576,8 +615,8 @@ export function SessionDetail() {
         repoId={repoId}
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
-        currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        currentBranch={repo?.currentBranch || repo?.branch || "main"}
+        repoName={repoDisplayName}
       />
 
       <ResetPermissionsDialog

@@ -18,8 +18,8 @@ export function Repos() {
   return (
     <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
       <Header>
-        <div className="flex items-center gap-3">
-          <Header.Title logo>OpenCode</Header.Title>
+        <div className="flex items-center gap-2">
+          <Header.Title>Repos</Header.Title>
         </div>
         <Header.Actions>
           <PendingActionsGroup />

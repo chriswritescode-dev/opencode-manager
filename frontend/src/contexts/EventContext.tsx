@@ -315,7 +315,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     if (!currentQuestion) return
     const repoId = getRepoIdForSession(currentQuestion.sessionID)
     if (repoId) {
-      const targetPath = `/repos/${repoId}/sessions/${currentQuestion.sessionID}`
+      const targetPath = `/workspace/${repoId}/sessions/${currentQuestion.sessionID}`
       if (location.pathname !== targetPath) {
         navigate(targetPath)
       }

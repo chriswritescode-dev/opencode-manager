@@ -1,4 +1,4 @@
-export type SessionStatus = 'creating' | 'running' | 'stale' | 'stopped' | 'error'
+export type SessionStatus = 'creating' | 'building' | 'running' | 'stale' | 'stopped' | 'error'
 
 export interface RepoMapping {
   repoId: number
@@ -125,6 +125,8 @@ export interface ContainerStatus {
 }
 
 export interface SessionDetail extends Session {
+  workspaceContainerPath?: string
+  workspaceHostPath?: string
   containers: {
     opencode?: ContainerStatus
     dind?: ContainerStatus

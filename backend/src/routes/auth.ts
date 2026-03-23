@@ -91,6 +91,7 @@ export function createAuthInfoRoutes(auth: AuthInstance, db: Database) {
       registrationEnabled: !adminConfigured,
       isFirstUser: hasUsers.count === 0,
       adminConfigured,
+      authDisabled: ENV.AUTH.DISABLED,
     })
   })
 

@@ -97,3 +97,5 @@ export async function executeCommand(
     })
   })
 }
+
+export const execCommand = executeCommand
