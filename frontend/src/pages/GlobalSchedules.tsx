@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAllSchedules } from '@/hooks/useSchedules'
-import { useDeleteRepoSchedule, useRunRepoSchedule, useUpdateRepoSchedule } from '@/hooks/useSchedules'
+import { useDeleteRepoSchedule, useRunRepoSchedule, useUpdateRepoSchedule, useCreateRepoSchedule } from '@/hooks/useSchedules'
 import { ScheduleJobDialog } from '@/components/schedules'
 import type { CreateScheduleJobRequest } from '@opencode-manager/shared/types'
 import { toUpdateScheduleRequest, formatScheduleShortLabel, getJobStatusTone, formatTimestamp } from '@/components/schedules/schedule-utils'
@@ -24,7 +24,8 @@ export function GlobalSchedules() {
   const navigate = useNavigate()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingJob, setEditingJob] = useState<ScheduleJobWithRepo | null>(null)
-  const [deleteJobId, setDeleteJobId] = useState<number | null>(null)
+  const [deletingJob, setDeletingJob] = useState<ScheduleJobWithRepo | null>(null)
+  const [selectedRepoId, setSelectedRepoId] = useState<number | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [scheduleModeFilter, setScheduleModeFilter] = useState<ScheduleModeFilter>('all')
   const [repoFilter, setRepoFilter] = useState<string>('all')
@@ -32,6 +33,7 @@ export function GlobalSchedules() {
 
   const { data: jobs = [], isLoading, error } = useAllSchedules()
 
+  const createMutation = useCreateRepoSchedule(undefined)
   const deleteMutation = useDeleteRepoSchedule(undefined)
   const runMutation = useRunRepoSchedule(undefined)
   const updateMutation = useUpdateRepoSchedule(undefined)
@@ -124,26 +126,26 @@ export function GlobalSchedules() {
   ], [])
 
   const handleDelete = () => {
-    if (deleteJobId === null) {
+    if (!deletingJob) {
       return
     }
 
-    deleteMutation.mutate(deleteJobId, {
-      onSuccess: () => {
-        setDeleteJobId(null)
-      },
-    })
+    deleteMutation.mutate(
+      { repoId: deletingJob.repoId, jobId: deletingJob.id },
+      { onSuccess: () => setDeletingJob(null) }
+    )
   }
 
   const handleToggleEnabled = (job: ScheduleJobWithRepo) => {
     updateMutation.mutate({
+      repoId: job.repoId,
       jobId: job.id,
       data: { enabled: !job.enabled },
     })
   }
 
   const handleRunNow = (job: ScheduleJobWithRepo) => {
-    runMutation.mutate(job.id)
+    runMutation.mutate({ repoId: job.repoId, jobId: job.id })
   }
 
   const handleEdit = (job: ScheduleJobWithRepo) => {
@@ -151,17 +153,24 @@ export function GlobalSchedules() {
     setDialogOpen(true)
   }
 
-  const handleCreate = () => {
-    setDialogOpen(false)
+  const handleCreate = (data: CreateScheduleJobRequest) => {
+    if (!selectedRepoId) return
+    createMutation.mutate(
+      { repoId: selectedRepoId, data },
+      {
+        onSuccess: () => {
+          setDialogOpen(false)
+          setSelectedRepoId(undefined)
+        },
+      }
+    )
   }
 
   const handleUpdate = (data: CreateScheduleJobRequest) => {
-    if (!editingJob) {
-      return
-    }
-
+    if (!editingJob) return
     updateMutation.mutate(
       {
+        repoId: editingJob.repoId,
         jobId: editingJob.id,
         data: toUpdateScheduleRequest(data),
       },
@@ -221,7 +230,7 @@ export function GlobalSchedules() {
           </Badge>
           <Header.Actions>
             <Button
-              onClick={() => { setEditingJob(null); setDialogOpen(true) }}
+              onClick={() => { setEditingJob(null); setSelectedRepoId(undefined); setDialogOpen(true) }}
               size="sm"
               className="hidden sm:flex"
             >
@@ -229,7 +238,7 @@ export function GlobalSchedules() {
               New Schedule
             </Button>
             <Button
-              onClick={() => { setEditingJob(null); setDialogOpen(true) }}
+              onClick={() => { setEditingJob(null); setSelectedRepoId(undefined); setDialogOpen(true) }}
               size="sm"
               className="sm:hidden"
             >
@@ -535,7 +544,7 @@ export function GlobalSchedules() {
                       className="h-8 w-8 p-0 text-destructive hover:text-destructive"
                       onClick={(e) => {
                         e.stopPropagation()
-                        setDeleteJobId(job.id)
+                        setDeletingJob(job)
                       }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
@@ -554,18 +563,22 @@ export function GlobalSchedules() {
           setDialogOpen(open)
           if (!open) {
             setEditingJob(null)
+            setSelectedRepoId(undefined)
           }
         }}
         job={editingJob ?? undefined}
-        isSaving={updateMutation.isPending}
+        isSaving={createMutation.isPending || updateMutation.isPending}
         onSubmit={editingJob ? handleUpdate : handleCreate}
+        showRepoSelector
+        repoId={selectedRepoId}
+        onRepoChange={setSelectedRepoId}
       />
 
       <DeleteDialog
-        open={deleteJobId !== null}
-        onOpenChange={(open) => !open && setDeleteJobId(null)}
+        open={deletingJob !== null}
+        onOpenChange={(open) => !open && setDeletingJob(null)}
         onConfirm={handleDelete}
-        onCancel={() => setDeleteJobId(null)}
+        onCancel={() => setDeletingJob(null)}
         title="Delete Schedule"
         description="This removes the job definition and all recorded run history for it."
         isDeleting={deleteMutation.isPending}

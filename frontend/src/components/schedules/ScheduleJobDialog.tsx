@@ -4,6 +4,8 @@ import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@ope
 import { getProvidersWithModels } from '@/api/providers'
 import { createOpenCodeClient } from '@/api/opencode'
 import { settingsApi } from '@/api/settings'
+import { listRepos } from '@/api/repos'
+import type { Repo } from '@/api/types'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +28,7 @@ import {
   type SchedulePreset,
   weekdayOptions,
 } from '@/components/schedules/schedule-utils'
+import { getRepoDisplayName } from '@/lib/utils'
 import { Check, Info, Loader2, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
@@ -37,6 +40,9 @@ type ScheduleJobDialogProps = {
   job?: ScheduleJob
   isSaving: boolean
   onSubmit: (data: CreateScheduleJobRequest) => void
+  showRepoSelector?: boolean
+  repoId?: number
+  onRepoChange?: (repoId: number | undefined) => void
 }
 
 function InfoHint({ text }: { text: string }) {
@@ -51,7 +57,7 @@ function InfoHint({ text }: { text: string }) {
   )
 }
 
-export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit }: ScheduleJobDialogProps) {
+export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit, showRepoSelector, repoId: selectedRepoId, onRepoChange }: ScheduleJobDialogProps) {
   const [schedulePreset, setSchedulePreset] = useState<SchedulePreset>('interval')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -111,6 +117,24 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
     enabled: open,
     staleTime: 5 * 60 * 1000,
   })
+
+  const { data: repos = [] } = useQuery<Repo[]>({
+    queryKey: ['repos'],
+    queryFn: listRepos,
+    enabled: open && !!showRepoSelector,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const repoOptions = useMemo<ComboboxOption[]>(() =>
+    repos
+      .filter((repo) => repo.cloneStatus === 'ready')
+      .map((repo) => ({
+        value: repo.id.toString(),
+        label: getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath),
+        description: repo.localPath,
+      })),
+    [repos]
+  )
 
   const modelOptions = useMemo<ComboboxOption[]>(() => {
     const configuredModels: ComboboxOption[] = []
@@ -269,6 +293,18 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
 
           <TabsContent value="basics" className="mt-0 min-h-0 flex-1 overflow-y-auto pt-4 pb-5">
             <div className="space-y-4">
+              {showRepoSelector && !job && (
+                <div className="space-y-2">
+                  <Label>Repository</Label>
+                  <Combobox
+                    value={selectedRepoId?.toString() ?? ''}
+                    onChange={(value) => onRepoChange?.(value ? Number(value) : undefined)}
+                    options={repoOptions}
+                    placeholder="Select a repository"
+                    allowCustomValue={false}
+                  />
+                </div>
+              )}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="schedule-name">Name</Label>
@@ -637,7 +673,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit 
 
         <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row gap-2 sm:justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid} className="flex-1 sm:flex-none">
+          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && !selectedRepoId)} className="flex-1 sm:flex-none">
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isSaving ? 'Saving...' : job ? 'Save changes' : 'Create schedule'}
           </Button>

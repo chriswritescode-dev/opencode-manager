@@ -103,7 +103,7 @@ export function Schedules() {
   const hasJobs = (jobs?.length ?? 0) > 0
 
   const handleCreate = (data: CreateScheduleJobRequest) => {
-    createMutation.mutate(data, {
+    createMutation.mutate({ data }, {
       onSuccess: (job) => {
         setSelectedJobId(job.id)
         setDialogOpen(false)
@@ -133,7 +133,7 @@ export function Schedules() {
       return
     }
 
-    deleteMutation.mutate(deleteJobId, {
+    deleteMutation.mutate({ jobId: deleteJobId }, {
       onSuccess: () => {
         if (selectedJobId === deleteJobId) {
           setSelectedJobId(null)
@@ -159,7 +159,7 @@ export function Schedules() {
       return
     }
 
-    runMutation.mutate(selectedJob.id, {
+    runMutation.mutate({ jobId: selectedJob.id }, {
       onSuccess: (run) => {
         setSelectedRunId(run.id)
       },

@@ -77,15 +77,17 @@ export function useCreateRepoSchedule(repoId: number | undefined) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (data: CreateScheduleJobRequest) => {
-      const response = await createRepoSchedule(repoId!, data)
+    mutationFn: async ({ repoId: callRepoId, data }: { repoId?: number; data: CreateScheduleJobRequest }) => {
+      const resolvedRepoId = callRepoId ?? repoId
+      const response = await createRepoSchedule(resolvedRepoId!, data)
       return response.job
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['repo-schedules', repoId] })
+    onSuccess: (__variables) => {
+      queryClient.invalidateQueries({ queryKey: ['repo-schedules', __variables.repoId ?? repoId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule created')
     },
-    onError: (error) => {
+    onError: (error: unknown) => {
       showToast.error(`Failed to create schedule: ${error instanceof Error ? error.message : String(error)}`)
     },
   })
@@ -95,16 +97,18 @@ export function useUpdateRepoSchedule(repoId: number | undefined) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ jobId, data }: { jobId: number; data: UpdateScheduleJobRequest }) => {
-      const response = await updateRepoSchedule(repoId!, jobId, data)
+    mutationFn: async ({ repoId: callRepoId, jobId, data }: { repoId?: number; jobId: number; data: UpdateScheduleJobRequest }) => {
+      const resolvedRepoId = callRepoId ?? repoId
+      const response = await updateRepoSchedule(resolvedRepoId!, jobId, data)
       return response.job
     },
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['repo-schedules', repoId] })
-      queryClient.invalidateQueries({ queryKey: ['repo-schedule', repoId, variables.jobId] })
+    onSuccess: (__variables) => {
+      queryClient.invalidateQueries({ queryKey: ['repo-schedules', __variables.repoId ?? repoId] })
+      queryClient.invalidateQueries({ queryKey: ['repo-schedule', __variables.repoId ?? repoId, __variables.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule updated')
     },
-    onError: (error) => {
+    onError: (error: unknown) => {
       showToast.error(`Failed to update schedule: ${error instanceof Error ? error.message : String(error)}`)
     },
   })
@@ -114,12 +118,16 @@ export function useDeleteRepoSchedule(repoId: number | undefined) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (jobId: number) => deleteRepoSchedule(repoId!, jobId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['repo-schedules', repoId] })
+    mutationFn: ({ repoId: callRepoId, jobId }: { repoId?: number; jobId: number }) => {
+      const resolvedRepoId = callRepoId ?? repoId
+      return deleteRepoSchedule(resolvedRepoId!, jobId)
+    },
+    onSuccess: (__variables) => {
+      queryClient.invalidateQueries({ queryKey: ['repo-schedules', __variables.repoId ?? repoId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success('Schedule deleted')
     },
-    onError: (error) => {
+    onError: (error: unknown) => {
       showToast.error(`Failed to delete schedule: ${error instanceof Error ? error.message : String(error)}`)
     },
   })
@@ -129,18 +137,20 @@ export function useRunRepoSchedule(repoId: number | undefined) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (jobId: number) => {
-      const response = await runRepoSchedule(repoId!, jobId)
+    mutationFn: async ({ repoId: callRepoId, jobId }: { repoId?: number; jobId: number }) => {
+      const resolvedRepoId = callRepoId ?? repoId
+      const response = await runRepoSchedule(resolvedRepoId!, jobId)
       return response.run
     },
-    onSuccess: (run) => {
-      queryClient.invalidateQueries({ queryKey: ['repo-schedules', repoId] })
-      queryClient.invalidateQueries({ queryKey: ['repo-schedule-runs', repoId, run.jobId] })
-      queryClient.invalidateQueries({ queryKey: ['repo-schedule', repoId, run.jobId] })
-      queryClient.invalidateQueries({ queryKey: ['repo-schedule-run', repoId, run.jobId, run.id] })
+    onSuccess: (run, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['repo-schedules', variables.repoId ?? repoId] })
+      queryClient.invalidateQueries({ queryKey: ['repo-schedule-runs', variables.repoId ?? repoId, run.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['repo-schedule', variables.repoId ?? repoId, run.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['repo-schedule-run', variables.repoId ?? repoId, run.jobId, run.id] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       showToast.success(run.status === 'running' ? 'Schedule started' : 'Schedule run completed')
     },
-    onError: (error) => {
+    onError: (error: unknown) => {
       showToast.error(`Failed to run schedule: ${error instanceof Error ? error.message : String(error)}`)
     },
   })
