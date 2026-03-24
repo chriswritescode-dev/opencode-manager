@@ -10,80 +10,37 @@ interface ProjectStats {
   newest: number
 }
 
-function parseArgs(args: string[]): { projectId?: string; dbPath?: string; help?: boolean } {
-  const options: { projectId?: string; dbPath?: string; help?: boolean } = {}
-  let i = 0
-
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--project' || arg === '-p') {
-      options.projectId = args[++i]
-    } else if (arg === '--db-path') {
-      options.dbPath = args[++i]
-    } else if (arg === '--help' || arg === '-h') {
-      options.help = true
-    } else {
-      console.error(`Unknown option: ${arg}`)
-      help()
-      process.exit(1)
-    }
-
-    i++
-  }
-
-  return options
+export interface StatsArgs {
+  dbPath?: string
+  resolvedProjectId?: string
 }
 
-export function help(): void {
-  console.log(`
-Show memory statistics for a project
-
-Usage:
-  ocm-mem stats [options]
-
-Options:
-  --project, -p <id>    Project ID (auto-detected from git if not provided)
-  --db-path <path>      Path to memory database
-  --help, -h            Show this help message
-  `.trim())
-}
-
-export function run(args: string[], globalOpts: { dbPath?: string; projectId?: string }): void {
-  const options = parseArgs(args)
-  const dbPath = options.dbPath || globalOpts.dbPath
-  const projectId = options.projectId || globalOpts.projectId
-
-  if (options.help) {
-    help()
-    process.exit(0)
-  }
+export function run(argv: StatsArgs): void {
+  const projectId = argv.resolvedProjectId
 
   if (!projectId) {
     console.error('Project ID required. Use --project or run from a git repository.')
     process.exit(1)
   }
 
-  const finalProjectId = projectId
-
-  const db = openDatabase(dbPath)
+  const db = openDatabase(argv.dbPath)
   const nameMap = resolveProjectNames()
 
   try {
     const scopeRows = db.prepare(`
       SELECT scope, COUNT(*) as count FROM memories 
       WHERE project_id = ? GROUP BY scope
-    `).all(finalProjectId) as ScopeStats[]
+    `).all(projectId) as ScopeStats[]
 
     const statsRow = db.prepare(`
       SELECT MIN(created_at) as oldest, MAX(created_at) as newest
       FROM memories WHERE project_id = ?
-    `).get(finalProjectId) as ProjectStats | undefined
+    `).get(projectId) as ProjectStats | undefined
 
     const totalMemories = scopeRows.reduce((sum, row) => sum + row.count, 0)
 
     console.log('')
-    console.log(`Memory Statistics for: ${displayProjectId(finalProjectId, nameMap)}`)
+    console.log(`Memory Statistics for: ${displayProjectId(projectId, nameMap)}`)
     console.log(`  Total: ${totalMemories}`)
     console.log('  By scope:')
 
@@ -108,4 +65,29 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
   } finally {
     db.close()
   }
+}
+
+export function help(): void {
+  console.log(`
+Show memory statistics for a project
+
+Usage:
+  ocm-mem stats [options]
+
+Options:
+  --project, -p <id>    Project ID (auto-detected from git if not provided)
+  --db-path <path>      Path to memory database
+  --help, -h            Show this help message
+  `.trim())
+}
+
+export function cli(args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }): void {
+  for (const arg of args) {
+    if (arg === '--help' || arg === '-h') {
+      help()
+      process.exit(0)
+    }
+  }
+
+  run({ dbPath: globalOpts.dbPath, resolvedProjectId: globalOpts.resolvedProjectId })
 }

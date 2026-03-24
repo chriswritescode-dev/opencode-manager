@@ -19,13 +19,6 @@ export interface PluginMemory {
   updatedAt: number
 }
 
-export interface GlobalOptions {
-  dbPath?: string
-  projectId?: string
-  dir?: string
-  help?: boolean
-}
-
 export function resolveDefaultDbPath(): string {
   const localPath = join(process.cwd(), '.opencode', 'state', 'opencode', 'memory', 'memory.db')
   if (existsSync(localPath)) {
@@ -107,36 +100,6 @@ export function confirm(message: string): Promise<boolean> {
   })
 }
 
-export interface ParsedGlobalOptions {
-  globalOpts: GlobalOptions
-  remainingArgs: string[]
-}
-
-export function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
-  const globalOpts: GlobalOptions = {}
-  const remainingArgs: string[] = []
-
-  let i = 0
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--db-path') {
-      globalOpts.dbPath = args[++i]
-    } else if (arg === '--project' || arg === '-p') {
-      globalOpts.projectId = args[++i]
-    } else if (arg === '--dir' || arg === '-d') {
-      globalOpts.dir = args[++i]
-    } else if (arg === '--help' || arg === '-h') {
-      globalOpts.help = true
-    } else {
-      remainingArgs.push(arg)
-    }
-
-    i++
-  }
-
-  return { globalOpts, remainingArgs }
-}
 
 export function resolveProjectNames(): Map<string, string> {
   const nameMap = new Map<string, string>()
@@ -194,4 +157,42 @@ export function resolveProjectIdByName(name: string): string | null {
 
 export function displayProjectId(id: string, nameMap: Map<string, string>): string {
   return nameMap.get(id) || id
+}
+
+export interface GlobalOptions {
+  dbPath?: string
+  projectId?: string
+  dir?: string
+  help?: boolean
+}
+
+export interface ParsedGlobalOptions {
+  globalOpts: GlobalOptions
+  remainingArgs: string[]
+}
+
+export function parseGlobalOptions(args: string[]): ParsedGlobalOptions {
+  const globalOpts: GlobalOptions = {}
+  const remainingArgs: string[] = []
+
+  let i = 0
+  while (i < args.length) {
+    const arg = args[i]
+
+    if (arg === '--db-path') {
+      globalOpts.dbPath = args[++i]
+    } else if (arg === '--project' || arg === '-p') {
+      globalOpts.projectId = args[++i]
+    } else if (arg === '--dir' || arg === '-d') {
+      globalOpts.dir = args[++i]
+    } else if (arg === '--help' || arg === '-h') {
+      globalOpts.help = true
+    } else {
+      remainingArgs.push(arg)
+    }
+
+    i++
+  }
+
+  return { globalOpts, remainingArgs }
 }

@@ -6,11 +6,12 @@ import {
   MemoryScope,
 } from '../utils'
 
-export interface ImportOptions {
-  format?: 'json' | 'markdown'
-  projectId: string
-  force?: boolean
+export interface ImportArgs {
   dbPath?: string
+  resolvedProjectId?: string
+  file: string
+  format?: 'json' | 'markdown'
+  force?: boolean
 }
 
 export function parseJsonImport(content: string, projectId: string): PluginMemory[] {
@@ -20,17 +21,22 @@ export function parseJsonImport(content: string, projectId: string): PluginMemor
   }
 
   const now = Date.now()
-  return data.map((item: Record<string, unknown>, index: number) => ({
-    id: 0,
-    projectId: (item.projectId as string) || projectId,
-    scope: (item.scope as MemoryScope) || 'context',
-    content: item.content as string,
-    filePath: (item.filePath as string) || null,
-    accessCount: 0,
-    lastAccessedAt: null,
-    createdAt: (item.createdAt as number) || now,
-    updatedAt: (item.updatedAt as number) || now,
-  }))
+  return data.map((item: Record<string, unknown>) => {
+    if (!item.content || typeof item.content !== 'string') {
+      throw new Error('Invalid memory: missing or invalid content field')
+    }
+    return {
+      id: 0,
+      projectId: (item.projectId as string) || projectId,
+      scope: (item.scope as MemoryScope) || 'context',
+      content: item.content as string,
+      filePath: (item.filePath as string) || null,
+      accessCount: 0,
+      lastAccessedAt: null,
+      createdAt: (item.createdAt as number) || now,
+      updatedAt: (item.updatedAt as number) || now,
+    }
+  })
 }
 
 export function parseMarkdownImport(content: string, projectId: string): PluginMemory[] {
@@ -39,7 +45,6 @@ export function parseMarkdownImport(content: string, projectId: string): PluginM
   let currentScope: MemoryScope = 'context'
   let currentContent: string[] = []
   let currentCreatedAt = Date.now()
-  let memoryIndex = 0
 
   const scopePattern = /^##\s+(\w+)(?:s)?\s+\(\d+\)$/i
   const memoryPattern = /^###\s+\[(\d+)\]\s+-\s+Created\s+(\d{4}-\d{2}-\d{2})/
@@ -82,7 +87,6 @@ export function parseMarkdownImport(content: string, projectId: string): PluginM
     const memoryMatch = line.match(memoryPattern)
     if (memoryMatch) {
       saveCurrentMemory()
-      memoryIndex++
       try {
         currentCreatedAt = new Date(memoryMatch[2]).getTime()
       } catch {
@@ -127,11 +131,18 @@ export function parseMarkdownImport(content: string, projectId: string): PluginM
   return memories
 }
 
-function importMemories(filePath: string, options: ImportOptions): void {
-  const db = openDatabase(options.dbPath)
+export function run(argv: ImportArgs): void {
+  const projectId = argv.resolvedProjectId
+
+  if (!projectId) {
+    console.error('Project ID required. Use --project or ensure this is a git repository.')
+    process.exit(1)
+  }
+
+  let filePath = argv.file
+  if (filePath === '-') filePath = '/dev/stdin'
 
   let content: string
-
   try {
     content = readFileSync(filePath, 'utf-8')
   } catch {
@@ -139,15 +150,14 @@ function importMemories(filePath: string, options: ImportOptions): void {
     process.exit(1)
   }
 
-  const format = options.format || (extname(filePath).toLowerCase() === '.md' ? 'markdown' : 'json')
+  const format = argv.format || (extname(filePath).toLowerCase() === '.md' ? 'markdown' : 'json')
 
   let memories: PluginMemory[]
-
   try {
     if (format === 'markdown') {
-      memories = parseMarkdownImport(content, options.projectId)
+      memories = parseMarkdownImport(content, projectId)
     } else {
-      memories = parseJsonImport(content, options.projectId)
+      memories = parseJsonImport(content, projectId)
     }
   } catch (error) {
     console.error(`Failed to parse ${format} file: ${error instanceof Error ? error.message : 'Unknown error'}`)
@@ -159,17 +169,19 @@ function importMemories(filePath: string, options: ImportOptions): void {
     process.exit(0)
   }
 
+  const db = openDatabase(argv.dbPath)
+
   try {
     let importedCount = 0
     let skippedCount = 0
 
     for (const memory of memories) {
-      memory.projectId = options.projectId
+      memory.projectId = projectId
 
-      if (!options.force) {
+      if (!argv.force) {
         const existing = db
           .prepare('SELECT id FROM memories WHERE project_id = ? AND content = ? LIMIT 1')
-          .get(options.projectId, memory.content)
+          .get(projectId, memory.content)
 
         if (existing) {
           skippedCount++
@@ -200,52 +212,6 @@ function importMemories(filePath: string, options: ImportOptions): void {
   }
 }
 
-function parseArgs(args: string[]): { filePath: string; options: ImportOptions } {
-  const options: ImportOptions = { projectId: '' }
-  let filePath = args[0]
-  let i = 1
-
-  if (!filePath || filePath.startsWith('-')) {
-    console.error('Import requires a file path')
-    help()
-    process.exit(1)
-  }
-
-  if (filePath === '-') {
-    filePath = '/dev/stdin'
-  }
-
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--format' || arg === '-f') {
-      const format = args[++i] as 'json' | 'markdown'
-      if (format !== 'json' && format !== 'markdown') {
-        console.error(`Unknown format '${format}'. Use 'json' or 'markdown'.`)
-        process.exit(1)
-      }
-      options.format = format
-    } else if (arg === '--project' || arg === '-p') {
-      options.projectId = args[++i]
-    } else if (arg === '--force') {
-      options.force = true
-    } else if (arg === '--db-path') {
-      options.dbPath = args[++i]
-    } else if (arg === '--help' || arg === '-h') {
-      help()
-      process.exit(0)
-    } else {
-      console.error(`Unknown option: ${arg}`)
-      help()
-      process.exit(1)
-    }
-
-    i++
-  }
-
-  return { filePath, options }
-}
-
 export function help(): void {
   console.log(`
 Import memories into the database
@@ -258,22 +224,53 @@ Arguments:
 
 Options:
   --format, -f <format>    Input format: json or markdown (auto-detected from extension)
-  --project, -p <id>       Project ID to assign memories to (required, auto-detected from git)
   --force                  Skip duplicate detection and import all memories
   --db-path <path>         Path to database file
   --help, -h               Show this help message
   `.trim())
 }
 
-export function run(args: string[], globalOpts: { dbPath?: string; projectId?: string }): void {
-  const { filePath, options } = parseArgs(args)
-  options.dbPath = options.dbPath || globalOpts.dbPath
-  options.projectId = options.projectId || globalOpts.projectId || ''
+export function cli(args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }): void {
+  const filePath = args[0]
+  if (!filePath || filePath.startsWith('-') && filePath !== '-') {
+    console.error('Import requires a file path')
+    help()
+    process.exit(1)
+  }
 
-  if (!options.projectId) {
+  const argv: ImportArgs = {
+    dbPath: globalOpts.dbPath,
+    resolvedProjectId: globalOpts.resolvedProjectId,
+    file: filePath === '-' ? '/dev/stdin' : filePath,
+  }
+
+  let i = 1
+  while (i < args.length) {
+    const arg = args[i]
+    if (arg === '--format' || arg === '-f') {
+      const format = args[++i] as 'json' | 'markdown'
+      if (format !== 'json' && format !== 'markdown') {
+        console.error(`Unknown format '${format}'. Use 'json' or 'markdown'.`)
+        process.exit(1)
+      }
+      argv.format = format
+    } else if (arg === '--force') {
+      argv.force = true
+    } else if (arg === '--help' || arg === '-h') {
+      help()
+      process.exit(0)
+    } else {
+      console.error(`Unknown option: ${arg}`)
+      help()
+      process.exit(1)
+    }
+    i++
+  }
+
+  if (!argv.resolvedProjectId) {
     console.error('Project ID required. Use --project or ensure this is a git repository.')
     process.exit(1)
   }
 
-  importMemories(filePath, options)
+  run(argv)
 }

@@ -1,10 +1,14 @@
 import type { RalphState } from '../../services/ralph'
 import { openDatabase } from '../utils'
+import { formatSessionOutput, formatAuditResult } from '../../utils/ralph-format'
+import { createOpencodeClient } from '@opencode-ai/sdk/v2'
+import { fetchSessionOutput } from '../../services/ralph'
+import { findPartialMatch, filterByPartial } from '../../utils/partial-match'
 
 interface RalphLoopInfo {
   sessionId: string
   worktreeName: string
-  worktreeBranch: string
+  worktreeBranch?: string
   iteration: number
   maxIterations: number
   phase: 'coding' | 'auditing'
@@ -12,65 +16,47 @@ interface RalphLoopInfo {
   audit: boolean
 }
 
-function parseArgs(args: string[]): { projectId?: string; dbPath?: string; help?: boolean; worktreeName?: string } {
-  const options: { projectId?: string; dbPath?: string; help?: boolean; worktreeName?: string } = {}
-  let i = 0
+export interface StatusArgs {
+  dbPath?: string
+  resolvedProjectId?: string
+  name?: string
+  server?: string
+  listWorktrees?: boolean
+  listWorktreesFilter?: string
+}
 
-  while (i < args.length) {
-    const arg = args[i]
+export async function run(argv: StatusArgs): Promise<void> {
+  const db = openDatabase(argv.dbPath)
 
-    if (arg === '--project' || arg === '-p') {
-      options.projectId = args[++i]
-    } else if (arg === '--db-path') {
-      options.dbPath = args[++i]
-    } else if (arg === '--help' || arg === '-h') {
-      options.help = true
-    } else if (!arg.startsWith('-')) {
-      options.worktreeName = arg
-    } else {
-      console.error(`Unknown option: ${arg}`)
-      help()
-      process.exit(1)
+  async function tryFetchSessionOutput(serverUrl: string, sessionId: string, directory: string) {
+    try {
+      const client = createOpencodeClient({ baseUrl: serverUrl, directory })
+      return await fetchSessionOutput(client, sessionId, directory)
+    } catch {
+      return null
     }
-
-    i++
   }
-
-  return options
-}
-
-export function help(): void {
-  console.log(`
-Show Ralph loop status
-
-Usage:
-  ocm-mem status [options]
-  ocm-mem status <name> [options]
-
-Arguments:
-  name                  Worktree name for detailed status (optional)
-
-Options:
-  --project, -p <id>    Project ID (auto-detected from git if not provided)
-  --db-path <path>      Path to memory database
-  --help, -h            Show this help message
-  `.trim())
-}
-
-export function run(args: string[], globalOpts: { dbPath?: string; projectId?: string }): void {
-  const options = parseArgs(args)
-  options.projectId = options.projectId || globalOpts.projectId
-  options.dbPath = options.dbPath || globalOpts.dbPath
-
-  if (options.help) {
-    help()
-    process.exit(0)
-  }
-
-  const db = openDatabase(options.dbPath)
 
   try {
-    const projectId = options.projectId
+    if (argv.listWorktrees) {
+      const rows = db.prepare('SELECT key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?').all('ralph:%', Date.now()) as Array<{ key: string; data: string }>
+      const states: RalphState[] = []
+      for (const row of rows) {
+        try {
+          const state = JSON.parse(row.data) as RalphState
+          states.push(state)
+        } catch {
+        }
+      }
+      const filtered = filterByPartial(argv.listWorktreesFilter, states, (s) => [s.worktreeName, s.worktreeBranch])
+      for (const state of filtered) {
+        console.log(state.worktreeName)
+      }
+      db.close()
+      return
+    }
+
+    const projectId = argv.resolvedProjectId
 
     const now = Date.now()
     let query: string
@@ -114,13 +100,31 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
       } catch {}
     }
 
-    const worktreeName = options.worktreeName
+    const worktreeName = argv.name
 
     if (worktreeName) {
-      let activeLoop = activeLoops.find((l) => l.worktreeName === worktreeName)
-      let recentLoop = recentLoops.find((l) => l.state.worktreeName === worktreeName)
+      type LoopUnion = { type: 'active'; loop: RalphLoopInfo } | { type: 'recent'; loop: typeof recentLoops[number] }
+      const allLoops: LoopUnion[] = [
+        ...activeLoops.map((l) => ({ type: 'active' as const, loop: l })),
+        ...recentLoops.map((l) => ({ type: 'recent' as const, loop: l })),
+      ]
 
-      if (!activeLoop && !recentLoop) {
+      const { match, candidates } = findPartialMatch(worktreeName, allLoops, (l) => [
+        l.type === 'active' ? l.loop.worktreeName : l.loop.state.worktreeName,
+        l.type === 'active' ? l.loop.worktreeBranch : l.loop.state.worktreeBranch,
+      ])
+
+      if (!match && candidates.length > 0) {
+        console.error(`Multiple loops match '${worktreeName}':`)
+        for (const c of candidates) {
+          const name = c.type === 'active' ? c.loop.worktreeName : c.loop.state.worktreeName
+          console.error(`  - ${name}`)
+        }
+        console.error('')
+        process.exit(1)
+      }
+
+      if (!match && candidates.length === 0) {
         console.error(`Ralph loop not found: ${worktreeName}`)
         console.error('')
         if (activeLoops.length > 0) {
@@ -139,11 +143,16 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
         process.exit(1)
       }
 
-      if (activeLoop) {
+      const matchedLoop = match!
+      const resolvedWorktreeName = matchedLoop.type === 'active'
+        ? matchedLoop.loop.worktreeName
+        : matchedLoop.loop.state.worktreeName
+
+      if (matchedLoop.type === 'active') {
         const row = rows.find((r) => {
           try {
             const state = JSON.parse(r.data) as RalphState
-            return state.worktreeName === worktreeName
+            return state.worktreeName === resolvedWorktreeName
           } catch {
             return false
           }
@@ -164,7 +173,9 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
         console.log(`Ralph Loop: ${state.worktreeName}`)
         console.log(`  Session ID:      ${state.sessionId}`)
         console.log(`  Worktree:        ${state.worktreeName}`)
-        console.log(`  Branch:          ${state.worktreeBranch}`)
+        if (state.worktreeBranch) {
+          console.log(`  Branch:          ${state.worktreeBranch}`)
+        }
         console.log(`  Worktree Dir:    ${state.worktreeDir}`)
         if (state.inPlace) {
           console.log(`  Mode:            in-place`)
@@ -179,9 +190,22 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
         if (state.completionPromise) {
           console.log(`  Completion:      ${state.completionPromise}`)
         }
-        console.log('')
-      } else if (recentLoop) {
-        const state = recentLoop.state
+        if (state.lastAuditResult) {
+          for (const line of formatAuditResult(state.lastAuditResult)) {
+            console.log(line)
+          }
+        }
+
+        const sessionOutput = await tryFetchSessionOutput(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir)
+        if (sessionOutput) {
+          console.log('Session Output:')
+          for (const line of formatSessionOutput(sessionOutput)) {
+            console.log(line)
+          }
+          console.log('')
+        }
+      } else {
+        const state = matchedLoop.loop.state
         const completedAt = state.completedAt!
         const duration = new Date(completedAt).getTime() - new Date(state.startedAt).getTime()
         const hours = Math.floor(duration / (1000 * 60 * 60))
@@ -192,7 +216,9 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
         console.log(`Ralph Loop (Completed): ${state.worktreeName}`)
         console.log(`  Session ID:      ${state.sessionId}`)
         console.log(`  Worktree:        ${state.worktreeName}`)
-        console.log(`  Branch:          ${state.worktreeBranch}`)
+        if (state.worktreeBranch) {
+          console.log(`  Branch:          ${state.worktreeBranch}`)
+        }
         console.log(`  Worktree Dir:    ${state.worktreeDir}`)
         if (state.inPlace) {
           console.log(`  Mode:            in-place (completed)`)
@@ -202,7 +228,20 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
         console.log(`  Reason:          ${state.terminationReason ?? 'unknown'}`)
         console.log(`  Started:         ${new Date(state.startedAt).toISOString()}`)
         console.log(`  Completed:       ${new Date(completedAt).toISOString()}`)
-        console.log('')
+        if (state.lastAuditResult) {
+          for (const line of formatAuditResult(state.lastAuditResult)) {
+            console.log(line)
+          }
+        }
+
+        const sessionOutput = await tryFetchSessionOutput(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir)
+        if (sessionOutput) {
+          console.log('Session Output:')
+          for (const line of formatSessionOutput(sessionOutput)) {
+            console.log(line)
+          }
+          console.log('')
+        }
       }
     } else {
       if (activeLoops.length > 0) {
@@ -253,4 +292,58 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
   } finally {
     db.close()
   }
+}
+
+export function help(): void {
+  console.log(`
+Show Ralph loop status
+
+Usage:
+  ocm-mem status [options]
+  ocm-mem status <name> [options]
+
+Arguments:
+  name                    Worktree name for detailed status (optional, supports partial matching)
+
+Options:
+  --server <url>          OpenCode server URL (default: http://localhost:5551)
+  --list-worktrees        List all worktree names (for shell completion)
+                          Optionally provide a filter: --list-worktrees <filter>
+  --project, -p <id>      Project ID (auto-detected from git if not provided)
+  --db-path <path>        Path to memory database
+  --help, -h              Show this help message
+  `.trim())
+}
+
+export async function cli(args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }): Promise<void> {
+  const argv: StatusArgs = {
+    dbPath: globalOpts.dbPath,
+    resolvedProjectId: globalOpts.resolvedProjectId,
+    server: 'http://localhost:5551',
+  }
+
+  let i = 0
+  while (i < args.length) {
+    const arg = args[i]
+    if (arg === '--server') {
+      argv.server = args[++i]
+    } else if (arg === '--list-worktrees') {
+      argv.listWorktrees = true
+      if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
+        argv.listWorktreesFilter = args[++i]
+      }
+    } else if (arg === '--help' || arg === '-h') {
+      help()
+      process.exit(0)
+    } else if (!arg.startsWith('-')) {
+      argv.name = arg
+    } else {
+      console.error(`Unknown option: ${arg}`)
+      help()
+      process.exit(1)
+    }
+    i++
+  }
+
+  await run(argv)
 }

@@ -2,15 +2,15 @@
 import { parseGlobalOptions, getGitProjectId, resolveProjectIdByName } from './utils'
 
 interface CommandModule {
-  run: (args: string[], globalOpts: { dbPath?: string; projectId?: string }) => Promise<void>
+  cli: (args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }) => Promise<void> | void
   help: () => void | Promise<void>
 }
 
 const commands: Record<string, CommandModule> = {
   export: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/export')
-      run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/export')
+      cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/export')
@@ -18,9 +18,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   import: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/import')
-      run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/import')
+      cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/import')
@@ -28,9 +28,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   list: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/list')
-      run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/list')
+      cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/list')
@@ -38,9 +38,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   stats: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/stats')
-      run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/stats')
+      cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/stats')
@@ -48,9 +48,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   cleanup: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/cleanup')
-      run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/cleanup')
+      await cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/cleanup')
@@ -58,9 +58,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   upgrade: {
-    run: async (args, globalOpts) => {
+    cli: async (args, globalOpts) => {
       const { run } = await import('./commands/upgrade')
-      await run(args, globalOpts)
+      await run()
     },
     help: async () => {
       const { help } = await import('./commands/upgrade')
@@ -68,9 +68,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   status: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/status')
-      await run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/status')
+      await cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/status')
@@ -78,9 +78,9 @@ const commands: Record<string, CommandModule> = {
     },
   },
   cancel: {
-    run: async (args, globalOpts) => {
-      const { run } = await import('./commands/cancel')
-      await run(args, globalOpts)
+    cli: async (args, globalOpts) => {
+      const { cli } = await import('./commands/cancel')
+      await cli(args, globalOpts)
     },
     help: async () => {
       const { help } = await import('./commands/cancel')
@@ -119,7 +119,6 @@ Run '<command> --help' for more information on a command.
 function resolveProjectId(input: string): string {
   const isSha = /^[0-9a-f]{40}$/.test(input)
   if (isSha) return input
-
   return resolveProjectIdByName(input) || input
 }
 
@@ -166,19 +165,14 @@ async function runCli(): Promise<void> {
     process.exit(0)
   }
 
-  let finalProjectId = globalOpts.projectId
+  const resolvedProjectId = globalOpts.projectId
     ? resolveProjectId(globalOpts.projectId)
-    : getGitProjectId(globalOpts.dir)
+    : getGitProjectId(globalOpts.dir) ?? undefined
 
-  const effectiveGlobalOpts: { dbPath?: string; projectId?: string } = {
-    ...globalOpts,
-  }
-
-  if (finalProjectId) {
-    effectiveGlobalOpts.projectId = finalProjectId
-  }
-
-  await command.run(commandArgs, effectiveGlobalOpts)
+  await command.cli(commandArgs, {
+    dbPath: globalOpts.dbPath,
+    resolvedProjectId,
+  })
 }
 
 runCli().catch((error) => {

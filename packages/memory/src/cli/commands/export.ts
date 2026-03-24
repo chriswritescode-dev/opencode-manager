@@ -7,14 +7,14 @@ import {
   MemoryScope,
 } from '../utils'
 
-export interface ExportOptions {
+export interface ExportArgs {
+  dbPath?: string
+  resolvedProjectId?: string
   format?: 'json' | 'markdown'
   output?: string
-  projectId?: string
-  scope?: MemoryScope
+  scope?: 'convention' | 'decision' | 'context'
   limit?: number
   offset?: number
-  dbPath?: string
 }
 
 export function formatAsJson(memories: PluginMemory[]): string {
@@ -49,27 +49,27 @@ export function formatAsMarkdown(memories: PluginMemory[]): string {
   return lines.join('\n')
 }
 
-function exportMemories(options: ExportOptions): void {
-  const db = openDatabase(options.dbPath)
+export function run(argv: ExportArgs): void {
+  const projectId = argv.resolvedProjectId
+
+  if (!projectId) {
+    console.error('Project ID required. Use --project or ensure this is a git repository.')
+    process.exit(1)
+  }
+
+  const db = openDatabase(argv.dbPath)
 
   try {
-    if (!options.projectId) {
-      console.error('Project ID required. Use --project or ensure this is a git repository.')
-      process.exit(1)
-    }
-
-    const projectId = options.projectId
-
     const conditions: string[] = ['project_id = ?']
     const params: (string | number)[] = [projectId]
 
-    if (options.scope) {
+    if (argv.scope) {
       conditions.push('scope = ?')
-      params.push(options.scope)
+      params.push(argv.scope)
     }
 
-    const limit = options.limit ?? 1000
-    const offset = options.offset ?? 0
+    const limit = argv.limit ?? 1000
+    const offset = argv.offset ?? 0
 
     const query = `
       SELECT id, project_id, scope, content, file_path, access_count, last_accessed_at, created_at, updated_at
@@ -103,7 +103,7 @@ function exportMemories(options: ExportOptions): void {
       updatedAt: row.updated_at,
     }))
 
-    const format = options.format || 'json'
+    const format = argv.format || 'json'
     let output: string
 
     if (format === 'markdown') {
@@ -112,69 +112,15 @@ function exportMemories(options: ExportOptions): void {
       output = formatAsJson(memories)
     }
 
-    if (options.output) {
-      writeFileSync(options.output, output, 'utf-8')
-      console.log(`Exported ${memories.length} memories to ${options.output}`)
+    if (argv.output) {
+      writeFileSync(argv.output, output, 'utf-8')
+      console.log(`Exported ${memories.length} memories to ${argv.output}`)
     } else {
       console.log(output)
     }
   } finally {
     db.close()
   }
-}
-
-function parseArgs(args: string[]): ExportOptions {
-  const options: ExportOptions = {}
-  let i = 0
-
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--format' || arg === '-f') {
-      const format = args[++i] as 'json' | 'markdown'
-      if (format !== 'json' && format !== 'markdown') {
-        console.error(`Unknown format '${format}'. Use 'json' or 'markdown'.`)
-        process.exit(1)
-      }
-      options.format = format
-    } else if (arg === '--output' || arg === '-o') {
-      options.output = args[++i]
-    } else if (arg === '--project' || arg === '-p') {
-      options.projectId = args[++i]
-    } else if (arg === '--scope' || arg === '-s') {
-      const scope = args[++i] as MemoryScope
-      if (scope !== 'convention' && scope !== 'decision' && scope !== 'context') {
-        console.error(`Unknown scope '${scope}'. Use 'convention', 'decision', or 'context'.`)
-        process.exit(1)
-      }
-      options.scope = scope
-    } else if (arg === '--limit' || arg === '-l') {
-      options.limit = parseInt(args[++i], 10)
-      if (isNaN(options.limit)) {
-        console.error('Invalid limit value')
-        process.exit(1)
-      }
-    } else if (arg === '--offset') {
-      options.offset = parseInt(args[++i], 10)
-      if (isNaN(options.offset ?? 0)) {
-        console.error('Invalid offset value')
-        process.exit(1)
-      }
-    } else if (arg === '--db-path') {
-      options.dbPath = args[++i]
-    } else if (arg === '--help' || arg === '-h') {
-      help()
-      process.exit(0)
-    } else {
-      console.error(`Unknown option: ${arg}`)
-      help()
-      process.exit(1)
-    }
-
-    i++
-  }
-
-  return options
 }
 
 export function help(): void {
@@ -187,7 +133,6 @@ Usage:
 Options:
   --format, -f <format>    Output format: json or markdown (default: json)
   --output, -o <file>      Output file path (prints to stdout if not specified)
-  --project, -p <id>       Project ID to filter by (auto-detected from git if not provided)
   --scope, -s <scope>      Filter by scope: convention, decision, or context
   --limit, -l <n>          Limit number of memories (default: 1000)
   --offset <n>             Offset for pagination (default: 0)
@@ -196,10 +141,53 @@ Options:
   `.trim())
 }
 
-export function run(args: string[], globalOpts: { dbPath?: string; projectId?: string }): void {
-  const options = parseArgs(args)
-  options.dbPath = options.dbPath || globalOpts.dbPath
-  options.projectId = options.projectId || globalOpts.projectId
+export function cli(args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }): void {
+  const argv: ExportArgs = {
+    dbPath: globalOpts.dbPath,
+    resolvedProjectId: globalOpts.resolvedProjectId,
+  }
 
-  exportMemories(options)
+  let i = 0
+  while (i < args.length) {
+    const arg = args[i]
+    if (arg === '--format' || arg === '-f') {
+      const format = args[++i] as 'json' | 'markdown'
+      if (format !== 'json' && format !== 'markdown') {
+        console.error(`Unknown format '${format}'. Use 'json' or 'markdown'.`)
+        process.exit(1)
+      }
+      argv.format = format
+    } else if (arg === '--output' || arg === '-o') {
+      argv.output = args[++i]
+    } else if (arg === '--scope' || arg === '-s') {
+      const scope = args[++i] as 'convention' | 'decision' | 'context'
+      if (scope !== 'convention' && scope !== 'decision' && scope !== 'context') {
+        console.error(`Unknown scope '${scope}'. Use 'convention', 'decision', or 'context'.`)
+        process.exit(1)
+      }
+      argv.scope = scope
+    } else if (arg === '--limit' || arg === '-l') {
+      argv.limit = parseInt(args[++i], 10)
+      if (isNaN(argv.limit)) {
+        console.error('Invalid limit value')
+        process.exit(1)
+      }
+    } else if (arg === '--offset') {
+      argv.offset = parseInt(args[++i], 10)
+      if (isNaN(argv.offset ?? 0)) {
+        console.error('Invalid offset value')
+        process.exit(1)
+      }
+    } else if (arg === '--help' || arg === '-h') {
+      help()
+      process.exit(0)
+    } else {
+      console.error(`Unknown option: ${arg}`)
+      help()
+      process.exit(1)
+    }
+    i++
+  }
+
+  run(argv)
 }

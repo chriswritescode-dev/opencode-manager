@@ -3,79 +3,21 @@ import { openDatabase, confirm } from '../utils'
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 import { resolve } from 'path'
+import { findPartialMatch } from '../../utils/partial-match'
 
-interface CancelOptions {
-  projectId?: string
+export interface CancelArgs {
   dbPath?: string
+  resolvedProjectId?: string
+  name?: string
   cleanup?: boolean
   force?: boolean
-  help?: boolean
 }
 
-function parseArgs(args: string[]): CancelOptions & { worktreeName?: string } {
-  const options: CancelOptions & { worktreeName?: string } = {}
-  let i = 0
-
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--project' || arg === '-p') {
-      options.projectId = args[++i]
-    } else if (arg === '--db-path') {
-      options.dbPath = args[++i]
-    } else if (arg === '--cleanup') {
-      options.cleanup = true
-    } else if (arg === '--force') {
-      options.force = true
-    } else if (arg === '--help' || arg === '-h') {
-      options.help = true
-    } else if (!arg.startsWith('-')) {
-      options.worktreeName = arg
-    } else {
-      console.error(`Unknown option: ${arg}`)
-      help()
-      process.exit(1)
-    }
-
-    i++
-  }
-
-  return options
-}
-
-export function help(): void {
-  console.log(`
-Cancel a Ralph loop
-
-Usage:
-  ocm-mem cancel [name] [options]
-
-Arguments:
-  name                  Worktree name to cancel (optional if only one active)
-
-Options:
-  --cleanup             Remove worktree directory after cancellation
-  --force               Skip confirmation prompt
-  --project, -p <id>    Project ID (auto-detected from git if not provided)
-  --db-path <path>      Path to memory database
-  --help, -h            Show this help message
-  `.trim())
-}
-
-export async function run(args: string[], globalOpts: { dbPath?: string; projectId?: string }): Promise<void> {
-  const options = parseArgs(args)
-  options.projectId = options.projectId || globalOpts.projectId
-  options.dbPath = options.dbPath || globalOpts.dbPath
-
-  if (options.help) {
-    help()
-    process.exit(0)
-  }
-
-  const db = openDatabase(options.dbPath)
+export async function run(argv: CancelArgs): Promise<void> {
+  const db = openDatabase(argv.dbPath)
 
   try {
-    const projectId = options.projectId
+    const projectId = argv.resolvedProjectId
 
     const now = Date.now()
     let query: string
@@ -123,11 +65,23 @@ export async function run(args: string[], globalOpts: { dbPath?: string; project
 
     let loopToCancel: { state: RalphState; row: { project_id: string; key: string; data: string } } | undefined
 
-    if (options.worktreeName) {
-      loopToCancel = loops.find((l) => l.state.worktreeName === options.worktreeName)
+    if (argv.name) {
+      const { match, candidates } = findPartialMatch(argv.name, loops, (l) => [
+        l.state.worktreeName,
+        l.state.worktreeBranch,
+      ])
 
-      if (!loopToCancel) {
-        console.error(`Ralph loop not found: ${options.worktreeName}`)
+      if (!match && candidates.length > 0) {
+        console.error(`Multiple loops match '${argv.name}':`)
+        for (const c of candidates) {
+          console.error(`  - ${c.state.worktreeName}`)
+        }
+        console.error('')
+        process.exit(1)
+      }
+
+      if (!match && candidates.length === 0) {
+        console.error(`Ralph loop not found: ${argv.name}`)
         console.error('')
         console.error('Active loops:')
         for (const l of loops) {
@@ -136,6 +90,8 @@ export async function run(args: string[], globalOpts: { dbPath?: string; project
         console.error('')
         process.exit(1)
       }
+
+      loopToCancel = match!
     } else {
       if (loops.length === 1) {
         loopToCancel = loops[0]
@@ -166,62 +122,100 @@ export async function run(args: string[], globalOpts: { dbPath?: string; project
     console.log(`  Session:   ${state.sessionId}`)
     console.log(`  Iteration: ${state.iteration}/${state.maxIterations}`)
     console.log(`  Phase:     ${state.phase}`)
-    if (options.cleanup) {
+    if (argv.cleanup) {
       console.log(`  Worktree:  ${state.worktreeDir} (will be removed)`)
     }
     console.log('')
 
-    await runCancel(db, loopToCancel, options)
+    const shouldProceed = argv.force || await confirm(`Cancel Ralph loop '${state.worktreeName}'`)
+
+    if (!shouldProceed) {
+      console.log('Cancelled.')
+      return
+    }
+
+    const updatedState = {
+      ...state,
+      active: false,
+      completedAt: new Date().toISOString(),
+      terminationReason: 'cancelled',
+    }
+    db.prepare('UPDATE project_kv SET data = ?, updated_at = ? WHERE project_id = ? AND key = ?').run(
+      JSON.stringify(updatedState),
+      Date.now(),
+      loopToCancel.row.project_id,
+      loopToCancel.row.key,
+    )
+
+    console.log(`Cancelled Ralph loop: ${state.worktreeName}`)
+
+    if (argv.cleanup && state.worktreeDir && !state.inPlace) {
+      if (existsSync(state.worktreeDir)) {
+        try {
+          const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
+          const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
+          const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
+          if (removeResult.status !== 0) {
+            throw new Error(removeResult.stderr || 'git worktree remove failed')
+          }
+          console.log(`Removed worktree: ${state.worktreeDir}`)
+        } catch {
+          console.error(`Failed to remove worktree: ${state.worktreeDir}`)
+          console.error('You may need to remove it manually.')
+        }
+      }
+    }
+
+    console.log('')
   } finally {
     db.close()
   }
 }
 
-async function runCancel(
-  db: ReturnType<typeof openDatabase>,
-  loopToCancel: { state: RalphState; row: { project_id: string; key: string; data: string } },
-  options: CancelOptions & { worktreeName?: string },
-): Promise<void> {
-  const { state } = loopToCancel
+export function help(): void {
+  console.log(`
+Cancel a Ralph loop
 
-  const shouldProceed = options.force || await confirm(`Cancel Ralph loop '${state.worktreeName}'`)
+Usage:
+  ocm-mem cancel [name] [options]
 
-  if (!shouldProceed) {
-    console.log('Cancelled.')
-    return
+Arguments:
+  name                  Worktree name to cancel (optional if only one active)
+
+Options:
+  --cleanup             Remove worktree directory after cancellation
+  --force               Skip confirmation prompt
+  --project, -p <id>    Project ID (auto-detected from git if not provided)
+  --db-path <path>      Path to memory database
+  --help, -h            Show this help message
+  `.trim())
+}
+
+export async function cli(args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }): Promise<void> {
+  const argv: CancelArgs = {
+    dbPath: globalOpts.dbPath,
+    resolvedProjectId: globalOpts.resolvedProjectId,
   }
 
-  const updatedState = {
-    ...state,
-    active: false,
-    completedAt: new Date().toISOString(),
-    terminationReason: 'cancelled',
-  }
-  db.prepare('UPDATE project_kv SET data = ?, updated_at = ? WHERE project_id = ? AND key = ?').run(
-    JSON.stringify(updatedState),
-    Date.now(),
-    loopToCancel.row.project_id,
-    loopToCancel.row.key,
-  )
-
-  console.log(`Cancelled Ralph loop: ${state.worktreeName}`)
-
-  if (options.cleanup && state.worktreeDir && !state.inPlace) {
-    if (existsSync(state.worktreeDir)) {
-      try {
-        const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
-        const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
-        const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
-        if (removeResult.status !== 0) {
-          throw new Error(removeResult.stderr || 'git worktree remove failed')
-        }
-        console.log(`Removed worktree: ${state.worktreeDir}`)
-      } catch {
-        console.error(`Failed to remove worktree: ${state.worktreeDir}`)
-        console.error('You may need to remove it manually.')
-      }
+  let i = 0
+  while (i < args.length) {
+    const arg = args[i]
+    if (arg === '--cleanup') {
+      argv.cleanup = true
+    } else if (arg === '--force') {
+      argv.force = true
+    } else if (arg === '--help' || arg === '-h') {
+      help()
+      process.exit(0)
+    } else if (!arg.startsWith('-')) {
+      argv.name = arg
+    } else {
+      console.error(`Unknown option: ${arg}`)
+      help()
+      process.exit(1)
     }
+    i++
   }
 
-  console.log('')
+  await run(argv)
 }

@@ -2,19 +2,7 @@ import { execFileSync } from 'child_process'
 import { VERSION } from '../../version'
 import { checkForUpdate, performUpgrade } from '../../utils/upgrade'
 
-export function help(): void {
-  console.log(`
-Check for and install plugin updates
-
-Usage:
-  ocm-mem upgrade
-
-Options:
-  --help, -h    Show this help message
-  `.trim())
-}
-
-export async function run(_args: string[], _globalOpts: { dbPath?: string; projectId?: string }): Promise<void> {
+export async function run(): Promise<void> {
   const updateCheck = await checkForUpdate()
 
   if (!updateCheck.latest || !updateCheck.updateAvailable) {
@@ -42,4 +30,16 @@ export async function run(_args: string[], _globalOpts: { dbPath?: string; proje
   if (result.upgraded) {
     console.log('Restart OpenCode to use the new version.')
   }
+}
+
+export function help(): void {
+  console.log(`
+Check for and install plugin updates
+
+Usage:
+  ocm-mem upgrade
+
+Options:
+  --help, -h    Show this help message
+  `.trim())
 }
