@@ -99,7 +99,7 @@ All execution modes require a **title** — a short descriptive label for the se
 | Option | Tool | inPlace | Plan Content |
 |---|---|---|---|
 | New session | memory-plan-execute | false | Full self-contained plan |
-| Execute here | memory-plan-execute | true | "See plan above" |
+| Execute here | memory-plan-execute | true | "Execute the implementation plan from this conversation. Review all phases above and implement each one." |
 | Ralph (worktree) | memory-plan-ralph | false | Full self-contained plan |
 | Ralph (in place) | memory-plan-ralph | true | Full self-contained plan |
 

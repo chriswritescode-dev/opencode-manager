@@ -608,7 +608,7 @@ Do NOT output text without also making this tool call.
 </system-reminder>`,
       'Execute here': `<system-reminder>
 The user selected "Execute here". You MUST now call memory-plan-execute in this response with:
-- plan: "See plan above" (the code agent continues this session and already has context)
+- plan: "Execute the implementation plan from this conversation. Review all phases above and implement each one."
 - title: A short descriptive title for the session
 - inPlace: true
 Do NOT output text without also making this tool call.
@@ -774,19 +774,21 @@ Do NOT output text without also making this tool call.
             const executionModel = parseModelString(config.executionModel)
 
             if (args.inPlace) {
+              const inPlacePrompt = `The architect agent has created an implementation plan in this conversation above. You are now the code agent taking over this session. Your job is to execute the plan — edit files, run commands, create tests, and implement every phase. Do NOT just describe or summarize the changes. Actually make them.\n\nPlan reference: ${args.plan}`
+
               const { result: promptResult, usedModel: actualModel } = await retryWithModelFallback(
                 () => v2.session.promptAsync({
                   sessionID: context.sessionID,
                   directory,
                   agent: 'code',
-                  parts: [{ type: 'text' as const, text: args.plan }],
+                  parts: [{ type: 'text' as const, text: inPlacePrompt }],
                   ...(executionModel ? { model: executionModel } : {}),
                 }),
                 () => v2.session.promptAsync({
                   sessionID: context.sessionID,
                   directory,
                   agent: 'code',
-                  parts: [{ type: 'text' as const, text: args.plan }],
+                  parts: [{ type: 'text' as const, text: inPlacePrompt }],
                 }),
                 executionModel,
                 logger,

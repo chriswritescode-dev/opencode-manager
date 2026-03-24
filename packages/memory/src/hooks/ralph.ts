@@ -254,6 +254,37 @@ export function createRalphEventHandler(
     }
   }
 
+  async function rotateSession(oldSessionId: string, state: RalphState): Promise<string> {
+    const createResult = await v2Client.session.create({
+      title: state.worktreeName,
+      directory: state.worktreeDir,
+    })
+
+    if (createResult.error || !createResult.data) {
+      throw new Error(`Failed to create new session: ${createResult.error}`)
+    }
+
+    const newSessionId = createResult.data.id
+
+    const oldRetryTimeout = retryTimeouts.get(oldSessionId)
+    if (oldRetryTimeout) {
+      clearTimeout(oldRetryTimeout)
+      retryTimeouts.delete(oldSessionId)
+    }
+
+    ralphService.deleteState(oldSessionId)
+
+    stopWatchdog(oldSessionId)
+    startWatchdog(newSessionId)
+
+    v2Client.session.delete({ sessionID: oldSessionId, directory: state.worktreeDir }).catch((err) => {
+      logger.error(`Ralph: failed to delete old session ${oldSessionId}`, err)
+    })
+
+    logger.log(`Ralph: rotated session ${oldSessionId} → ${newSessionId}`)
+    return newSessionId
+  }
+
   async function handleCodingPhase(sessionId: string, state: RalphState): Promise<void> {
     let currentState = ralphService.getActiveState(sessionId)
     if (!currentState?.active) {
@@ -315,22 +346,34 @@ export function createRalphEventHandler(
       return
     }
 
+    let activeSessionId = sessionId
+    try {
+      activeSessionId = await rotateSession(sessionId, currentState)
+    } catch (err) {
+      logger.error(`Ralph: session rotation failed, continuing with existing session`, err)
+    }
+
     const nextIteration = currentState.iteration + 1
-    ralphService.setState(sessionId, { ...currentState, iteration: nextIteration, errorCount: 0 })
+    ralphService.setState(activeSessionId, {
+      ...currentState,
+      sessionId: activeSessionId,
+      iteration: nextIteration,
+      errorCount: 0,
+    })
 
     const continuationPrompt = ralphService.buildContinuationPrompt({ ...currentState, iteration: nextIteration })
-    logger.log(`Ralph iteration ${nextIteration} for session ${sessionId}`)
+    logger.log(`Ralph iteration ${nextIteration} for session ${activeSessionId}`)
 
     const currentConfig = getConfig()
     const ralphModel = parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
 
     const sendContinuationPromptWithModel = async () => {
-      const freshState = ralphService.getActiveState(sessionId)
+      const freshState = ralphService.getActiveState(activeSessionId)
       if (!freshState?.active) {
         throw new Error('loop_cancelled')
       }
       const result = await v2Client.session.promptAsync({
-        sessionID: sessionId,
+        sessionID: activeSessionId,
         directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
         model: ralphModel!,
@@ -339,12 +382,12 @@ export function createRalphEventHandler(
     }
     
     const sendContinuationPromptWithoutModel = async () => {
-      const freshState = ralphService.getActiveState(sessionId)
+      const freshState = ralphService.getActiveState(activeSessionId)
       if (!freshState?.active) {
         throw new Error('loop_cancelled')
       }
       const result = await v2Client.session.promptAsync({
-        sessionID: sessionId,
+        sessionID: activeSessionId,
         directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
       })
@@ -365,7 +408,7 @@ export function createRalphEventHandler(
           throw result.error
         }
       }
-      await handlePromptError(sessionId, currentState, 'failed to send continuation prompt', promptResult.error, retryFn)
+      await handlePromptError(activeSessionId, currentState, 'failed to send continuation prompt', promptResult.error, retryFn)
       return
     }
     
@@ -375,7 +418,7 @@ export function createRalphEventHandler(
       logger.log(`coding phase using default model (fallback)`)
     }
     
-    consecutiveStalls.set(sessionId, 0)
+    consecutiveStalls.set(activeSessionId, 0)
   }
 
   async function handleAuditingPhase(sessionId: string, state: RalphState): Promise<void> {
@@ -412,8 +455,16 @@ export function createRalphEventHandler(
       return
     }
 
-    ralphService.setState(sessionId, {
+    let activeSessionId = sessionId
+    try {
+      activeSessionId = await rotateSession(sessionId, currentState)
+    } catch (err) {
+      logger.error(`Ralph: session rotation failed, continuing with existing session`, err)
+    }
+
+    ralphService.setState(activeSessionId, {
       ...currentState,
+      sessionId: activeSessionId,
       iteration: nextIteration,
       phase: 'coding',
       lastAuditResult: auditFindings,
@@ -425,18 +476,18 @@ export function createRalphEventHandler(
       { ...currentState, iteration: nextIteration },
       auditFindings,
     )
-    logger.log(`Ralph iteration ${nextIteration} for session ${sessionId}`)
+    logger.log(`Ralph iteration ${nextIteration} for session ${activeSessionId}`)
 
     const currentConfig = getConfig()
     const ralphModel = parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
 
     const sendContinuationPromptWithModel = async () => {
-      const freshState = ralphService.getActiveState(sessionId)
+      const freshState = ralphService.getActiveState(activeSessionId)
       if (!freshState?.active) {
         throw new Error('loop_cancelled')
       }
       const result = await v2Client.session.promptAsync({
-        sessionID: sessionId,
+        sessionID: activeSessionId,
         directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
         model: ralphModel!,
@@ -445,12 +496,12 @@ export function createRalphEventHandler(
     }
     
     const sendContinuationPromptWithoutModel = async () => {
-      const freshState = ralphService.getActiveState(sessionId)
+      const freshState = ralphService.getActiveState(activeSessionId)
       if (!freshState?.active) {
         throw new Error('loop_cancelled')
       }
       const result = await v2Client.session.promptAsync({
-        sessionID: sessionId,
+        sessionID: activeSessionId,
         directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
       })
@@ -466,7 +517,7 @@ export function createRalphEventHandler(
     
     if (promptResult.error) {
       const retryFn = async () => {
-        const freshState = ralphService.getActiveState(sessionId)
+        const freshState = ralphService.getActiveState(activeSessionId)
         if (!freshState?.active) {
           throw new Error('loop_cancelled')
         }
@@ -475,7 +526,7 @@ export function createRalphEventHandler(
           throw result.error
         }
       }
-      await handlePromptError(sessionId, currentState, 'failed to send continuation prompt after audit', promptResult.error, retryFn)
+      await handlePromptError(activeSessionId, currentState, 'failed to send continuation prompt after audit', promptResult.error, retryFn)
       return
     }
     
@@ -485,7 +536,7 @@ export function createRalphEventHandler(
       logger.log(`coding continuation using default model (fallback)`)
     }
     
-    consecutiveStalls.set(sessionId, 0)
+    consecutiveStalls.set(activeSessionId, 0)
   }
 
   async function onEvent(input: { event: { type: string; properties?: Record<string, unknown> } }): Promise<void> {
