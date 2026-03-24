@@ -1,17 +1,17 @@
 import { Loader2, CheckCircle2, XCircle, Ban, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import type { RalphLoopState } from '@/api/memory'
+import type { RalphState } from '@opencode-manager/shared'
 
 interface RepoRalphListProps {
   isLoading: boolean
-  data: RalphLoopState[] | undefined
+  data: RalphState[] | undefined
   error: Error | null
   onCancel: (sessionId: string) => void
-  cancelPending: boolean
+  pendingSessionId: string | null
 }
 
-function StatusIcon({ loop }: { loop: RalphLoopState }) {
+function StatusIcon({ loop }: { loop: RalphState }) {
   if (loop.active) return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
   if (loop.terminationReason === 'completed') return <CheckCircle2 className="h-4 w-4 text-green-400" />
   if (loop.terminationReason === 'cancelled' || loop.terminationReason === 'user_aborted') return <Ban className="h-4 w-4 text-yellow-400" />
@@ -28,7 +28,7 @@ function formatDuration(startedAt: string, completedAt?: string): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-export function RepoRalphList({ isLoading, data, error, onCancel, cancelPending }: RepoRalphListProps) {
+export function RepoRalphList({ isLoading, data, error, onCancel, pendingSessionId }: RepoRalphListProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -65,14 +65,14 @@ export function RepoRalphList({ isLoading, data, error, onCancel, cancelPending 
             </div>
             <div className="flex items-center gap-2 shrink-0">
               <Badge variant="outline" className="text-xs capitalize">
-                {loop.phase}
+                {loop.phase ?? 'coding'}
               </Badge>
               {loop.active && (
                 <Button
                   variant="destructive"
                   size="sm"
                   onClick={() => onCancel(loop.sessionId)}
-                  disabled={cancelPending}
+                  disabled={pendingSessionId === loop.sessionId}
                   className="h-7 text-xs"
                 >
                   Cancel
@@ -81,8 +81,8 @@ export function RepoRalphList({ isLoading, data, error, onCancel, cancelPending 
             </div>
           </div>
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
-            <span>Iteration {loop.iteration}/{loop.maxIterations}</span>
-            <span>{formatDuration(loop.startedAt, loop.completedAt)}</span>
+            <span>Iteration {loop.iteration ?? 0}/{loop.maxIterations ?? 0}</span>
+            <span>{formatDuration(loop.startedAt ?? new Date().toISOString(), loop.completedAt)}</span>
             {loop.worktreeBranch && <span className="truncate">{loop.worktreeBranch}</span>}
           </div>
           {loop.terminationReason && !loop.active && (

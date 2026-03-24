@@ -16,7 +16,9 @@ import {
   PluginConfigSchema,
   CreateKvEntryRequestSchema,
   UpdateKvEntryRequestSchema,
+  RalphStateSchema,
   type PluginConfig,
+  type RalphState,
 } from '@opencode-manager/shared/schemas'
 
 function resolveMemoryDataDir(): string {
@@ -548,7 +550,7 @@ export function createMemoryRoutes(db: Database): Hono {
       const projectId = await resolveProjectId(repo.fullPath)
 
       if (!projectId) {
-        return c.json({ error: 'Failed to resolve project ID' }, 500)
+        return c.json({ loops: [], projectId: null })
       }
 
       const entries = pluginMemory.listKv(projectId, 'ralph:')
@@ -557,6 +559,11 @@ export function createMemoryRoutes(db: Database): Hono {
         .filter((data): data is Record<string, unknown> =>
           data !== null && typeof data === 'object' && 'active' in data
         )
+        .map(data => {
+          const result = RalphStateSchema.safeParse(data)
+          return result.success ? result.data : null
+        })
+        .filter((loop): loop is RalphState => loop !== null)
 
       return c.json({ loops })
     } catch (error) {

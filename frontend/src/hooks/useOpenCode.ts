@@ -544,7 +544,7 @@ export const useAbortSession = (
       attemptAbort();
 
       if (repoId) {
-        cancelRalphLoop(String(repoId), targetSessionID).catch(() => {})
+        cancelRalphLoop(repoId, targetSessionID).catch(() => {})
       }
 
       retryIntervalRef.current = setInterval(() => {

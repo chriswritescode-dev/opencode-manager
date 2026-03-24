@@ -9,7 +9,6 @@ import { Header } from "@/components/ui/header";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { RepoRalphDialog } from "@/components/repo/RepoRalphDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useSSE } from "@/hooks/useSSE";
@@ -18,7 +17,7 @@ import { useSwipeBack } from "@/hooks/useMobile";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
-import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2, CalendarClock, Sparkles, Bot } from "lucide-react";
+import { Plug, FolderOpen, Plus, GitBranch, GitCommitHorizontal, ShieldOff, Brain, Loader2, CalendarClock, Sparkles } from "lucide-react";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
@@ -34,7 +33,6 @@ export function RepoDetail() {
   const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const [sourceControlOpen, setSourceControlOpen] = useState(false);
   const [resetPermissionsOpen, setResetPermissionsOpen] = useState(false);
-  const [ralphDialogOpen, setRalphDialogOpen] = useState(false);
   const pageRef = useRef<HTMLDivElement>(null);
   
   const handleSwipeBack = useCallback(() => {
@@ -159,17 +157,6 @@ export function RepoDetail() {
           <Sparkles className="w-4 h-4 sm:mr-2" />
           <span className="hidden sm:inline">Skills</span>
         </Button>
-        {memoryPluginStatus?.memoryPluginEnabled && (
-          <Button
-            variant="outline"
-            onClick={() => setRalphDialogOpen(true)}
-            size="sm"
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <Bot className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Ralph</span>
-          </Button>
-        )}
         <Button
           variant="outline"
           onClick={() => setSourceControlOpen(true)}
@@ -232,11 +219,6 @@ export function RepoDetail() {
           <DropdownMenuItem onClick={() => setSkillsDialogOpen(true)}>
             <Sparkles className="w-4 h-4 mr-2" /> Skills
           </DropdownMenuItem>
-          {memoryPluginStatus?.memoryPluginEnabled && (
-            <DropdownMenuItem onClick={() => setRalphDialogOpen(true)}>
-              <Bot className="w-4 h-4 mr-2" /> Ralph
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem onClick={() => setResetPermissionsOpen(true)}>
             <ShieldOff className="w-4 h-4 mr-2" /> Reset Permissions
           </DropdownMenuItem>
@@ -286,12 +268,6 @@ export function RepoDetail() {
       <RepoSkillsDialog
         open={skillsDialogOpen}
         onOpenChange={setSkillsDialogOpen}
-        repoId={repoId}
-      />
-
-      <RepoRalphDialog
-        open={ralphDialogOpen}
-        onOpenChange={setRalphDialogOpen}
         repoId={repoId}
       />
 

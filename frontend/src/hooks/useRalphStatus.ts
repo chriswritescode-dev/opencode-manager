@@ -2,12 +2,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getRalphStatus, cancelRalphLoop } from '@/api/memory'
 import { showToast } from '@/lib/toast'
 
-export function useRalphStatus(repoId: number, open: boolean) {
+export function useRalphStatus(repoId: number | undefined, open: boolean) {
   const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['ralph-status', repoId],
-    queryFn: () => getRalphStatus(repoId),
+    queryFn: () => getRalphStatus(repoId!),
     enabled: open && !!repoId,
     staleTime: 0,
     refetchInterval: ({ state }) => {
@@ -18,7 +18,7 @@ export function useRalphStatus(repoId: number, open: boolean) {
 
   const cancelMutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
-      cancelRalphLoop(String(repoId), sessionId),
+      cancelRalphLoop(repoId!, sessionId),
     onSuccess: (result) => {
       if (result.cancelled) {
         queryClient.invalidateQueries({ queryKey: ['ralph-status', repoId] })
@@ -31,5 +31,18 @@ export function useRalphStatus(repoId: number, open: boolean) {
     },
   })
 
-  return { data, isLoading, error, cancelMutation }
+  const pendingSessionId = cancelMutation.isPending ? (cancelMutation.variables?.sessionId ?? null) : null
+
+  return { data, isLoading, error, cancelMutation, pendingSessionId }
+}
+
+export function useRalphActiveCount(repoId: number | undefined, enabled: boolean) {
+  const { data } = useQuery({
+    queryKey: ['ralph-status', repoId],
+    queryFn: () => getRalphStatus(repoId!),
+    enabled: enabled && !!repoId,
+    staleTime: 0,
+    refetchInterval: 10000,
+  })
+  return data?.loops.filter(l => l.active).length ?? 0
 }
