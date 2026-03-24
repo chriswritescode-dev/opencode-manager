@@ -1,0 +1,92 @@
+FROM kasmweb/core-ubuntu-jammy:1.18.0
+USER root
+
+ENV HOME /home/kasm-default-profile
+ENV STARTUPDIR /dockerstartup
+ENV INST_SCRIPTS $STARTUPDIR/install
+WORKDIR $HOME
+
+######### Customize Container Here ###########
+
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    lsof \
+    ripgrep \
+    ca-certificates \
+    grep \
+    gawk \
+    sed \
+    findutils \
+    coreutils \
+    procps \
+    jq \
+    less \
+    tree \
+    file \
+    python3 \
+    python3-pip \
+    python3-venv \
+    chromium-browser \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+  && apt-get update && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@latest --activate
+
+RUN curl -fsSL https://bun.sh/install | bash && \
+    mv $HOME/.bun /opt/bun && \
+    chmod -R 755 /opt/bun && \
+    ln -s /opt/bun/bin/bun /usr/local/bin/bun
+
+ARG UV_VERSION=latest
+ARG OPENCODE_VERSION=latest
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh && \
+    mv $HOME/.local/bin/uv /usr/local/bin/uv && \
+    mv $HOME/.local/bin/uvx /usr/local/bin/uvx && \
+    chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
+    if [ "${OPENCODE_VERSION}" = "latest" ]; then \
+        curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path; \
+    else \
+        curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path; \
+    fi && \
+    mv $HOME/.opencode /opt/opencode && \
+    chmod -R 755 /opt/opencode && \
+    ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
+
+COPY --from=ghcr.io/chriswritescode-dev/opencode-manager:latest /app /opt/opencode-manager
+COPY --from=ghcr.io/chriswritescode-dev/opencode-manager:latest /opt/opencode-plugins /opt/opencode-plugins
+
+RUN mkdir -p /workspace /opt/opencode-manager/data && \
+    chown -R 1000:0 /workspace /opt/opencode-manager/data /opt/opencode-plugins
+
+ENV NODE_ENV=production
+ENV HOST=0.0.0.0
+ENV PORT=5003
+ENV OPENCODE_SERVER_PORT=5551
+ENV DATABASE_PATH=/opt/opencode-manager/data/opencode.db
+ENV WORKSPACE_PATH=/workspace
+ENV NODE_PATH=/opt/opencode-plugins/node_modules
+
+COPY scripts/kasm-startup.sh $STARTUPDIR/custom_startup.sh
+RUN chmod +x $STARTUPDIR/custom_startup.sh
+
+######### End Customizations ###########
+
+RUN chown 1000:0 $HOME
+RUN $STARTUPDIR/set_user_permission.sh $HOME
+
+ENV HOME /home/kasm-user
+WORKDIR $HOME
+RUN mkdir -p $HOME && chown -R 1000:0 $HOME
+
+USER 1000
