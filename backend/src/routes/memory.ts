@@ -525,6 +525,46 @@ export function createMemoryRoutes(db: Database): Hono {
     }
   })
 
+  app.get('/ralph/status', async (c) => {
+    const repoIdParam = c.req.query('repoId')
+
+    if (!repoIdParam) {
+      return c.json({ error: 'Missing repoId' }, 400)
+    }
+
+    const repoId = parseInt(repoIdParam, 10)
+
+    if (isNaN(repoId)) {
+      return c.json({ error: 'Invalid repoId' }, 400)
+    }
+
+    try {
+      const repo = getRepoById(db, repoId)
+
+      if (!repo) {
+        return c.json({ loops: [] })
+      }
+
+      const projectId = await resolveProjectId(repo.fullPath)
+
+      if (!projectId) {
+        return c.json({ error: 'Failed to resolve project ID' }, 500)
+      }
+
+      const entries = pluginMemory.listKv(projectId, 'ralph:')
+      const loops = entries
+        .map(e => e.data)
+        .filter((data): data is Record<string, unknown> =>
+          data !== null && typeof data === 'object' && 'active' in data
+        )
+
+      return c.json({ loops })
+    } catch (error) {
+      logger.error('Failed to get Ralph status:', error)
+      return c.json({ error: 'Failed to get Ralph status' }, 500)
+    }
+  })
+
   app.post('/ralph/cancel', async (c) => {
     try {
       const body = await c.req.json()

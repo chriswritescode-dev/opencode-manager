@@ -123,6 +123,30 @@ export async function updateKvEntry(projectId: string, key: string, data: Update
   })
 }
 
+export interface RalphLoopState {
+  active: boolean
+  sessionId: string
+  worktreeName: string
+  worktreeDir: string
+  worktreeBranch?: string
+  iteration: number
+  maxIterations: number
+  startedAt: string
+  prompt: string
+  phase: 'coding' | 'auditing'
+  audit: boolean
+  lastAuditResult?: string
+  errorCount: number
+  auditCount: number
+  terminationReason?: string
+  completedAt?: string
+  inPlace?: boolean
+}
+
+export async function getRalphStatus(repoId: number): Promise<{ loops: RalphLoopState[] }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/ralph/status?repoId=${repoId}`)
+}
+
 export async function cancelRalphLoop(repoId: string, sessionId: string): Promise<{ cancelled: boolean; worktreeName?: string }> {
   return fetchWrapper(`${API_BASE_URL}/api/memory/ralph/cancel`, {
     method: 'POST',
