@@ -88,10 +88,29 @@ export function SessionDetail() {
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
+  const promptOverlayRef = useRef<HTMLDivElement>(null);
+  const [promptOverlayHeight, setPromptOverlayHeight] = useState(112);
 
   useEffect(() => {
     return bindSwipe(pageRef.current);
   }, [bindSwipe]);
+
+  useEffect(() => {
+    const el = promptOverlayRef.current;
+    if (!el) return;
+    let mounted = true;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry && mounted) {
+        setPromptOverlayHeight(entry.contentRect.height);
+      }
+    });
+    observer.observe(el);
+    return () => {
+      mounted = false;
+      observer.disconnect();
+    };
+  }, []);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -141,7 +160,7 @@ export function SessionDetail() {
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion } = useQuestions();
 
   const sessionStatus = useSessionStatusForSession(sessionId);
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry';
+  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
   const lastAssistantText = (lastAssistantMessage?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
@@ -488,7 +507,7 @@ export function SessionDetail() {
       <SessionTodoDisplay sessionID={sessionId} />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28 overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
           {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
@@ -506,6 +525,7 @@ export function SessionDetail() {
         </div>
         {opcodeUrl && repoDirectory && !isEditingMessage && (
           <div
+            ref={promptOverlayRef}
             className="absolute left-0 right-0 flex justify-center"
             style={{ bottom: inputBottomOffset }}
           >
