@@ -978,7 +978,7 @@ Do NOT output text without also making this tool call.
             await ralphHandler.cancelBySessionId(state.sessionId)
             logger.log(`ralph-cancel: cancelled loop for session=${state.sessionId} at iteration ${state.iteration}`)
 
-            if (config.ralph?.cleanupWorktree && !state.inPlace) {
+            if (config.ralph?.cleanupWorktree && !state.inPlace && state.worktreeDir) {
               try {
                 const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
                 const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
@@ -994,7 +994,7 @@ Do NOT output text without also making this tool call.
 
             const modeInfo = state.inPlace ? ' (in-place)' : ''
             const branchInfo = state.worktreeBranch ? `\nBranch: ${state.worktreeBranch}` : ''
-            return `Cancelled Ralph loop "${state.worktreeName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir}${branchInfo}`
+            return `Cancelled Ralph loop "${state.worktreeName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir ?? 'unknown'}${branchInfo}`
           },
         }),
         'ralph-status': tool({
@@ -1030,7 +1030,7 @@ Do NOT output text without also making this tool call.
                 return `Loop "${stoppedState.worktreeName}" completed successfully and cannot be restarted.`
               }
 
-              if (!stoppedState.inPlace) {
+              if (!stoppedState.inPlace && stoppedState.worktreeDir) {
                 if (!existsSync(stoppedState.worktreeDir)) {
                   return `Cannot restart "${stoppedState.worktreeName}": worktree directory no longer exists at ${stoppedState.worktreeDir}. The worktree may have been cleaned up.`
                 }
@@ -1038,7 +1038,7 @@ Do NOT output text without also making this tool call.
 
               const createResult = await v2.session.create({
                 title: stoppedState.worktreeName,
-                directory: stoppedState.worktreeDir,
+                directory: stoppedState.worktreeDir!,
               })
 
               if (createResult.error || !createResult.data) {
@@ -1071,7 +1071,7 @@ Do NOT output text without also making this tool call.
 
               ralphService.setState(newSessionId, newState)
 
-              let promptText = stoppedState.prompt
+              let promptText = stoppedState.prompt ?? ''
               if (stoppedState.completionPromise) {
                 promptText += `\n\n---\n\n**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully, you MUST output the following tag exactly: <promise>${stoppedState.completionPromise}</promise>\n\nDo NOT output this tag until every phase is truly complete. The loop will continue until this signal is detected.`
               }
@@ -1081,14 +1081,14 @@ Do NOT output text without also making this tool call.
               const { result: promptResult } = await retryWithModelFallback(
                 () => v2.session.promptAsync({
                   sessionID: newSessionId,
-                  directory: stoppedState.worktreeDir,
+                  directory: stoppedState.worktreeDir!,
                   parts: [{ type: 'text' as const, text: promptText }],
                   agent: 'code',
                   model: ralphModel!,
                 }),
                 () => v2.session.promptAsync({
                   sessionID: newSessionId,
-                  directory: stoppedState.worktreeDir,
+                  directory: stoppedState.worktreeDir!,
                   parts: [{ type: 'text' as const, text: promptText }],
                   agent: 'code',
                 }),
@@ -1125,14 +1125,16 @@ Do NOT output text without also making this tool call.
 
                 const lines: string[] = ['Recently Completed Ralph Loops', '']
                 recent.forEach((s, i) => {
-                  const duration = s.completedAt
-                    ? Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)
+                  const startedAt = s.startedAt!
+                  const completedAt = s.completedAt!
+                  const duration = completedAt
+                    ? Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000)
                     : 0
                   const minutes = Math.floor(duration / 60)
                   const seconds = duration % 60
                   const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
                   lines.push(`${i + 1}. ${s.worktreeName}`)
-                  lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt}`)
+                  lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration ?? 0} | Duration: ${durationStr} | Completed: ${s.completedAt}`)
                   lines.push('')
                 })
                 lines.push('Use ralph-status <name> for detailed info.')
@@ -1148,18 +1150,19 @@ Do NOT output text without also making this tool call.
 
               const lines: string[] = [`Active Ralph Loops (${active.length})`, '']
               active.forEach((s, i) => {
-                const elapsed = Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000)
+                const startedAt = s.startedAt!
+                const elapsed = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)
                 const minutes = Math.floor(elapsed / 60)
                 const seconds = elapsed % 60
                 const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
-                const iterInfo = s.maxIterations > 0 ? `${s.iteration} / ${s.maxIterations}` : `${s.iteration} (unlimited)`
+                const iterInfo = (s.maxIterations ?? 0) > 0 ? `${s.iteration ?? 0} / ${s.maxIterations}` : `${s.iteration ?? 0} (unlimited)`
                 const sessionStatus = statuses[s.sessionId]?.type ?? 'unknown'
                 const modeIndicator = s.inPlace ? ' (in-place)' : ''
                 const stallInfo = ralphHandler.getStallInfo(s.sessionId)
                 const stallCount = stallInfo?.consecutiveStalls ?? 0
                 const stallSuffix = stallCount > 0 ? ` | Stalls: ${stallCount}` : ''
                 lines.push(`${i + 1}. ${s.worktreeName}${modeIndicator}`)
-                lines.push(`   Phase: ${s.phase} | Iteration: ${iterInfo} | Duration: ${duration} | Status: ${sessionStatus}${stallSuffix}`)
+                lines.push(`   Phase: ${s.phase ?? 'coding'} | Iteration: ${iterInfo} | Duration: ${duration} | Status: ${sessionStatus}${stallSuffix}`)
                 lines.push('')
               })
 
@@ -1167,14 +1170,16 @@ Do NOT output text without also making this tool call.
                 lines.push('Recently Completed:')
                 lines.push('')
                 recent.forEach((s, i) => {
-                  const duration = s.completedAt
-                    ? Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)
+                  const startedAt = s.startedAt!
+                  const completedAt = s.completedAt!
+                  const duration = completedAt
+                    ? Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000)
                     : 0
                   const minutes = Math.floor(duration / 60)
                   const seconds = duration % 60
                   const durationStr = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
                   lines.push(`${i + 1}. ${s.worktreeName}`)
-                  lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt}`)
+                  lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration ?? 0} | Duration: ${durationStr} | Completed: ${s.completedAt}`)
                   lines.push('')
                 })
               }
@@ -1193,9 +1198,11 @@ Do NOT output text without also making this tool call.
             }
 
             if (!state.active) {
-              const maxInfo = state.maxIterations > 0 ? `${state.iteration} / ${state.maxIterations}` : `${state.iteration} (unlimited)`
-              const duration = state.completedAt
-                ? Math.round((new Date(state.completedAt).getTime() - new Date(state.startedAt).getTime()) / 1000)
+              const maxInfo = (state.maxIterations ?? 0) > 0 ? `${state.iteration ?? 0} / ${state.maxIterations}` : `${state.iteration ?? 0} (unlimited)`
+              const startedAt = state.startedAt!
+              const completedAt = state.completedAt
+              const duration = completedAt
+                ? Math.round((new Date(completedAt).getTime() - new Date(startedAt).getTime()) / 1000)
                 : 0
               const minutes = Math.floor(duration / 60)
               const seconds = duration % 60
@@ -1222,7 +1229,7 @@ Do NOT output text without also making this tool call.
                 statusLines.push(`Branch: ${state.worktreeBranch}`)
               }
               statusLines.push(
-                `Started: ${state.startedAt}`,
+                `Started: ${startedAt}`,
                 ...(state.completedAt ? [`Completed: ${state.completedAt}`] : []),
               )
 
@@ -1230,7 +1237,7 @@ Do NOT output text without also making this tool call.
                 statusLines.push(...formatAuditResult(state.lastAuditResult))
               }
 
-              const sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir, logger)
+              const sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir!, logger)
               if (sessionOutput) {
                 statusLines.push('')
                 statusLines.push('Session Output:')
@@ -1240,8 +1247,9 @@ Do NOT output text without also making this tool call.
               return statusLines.join('\n')
             }
 
-            const maxInfo = state.maxIterations > 0 ? `${state.iteration} / ${state.maxIterations}` : `${state.iteration} (unlimited)`
-            const promptPreview = state.prompt.length > 100 ? `${state.prompt.substring(0, 97)}...` : state.prompt
+            const maxInfo = (state.maxIterations ?? 0) > 0 ? `${state.iteration ?? 0} / ${state.maxIterations}` : `${state.iteration ?? 0} (unlimited)`
+            const promptText = state.prompt ?? ''
+            const promptPreview = promptText.length > 100 ? `${promptText.substring(0, 97)}...` : promptText
 
             let sessionStatus = 'unknown'
             try {
@@ -1257,7 +1265,8 @@ Do NOT output text without also making this tool call.
               sessionStatus = 'unavailable'
             }
 
-            const elapsed = Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000)
+            const startedAt = state.startedAt!
+            const elapsed = Math.round((Date.now() - new Date(startedAt).getTime()) / 1000)
             const minutes = Math.floor(elapsed / 60)
             const seconds = elapsed % 60
             const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
@@ -1282,7 +1291,7 @@ Do NOT output text without also making this tool call.
             }
             statusLines.push(
               `Status: ${sessionStatus}`,
-              `Phase: ${state.phase}`,
+              `Phase: ${state.phase ?? 'coding'}`,
               `Iteration: ${maxInfo}`,
               `Duration: ${duration}`,
               `Audit: ${state.audit ? 'enabled' : 'disabled'}`,
@@ -1292,8 +1301,8 @@ Do NOT output text without also making this tool call.
             }
             statusLines.push(
               `Completion promise: ${state.completionPromise ?? 'none'}`,
-              `Started: ${state.startedAt}`,
-              ...(state.errorCount > 0 ? [`Error count: ${state.errorCount} (retries before termination: ${MAX_RETRIES})`] : []),
+              `Started: ${startedAt}`,
+              ...(state.errorCount ? [`Error count: ${state.errorCount} (retries before termination: ${MAX_RETRIES})`] : []),
               `Audit count: ${state.auditCount ?? 0}`,
               `Model: ${config.ralph?.model || config.executionModel || 'default'}`,
               `Auditor model: ${config.auditorModel || 'default'}`,
@@ -1307,7 +1316,7 @@ Do NOT output text without also making this tool call.
               statusLines.push(...formatAuditResult(state.lastAuditResult))
             }
 
-            const sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir, logger)
+            const sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir!, logger)
             if (sessionOutput) {
               statusLines.push('')
               statusLines.push('Session Output:')

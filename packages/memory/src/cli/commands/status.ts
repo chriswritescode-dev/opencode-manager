@@ -83,7 +83,7 @@ export async function run(argv: StatusArgs): Promise<void> {
     for (const row of rows) {
       try {
         const state = JSON.parse(row.data) as RalphState
-        if (state.active) {
+        if (state.active && state.worktreeName && state.iteration !== undefined && state.maxIterations !== undefined && state.phase && state.startedAt && state.audit !== undefined) {
           activeLoops.push({
             sessionId: state.sessionId,
             worktreeName: state.worktreeName,
@@ -164,7 +164,8 @@ export async function run(argv: StatusArgs): Promise<void> {
         }
 
         const state = JSON.parse(row.data) as RalphState
-        const duration = Date.now() - new Date(state.startedAt).getTime()
+        const startedAt = state.startedAt!
+        const duration = Date.now() - new Date(startedAt).getTime()
         const hours = Math.floor(duration / (1000 * 60 * 60))
         const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60))
         const seconds = Math.floor((duration % (1000 * 60)) / 1000)
@@ -184,9 +185,9 @@ export async function run(argv: StatusArgs): Promise<void> {
         console.log(`  Iteration:       ${state.iteration}/${state.maxIterations}`)
         console.log(`  Duration:        ${hours}h ${minutes}m ${seconds}s`)
         console.log(`  Audit:           ${state.audit ? 'Yes' : 'No'}`)
-        console.log(`  Error Count:     ${state.errorCount}`)
-        console.log(`  Audit Count:     ${state.auditCount}`)
-        console.log(`  Started:         ${new Date(state.startedAt).toISOString()}`)
+        console.log(`  Error Count:     ${state.errorCount ?? 0}`)
+        console.log(`  Audit Count:     ${state.auditCount ?? 0}`)
+        console.log(`  Started:         ${new Date(startedAt).toISOString()}`)
         if (state.completionPromise) {
           console.log(`  Completion:      ${state.completionPromise}`)
         }
@@ -196,7 +197,7 @@ export async function run(argv: StatusArgs): Promise<void> {
           }
         }
 
-        const sessionOutput = await tryFetchSessionOutput(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir)
+        const sessionOutput = await tryFetchSessionOutput(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir!)
         if (sessionOutput) {
           console.log('Session Output:')
           for (const line of formatSessionOutput(sessionOutput)) {
@@ -207,7 +208,8 @@ export async function run(argv: StatusArgs): Promise<void> {
       } else {
         const state = matchedLoop.loop.state
         const completedAt = state.completedAt!
-        const duration = new Date(completedAt).getTime() - new Date(state.startedAt).getTime()
+        const startedAt = state.startedAt!
+        const duration = new Date(completedAt).getTime() - new Date(startedAt).getTime()
         const hours = Math.floor(duration / (1000 * 60 * 60))
         const minutes = Math.floor((duration % (1000 * 60 * 60)) / (1000 * 60))
         const seconds = Math.floor((duration % (1000 * 60)) / 1000)
@@ -226,7 +228,7 @@ export async function run(argv: StatusArgs): Promise<void> {
         console.log(`  Iteration:       ${state.iteration}/${state.maxIterations}`)
         console.log(`  Duration:        ${hours}h ${minutes}m ${seconds}s`)
         console.log(`  Reason:          ${state.terminationReason ?? 'unknown'}`)
-        console.log(`  Started:         ${new Date(state.startedAt).toISOString()}`)
+        console.log(`  Started:         ${new Date(startedAt).toISOString()}`)
         console.log(`  Completed:       ${new Date(completedAt).toISOString()}`)
         if (state.lastAuditResult) {
           for (const line of formatAuditResult(state.lastAuditResult)) {
@@ -234,7 +236,7 @@ export async function run(argv: StatusArgs): Promise<void> {
           }
         }
 
-        const sessionOutput = await tryFetchSessionOutput(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir)
+        const sessionOutput = await tryFetchSessionOutput(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir!)
         if (sessionOutput) {
           console.log('Session Output:')
           for (const line of formatSessionOutput(sessionOutput)) {
