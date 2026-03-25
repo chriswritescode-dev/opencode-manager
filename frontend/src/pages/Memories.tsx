@@ -3,16 +3,18 @@ import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
 import { useProjectSummary, useKvEntries } from '@/hooks/useMemories'
+import { useRalphStatus } from '@/hooks/useRalphStatus'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Loader2, Plus, Brain, Key } from 'lucide-react'
+import { Loader2, Plus, Brain, Key, Bot } from 'lucide-react'
 import { getRepoDisplayName } from '@/lib/utils'
 import { MemoryList } from '@/components/memory/MemoryList'
 import { MemoryFormDialog } from '@/components/memory/MemoryFormDialog'
 import { KvList } from '@/components/memory/KvList'
+import { RepoRalphList } from '@/components/repo/RepoRalphList'
 
 export function Memories() {
   const { id } = useParams<{ id: string }>()
@@ -28,6 +30,7 @@ export function Memories() {
 
   const { data: projectSummary, isLoading: projectSummaryLoading } = useProjectSummary(repoId)
   const { data: kvEntries } = useKvEntries(projectSummary?.projectId ?? undefined)
+  const { data: ralphData, isLoading: ralphLoading, error: ralphError, cancelMutation, pendingSessionId } = useRalphStatus(repoId, activeTab === 'ralph')
 
   const projectId = projectSummary?.projectId ?? null
   const stats = projectSummary?.stats ?? null
@@ -125,12 +128,25 @@ export function Memories() {
               <Key className="w-4 h-4 mr-2" />
               Key-Value
             </TabsTrigger>
+            <TabsTrigger value="ralph">
+              <Bot className="w-4 h-4 mr-2" />
+              Ralph
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="memories">
             <MemoryList projectId={projectId} showFilters={true} />
           </TabsContent>
           <TabsContent value="kv">
             <KvList projectId={projectId ?? undefined} />
+          </TabsContent>
+          <TabsContent value="ralph">
+            <RepoRalphList
+              isLoading={ralphLoading}
+              data={ralphData?.loops}
+              error={ralphError}
+              onCancel={(sessionId) => cancelMutation.mutate({ sessionId })}
+              pendingSessionId={pendingSessionId}
+            />
           </TabsContent>
         </Tabs>
       </div>

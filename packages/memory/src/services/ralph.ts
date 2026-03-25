@@ -12,23 +12,24 @@ export const RECENT_MESSAGES_COUNT = 5
 export interface RalphState {
   active: boolean
   sessionId: string
-  worktreeName: string
-  worktreeDir: string
+  worktreeName?: string
+  worktreeDir?: string
   worktreeBranch?: string
-  workspaceId: string
-  iteration: number
-  maxIterations: number
+  workspaceId?: string
+  iteration?: number
+  maxIterations?: number
   completionPromise: string | null
-  startedAt: string
-  prompt: string
-  phase: 'coding' | 'auditing'
-  audit: boolean
+  startedAt?: string
+  prompt?: string
+  phase?: 'coding' | 'auditing'
+  audit?: boolean
   lastAuditResult?: string
-  errorCount: number
-  auditCount: number
+  errorCount?: number
+  auditCount?: number
   terminationReason?: string
   completedAt?: string
   inPlace?: boolean
+  modelFailed?: boolean
 }
 
 export interface RalphService {
@@ -86,17 +87,17 @@ export function createRalphService(
   }
 
   function buildContinuationPrompt(state: RalphState, auditFindings?: string): string {
-    let systemLine = `Ralph iteration ${state.iteration}`
+    let systemLine = `Ralph iteration ${state.iteration ?? 0}`
 
     if (state.completionPromise) {
       systemLine += ` | To stop: output <promise>${state.completionPromise}</promise> (ONLY when all requirements are met)`
-    } else if (state.maxIterations > 0) {
+    } else if ((state.maxIterations ?? 0) > 0) {
       systemLine += ` / ${state.maxIterations}`
     } else {
       systemLine += ` | No completion promise set - loop runs until cancelled`
     }
 
-    let prompt = `[${systemLine}]\n\n${state.prompt}`
+    let prompt = `[${systemLine}]\n\n${state.prompt ?? ''}`
 
     if (auditFindings) {
       const completionInstruction = state.completionPromise
@@ -109,13 +110,13 @@ export function createRalphService(
   }
 
   function buildAuditPrompt(state: RalphState): string {
-    const taskSummary = state.prompt.length > 200
-      ? `${state.prompt.substring(0, 197)}...`
-      : state.prompt
+    const taskSummary = (state.prompt?.length ?? 0) > 200
+      ? `${state.prompt?.substring(0, 197)}...`
+      : (state.prompt ?? '')
 
     const branchInfo = state.worktreeBranch ? ` (branch: ${state.worktreeBranch})` : ''
     return [
-      `Post-iteration ${state.iteration} code review${branchInfo}.`,
+      `Post-iteration ${state.iteration ?? 0} code review${branchInfo}.`,
       '',
       `Task context: ${taskSummary}`,
       '',

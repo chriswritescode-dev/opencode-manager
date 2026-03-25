@@ -139,3 +139,27 @@ export const UpdateKvEntryRequestSchema = z.object({
   ttlMs: z.number().optional(),
 })
 export type UpdateKvEntryRequest = z.infer<typeof UpdateKvEntryRequestSchema>
+
+export const RalphStateSchema = z.object({
+  active: z.boolean(),
+  sessionId: z.string(),
+  worktreeName: z.string().optional(),
+  worktreeDir: z.string().optional(),
+  worktreeBranch: z.string().optional(),
+  workspaceId: z.string().optional(),
+  iteration: z.number().optional(),
+  maxIterations: z.number().optional(),
+  completionPromise: z.string().nullable().optional(),
+  startedAt: z.string().optional(),
+  prompt: z.string().optional(),
+  phase: z.enum(['coding', 'auditing']).optional(),
+  audit: z.boolean().optional(),
+  lastAuditResult: z.string().optional(),
+  errorCount: z.number().optional(),
+  auditCount: z.number().optional(),
+  terminationReason: z.string().optional(),
+  completedAt: z.string().optional(),
+  inPlace: z.boolean().optional(),
+  modelFailed: z.boolean().optional(),
+})
+export type RalphState = z.infer<typeof RalphStateSchema>
