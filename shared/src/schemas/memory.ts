@@ -160,5 +160,6 @@ export const RalphStateSchema = z.object({
   terminationReason: z.string().optional(),
   completedAt: z.string().optional(),
   inPlace: z.boolean().optional(),
+  modelFailed: z.boolean().optional(),
 })
 export type RalphState = z.infer<typeof RalphStateSchema>

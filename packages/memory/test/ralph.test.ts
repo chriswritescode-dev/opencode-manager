@@ -476,13 +476,11 @@ describe('RalphService', () => {
       errorCount: 2,
       auditCount: 1,
       terminationReason: undefined,
-      parentSessionId: 'parent-session-123',
     }
     ralphService.setState('session-err', state)
     const retrieved = ralphService.getActiveState('session-err')
     expect(retrieved?.errorCount).toBe(2)
     expect(retrieved?.auditCount).toBe(1)
-    expect(retrieved?.parentSessionId).toBe('parent-session-123')
   })
 
   test('state defaults errorCount to 0', () => {
@@ -1167,5 +1165,476 @@ describe('session rotation', () => {
     expect(existingState).not.toBeNull()
     expect(existingState?.iteration).toBe(2)
     expect(existingState?.sessionId).toBe(sessionId)
+  })
+})
+
+describe('Assistant Error Detection', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let ralphService: ReturnType<typeof createRalphService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    ralphService = createRalphService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('detects assistant error in coding phase and triggers error handling', async () => {
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const sessionId = 'error-session'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [
+            {
+              info: {
+                role: 'assistant',
+                error: { name: 'ProviderError', data: { message: 'Model not found' } },
+              },
+              parts: [{ type: 'text', text: '' }],
+            },
+          ],
+        }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'test-worktree',
+      worktreeDir: '/tmp/test-worktree',
+      worktreeBranch: 'main',
+      workspaceId: 'wrk-test',
+      iteration: 1,
+      maxIterations: 5,
+      completionPromise: 'DONE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    ralphService.setState(sessionId, state)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    const updatedState = ralphService.getActiveState(sessionId)
+    expect(updatedState?.errorCount).toBe(1)
+    expect(updatedState?.modelFailed).toBe(true)
+  })
+
+  test('detects assistant error in auditing phase and triggers error handling', async () => {
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const sessionId = 'audit-error-session'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [
+            {
+              info: {
+                role: 'assistant',
+                error: { name: 'AuthError', data: { message: 'Authentication failed' } },
+              },
+              parts: [{ type: 'text', text: '' }],
+            },
+          ],
+        }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'test-worktree',
+      worktreeDir: '/tmp/test-worktree',
+      worktreeBranch: 'main',
+      workspaceId: 'wrk-test',
+      iteration: 1,
+      maxIterations: 5,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'auditing' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    ralphService.setState(sessionId, state)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    const updatedState = ralphService.getActiveState(sessionId)
+    expect(updatedState?.errorCount).toBe(1)
+    expect(updatedState?.modelFailed).toBe(true)
+  })
+
+  test('session.error event with non-abort error sets modelFailed flag', async () => {
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const sessionId = 'session-error-test'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'test-worktree',
+      worktreeDir: '/tmp/test-worktree',
+      worktreeBranch: 'main',
+      workspaceId: 'wrk-test',
+      iteration: 1,
+      maxIterations: 5,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    ralphService.setState(sessionId, state)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'ProviderError',
+            data: { message: 'Model not found' },
+          },
+        },
+      },
+    })
+
+    const updatedState = ralphService.getActiveState(sessionId)
+    expect(updatedState?.modelFailed).toBe(true)
+  })
+
+  test('session.error event with abort error terminates loop immediately', async () => {
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const sessionId = 'abort-session'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'test-worktree',
+      worktreeDir: '/tmp/test-worktree',
+      worktreeBranch: 'main',
+      workspaceId: 'wrk-test',
+      iteration: 1,
+      maxIterations: 5,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    ralphService.setState(sessionId, state)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.error',
+        properties: {
+          sessionID: sessionId,
+          error: {
+            name: 'MessageAbortedError',
+          },
+        },
+      },
+    })
+
+    const updatedState = ralphService.getActiveState(sessionId)
+    expect(updatedState).toBeNull()
+  })
+
+  test('modelFailed flag causes default model usage in coding phase', async () => {
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const sessionId = 'model-fail-session'
+
+    let modelUsed: string | undefined
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async (params: any) => {
+          modelUsed = params.model
+          return { data: undefined, error: undefined }
+        },
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({
+      ralph: { model: 'custom/model' },
+      executionModel: 'execution/model',
+      auditorModel: undefined,
+    })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'test-worktree',
+      worktreeDir: '/tmp/test-worktree',
+      worktreeBranch: 'main',
+      workspaceId: 'wrk-test',
+      iteration: 1,
+      maxIterations: 5,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+      modelFailed: true,
+    }
+
+    ralphService.setState(sessionId, state)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    expect(modelUsed).toBeUndefined()
+  })
+
+  test('three consecutive errors terminate loop', async () => {
+    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const sessionId = 'three-errors-session'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({
+          data: [
+            {
+              info: {
+                role: 'assistant',
+                error: { name: 'ProviderError', data: { message: 'Model not found' } },
+              },
+              parts: [{ type: 'text', text: '' }],
+            },
+          ],
+        }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'test-worktree',
+      worktreeDir: '/tmp/test-worktree',
+      worktreeBranch: 'main',
+      workspaceId: 'wrk-test',
+      iteration: 1,
+      maxIterations: 5,
+      completionPromise: 'DONE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    ralphService.setState(sessionId, state)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    let stateAfterSecondError = ralphService.getActiveState(sessionId)
+    expect(stateAfterSecondError?.errorCount).toBe(1)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    let stateAfterThirdError = ralphService.getActiveState(sessionId)
+    expect(stateAfterThirdError?.errorCount).toBe(2)
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    const finalState = ralphService.getActiveState(sessionId)
+    expect(finalState).toBeNull()
+
+    const terminatedState = ralphService.getAnyState(sessionId)
+    expect(terminatedState?.active).toBe(false)
+    expect(terminatedState?.terminationReason).toContain('error_max_retries')
   })
 })

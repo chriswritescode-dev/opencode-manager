@@ -8,6 +8,7 @@ import { resolveProjectId } from '../services/project-id-resolver'
 import { getRepoById } from '../db/queries'
 import { getWorkspacePath, getConfigPath } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
+import { OPENCODE_SERVER_URL } from '../services/proxy'
 import {
   CreateMemoryRequestSchema,
   UpdateMemoryRequestSchema,
@@ -544,7 +545,7 @@ export function createMemoryRoutes(db: Database): Hono {
       const repo = getRepoById(db, repoId)
 
       if (!repo) {
-        return c.json({ loops: [] })
+        return c.json({ loops: [], projectId: null })
       }
 
       const projectId = await resolveProjectId(repo.fullPath)
@@ -565,7 +566,7 @@ export function createMemoryRoutes(db: Database): Hono {
         })
         .filter((loop): loop is RalphState => loop !== null)
 
-      return c.json({ loops })
+      return c.json({ loops, projectId })
     } catch (error) {
       logger.error('Failed to get Ralph status:', error)
       return c.json({ error: 'Failed to get Ralph status' }, 500)
@@ -599,9 +600,16 @@ export function createMemoryRoutes(db: Database): Hono {
         return c.json({ cancelled: false })
       }
 
-      const state = kvEntry.data as { active?: boolean; worktreeName?: string } | undefined
+      const result = RalphStateSchema.safeParse(kvEntry.data)
 
-      if (!state?.active) {
+      if (!result.success) {
+        logger.warn('Failed to parse Ralph state for cancel:', result.error)
+        return c.json({ cancelled: false })
+      }
+
+      const state = result.data
+
+      if (!state.active) {
         return c.json({ cancelled: false })
       }
 
@@ -613,6 +621,14 @@ export function createMemoryRoutes(db: Database): Hono {
       }
 
       pluginMemory.setKv(projectId, `ralph:${sessionId}`, updatedState)
+
+      try {
+        const abortUrl = new URL(`${OPENCODE_SERVER_URL}/session/${sessionId}/abort`)
+        abortUrl.searchParams.set('directory', repo.fullPath)
+        await fetch(abortUrl.toString(), { method: 'POST' })
+      } catch {
+        // Session may already be idle
+      }
 
       return c.json({ cancelled: true, worktreeName: state.worktreeName })
     } catch (error) {

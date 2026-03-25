@@ -64,17 +64,19 @@ export function createRalphEventHandler(
       logger.error(`Ralph: failed to commit changes in worktree ${state.worktreeDir}`, err)
     }
 
-    try {
-      const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
-      const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
-      const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
-      if (removeResult.status !== 0) {
-        throw new Error(removeResult.stderr || 'git worktree remove failed')
+    if (state.worktreeDir && state.worktreeBranch) {
+      try {
+        const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
+        const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
+        const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
+        if (removeResult.status !== 0) {
+          throw new Error(removeResult.stderr || 'git worktree remove failed')
+        }
+        cleaned = true
+        logger.log(`Ralph: removed worktree ${state.worktreeDir}, branch ${state.worktreeBranch} preserved`)
+      } catch (err) {
+        logger.error(`Ralph: failed to remove worktree ${state.worktreeDir}`, err)
       }
-      cleaned = true
-      logger.log(`Ralph: removed worktree ${state.worktreeDir}, branch ${state.worktreeBranch} preserved`)
-    } catch (err) {
-      logger.error(`Ralph: failed to remove worktree ${state.worktreeDir}`, err)
     }
 
     return { committed, cleaned }
@@ -188,7 +190,7 @@ export function createRalphEventHandler(
     logger.log(`Ralph loop terminated: reason="${reason}", worktree="${state.worktreeName}", iteration=${state.iteration}`)
 
     let commitResult: { committed: boolean; cleaned: boolean } | undefined
-    if (reason === 'completed') {
+    if (reason === 'completed' || reason === 'cancelled') {
       commitResult = await commitAndCleanupWorktree(state)
     }
   }
@@ -227,7 +229,7 @@ export function createRalphEventHandler(
     }
   }
 
-  async function getLastAssistantText(sessionId: string, worktreeDir: string): Promise<string | null> {
+  async function getLastAssistantInfo(sessionId: string, worktreeDir: string): Promise<{ text: string | null; error: string | null }> {
     try {
       const messagesResult = await v2Client.session.messages({
         sessionID: sessionId,
@@ -236,21 +238,25 @@ export function createRalphEventHandler(
       })
 
       const messages = (messagesResult.data ?? []) as Array<{
-        info: { role: string }
+        info: { role: string; error?: { name?: string; data?: { message?: string } } }
         parts: Array<{ type: string; text?: string }>
       }>
 
       const lastAssistant = [...messages].reverse().find((m) => m.info.role === 'assistant')
 
-      if (!lastAssistant) return null
+      if (!lastAssistant) return { text: null, error: null }
 
-      return lastAssistant.parts
+      const text = lastAssistant.parts
         .filter((p) => p.type === 'text' && typeof p.text === 'string')
         .map((p) => p.text as string)
-        .join('\n')
+        .join('\n') || null
+
+      const error = lastAssistant.info.error?.data?.message ?? lastAssistant.info.error?.name ?? null
+
+      return { text, error }
     } catch (err) {
       logger.error(`Ralph: could not read session messages`, err)
-      return null
+      return { text: null, error: null }
     }
   }
 
@@ -292,9 +298,31 @@ export function createRalphEventHandler(
       return
     }
 
+    if (!currentState.worktreeDir) {
+      logger.error(`Ralph: loop ${sessionId} missing worktreeDir in coding phase, terminating`)
+      await terminateLoop(sessionId, currentState, 'missing_worktree_dir')
+      return
+    }
+
+    let assistantErrorDetected = false
     if (currentState.completionPromise) {
-      const textContent = await getLastAssistantText(sessionId, currentState.worktreeDir)
-      if (textContent && ralphService.checkCompletionPromise(textContent, currentState.completionPromise)) {
+      const { text: textContent, error: assistantError } = await getLastAssistantInfo(sessionId, currentState.worktreeDir)
+      if (assistantError) {
+        assistantErrorDetected = true
+        logger.error(`Ralph: assistant error detected in coding phase: ${assistantError}`)
+        const isModelError = /provider|auth|model|api\s*error/i.test(assistantError)
+        if (isModelError) {
+          const nextErrorCount = (currentState.errorCount ?? 0) + 1
+          if (nextErrorCount >= MAX_RETRIES) {
+            await terminateLoop(sessionId, currentState, `error_max_retries: assistant error: ${assistantError}`)
+            return
+          }
+          ralphService.setState(sessionId, { ...currentState, modelFailed: true, errorCount: nextErrorCount })
+          logger.log(`Ralph: marking model as failed, will fall back to default model (error ${nextErrorCount}/${MAX_RETRIES})`)
+          currentState = ralphService.getActiveState(sessionId)!
+        }
+      }
+      if (textContent && currentState.completionPromise && ralphService.checkCompletionPromise(textContent, currentState.completionPromise)) {
         const currentAuditCount = currentState.auditCount ?? 0
         if (!currentState.audit || currentAuditCount >= minAudits) {
           await terminateLoop(sessionId, currentState, 'completed')
@@ -305,14 +333,20 @@ export function createRalphEventHandler(
       }
     }
 
-    if (currentState.maxIterations > 0 && currentState.iteration >= currentState.maxIterations) {
+    if (!assistantErrorDetected && currentState.errorCount && currentState.errorCount > 0) {
+      ralphService.setState(sessionId, { ...currentState, errorCount: 0 })
+      logger.log(`Ralph: resetting error count after successful retry in coding phase`)
+      currentState = ralphService.getActiveState(sessionId)!
+    }
+
+    if ((currentState.maxIterations ?? 0) > 0 && (currentState.iteration ?? 0) >= (currentState.maxIterations ?? 0)) {
       await terminateLoop(sessionId, currentState, 'max_iterations')
       return
     }
 
     if (currentState.audit) {
       ralphService.setState(sessionId, { ...currentState, phase: 'auditing', errorCount: 0 })
-      logger.log(`Ralph iteration ${currentState.iteration} complete, running auditor for session ${sessionId}`)
+      logger.log(`Ralph iteration ${currentState.iteration ?? 0} complete, running auditor for session ${sessionId}`)
 
       const auditPrompt = {
         sessionID: sessionId,
@@ -353,19 +387,26 @@ export function createRalphEventHandler(
       logger.error(`Ralph: session rotation failed, continuing with existing session`, err)
     }
 
-    const nextIteration = currentState.iteration + 1
+    const nextIteration = (currentState.iteration ?? 0) + 1
     ralphService.setState(activeSessionId, {
       ...currentState,
       sessionId: activeSessionId,
       iteration: nextIteration,
-      errorCount: 0,
+      errorCount: assistantErrorDetected ? currentState.errorCount : 0,
     })
 
     const continuationPrompt = ralphService.buildContinuationPrompt({ ...currentState, iteration: nextIteration })
     logger.log(`Ralph iteration ${nextIteration} for session ${activeSessionId}`)
 
     const currentConfig = getConfig()
-    const ralphModel = parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
+    const freshStateForModel = ralphService.getActiveState(activeSessionId)
+    const ralphModel = freshStateForModel?.modelFailed
+      ? undefined
+      : (parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel))
+
+    if (freshStateForModel?.modelFailed) {
+      logger.log(`Ralph: configured model previously failed, using default model`)
+    }
 
     const sendContinuationPromptWithModel = async () => {
       const freshState = ralphService.getActiveState(activeSessionId)
@@ -376,7 +417,7 @@ export function createRalphEventHandler(
         sessionID: activeSessionId,
         directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
-        model: ralphModel!,
+        model: ralphModel,
       })
       return { data: result.data, error: result.error }
     }
@@ -405,7 +446,8 @@ export function createRalphEventHandler(
       const retryFn = async () => {
         const result = await sendContinuationPromptWithoutModel()
         if (result.error) {
-          throw result.error
+          await handlePromptError(activeSessionId, currentState, 'retry failed', result.error)
+          return
         }
       }
       await handlePromptError(activeSessionId, currentState, 'failed to send continuation prompt', promptResult.error, retryFn)
@@ -423,17 +465,46 @@ export function createRalphEventHandler(
 
   async function handleAuditingPhase(sessionId: string, state: RalphState): Promise<void> {
     // Re-fetch and validate state to catch aborts that happened during idle event processing
-    const currentState = ralphService.getActiveState(sessionId)
+    let currentState = ralphService.getActiveState(sessionId)
     if (!currentState?.active) {
       logger.log(`Ralph: loop ${sessionId} no longer active, skipping auditing phase`)
       return
     }
 
-    const auditText = await getLastAssistantText(sessionId, currentState.worktreeDir)
+    if (!currentState.worktreeDir) {
+      logger.error(`Ralph: loop ${sessionId} missing worktreeDir in auditing phase, terminating`)
+      await terminateLoop(sessionId, currentState, 'missing_worktree_dir')
+      return
+    }
 
-    const nextIteration = currentState.iteration + 1
+    const { text: auditText, error: assistantError } = await getLastAssistantInfo(sessionId, currentState.worktreeDir)
+
+    let assistantErrorDetected = false
+    if (assistantError) {
+      assistantErrorDetected = true
+      logger.error(`Ralph: assistant error detected in auditing phase: ${assistantError}`)
+      const isModelError = /provider|auth|model|api\s*error/i.test(assistantError)
+      if (isModelError) {
+        const nextErrorCount = (currentState.errorCount ?? 0) + 1
+        if (nextErrorCount >= MAX_RETRIES) {
+          await terminateLoop(sessionId, currentState, `error_max_retries: assistant error: ${assistantError}`)
+          return
+        }
+        ralphService.setState(sessionId, { ...currentState, modelFailed: true, errorCount: nextErrorCount })
+        logger.log(`Ralph: marking model as failed, will fall back to default model (error ${nextErrorCount}/${MAX_RETRIES})`)
+        currentState = ralphService.getActiveState(sessionId)!
+      }
+    }
+
+    if (!assistantErrorDetected && currentState.errorCount && currentState.errorCount > 0) {
+      ralphService.setState(sessionId, { ...currentState, errorCount: 0 })
+      logger.log(`Ralph: resetting error count after successful retry in auditing phase`)
+      currentState = ralphService.getActiveState(sessionId)!
+    }
+
+    const nextIteration = (currentState.iteration ?? 0) + 1
     const newAuditCount = (currentState.auditCount ?? 0) + 1
-    logger.log(`Ralph audit ${newAuditCount} at iteration ${currentState.iteration}`)
+    logger.log(`Ralph audit ${newAuditCount} at iteration ${currentState.iteration ?? 0}`)
 
     // Always pass the full audit response to the code agent
     const auditFindings = auditText ?? undefined
@@ -450,7 +521,7 @@ export function createRalphEventHandler(
       }
     }
 
-    if (currentState.maxIterations > 0 && nextIteration > currentState.maxIterations) {
+    if ((currentState.maxIterations ?? 0) > 0 && nextIteration > (currentState.maxIterations ?? 0)) {
       await terminateLoop(sessionId, currentState, 'max_iterations')
       return
     }
@@ -469,7 +540,7 @@ export function createRalphEventHandler(
       phase: 'coding',
       lastAuditResult: auditFindings,
       auditCount: newAuditCount,
-      errorCount: 0,
+      errorCount: assistantErrorDetected ? currentState.errorCount : 0,
     })
 
     const continuationPrompt = ralphService.buildContinuationPrompt(
@@ -479,7 +550,14 @@ export function createRalphEventHandler(
     logger.log(`Ralph iteration ${nextIteration} for session ${activeSessionId}`)
 
     const currentConfig = getConfig()
-    const ralphModel = parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel)
+    const freshStateForModel = ralphService.getActiveState(activeSessionId)
+    const ralphModel = freshStateForModel?.modelFailed
+      ? undefined
+      : (parseModelString(currentConfig.ralph?.model) ?? parseModelString(currentConfig.executionModel))
+
+    if (freshStateForModel?.modelFailed) {
+      logger.log(`Ralph: configured model previously failed, using default model`)
+    }
 
     const sendContinuationPromptWithModel = async () => {
       const freshState = ralphService.getActiveState(activeSessionId)
@@ -490,7 +568,7 @@ export function createRalphEventHandler(
         sessionID: activeSessionId,
         directory: freshState.worktreeDir,
         parts: [{ type: 'text' as const, text: continuationPrompt }],
-        model: ralphModel!,
+        model: ralphModel,
       })
       return { data: result.data, error: result.error }
     }
@@ -523,7 +601,8 @@ export function createRalphEventHandler(
         }
         const result = await sendContinuationPromptWithoutModel()
         if (result.error) {
-          throw result.error
+          await handlePromptError(activeSessionId, currentState, 'retry failed after audit', result.error)
+          return
         }
       }
       await handlePromptError(activeSessionId, currentState, 'failed to send continuation prompt after audit', promptResult.error, retryFn)
@@ -558,17 +637,31 @@ export function createRalphEventHandler(
     }
 
     if (event.type === 'session.error') {
-      const errorProps = event.properties as { sessionID?: string; error?: { name?: string } }
+      const errorProps = event.properties as { sessionID?: string; error?: { name?: string; data?: { message?: string } } }
       const eventSessionId = errorProps?.sessionID
       const errorName = errorProps?.error?.name
       const isAbort = errorName === 'MessageAbortedError' || errorName === 'AbortError'
 
-      if (!eventSessionId || !isAbort) return
+      if (!eventSessionId) return
+
+      if (isAbort) {
+        const state = ralphService.getActiveState(eventSessionId)
+        if (state?.active) {
+          logger.log(`Ralph: session ${eventSessionId} aborted, terminating loop`)
+          await terminateLoop(eventSessionId, state, 'user_aborted')
+        }
+        return
+      }
 
       const state = ralphService.getActiveState(eventSessionId)
       if (state?.active) {
-        logger.log(`Ralph: session ${eventSessionId} aborted, terminating loop`)
-        await terminateLoop(eventSessionId, state, 'user_aborted')
+        const errorMessage = errorProps?.error?.data?.message ?? errorName ?? 'unknown error'
+        logger.error(`Ralph: session error for ${eventSessionId}: ${errorMessage}`)
+        const isModelError = /provider|auth|model|api\s*error/i.test(errorMessage)
+        if (isModelError && !state.modelFailed) {
+          logger.log(`Ralph: marking model as failed, will fall back to default on next iteration`)
+          ralphService.setState(eventSessionId, { ...state, modelFailed: true })
+        }
       }
       return
     }
