@@ -2,7 +2,7 @@ import type { Database } from 'bun:sqlite'
 import { createKvQuery } from '../storage/kv-queries'
 import type { Logger } from '../types'
 
-const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000
+const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 export interface KvEntry {
   key: string
@@ -19,7 +19,7 @@ export interface KvService {
   listByPrefix(projectId: string, prefix: string): KvEntry[]
 }
 
-export function createKvService(db: Database, logger?: Logger): KvService {
+export function createKvService(db: Database, logger?: Logger, defaultTtlMs?: number): KvService {
   const queries = createKvQuery(db)
 
   return {
@@ -34,7 +34,7 @@ export function createKvService(db: Database, logger?: Logger): KvService {
     },
 
     set<T = unknown>(projectId: string, key: string, data: T, ttlMs?: number): void {
-      const expiresAt = Date.now() + (ttlMs ?? DEFAULT_TTL_MS)
+      const expiresAt = Date.now() + (ttlMs ?? defaultTtlMs ?? DEFAULT_TTL_MS)
       const jsonData = JSON.stringify(data)
       queries.set(projectId, key, jsonData, expiresAt)
     },

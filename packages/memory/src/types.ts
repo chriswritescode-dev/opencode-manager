@@ -80,6 +80,7 @@ export interface PluginConfig {
   executionModel?: string
   auditorModel?: string
   ralph?: RalphConfig
+  defaultKvTtlMs?: number
 }
 
 export interface ListMemoriesFilter {

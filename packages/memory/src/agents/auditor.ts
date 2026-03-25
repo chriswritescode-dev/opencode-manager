@@ -149,9 +149,9 @@ Example:
 
 The KV store upserts by key, so storing a finding for the same file:line automatically updates the previous entry. No dedup checks needed.
 
-When the calling agent reports that a finding has been fixed, update the finding by calling \`memory-kv-set\` with the same key and the status changed to "resolved" with a resolution date added.
+When a previously open finding has been addressed by the current changes, **delete it** using \`memory-kv-delete\` with the same key. Do not re-store resolved findings — removing them keeps the KV store clean and avoids extending the TTL on stale data.
 
-Findings expire after 24 hours automatically. If an issue persists, the next review will re-discover it.
+Findings expire after 7 days automatically. If an issue persists, the next review will re-discover it.
 
 ## Retrieving Past Findings
 
@@ -159,7 +159,7 @@ At the start of every review, before analyzing the diff:
 1. Call \`memory-kv-list\` to get all active KV entries for the project
 2. Filter entries with keys starting with \`review-finding:\` that match files in the current diff
 3. If open findings exist for files being changed, include them under a "### Previously Identified Issues" heading before new findings
-4. Check if any previously open findings have been addressed by the current changes — if so, update their status to "resolved" via \`memory-kv-set\` with the same key
+4. Check if any previously open findings have been addressed by the current changes — if so, delete them via \`memory-kv-delete\` with the same key
 
 ${getInjectedMemory('auditor')}
 `,
