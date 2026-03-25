@@ -12,20 +12,20 @@ export const RECENT_MESSAGES_COUNT = 5
 export interface RalphState {
   active: boolean
   sessionId: string
-  worktreeName?: string
-  worktreeDir?: string
+  worktreeName: string
+  worktreeDir: string
   worktreeBranch?: string
   workspaceId?: string
-  iteration?: number
-  maxIterations?: number
+  iteration: number
+  maxIterations: number
   completionPromise: string | null
-  startedAt?: string
+  startedAt: string
   prompt?: string
-  phase?: 'coding' | 'auditing'
+  phase: 'coding' | 'auditing'
   audit?: boolean
   lastAuditResult?: string
-  errorCount?: number
-  auditCount?: number
+  errorCount: number
+  auditCount: number
   terminationReason?: string
   completedAt?: string
   inPlace?: boolean
@@ -33,10 +33,13 @@ export interface RalphState {
 }
 
 export interface RalphService {
-  getActiveState(sessionId: string): RalphState | null
-  getAnyState(sessionId: string): RalphState | null
-  setState(sessionId: string, state: RalphState): void
-  deleteState(sessionId: string): void
+  getActiveState(name: string): RalphState | null
+  getAnyState(name: string): RalphState | null
+  setState(name: string, state: RalphState): void
+  deleteState(name: string): void
+  registerSession(sessionId: string, worktreeName: string): void
+  resolveWorktreeName(sessionId: string): string | null
+  unregisterSession(sessionId: string): void
   checkCompletionPromise(text: string, promise: string): boolean
   buildContinuationPrompt(state: RalphState, auditFindings?: string): string
   buildAuditPrompt(state: RalphState): string
@@ -55,26 +58,38 @@ export function createRalphService(
   logger: Logger,
   ralphConfig?: RalphConfig,
 ): RalphService {
-  const stateKey = (sessionId: string) => `ralph:${sessionId}`
+  const stateKey = (name: string) => `ralph:${name}`
 
-  function getAnyState(sessionId: string): RalphState | null {
-    return kvService.get<RalphState>(projectId, stateKey(sessionId))
+  function getAnyState(name: string): RalphState | null {
+    return kvService.get<RalphState>(projectId, stateKey(name))
   }
 
-  function getActiveState(sessionId: string): RalphState | null {
-    const state = kvService.get<RalphState>(projectId, stateKey(sessionId))
+  function getActiveState(name: string): RalphState | null {
+    const state = kvService.get<RalphState>(projectId, stateKey(name))
     if (!state || !state.active) {
       return null
     }
     return state
   }
 
-  function setState(sessionId: string, state: RalphState): void {
-    kvService.set(projectId, stateKey(sessionId), state)
+  function setState(name: string, state: RalphState): void {
+    kvService.set(projectId, stateKey(name), state)
   }
 
-  function deleteState(sessionId: string): void {
-    kvService.delete(projectId, stateKey(sessionId))
+  function deleteState(name: string): void {
+    kvService.delete(projectId, stateKey(name))
+  }
+
+  function registerSession(sessionId: string, worktreeName: string): void {
+    kvService.set(projectId, `ralph-session:${sessionId}`, worktreeName)
+  }
+
+  function resolveWorktreeName(sessionId: string): string | null {
+    return kvService.get<string>(projectId, `ralph-session:${sessionId}`)
+  }
+
+  function unregisterSession(sessionId: string): void {
+    kvService.delete(projectId, `ralph-session:${sessionId}`)
   }
 
   function checkCompletionPromise(text: string, promise: string): boolean {
@@ -177,7 +192,7 @@ export function createRalphService(
         completedAt: new Date().toISOString(),
         terminationReason: 'shutdown',
       }
-      setState(state.sessionId, updated)
+      setState(state.worktreeName, updated)
     }
     logger.log(`Ralph: terminated ${active.length} active loop(s)`)
   }
@@ -187,6 +202,9 @@ export function createRalphService(
     getAnyState,
     setState,
     deleteState,
+    registerSession,
+    resolveWorktreeName,
+    unregisterSession,
     checkCompletionPromise,
     buildContinuationPrompt,
     buildAuditPrompt,

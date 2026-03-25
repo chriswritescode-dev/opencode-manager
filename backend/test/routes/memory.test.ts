@@ -147,7 +147,7 @@ describe('Memory Routes - Ralph Status', () => {
       mockResolveProjectId.mockResolvedValue('test-project-id')
       mockListKv.mockReturnValue([
         {
-          key: 'ralph:session-123',
+          key: 'ralph:test-worktree',
           data: {
             active: true,
             sessionId: 'session-123',
@@ -194,28 +194,40 @@ describe('Memory Routes - Ralph Status', () => {
       mockResolveProjectId.mockResolvedValue('test-project-id')
       mockListKv.mockReturnValue([
         {
-          key: 'ralph:session-123',
-          data: { active: true, sessionId: 'session-123' },
+          key: 'ralph:test-worktree-1',
+          data: {
+            active: true,
+            sessionId: 'session-123',
+            worktreeName: 'test-worktree-1',
+            worktreeDir: '/tmp/test-worktree-1',
+            iteration: 1,
+            maxIterations: 10,
+            startedAt: new Date().toISOString(),
+            phase: 'coding',
+            errorCount: 0,
+            auditCount: 0,
+            completionPromise: null,
+          },
           createdAt: Date.now(),
           updatedAt: Date.now(),
           expiresAt: Date.now() + 86400000,
         },
         {
-          key: 'ralph:session-456',
+          key: 'ralph:test-worktree-2',
           data: null,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           expiresAt: Date.now() + 86400000,
         },
         {
-          key: 'ralph:session-789',
+          key: 'ralph:test-worktree-3',
           data: 'string-data',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           expiresAt: Date.now() + 86400000,
         },
         {
-          key: 'ralph:session-abc',
+          key: 'ralph:test-worktree-4',
           data: { sessionId: 'session-abc' },
           createdAt: Date.now(),
           updatedAt: Date.now(),

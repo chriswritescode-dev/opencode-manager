@@ -657,7 +657,7 @@ describe('Stall Detection', () => {
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
-    const info = handler.getStallInfo('test-session')
+    const info = handler.getStallInfo('test')
     expect(info).toBeNull()
   })
 
@@ -695,10 +695,11 @@ describe('Stall Detection', () => {
     const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
-    ralphService.setState(sessionId, {
+    const worktreeName = 'test'
+    ralphService.setState(worktreeName, {
       active: true,
       sessionId,
-      worktreeName: 'test',
+      worktreeName,
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
       workspaceId: '',
@@ -713,9 +714,9 @@ describe('Stall Detection', () => {
       auditCount: 0,
     })
 
-    handler.startWatchdog(sessionId)
+    handler.startWatchdog(worktreeName)
 
-    const info = handler.getStallInfo(sessionId)
+    const info = handler.getStallInfo(worktreeName)
     expect(info).not.toBeNull()
     expect(info?.consecutiveStalls).toBe(0)
     expect(info?.lastActivityTime).toBeDefined()
@@ -757,8 +758,9 @@ describe('Stall Detection', () => {
 
     const parentId = 'parent-session'
     const childId = 'child-session'
+    const worktreeName = 'test'
 
-    ralphService.setState(parentId, {
+    ralphService.setState(worktreeName, {
       active: true,
       sessionId: parentId,
       worktreeName: 'test',
@@ -776,8 +778,8 @@ describe('Stall Detection', () => {
       auditCount: 0,
     })
 
-    handler.startWatchdog(parentId)
-    const initialInfo = handler.getStallInfo(parentId)
+    handler.startWatchdog(worktreeName)
+    const initialInfo = handler.getStallInfo(worktreeName)
     const initialTime = initialInfo?.lastActivityTime
 
     await handler.onEvent({
@@ -792,7 +794,7 @@ describe('Stall Detection', () => {
       },
     })
 
-    const updatedInfo = handler.getStallInfo(parentId)
+    const updatedInfo = handler.getStallInfo(worktreeName)
     expect(updatedInfo?.lastActivityTime).toBeGreaterThanOrEqual(initialTime!)
   })
 
@@ -830,7 +832,8 @@ describe('Stall Detection', () => {
     const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
-    ralphService.setState(sessionId, {
+    const worktreeName = 'test'
+    ralphService.setState(worktreeName, {
       active: true,
       sessionId,
       worktreeName: 'test',
@@ -848,8 +851,8 @@ describe('Stall Detection', () => {
       auditCount: 0,
     })
 
-    handler.startWatchdog(sessionId)
-    const initialInfo = handler.getStallInfo(sessionId)
+    handler.startWatchdog(worktreeName)
+    const initialInfo = handler.getStallInfo(worktreeName)
     const initialTime = initialInfo?.lastActivityTime
 
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -863,7 +866,7 @@ describe('Stall Detection', () => {
       },
     })
 
-    const updatedInfo = handler.getStallInfo(sessionId)
+    const updatedInfo = handler.getStallInfo(worktreeName)
     expect(updatedInfo?.lastActivityTime).toBeGreaterThanOrEqual(initialTime!)
   })
 
@@ -901,7 +904,8 @@ describe('Stall Detection', () => {
     const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
-    ralphService.setState(sessionId, {
+    const worktreeName = 'test'
+    ralphService.setState(worktreeName, {
       active: true,
       sessionId,
       worktreeName: 'test',
@@ -919,11 +923,11 @@ describe('Stall Detection', () => {
       auditCount: 0,
     })
 
-    handler.startWatchdog(sessionId)
-    expect(handler.getStallInfo(sessionId)).not.toBeNull()
+    handler.startWatchdog(worktreeName)
+    expect(handler.getStallInfo(worktreeName)).not.toBeNull()
 
     handler.clearAllRetryTimeouts()
-    expect(handler.getStallInfo(sessionId)).toBeNull()
+    expect(handler.getStallInfo(worktreeName)).toBeNull()
   })
 })
 
@@ -1003,7 +1007,8 @@ describe('session rotation', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(oldSessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(oldSessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1012,10 +1017,11 @@ describe('session rotation', () => {
       },
     })
 
-    const oldState = ralphService.getActiveState(oldSessionId)
-    expect(oldState).toBeNull()
+    const oldState = ralphService.getActiveState('test-worktree')
+    expect(oldState).not.toBeNull()
+    expect(oldState?.sessionId).toBe(newSessionId)
 
-    const newState = ralphService.getActiveState(newSessionId)
+    const newState = ralphService.getActiveState('test-worktree')
     expect(newState).not.toBeNull()
     expect(newState?.iteration).toBe(2)
     expect(newState?.sessionId).toBe(newSessionId)
@@ -1086,7 +1092,8 @@ describe('session rotation', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(oldSessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(oldSessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1095,7 +1102,7 @@ describe('session rotation', () => {
       },
     })
 
-    const newState = ralphService.getActiveState(newSessionId)
+    const newState = ralphService.getActiveState('test-worktree')
     expect(newState).not.toBeNull()
     expect(newState?.phase).toBe('coding')
     expect(newState?.iteration).toBe(2)
@@ -1152,7 +1159,8 @@ describe('session rotation', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1161,7 +1169,7 @@ describe('session rotation', () => {
       },
     })
 
-    const existingState = ralphService.getActiveState(sessionId)
+    const existingState = ralphService.getActiveState('test-worktree')
     expect(existingState).not.toBeNull()
     expect(existingState?.iteration).toBe(2)
     expect(existingState?.sessionId).toBe(sessionId)
@@ -1244,7 +1252,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1253,7 +1262,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState(sessionId)
+    const updatedState = ralphService.getActiveState('test-worktree')
     expect(updatedState?.errorCount).toBe(1)
     expect(updatedState?.modelFailed).toBe(true)
   })
@@ -1318,7 +1327,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1327,7 +1337,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState(sessionId)
+    const updatedState = ralphService.getActiveState('test-worktree')
     expect(updatedState?.errorCount).toBe(1)
     expect(updatedState?.modelFailed).toBe(true)
   })
@@ -1382,7 +1392,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1397,7 +1408,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState(sessionId)
+    const updatedState = ralphService.getActiveState('test-worktree')
     expect(updatedState?.modelFailed).toBe(true)
   })
 
@@ -1451,7 +1462,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1465,7 +1477,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState(sessionId)
+    const updatedState = ralphService.getActiveState('test-worktree')
     expect(updatedState).toBeNull()
   })
 
@@ -1529,7 +1541,7 @@ describe('Assistant Error Detection', () => {
       modelFailed: true,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
 
     await handler.onEvent({
       event: {
@@ -1601,7 +1613,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState(sessionId, state)
+    ralphService.setState('test-worktree', state)
+    ralphService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1610,7 +1623,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    let stateAfterSecondError = ralphService.getActiveState(sessionId)
+    let stateAfterSecondError = ralphService.getActiveState('test-worktree')
     expect(stateAfterSecondError?.errorCount).toBe(1)
 
     await handler.onEvent({
@@ -1620,7 +1633,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    let stateAfterThirdError = ralphService.getActiveState(sessionId)
+    let stateAfterThirdError = ralphService.getActiveState('test-worktree')
     expect(stateAfterThirdError?.errorCount).toBe(2)
 
     await handler.onEvent({
@@ -1630,10 +1643,10 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const finalState = ralphService.getActiveState(sessionId)
+    const finalState = ralphService.getActiveState('test-worktree')
     expect(finalState).toBeNull()
 
-    const terminatedState = ralphService.getAnyState(sessionId)
+    const terminatedState = ralphService.getAnyState('test-worktree')
     expect(terminatedState?.active).toBe(false)
     expect(terminatedState?.terminationReason).toContain('error_max_retries')
   })

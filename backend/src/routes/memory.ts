@@ -576,10 +576,10 @@ export function createMemoryRoutes(db: Database): Hono {
   app.post('/ralph/cancel', async (c) => {
     try {
       const body = await c.req.json()
-      const { repoId, sessionId } = body
+      const { repoId, worktreeName, sessionId } = body
 
-      if (!repoId || !sessionId) {
-        return c.json({ error: 'Missing repoId or sessionId' }, 400)
+      if (!repoId || (!worktreeName && !sessionId)) {
+        return c.json({ error: 'Missing repoId or identifier (worktreeName or sessionId)' }, 400)
       }
 
       const repo = getRepoById(db, parseInt(repoId, 10))
@@ -594,8 +594,23 @@ export function createMemoryRoutes(db: Database): Hono {
         return c.json({ cancelled: false })
       }
 
-      const kvEntry = pluginMemory.getKv(projectId, `ralph:${sessionId}`)
+      let worktreeNameToUse: string | undefined
 
+      if (worktreeName) {
+        worktreeNameToUse = worktreeName
+      } else if (sessionId) {
+        const sessionMappingEntry = pluginMemory.getKv(projectId, `ralph-session:${sessionId}`)
+        if (!sessionMappingEntry) {
+          return c.json({ cancelled: false })
+        }
+        worktreeNameToUse = sessionMappingEntry.data as string
+      }
+
+      if (!worktreeNameToUse) {
+        return c.json({ cancelled: false })
+      }
+
+      const kvEntry = pluginMemory.getKv(projectId, `ralph:${worktreeNameToUse}`)
       if (!kvEntry) {
         return c.json({ cancelled: false })
       }
@@ -620,10 +635,10 @@ export function createMemoryRoutes(db: Database): Hono {
         completedAt: new Date().toISOString(),
       }
 
-      pluginMemory.setKv(projectId, `ralph:${sessionId}`, updatedState)
+      pluginMemory.setKv(projectId, `ralph:${worktreeNameToUse}`, updatedState)
 
       try {
-        const abortUrl = new URL(`${OPENCODE_SERVER_URL}/session/${sessionId}/abort`)
+        const abortUrl = new URL(`${OPENCODE_SERVER_URL}/session/${state.sessionId}/abort`)
         abortUrl.searchParams.set('directory', repo.fullPath)
         await fetch(abortUrl.toString(), { method: 'POST' })
       } catch {
