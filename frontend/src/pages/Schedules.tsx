@@ -259,7 +259,6 @@ export function Schedules() {
                 selectedJob={selectedJob}
                 runs={runs}
                 runsLoading={runsLoading}
-                selectedRunId={selectedRunId}
                 onSelectRun={setSelectedRunId}
                 activeRun={activeRun}
                 selectedRunLoading={selectedRunLoading}

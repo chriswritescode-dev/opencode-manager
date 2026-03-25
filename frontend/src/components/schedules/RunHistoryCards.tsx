@@ -2,13 +2,12 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { History, Loader2, XCircle, CheckCircle2, Ban, ChevronDown } from 'lucide-react'
 import type { ScheduleRun } from '@opencode-manager/shared/types'
-import type { ScheduleRunWithContext } from '@/api/schedules'
 import { getRunTone } from '@/components/schedules/schedule-utils'
 import { RunDetailPanel } from '@/components/schedules/RunDetailPanel'
 import { useRepoScheduleRun } from '@/hooks/useSchedules'
 
 interface RunHistoryCardsProps {
-  runs: ScheduleRunWithContext[] | undefined
+  runs: ScheduleRun[] | undefined
   runsLoading: boolean
   onSelectRun: (id: number) => void
   onCancelRun: () => void
