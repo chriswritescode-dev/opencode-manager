@@ -23,6 +23,7 @@ export interface StatusArgs {
   server?: string
   listWorktrees?: boolean
   listWorktreesFilter?: string
+  limit?: number
 }
 
 export async function run(argv: StatusArgs): Promise<void> {
@@ -83,7 +84,7 @@ export async function run(argv: StatusArgs): Promise<void> {
     for (const row of rows) {
       try {
         const state = JSON.parse(row.data) as RalphState
-        if (state.active && state.worktreeName && state.iteration !== undefined && state.maxIterations !== undefined && state.phase && state.startedAt && state.audit !== undefined) {
+        if (state.active && state.sessionId && state.worktreeName && state.iteration != null && state.maxIterations != null && state.phase && state.startedAt) {
           activeLoops.push({
             sessionId: state.sessionId,
             worktreeName: state.worktreeName,
@@ -92,7 +93,7 @@ export async function run(argv: StatusArgs): Promise<void> {
             maxIterations: state.maxIterations,
             phase: state.phase,
             startedAt: state.startedAt,
-            audit: state.audit,
+            audit: state.audit ?? false,
           })
         } else if (state.completedAt) {
           recentLoops.push({ state, row })
@@ -272,12 +273,19 @@ export async function run(argv: StatusArgs): Promise<void> {
         console.log('Recently Completed:')
         console.log('')
 
-        for (const loop of recentLoops) {
+        const limit = argv.limit ?? 10
+        const displayedLoops = recentLoops.slice(0, limit)
+        for (const loop of displayedLoops) {
           const reason = loop.state.terminationReason ?? 'unknown'
           const completed = new Date(loop.state.completedAt!).toLocaleString()
 
           console.log(`  ${loop.state.worktreeName}`)
           console.log(`    Iterations: ${loop.state.iteration}  Reason: ${reason}  Completed: ${completed}`)
+          console.log('')
+        }
+        
+        if (recentLoops.length > limit) {
+          console.log(`  ... and ${recentLoops.length - limit} more. Use 'ocm-mem status <name>' for details.`)
           console.log('')
         }
       }
@@ -311,6 +319,7 @@ Options:
   --server <url>          OpenCode server URL (default: http://localhost:5551)
   --list-worktrees        List all worktree names (for shell completion)
                           Optionally provide a filter: --list-worktrees <filter>
+  --limit <n>             Limit recent loops shown (default: 10)
   --project, -p <id>      Project ID (auto-detected from git if not provided)
   --db-path <path>        Path to memory database
   --help, -h              Show this help message
@@ -334,6 +343,8 @@ export async function cli(args: string[], globalOpts: { dbPath?: string; resolve
       if (i + 1 < args.length && !args[i + 1].startsWith('-')) {
         argv.listWorktreesFilter = args[++i]
       }
+    } else if (arg === '--limit') {
+      argv.limit = parseInt(args[++i], 10)
     } else if (arg === '--help' || arg === '-h') {
       help()
       process.exit(0)
