@@ -33,7 +33,7 @@ function createMockLogger(): Logger {
 
 describe('Plan Approval Tool Interception', () => {
   let db: Database
-  let ralphService: ReturnType<typeof createLoopService>
+  let loopService: ReturnType<typeof createLoopService>
   const projectId = 'test-project'
   const sessionID = 'test-session-123'
 
@@ -75,7 +75,7 @@ Do NOT output text without also making this tool call.
   beforeEach(() => {
     db = createTestDb()
     const kvService = createKvService(db)
-    ralphService = createLoopService(kvService, projectId, createMockLogger())
+    loopService = createLoopService(kvService, projectId, createMockLogger())
   })
 
   afterEach(() => {
@@ -94,7 +94,7 @@ Do NOT output text without also making this tool call.
         sessionId: sessionID,
         worktreeName: 'test-worktree',
         worktreeDir: '/test/worktree',
-        worktreeBranch: 'opencode/ralph-test',
+        worktreeBranch: 'opencode/loop-test',
         workspaceId: 'wrk-test-worktree',
         iteration: 1,
         maxIterations: 5,
@@ -105,9 +105,9 @@ Do NOT output text without also making this tool call.
         audit: false,
         errorCount: 0,
         auditCount: 0,
-        inPlace: false,
+        worktree: true,
       }
-      ralphService.setState(sessionID, state)
+      loopService.setState(sessionID, state)
     }
 
     if (tool === 'question') {
@@ -129,16 +129,16 @@ Do NOT output text without also making this tool call.
 
     if (!sessionActive) return
 
-    const RALPH_BLOCKED_TOOLS: Record<string, string> = {
+    const LOOP_BLOCKED_TOOLS: Record<string, string> = {
       question: 'The question tool is not available during a memory loop. Do not ask questions — continue working on the task autonomously.',
       'memory-plan-execute': 'The memory-plan-execute tool is not available during a memory loop. Focus on executing the current plan.',
       'memory-loop': 'The memory-loop tool is not available during a memory loop. Focus on executing the current plan.',
     }
 
-    if (!(tool in RALPH_BLOCKED_TOOLS)) return
+    if (!(tool in LOOP_BLOCKED_TOOLS)) return
 
     output.title = 'Tool blocked'
-    output.output = RALPH_BLOCKED_TOOLS[tool]!
+    output.output = LOOP_BLOCKED_TOOLS[tool]!
   }
 
   test('Detects plan approval question and injects "New session" directive', () => {
@@ -321,7 +321,7 @@ Do NOT output text without also making this tool call.
     expect(output.output).toBe(originalOutput)
   })
 
-  test('Ralph blocking still works for question tool when Ralph is active', () => {
+  test('Loop blocking still works for question tool when loop is active', () => {
     const output = { title: '', output: 'test', metadata: {} }
 
     simulateToolExecuteAfter('question', {}, output, true)
@@ -330,7 +330,7 @@ Do NOT output text without also making this tool call.
     expect(output.output).toBe('test')
   })
 
-  test('Ralph blocking works for memory-plan-execute tool', () => {
+  test('Loop blocking works for memory-plan-execute tool', () => {
     const output = { title: '', output: 'test', metadata: {} }
 
     simulateToolExecuteAfter('memory-plan-execute', {}, output, true)
@@ -339,7 +339,7 @@ Do NOT output text without also making this tool call.
     expect(output.output).toContain('memory-plan-execute tool is not available')
   })
 
-  test('Ralph blocking works for memory-loop tool', () => {
+  test('Loop blocking works for memory-loop tool', () => {
     const output = { title: '', output: 'test', metadata: {} }
 
     simulateToolExecuteAfter('memory-loop', {}, output, true)
@@ -348,7 +348,7 @@ Do NOT output text without also making this tool call.
     expect(output.output).toContain('memory-loop tool is not available')
   })
 
-  test('Ralph blocking does not affect non-blocked tools', () => {
+  test('Loop blocking does not affect non-blocked tools', () => {
     const output = { title: '', output: 'test', metadata: {} }
 
     simulateToolExecuteAfter('memory-read', {}, output, true)
@@ -357,7 +357,7 @@ Do NOT output text without also making this tool call.
     expect(output.output).toBe('test')
   })
 
-  test('Ralph blocking only applies when Ralph is active', () => {
+  test('Loop blocking only applies when loop is active', () => {
     const output = { title: '', output: 'test', metadata: {} }
 
     simulateToolExecuteAfter('memory-plan-execute', {}, output, false)

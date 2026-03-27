@@ -9,7 +9,7 @@ interface LoopState {
   worktreeName: string
   worktreeBranch: string
   worktreeDir: string
-  inPlace: boolean
+  worktree: boolean
   iteration: number
   maxIterations: number
   phase: 'coding' | 'auditing'
@@ -274,10 +274,10 @@ describe('CLI Status - partial matching', () => {
 
   test('partial name matches single active loop', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
-    insertLoopState(db, 'test-project', 'ralph-fix-bug', {
+    insertLoopState(db, 'test-project', 'loop-fix-bug', {
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
     db.close()
@@ -294,17 +294,17 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Memory Loop: ralph-feat-auth')
+    expect(output).toContain('Memory Loop: loop-feat-auth')
   })
 
   test('partial name matches single recent loop', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-completed-auth', {
+    insertLoopState(db, 'test-project', 'loop-completed-auth', {
       active: false,
       completedAt: new Date().toISOString(),
       terminationReason: 'success',
     })
-    insertLoopState(db, 'test-project', 'ralph-fix-bug', {
+    insertLoopState(db, 'test-project', 'loop-fix-bug', {
       active: true,
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
@@ -322,13 +322,13 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Memory Loop (Completed): ralph-completed-auth')
+    expect(output).toContain('Memory Loop (Completed): loop-completed-auth')
   })
 
   test('partial name matches multiple loops lists ambiguous', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
-    insertLoopState(db, 'test-project', 'ralph-auth-fix', {})
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {})
+    insertLoopState(db, 'test-project', 'loop-auth-fix', {})
     db.close()
 
     const outputLines: string[] = []
@@ -357,17 +357,17 @@ describe('CLI Status - partial matching', () => {
     expect(exited).toBe(true)
     const output = outputLines.join('\n')
     expect(output).toContain("Multiple loops match 'auth':")
-    expect(output).toContain('ralph-feat-auth')
-    expect(output).toContain('ralph-auth-fix')
+    expect(output).toContain('loop-feat-auth')
+    expect(output).toContain('loop-auth-fix')
   })
 
   test('partial name matches via worktreeBranch field', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {
       worktreeBranch: 'feat/auth',
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
-    insertLoopState(db, 'test-project', 'ralph-fix-bug', {
+    insertLoopState(db, 'test-project', 'loop-fix-bug', {
       worktreeBranch: 'fix/bug',
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
@@ -385,13 +385,13 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Memory Loop: ralph-feat-auth')
+    expect(output).toContain('Memory Loop: loop-feat-auth')
     expect(output).toContain('Branch:          feat/auth')
   })
 
   test('case-insensitive matching works', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
     db.close()
@@ -408,7 +408,7 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Memory Loop: ralph-feat-auth')
+    expect(output).toContain('Memory Loop: loop-feat-auth')
   })
 
   test('exact match takes priority over partial', async () => {
@@ -416,7 +416,7 @@ describe('CLI Status - partial matching', () => {
     insertLoopState(db, 'test-project', 'auth', {
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
-    insertLoopState(db, 'test-project', 'ralph-auth', {
+    insertLoopState(db, 'test-project', 'loop-auth', {
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
     db.close()
@@ -434,14 +434,14 @@ describe('CLI Status - partial matching', () => {
 
     const output = outputLines.join('\n')
     expect(output).toContain('Memory Loop: auth')
-    expect(output).not.toContain('Memory Loop: ralph-auth')
+    expect(output).not.toContain('Memory Loop: loop-auth')
   })
 
   test('--list-worktrees with filter returns filtered results', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', { worktreeBranch: 'feat/auth' })
-    insertLoopState(db, 'test-project', 'ralph-fix-bug', { worktreeBranch: 'fix/bug' })
-    insertLoopState(db, 'test-project', 'ralph-update-deps', {})
+    insertLoopState(db, 'test-project', 'loop-feat-auth', { worktreeBranch: 'feat/auth' })
+    insertLoopState(db, 'test-project', 'loop-fix-bug', { worktreeBranch: 'fix/bug' })
+    insertLoopState(db, 'test-project', 'loop-update-deps', {})
     db.close()
 
     const outputLines: string[] = []
@@ -457,15 +457,15 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('ralph-feat-auth')
-    expect(output).not.toContain('ralph-fix-bug')
-    expect(output).not.toContain('ralph-update-deps')
+    expect(output).toContain('loop-feat-auth')
+    expect(output).not.toContain('loop-fix-bug')
+    expect(output).not.toContain('loop-update-deps')
   })
 
   test('--list-worktrees without filter returns all', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
-    insertLoopState(db, 'test-project', 'ralph-fix-bug', {})
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {})
+    insertLoopState(db, 'test-project', 'loop-fix-bug', {})
     db.close()
 
     const outputLines: string[] = []
@@ -480,7 +480,7 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('ralph-feat-auth')
-    expect(output).toContain('ralph-fix-bug')
+    expect(output).toContain('loop-feat-auth')
+    expect(output).toContain('loop-fix-bug')
   })
 })

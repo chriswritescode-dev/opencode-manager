@@ -10,12 +10,12 @@ interface TestItem {
 describe('findPartialMatch', () => {
   test('exact match returns single result', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
-      { worktreeName: 'ralph-update-deps', value: 'c' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
+      { worktreeName: 'loop-update-deps', value: 'c' },
     ]
 
-    const result = findPartialMatch('ralph-feat-auth', items, (i) => [i.worktreeName])
+    const result = findPartialMatch('loop-feat-auth', items, (i) => [i.worktreeName])
 
     expect(result.match).toBe(items[0])
     expect(result.candidates).toEqual([])
@@ -23,9 +23,9 @@ describe('findPartialMatch', () => {
 
   test('substring match returns single result', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
-      { worktreeName: 'ralph-update-deps', value: 'c' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
+      { worktreeName: 'loop-update-deps', value: 'c' },
     ]
 
     const result = findPartialMatch('auth', items, (i) => [i.worktreeName])
@@ -36,8 +36,8 @@ describe('findPartialMatch', () => {
 
   test('case-insensitive substring match', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
     ]
 
     const result = findPartialMatch('AUTH', items, (i) => [i.worktreeName])
@@ -48,9 +48,9 @@ describe('findPartialMatch', () => {
 
   test('multiple substring matches returns candidates', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-auth-fix', value: 'b' },
-      { worktreeName: 'ralph-update-deps', value: 'c' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-auth-fix', value: 'b' },
+      { worktreeName: 'loop-update-deps', value: 'c' },
     ]
 
     const result = findPartialMatch('auth', items, (i) => [i.worktreeName])
@@ -61,8 +61,8 @@ describe('findPartialMatch', () => {
 
   test('no matches returns null and empty candidates', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
     ]
 
     const result = findPartialMatch('nonexistent', items, (i) => [i.worktreeName])
@@ -74,7 +74,7 @@ describe('findPartialMatch', () => {
   test('exact match takes priority over multiple substring matches', () => {
     const items: TestItem[] = [
       { worktreeName: 'auth', value: 'a' },
-      { worktreeName: 'ralph-auth', value: 'b' },
+      { worktreeName: 'loop-auth', value: 'b' },
       { worktreeName: 'auth-fix', value: 'c' },
     ]
 
@@ -86,8 +86,8 @@ describe('findPartialMatch', () => {
 
   test('matches against worktreeBranch field', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', worktreeBranch: 'feat/auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', worktreeBranch: 'fix/bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', worktreeBranch: 'feat/auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', worktreeBranch: 'fix/bug', value: 'b' },
     ]
 
     const result = findPartialMatch('feat/auth', items, (i) => [i.worktreeName, i.worktreeBranch])
@@ -98,8 +98,8 @@ describe('findPartialMatch', () => {
 
   test('matches against worktreeBranch with partial input', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', worktreeBranch: 'feat/auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', worktreeBranch: 'fix/bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', worktreeBranch: 'feat/auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', worktreeBranch: 'fix/bug', value: 'b' },
     ]
 
     const result = findPartialMatch('feat', items, (i) => [i.worktreeName, i.worktreeBranch])
@@ -112,9 +112,9 @@ describe('findPartialMatch', () => {
 describe('filterByPartial', () => {
   test('with filter returns filtered items', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
-      { worktreeName: 'ralph-update-deps', value: 'c' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
+      { worktreeName: 'loop-update-deps', value: 'c' },
     ]
 
     const result = filterByPartial('auth', items, (i) => [i.worktreeName])
@@ -124,8 +124,8 @@ describe('filterByPartial', () => {
 
   test('without filter returns all items', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
     ]
 
     const result = filterByPartial(undefined, items, (i) => [i.worktreeName])
@@ -135,8 +135,8 @@ describe('filterByPartial', () => {
 
   test('empty filter returns all items', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
     ]
 
     const result = filterByPartial('', items, (i) => [i.worktreeName])
@@ -146,8 +146,8 @@ describe('filterByPartial', () => {
 
   test('case-insensitive filtering', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', value: 'b' },
     ]
 
     const result = filterByPartial('AUTH', items, (i) => [i.worktreeName])
@@ -157,8 +157,8 @@ describe('filterByPartial', () => {
 
   test('filters by worktreeBranch field', () => {
     const items: TestItem[] = [
-      { worktreeName: 'ralph-feat-auth', worktreeBranch: 'feat/auth', value: 'a' },
-      { worktreeName: 'ralph-fix-bug', worktreeBranch: 'fix/bug', value: 'b' },
+      { worktreeName: 'loop-feat-auth', worktreeBranch: 'feat/auth', value: 'a' },
+      { worktreeName: 'loop-fix-bug', worktreeBranch: 'fix/bug', value: 'b' },
     ]
 
     const result = filterByPartial('feat', items, (i) => [i.worktreeName, i.worktreeBranch])

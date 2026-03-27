@@ -194,7 +194,7 @@ describe('Memory Routes - Loop Status', () => {
       mockResolveProjectId.mockResolvedValue('test-project-id')
       mockListKv.mockReturnValue([
         {
-          key: 'ralph:test-worktree-1',
+          key: 'loop:test-worktree-1',
           data: {
             active: true,
             sessionId: 'session-123',
@@ -213,21 +213,21 @@ describe('Memory Routes - Loop Status', () => {
           expiresAt: Date.now() + 86400000,
         },
         {
-          key: 'ralph:test-worktree-2',
+          key: 'loop:test-worktree-2',
           data: null,
           createdAt: Date.now(),
           updatedAt: Date.now(),
           expiresAt: Date.now() + 86400000,
         },
         {
-          key: 'ralph:test-worktree-3',
+          key: 'loop:test-worktree-3',
           data: 'string-data',
           createdAt: Date.now(),
           updatedAt: Date.now(),
           expiresAt: Date.now() + 86400000,
         },
         {
-          key: 'ralph:test-worktree-4',
+          key: 'loop:test-worktree-4',
           data: { sessionId: 'session-abc' },
           createdAt: Date.now(),
           updatedAt: Date.now(),

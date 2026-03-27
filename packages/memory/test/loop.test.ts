@@ -4,7 +4,7 @@ import { createKvQuery } from '../src/storage/kv-queries'
 import { createKvService } from '../src/services/kv'
 import { createLoopService } from '../src/services/loop'
 
-const TEST_DIR = '/tmp/opencode-manager-ralph-test-' + Date.now()
+const TEST_DIR = '/tmp/opencode-manager-loop-test-' + Date.now()
 
 function createTestDb(): Database {
   const db = new Database(`${TEST_DIR}-${Math.random().toString(36).slice(2)}.db`)
@@ -53,7 +53,7 @@ describe('LoopService', () => {
       sessionId: 'session-123',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 5,
@@ -85,7 +85,7 @@ describe('LoopService', () => {
       sessionId: 'session-456',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
@@ -145,7 +145,7 @@ describe('LoopService', () => {
       sessionId: 'session-789',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 3,
       maxIterations: 0,
@@ -169,7 +169,7 @@ describe('LoopService', () => {
       sessionId: 'session-789',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
@@ -192,7 +192,7 @@ describe('LoopService', () => {
       sessionId: 'session-789',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 10,
@@ -215,7 +215,7 @@ describe('LoopService', () => {
       sessionId: 'session-789',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
@@ -238,7 +238,7 @@ describe('LoopService', () => {
       sessionId: 'session-persist',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 5,
       maxIterations: 10,
@@ -266,7 +266,7 @@ describe('LoopService', () => {
       sessionId: 'session-audit',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
@@ -292,7 +292,7 @@ describe('LoopService', () => {
       sessionId: 'session-audit',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 0,
@@ -320,7 +320,7 @@ describe('LoopService', () => {
       sessionId: 'session-audit',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 0,
@@ -345,7 +345,7 @@ describe('LoopService', () => {
       sessionId: 'session-audit',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 0,
@@ -370,7 +370,7 @@ describe('LoopService', () => {
       sessionId: 'active-1',
       worktreeName: 'worktree-1',
       worktreeDir: '/path/to/worktree1',
-      worktreeBranch: 'opencode/ralph-worktree-1',
+      worktreeBranch: 'opencode/loop-worktree-1',
       workspaceId: 'wrk-worktree-1',
       iteration: 1,
       maxIterations: 0,
@@ -388,8 +388,8 @@ describe('LoopService', () => {
       sessionId: 'active-2',
       worktreeName: 'worktree-2',
       worktreeDir: '/path/to/worktree2',
-      worktreeBranch: 'opencode/ralph-worktree-2',
-      workspaceId: 'ralph-worktree-2',
+      worktreeBranch: 'opencode/loop-worktree-2',
+      workspaceId: 'loop-worktree-2',
       iteration: 2,
       maxIterations: 0,
       completionPromise: null,
@@ -406,8 +406,8 @@ describe('LoopService', () => {
       sessionId: 'inactive-1',
       worktreeName: 'worktree-3',
       worktreeDir: '/path/to/worktree3',
-      worktreeBranch: 'opencode/ralph-worktree-3',
-      workspaceId: 'ralph-worktree-3',
+      worktreeBranch: 'opencode/loop-worktree-3',
+      workspaceId: 'loop-worktree-3',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -436,7 +436,7 @@ describe('LoopService', () => {
       sessionId: 'session-1',
       worktreeName: 'unique-worktree-name',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-unique-worktree-name',
+      worktreeBranch: 'opencode/loop-unique-worktree-name',
       workspaceId: 'wrk-unique-worktree-name',
       iteration: 1,
       maxIterations: 0,
@@ -464,7 +464,7 @@ describe('LoopService', () => {
       sessionId: 'session-err',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 5,
@@ -489,7 +489,7 @@ describe('LoopService', () => {
       sessionId: 'session-default',
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
-      worktreeBranch: 'opencode/ralph-test',
+      worktreeBranch: 'opencode/loop-test',
       workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
@@ -654,7 +654,7 @@ describe('Stall Detection', () => {
     } as any
 
     const { createLoopEventHandler } = require('../src/hooks/loop')
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const info = handler.getStallInfo('test')
@@ -691,7 +691,7 @@ describe('Stall Detection', () => {
     } as any
 
     const { createLoopEventHandler } = require('../src/hooks/loop')
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
@@ -753,7 +753,7 @@ describe('Stall Detection', () => {
     } as any
 
     const { createLoopEventHandler } = require('../src/hooks/loop')
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const parentId = 'parent-session'
@@ -828,7 +828,7 @@ describe('Stall Detection', () => {
     } as any
 
     const { createLoopEventHandler } = require('../src/hooks/loop')
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
@@ -900,7 +900,7 @@ describe('Stall Detection', () => {
     } as any
 
     const { createLoopEventHandler } = require('../src/hooks/loop')
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
@@ -986,7 +986,7 @@ describe('session rotation', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1071,7 +1071,7 @@ describe('session rotation', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1138,7 +1138,7 @@ describe('session rotation', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1231,7 +1231,7 @@ describe('Assistant Error Detection', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1306,7 +1306,7 @@ describe('Assistant Error Detection', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1371,7 +1371,7 @@ describe('Assistant Error Detection', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1441,7 +1441,7 @@ describe('Assistant Error Detection', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
@@ -1516,7 +1516,7 @@ describe('Assistant Error Detection', () => {
     } as any
 
     const mockGetConfig = () => ({
-      ralph: { model: 'custom/model' },
+      loop: { model: 'custom/model' },
       executionModel: 'execution/model',
       auditorModel: undefined,
     })
@@ -1592,7 +1592,7 @@ describe('Assistant Error Detection', () => {
       },
     } as any
 
-    const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
     const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {

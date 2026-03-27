@@ -9,7 +9,7 @@ interface LoopState {
   worktreeName: string
   worktreeBranch: string
   worktreeDir: string
-  inPlace: boolean
+  worktree: boolean
   iteration: number
   maxIterations: number
   phase: 'coding' | 'auditing'
@@ -244,8 +244,8 @@ describe('CLI Cancel', () => {
 
   test('partial name matches single loop proceeds with cancel', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
-    insertLoopState(db, 'test-project', 'ralph-fix-bug', {})
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {})
+    insertLoopState(db, 'test-project', 'loop-fix-bug', {})
     db.close()
 
     const outputLines: string[] = []
@@ -260,7 +260,7 @@ describe('CLI Cancel', () => {
     })
 
     const db2 = new Database(join(tempDir, 'memory.db'))
-    const authRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:ralph-feat-auth') as { data: string }
+    const authRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:loop-feat-auth') as { data: string }
     const authState = JSON.parse(authRow.data) as LoopState
     db2.close()
 
@@ -270,8 +270,8 @@ describe('CLI Cancel', () => {
 
   test('partial name matches multiple loops lists ambiguous and exits', async () => {
     const db = createTestKvDb(tempDir)
-    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
-    insertLoopState(db, 'test-project', 'ralph-auth-fix', {})
+    insertLoopState(db, 'test-project', 'loop-feat-auth', {})
+    insertLoopState(db, 'test-project', 'loop-auth-fix', {})
     db.close()
 
     const outputLines: string[] = []
@@ -299,7 +299,7 @@ describe('CLI Cancel', () => {
     expect(exited).toBe(true)
     const output = outputLines.join('\n')
     expect(output).toContain("Multiple loops match 'auth':")
-    expect(output).toContain('ralph-feat-auth')
-    expect(output).toContain('ralph-auth-fix')
+    expect(output).toContain('loop-feat-auth')
+    expect(output).toContain('loop-auth-fix')
   })
 })

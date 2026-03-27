@@ -47,14 +47,14 @@ describe('Tool Blocking Logic', () => {
     db.close()
   })
 
-  describe('Ralph state lookup', () => {
-    test('getActiveState returns active state when Ralph loop is active', () => {
+  describe('Loop state lookup', () => {
+    test('getActiveState returns active state when loop is active', () => {
       const state = {
         active: true,
         sessionId: sessionID,
         worktreeName: 'test-worktree',
         worktreeDir: '/test/worktree',
-        worktreeBranch: 'opencode/ralph-test',
+        worktreeBranch: 'opencode/loop-test',
         workspaceId: 'wrk-test-worktree',
         iteration: 1,
         maxIterations: 5,
@@ -65,7 +65,7 @@ describe('Tool Blocking Logic', () => {
         audit: false,
         errorCount: 0,
         auditCount: 0,
-        inPlace: false,
+        worktree: true,
       }
       loopService.setState(sessionID, state)
 
@@ -74,18 +74,18 @@ describe('Tool Blocking Logic', () => {
       expect(retrieved?.active).toBe(true)
     })
 
-    test('getActiveState returns null when no Ralph loop exists', () => {
+    test('getActiveState returns null when no loop exists', () => {
       const retrieved = loopService.getActiveState('non-existent-session')
       expect(retrieved).toBeNull()
     })
 
-    test('getActiveState returns null when Ralph loop is inactive', () => {
+    test('getActiveState returns null when loop is inactive', () => {
       const inactiveState = {
         active: false,
         sessionId: sessionID,
         worktreeName: 'test-worktree',
         worktreeDir: '/test/worktree',
-        worktreeBranch: 'opencode/ralph-test',
+        worktreeBranch: 'opencode/loop-test',
         workspaceId: 'wrk-test-worktree',
         iteration: 1,
         maxIterations: 5,
@@ -96,7 +96,7 @@ describe('Tool Blocking Logic', () => {
         audit: false,
         errorCount: 0,
         auditCount: 0,
-        inPlace: false,
+        worktree: true,
       }
       loopService.setState(sessionID, inactiveState)
 
