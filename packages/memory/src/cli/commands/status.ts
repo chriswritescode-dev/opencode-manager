@@ -1,11 +1,11 @@
-import type { RalphState } from '../../services/ralph'
+import type { LoopState } from '../../services/loop'
 import { openDatabase } from '../utils'
-import { formatSessionOutput, formatAuditResult } from '../../utils/ralph-format'
+import { formatSessionOutput, formatAuditResult } from '../../utils/loop-format'
 import { createOpencodeClient } from '@opencode-ai/sdk/v2'
-import { fetchSessionOutput } from '../../services/ralph'
+import { fetchSessionOutput } from '../../services/loop'
 import { findPartialMatch, filterByPartial } from '../../utils/partial-match'
 
-interface RalphLoopInfo {
+interface LoopInfo {
   sessionId: string
   worktreeName: string
   worktreeBranch?: string
@@ -51,13 +51,14 @@ export async function run(argv: StatusArgs): Promise<void> {
 
   try {
     if (argv.listWorktrees) {
-      const rows = db.prepare('SELECT key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?').all('ralph:%', Date.now()) as Array<{ key: string; data: string }>
-      const states: RalphState[] = []
+      const rows = db.prepare('SELECT key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?').all('loop:%', Date.now()) as Array<{ key: string; data: string }>
+      const states: LoopState[] = []
       for (const row of rows) {
         try {
-          const state = JSON.parse(row.data) as RalphState
+          const state = JSON.parse(row.data) as LoopState
           states.push(state)
-        } catch {
+        } catch (err) {
+          console.error(`Failed to parse memory state for key ${row.key}:`, err)
         }
       }
       const filtered = filterByPartial(argv.listWorktreesFilter, states, (s) => [s.worktreeName, s.worktreeBranch])
@@ -76,10 +77,10 @@ export async function run(argv: StatusArgs): Promise<void> {
 
     if (projectId) {
       query = 'SELECT key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?'
-      params = [projectId, 'ralph:%', now]
+      params = [projectId, 'loop:%', now]
     } else {
       query = 'SELECT key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?'
-      params = ['ralph:%', now]
+      params = ['loop:%', now]
     }
 
     let rows: Array<{ key: string; data: string }>
@@ -89,12 +90,12 @@ export async function run(argv: StatusArgs): Promise<void> {
       rows = []
     }
 
-    const activeLoops: RalphLoopInfo[] = []
-    const recentLoops: Array<{ state: RalphState; row: { key: string; data: string } }> = []
+    const activeLoops: LoopInfo[] = []
+    const recentLoops: Array<{ state: LoopState; row: { key: string; data: string } }> = []
 
     for (const row of rows) {
       try {
-        const state = JSON.parse(row.data) as RalphState
+        const state = JSON.parse(row.data) as LoopState
         if (state.active && state.sessionId && state.worktreeName && state.iteration != null && state.maxIterations != null && state.phase && state.startedAt) {
           activeLoops.push({
             sessionId: state.sessionId,
@@ -115,7 +116,7 @@ export async function run(argv: StatusArgs): Promise<void> {
     const worktreeName = argv.name
 
     if (worktreeName) {
-      type LoopUnion = { type: 'active'; loop: RalphLoopInfo } | { type: 'recent'; loop: typeof recentLoops[number] }
+      type LoopUnion = { type: 'active'; loop: LoopInfo } | { type: 'recent'; loop: typeof recentLoops[number] }
       const allLoops: LoopUnion[] = [
         ...activeLoops.map((l) => ({ type: 'active' as const, loop: l })),
         ...recentLoops.map((l) => ({ type: 'recent' as const, loop: l })),
@@ -163,7 +164,7 @@ export async function run(argv: StatusArgs): Promise<void> {
       if (matchedLoop.type === 'active') {
         const row = rows.find((r) => {
           try {
-            const state = JSON.parse(r.data) as RalphState
+            const state = JSON.parse(r.data) as LoopState
             return state.worktreeName === resolvedWorktreeName
           } catch {
             return false
@@ -175,7 +176,7 @@ export async function run(argv: StatusArgs): Promise<void> {
           process.exit(1)
         }
 
-        const state = JSON.parse(row.data) as RalphState
+        const state = JSON.parse(row.data) as LoopState
         const startedAt = state.startedAt!
         const duration = Date.now() - new Date(startedAt).getTime()
         const hours = Math.floor(duration / (1000 * 60 * 60))
@@ -183,14 +184,14 @@ export async function run(argv: StatusArgs): Promise<void> {
         const seconds = Math.floor((duration % (1000 * 60)) / 1000)
 
         console.log('')
-        console.log(`Ralph Loop: ${state.worktreeName}`)
+        console.log(`Memory Loop: ${state.worktreeName}`)
         console.log(`  Session ID:      ${state.sessionId}`)
         console.log(`  Worktree:        ${state.worktreeName}`)
         if (state.worktreeBranch) {
           console.log(`  Branch:          ${state.worktreeBranch}`)
         }
         console.log(`  Worktree Dir:    ${state.worktreeDir}`)
-        if (state.inPlace) {
+        if (!state.worktree) {
           console.log(`  Mode:            in-place`)
         }
         console.log(`  Phase:           ${state.phase}`)
@@ -227,14 +228,14 @@ export async function run(argv: StatusArgs): Promise<void> {
         const seconds = Math.floor((duration % (1000 * 60)) / 1000)
 
         console.log('')
-        console.log(`Ralph Loop (Completed): ${state.worktreeName}`)
+        console.log(`Memory Loop (Completed): ${state.worktreeName}`)
         console.log(`  Session ID:      ${state.sessionId}`)
         console.log(`  Worktree:        ${state.worktreeName}`)
         if (state.worktreeBranch) {
           console.log(`  Branch:          ${state.worktreeBranch}`)
         }
         console.log(`  Worktree Dir:    ${state.worktreeDir}`)
-        if (state.inPlace) {
+        if (!state.worktree) {
           console.log(`  Mode:            in-place (completed)`)
         }
         console.log(`  Iteration:       ${state.iteration}/${state.maxIterations}`)
@@ -260,7 +261,7 @@ export async function run(argv: StatusArgs): Promise<void> {
     } else {
       if (activeLoops.length > 0) {
         console.log('')
-        console.log('Active Ralph Loops:')
+        console.log('Active Memory Loops:')
         console.log('')
 
         for (const loop of activeLoops) {
@@ -303,7 +304,7 @@ export async function run(argv: StatusArgs): Promise<void> {
 
       if (activeLoops.length === 0 && recentLoops.length === 0) {
         console.log('')
-        console.log('No Ralph loops found.')
+        console.log('No memory loops found.')
         console.log('')
       } else {
         console.log("Run 'ocm-mem status <name>' for detailed information.")
@@ -317,7 +318,7 @@ export async function run(argv: StatusArgs): Promise<void> {
 
 export function help(): void {
   console.log(`
-Show Ralph loop status
+Show memory loop status
 
 Usage:
   ocm-mem status [options]

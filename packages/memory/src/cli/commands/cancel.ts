@@ -1,4 +1,4 @@
-import type { RalphState } from '../../services/ralph'
+import type { LoopState } from '../../services/loop'
 import { openDatabase, confirm } from '../utils'
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -25,10 +25,10 @@ export async function run(argv: CancelArgs): Promise<void> {
 
     if (projectId) {
       query = 'SELECT project_id, key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?'
-      params = [projectId, 'ralph:%', now]
+      params = [projectId, 'loop:%', now]
     } else {
       query = 'SELECT project_id, key, data FROM project_kv WHERE key LIKE ? AND expires_at > ?'
-      params = ['ralph:%', now]
+      params = ['loop:%', now]
     }
 
     let rows: Array<{ project_id: string; key: string; data: string }>
@@ -40,30 +40,32 @@ export async function run(argv: CancelArgs): Promise<void> {
 
     if (rows.length === 0) {
       console.log('')
-      console.log('No active Ralph loops.')
+      console.log('No active memory loops.')
       console.log('')
       return
     }
 
-    const loops: Array<{ state: RalphState; row: { project_id: string; key: string; data: string } }> = []
+    const loops: Array<{ state: LoopState; row: { project_id: string; key: string; data: string } }> = []
 
     for (const row of rows) {
       try {
-        const state = JSON.parse(row.data) as RalphState
+        const state = JSON.parse(row.data) as LoopState
         if (state.active) {
           loops.push({ state, row })
         }
-      } catch {}
+      } catch (err) {
+        console.error(`Failed to parse memory state for key ${row.key}:`, err)
+      }
     }
 
     if (loops.length === 0) {
       console.log('')
-      console.log('No active Ralph loops.')
+      console.log('No active memory loops.')
       console.log('')
       return
     }
 
-    let loopToCancel: { state: RalphState; row: { project_id: string; key: string; data: string } } | undefined
+    let loopToCancel: { state: LoopState; row: { project_id: string; key: string; data: string } } | undefined
 
     if (argv.name) {
       const { match, candidates } = findPartialMatch(argv.name, loops, (l) => [
@@ -81,7 +83,7 @@ export async function run(argv: CancelArgs): Promise<void> {
       }
 
       if (!match && candidates.length === 0) {
-        console.error(`Ralph loop not found: ${argv.name}`)
+        console.error(`Memory loop not found: ${argv.name}`)
         console.error('')
         console.error('Active loops:')
         for (const l of loops) {
@@ -97,7 +99,7 @@ export async function run(argv: CancelArgs): Promise<void> {
         loopToCancel = loops[0]
       } else {
         console.log('')
-        console.log('Multiple active Ralph loops. Please specify which one to cancel:')
+        console.log('Multiple active memory loops. Please specify which one to cancel:')
         console.log('')
         for (const l of loops) {
           console.log(`  - ${l.state.worktreeName}`)
@@ -117,7 +119,7 @@ export async function run(argv: CancelArgs): Promise<void> {
     const { state } = loopToCancel
 
     console.log('')
-    console.log(`Ralph Loop to Cancel:`)
+    console.log(`Memory Loop to Cancel:`)
     console.log(`  Worktree:  ${state.worktreeName}`)
     console.log(`  Session:   ${state.sessionId}`)
     console.log(`  Iteration: ${state.iteration}/${state.maxIterations}`)
@@ -127,7 +129,7 @@ export async function run(argv: CancelArgs): Promise<void> {
     }
     console.log('')
 
-    const shouldProceed = argv.force || await confirm(`Cancel Ralph loop '${state.worktreeName}'`)
+    const shouldProceed = argv.force || await confirm(`Cancel memory loop '${state.worktreeName}'`)
 
     if (!shouldProceed) {
       console.log('Cancelled.')
@@ -147,9 +149,9 @@ export async function run(argv: CancelArgs): Promise<void> {
       loopToCancel.row.key,
     )
 
-    console.log(`Cancelled Ralph loop: ${state.worktreeName}`)
+    console.log(`Cancelled memory loop: ${state.worktreeName}`)
 
-    if (argv.cleanup && state.worktreeDir && !state.inPlace) {
+    if (argv.cleanup && state.worktreeDir && state.worktree) {
       if (existsSync(state.worktreeDir)) {
         try {
           const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
@@ -174,7 +176,7 @@ export async function run(argv: CancelArgs): Promise<void> {
 
 export function help(): void {
   console.log(`
-Cancel a Ralph loop
+Cancel a memory loop
 
 Usage:
   ocm-mem cancel [name] [options]

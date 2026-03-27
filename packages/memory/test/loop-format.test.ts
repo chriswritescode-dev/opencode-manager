@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
-import { formatTokens, formatSessionOutput, formatAuditResult } from '../src/utils/ralph-format'
-import type { RalphSessionOutput } from '../src/services/ralph'
+import { formatTokens, formatSessionOutput, formatAuditResult } from '../src/utils/loop-format'
+import type { LoopSessionOutput } from '../src/services/ralph'
 
 describe('formatTokens', () => {
   test('numbers less than 1000 returned as string', () => {
@@ -27,7 +27,7 @@ describe('formatTokens', () => {
 
 describe('formatSessionOutput', () => {
   test('includes cost string with dollar prefix', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.0123,
       totalTokens: {
         input: 1000,
@@ -45,7 +45,7 @@ describe('formatSessionOutput', () => {
   })
 
   test('includes token breakdown', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 1500,
@@ -67,7 +67,7 @@ describe('formatSessionOutput', () => {
   })
 
   test('includes file changes when present', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 100,
@@ -89,7 +89,7 @@ describe('formatSessionOutput', () => {
   })
 
   test('omits file changes line when not present', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 100,
@@ -108,7 +108,7 @@ describe('formatSessionOutput', () => {
   })
 
   test('includes recent activity messages', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 100,
@@ -131,7 +131,7 @@ describe('formatSessionOutput', () => {
   })
 
   test('handles empty messages array', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 100,
@@ -151,7 +151,7 @@ describe('formatSessionOutput', () => {
 
   test('truncates long message text', () => {
     const longMessage = 'a'.repeat(250)
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 100,
@@ -171,7 +171,7 @@ describe('formatSessionOutput', () => {
   })
 
   test('handles multiline messages', () => {
-    const sessionOutput: RalphSessionOutput = {
+    const sessionOutput: LoopSessionOutput = {
       totalCost: 0.01,
       totalTokens: {
         input: 100,

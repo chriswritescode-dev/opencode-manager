@@ -86,7 +86,7 @@ export const MessagesTransformConfigSchema = z.object({
 })
 export type MessagesTransformConfig = z.infer<typeof MessagesTransformConfigSchema>
 
-export const RalphConfigSchema = z.object({
+export const LoopConfigSchema = z.object({
   enabled: z.boolean().optional(),
   defaultMaxIterations: z.number().optional(),
   cleanupWorktree: z.boolean().optional(),
@@ -95,7 +95,7 @@ export const RalphConfigSchema = z.object({
   minAudits: z.number().optional(),
   stallTimeoutMs: z.number().optional(),
 })
-export type RalphConfig = z.infer<typeof RalphConfigSchema>
+export type LoopConfig = z.infer<typeof LoopConfigSchema>
 
 export const PluginConfigSchema = z.object({
   dataDir: z.string().optional(),
@@ -107,7 +107,8 @@ export const PluginConfigSchema = z.object({
   messagesTransform: MessagesTransformConfigSchema.optional(),
   executionModel: z.string().optional(),
   auditorModel: z.string().optional(),
-  ralph: RalphConfigSchema.optional(),
+  loop: LoopConfigSchema.optional(),
+  ralph: LoopConfigSchema.optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>
 
@@ -140,7 +141,7 @@ export const UpdateKvEntryRequestSchema = z.object({
 })
 export type UpdateKvEntryRequest = z.infer<typeof UpdateKvEntryRequestSchema>
 
-export const RalphStateSchema = z.object({
+export const LoopStateSchema = z.object({
   active: z.boolean(),
   sessionId: z.string(),
   worktreeName: z.string(),
@@ -159,7 +160,7 @@ export const RalphStateSchema = z.object({
   auditCount: z.number(),
   terminationReason: z.string().optional(),
   completedAt: z.string().optional(),
-  inPlace: z.boolean().optional(),
+  worktree: z.boolean().optional(),
   modelFailed: z.boolean().optional(),
 })
-export type RalphState = z.infer<typeof RalphStateSchema>
+export type LoopState = z.infer<typeof LoopStateSchema>

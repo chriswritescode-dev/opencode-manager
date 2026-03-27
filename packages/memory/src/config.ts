@@ -17,17 +17,17 @@ const PLUGIN_COMMANDS: Record<string, { template: string; description: string; a
     subtask: true,
     template: 'Review the current code changes. $ARGUMENTS',
   },
-  'ralph-loop': {
-    description: 'Start a Ralph iterative development loop in a worktree',
+  'memory-loop': {
+    description: 'Start a memory iterative development loop in a worktree',
     agent: 'code',
     subtask: false,
-    template: 'Use the memory-plan-ralph tool to start a Ralph loop. Use the following as the plan: $ARGUMENTS. Derive a short title from the plan.',
+    template: 'Use the memory-loop tool to start a loop. Use the following as the plan: $ARGUMENTS. Derive a short title from the plan.',
   },
-  'cancel-ralph': {
-    description: 'Cancel the active Ralph loop',
+  'memory-loop-cancel': {
+    description: 'Cancel the active memory loop',
     agent: 'code',
     subtask: false,
-    template: 'Use the ralph-cancel tool to cancel the active Ralph loop. $ARGUMENTS',
+    template: 'Use the memory-loop-cancel tool to cancel the active memory loop. $ARGUMENTS',
   },
 }
 

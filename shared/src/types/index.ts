@@ -98,7 +98,8 @@ export type {
   KvListQuery,
   CreateKvEntryRequest,
   UpdateKvEntryRequest,
-  RalphState,
+  LoopState,
+  LoopConfig,
 } from '../schemas/memory'
 
 export type {

@@ -1,17 +1,17 @@
 import { Loader2, CheckCircle2, XCircle, Ban, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import type { RalphState } from '@opencode-manager/shared'
+import type { LoopState } from '@opencode-manager/shared'
 
-interface RepoRalphListProps {
+interface RepoLoopListProps {
   isLoading: boolean
-  data: RalphState[] | undefined
+  data: LoopState[] | undefined
   error: Error | null
   onCancel: (sessionId: string) => void
   pendingSessionId: string | null
 }
 
-function StatusIcon({ loop }: { loop: RalphState }) {
+function StatusIcon({ loop }: { loop: LoopState }) {
   if (loop.active) return <Loader2 className="h-4 w-4 animate-spin text-blue-400" />
   if (loop.terminationReason === 'completed') return <CheckCircle2 className="h-4 w-4 text-green-400" />
   if (loop.terminationReason === 'cancelled' || loop.terminationReason === 'user_aborted') return <Ban className="h-4 w-4 text-yellow-400" />
@@ -28,7 +28,7 @@ function formatDuration(startedAt: string, completedAt?: string): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-export function RepoRalphList({ isLoading, data, error, onCancel, pendingSessionId }: RepoRalphListProps) {
+export function RepoLoopList({ isLoading, data, error, onCancel, pendingSessionId }: RepoLoopListProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-8">
@@ -41,7 +41,7 @@ export function RepoRalphList({ isLoading, data, error, onCancel, pendingSession
     return (
       <div className="flex items-center gap-2 p-6 text-destructive">
         <AlertCircle className="h-4 w-4" />
-        <span className="text-sm">Failed to load Ralph status</span>
+        <span className="text-sm">Failed to load loop status</span>
       </div>
     )
   }
@@ -49,7 +49,7 @@ export function RepoRalphList({ isLoading, data, error, onCancel, pendingSession
   if (!data?.length) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-muted-foreground">
-        <span className="text-sm">No Ralph loops found</span>
+        <span className="text-sm">No loops found</span>
       </div>
     )
   }

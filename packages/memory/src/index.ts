@@ -4,7 +4,7 @@ import { createOpencodeClient as createV2Client } from '@opencode-ai/sdk/v2'
 import { agents } from './agents'
 import { createConfigHandler } from './config'
 import { VERSION } from './version'
-import { createSessionHooks, createMemoryInjectionHook, createRalphEventHandler } from './hooks'
+import { createSessionHooks, createMemoryInjectionHook, createLoopEventHandler } from './hooks'
 import { join, resolve } from 'path'
 import { initializeDatabase, resolveDataDir, closeDatabase, createMetadataQuery } from './storage'
 import type { MemoryService } from './services/memory'
@@ -13,21 +13,21 @@ import { createEmbeddingProvider, checkServerHealth, isServerRunning, killEmbedd
 import { createMemoryService } from './services/memory'
 import { createEmbeddingSyncService } from './services/embedding-sync'
 import { createKvService } from './services/kv'
-import { createRalphService, type RalphState, fetchSessionOutput, type RalphSessionOutput } from './services/ralph'
+import { createLoopService, type LoopState, fetchSessionOutput, type LoopSessionOutput, migrateRalphKeys } from './services/loop'
 import { findPartialMatch } from './utils/partial-match'
 import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
 import { createLogger, slugify } from './utils/logger'
 import { stripPromiseTags } from './utils/strip-promise-tags'
 import { truncate } from './cli/utils'
-import { formatSessionOutput, formatAuditResult } from './utils/ralph-format'
+import { formatSessionOutput, formatAuditResult } from './utils/loop-format'
 import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig, HealthStatus, Logger } from './types'
 import type { EmbeddingProvider } from './embedding'
 import type { VecService } from './storage/vec-types'
 import { createNoopVecService } from './storage/vec'
 import { checkForUpdate, formatUpgradeCheck, performUpgrade } from './utils/upgrade'
-import { MAX_RETRIES } from './services/ralph'
+import { MAX_RETRIES } from './services/loop'
 import { parseModelString, retryWithModelFallback } from './utils/model-fallback'
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -311,8 +311,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
     const kvService = createKvService(db, logger, config.defaultKvTtlMs)
 
-    const ralphService = createRalphService(kvService, projectId, logger, config.ralph)
-    const ralphHandler = createRalphEventHandler(ralphService, client, v2, logger, () => config)
+    const loopService = createLoopService(kvService, projectId, logger, config.loop)
+    await migrateRalphKeys(kvService, projectId, logger)
+    const loopHandler = createLoopEventHandler(loopService, client, v2, logger, () => config)
 
     const mismatchState: DimensionMismatchState = {
       detected: false,
@@ -393,12 +394,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       cleaned = true
       logger.log('Cleaning up plugin resources...')
       
-      // First, stop all active Ralph loops
-      ralphHandler.terminateAll()
-      logger.log('Ralph: all active loops terminated')
+      // First, stop all active memory loops
+      loopHandler.terminateAll()
+      logger.log('Memory loop: all active loops terminated')
       
       // Clear all retry timeouts to prevent callbacks after cleanup
-      ralphHandler.clearAllRetryTimeouts()
+      loopHandler.clearAllRetryTimeouts()
       
       // Then proceed with remaining cleanup
       memoryInjection.destroy()
@@ -413,7 +414,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
     const getCleanup = cleanup
 
-    interface RalphSetupOptions {
+    interface LoopSetupOptions {
       prompt: string
       sessionTitle: string
       worktreeName?: string
@@ -422,31 +423,31 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       audit: boolean
       agent?: string
       model?: { providerID: string; modelID: string }
-      inPlace?: boolean
+      worktree?: boolean
       onLoopStarted?: (worktreeName: string) => void
     }
 
-    async function setupRalphLoop(options: RalphSetupOptions): Promise<string> {
-      const autoWorktreeName = options.worktreeName ?? `ralph-${slugify(options.sessionTitle.replace(/^Ralph:\s*/i, ''))}`
+    async function setupLoop(options: LoopSetupOptions): Promise<string> {
+      const autoWorktreeName = options.worktreeName ?? `loop-${slugify(options.sessionTitle.replace(/^Loop:\s*/i, ''))}`
       const projectDir = directory
-      const maxIter = options.maxIterations ?? config.ralph?.defaultMaxIterations ?? 0
+      const maxIter = options.maxIterations ?? config.loop?.defaultMaxIterations ?? 0
 
       interface LoopContext {
         sessionId: string
         directory: string
         branch?: string
         workspaceId?: string
-        inPlace: boolean
+        worktree: boolean
       }
 
       let loopContext: LoopContext
 
-      if (options.inPlace) {
+      if (!options.worktree) {
         let currentBranch: string | undefined
         try {
           currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: projectDir, encoding: 'utf-8' }).trim()
         } catch (err) {
-          logger.log(`ralph: no git branch detected, running without branch info`)
+          logger.log(`loop: no git branch detected, running without branch info`)
         }
 
         const createResult = await v2.session.create({
@@ -455,7 +456,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         })
 
         if (createResult.error || !createResult.data) {
-          logger.error(`ralph: failed to create session`, createResult.error)
+          logger.error(`loop: failed to create session`, createResult.error)
           return 'Failed to create Ralph session.'
         }
 
@@ -463,7 +464,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           sessionId: createResult.data.id,
           directory: projectDir,
           branch: currentBranch,
-          inPlace: true,
+          worktree: false,
         }
       } else {
         const worktreeResult = await v2.worktree.create({
@@ -471,12 +472,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         })
 
         if (worktreeResult.error || !worktreeResult.data) {
-          logger.error(`ralph: failed to create worktree`, worktreeResult.error)
+          logger.error(`loop: failed to create worktree`, worktreeResult.error)
           return 'Failed to create worktree.'
         }
 
         const worktreeInfo = worktreeResult.data
-        logger.log(`ralph: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
+        logger.log(`loop: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
 
         const createResult = await v2.session.create({
           title: options.sessionTitle,
@@ -484,11 +485,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         })
 
         if (createResult.error || !createResult.data) {
-          logger.error(`ralph: failed to create session`, createResult.error)
+          logger.error(`loop: failed to create session`, createResult.error)
           try {
             await v2.worktree.remove({ worktreeRemoveInput: { directory: worktreeInfo.directory } })
           } catch (cleanupErr) {
-            logger.error(`ralph: failed to cleanup worktree`, cleanupErr)
+            logger.error(`loop: failed to cleanup worktree`, cleanupErr)
           }
           return 'Failed to create Ralph session.'
         }
@@ -498,11 +499,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           directory: worktreeInfo.directory,
           branch: worktreeInfo.branch,
           workspaceId: `wrk-${autoWorktreeName}`,
-          inPlace: false,
+          worktree: true,
         }
       }
 
-      const state: RalphState = {
+      const state: LoopState = {
         active: true,
         sessionId: loopContext.sessionId,
         worktreeName: autoWorktreeName,
@@ -518,12 +519,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         audit: options.audit,
         errorCount: 0,
         auditCount: 0,
-        inPlace: options.inPlace,
+        worktree: options.worktree,
       }
 
-      ralphService.setState(autoWorktreeName, state)
-      ralphService.registerSession(loopContext.sessionId, autoWorktreeName)
-      logger.log(`ralph: state stored for worktree=${autoWorktreeName}`)
+      loopService.setState(autoWorktreeName, state)
+      loopService.registerSession(loopContext.sessionId, autoWorktreeName)
+      logger.log(`loop: state stored for worktree=${autoWorktreeName}`)
 
       let promptText = options.prompt
       if (options.completionPromise) {
@@ -549,16 +550,16 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       )
 
       if (promptResult.error) {
-        logger.error(`ralph: failed to send prompt`, promptResult.error)
-        ralphService.deleteState(autoWorktreeName)
-        if (!options.inPlace && loopContext.workspaceId) {
+        logger.error(`loop: failed to send prompt`, promptResult.error)
+        loopService.deleteState(autoWorktreeName)
+        if (options.worktree && loopContext.workspaceId) {
           try {
             await v2.worktree.remove({ worktreeRemoveInput: { directory: loopContext.directory } })
           } catch (cleanupErr) {
-            logger.error(`ralph: failed to cleanup worktree`, cleanupErr)
+            logger.error(`loop: failed to cleanup worktree`, cleanupErr)
           }
         }
-        return options.inPlace
+        return !options.worktree
           ? 'Ralph session created but failed to send prompt.'
           : 'Ralph session created but failed to send prompt. Cleaned up.'
       }
@@ -570,13 +571,13 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
       const modelInfo = actualModel ? `${actualModel.providerID}/${actualModel.modelID}` : 'default'
 
       const lines: string[] = [
-        options.inPlace ? 'Ralph loop activated! (in-place mode)' : 'Ralph loop activated!',
+        !options.worktree ? 'Memory loop activated! (in-place mode)' : 'Memory loop activated!',
         '',
         `Session: ${loopContext.sessionId}`,
         `Title: ${options.sessionTitle}`,
       ]
 
-      if (options.inPlace) {
+      if (!options.worktree) {
         lines.push(`Directory: ${loopContext.directory}`)
         if (loopContext.branch) {
           lines.push(`Branch: ${loopContext.branch} (in-place)`)
@@ -596,47 +597,47 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         '',
         'The loop will automatically continue when the session goes idle.',
         'Your job is done — just confirm to the user that the loop has been launched.',
-        'The user can run ralph-status or ralph-cancel later if needed.',
+        'The user can run memory-loop-status or memory-loop-cancel later if needed.',
       )
 
       return lines.join('\n')
     }
 
-    const RALPH_BLOCKED_TOOLS: Record<string, string> = {
-      question: 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
-      'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
-      'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
+    const LOOP_BLOCKED_TOOLS: Record<string, string> = {
+      question: 'The question tool is not available during a memory loop. Do not ask questions — continue working on the task autonomously.',
+      'memory-plan-execute': 'The memory-plan-execute tool is not available during a memory loop. Focus on executing the current plan.',
+      'memory-loop': 'The memory-loop tool is not available during a memory loop. Focus on executing the current plan.',
     }
 
-    const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Ralph (worktree)', 'Ralph (in place)']
+    const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Loop (worktree)', 'Loop']
 
     const PLAN_APPROVAL_DIRECTIVES: Record<string, string> = {
       'New session': `<system-reminder>
 The user selected "New session". You MUST now call memory-plan-execute in this response with:
 - plan: The FULL self-contained implementation plan (the code agent starts with zero context)
 - title: A short descriptive title for the session
-- inPlace: false (or omit)
+- worktree: true (or omit)
 Do NOT output text without also making this tool call.
 </system-reminder>`,
       'Execute here': `<system-reminder>
 The user selected "Execute here". You MUST now call memory-plan-execute in this response with:
 - plan: "Execute the implementation plan from this conversation. Review all phases above and implement each one."
 - title: A short descriptive title for the session
-- inPlace: true
+- worktree: false
 Do NOT output text without also making this tool call.
 </system-reminder>`,
-      'Ralph (worktree)': `<system-reminder>
-The user selected "Ralph (worktree)". You MUST now call memory-plan-ralph in this response with:
-- plan: The FULL self-contained implementation plan (Ralph runs in an isolated worktree with no prior context)
+      'Loop (worktree)': `<system-reminder>
+The user selected "Loop (worktree)". You MUST now call memory-loop in this response with:
+- plan: The FULL self-contained implementation plan (runs in an isolated worktree with no prior context)
 - title: A short descriptive title for the session
-- inPlace: false (or omit)
+- worktree: true
 Do NOT output text without also making this tool call.
 </system-reminder>`,
-      'Ralph (in place)': `<system-reminder>
-The user selected "Ralph (in place)". You MUST now call memory-plan-ralph in this response with:
-- plan: The FULL self-contained implementation plan (Ralph runs in the current directory with no prior context)
+      'Loop': `<system-reminder>
+The user selected "Loop". You MUST now call memory-loop in this response with:
+- plan: The FULL self-contained implementation plan (runs in the current directory with no prior context)
 - title: A short descriptive title for the session
-- inPlace: true
+- worktree: false
 Do NOT output text without also making this tool call.
 </system-reminder>`,
     }
@@ -862,34 +863,34 @@ Do NOT output text without also making this tool call.
             return `Implementation session created and plan sent.\n\nSession: ${newSessionId}\nTitle: ${sessionTitle}\nModel: ${modelInfo}\n\nSwitch to this session to begin. You can change the model from the session dropdown.`
           },
         }),
-        'memory-plan-ralph': tool({
-          description: 'Execute a plan using a Ralph iterative development loop. By default runs in an isolated git worktree. Set inPlace to true to run in the current directory instead.',
+        'memory-loop': tool({
+          description: 'Execute a plan using an iterative development loop. Default runs in current directory. Set worktree to true for isolated git worktree.',
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
-            inPlace: z.boolean().optional().default(false).describe('Run in current directory instead of creating a worktree'),
+            worktree: z.boolean().optional().default(false).describe('Run in isolated git worktree instead of current directory'),
           },
           execute: async (args, context) => {
-            if (config.ralph?.enabled === false) {
+            if (config.loop?.enabled === false) {
               return 'Ralph loops are disabled in plugin config. Use memory-plan-execute instead.'
             }
 
-            logger.log(`memory-plan-ralph: creating worktree for plan="${args.title}"`)
+            logger.log(`memory-loop: creating worktree for plan="${args.title}"`)
 
             const sessionTitle = args.title.length > 60 ? `${args.title.substring(0, 57)}...` : args.title
-            const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
-            const audit = config.ralph?.defaultAudit ?? true
+            const loopModel = parseModelString(config.loop?.model) ?? parseModelString(config.executionModel)
+            const audit = config.loop?.defaultAudit ?? true
 
-            return setupRalphLoop({
+            return setupLoop({
               prompt: args.plan,
-              sessionTitle: `Ralph: ${sessionTitle}`,
+              sessionTitle: `Loop: ${sessionTitle}`,
               completionPromise: DEFAULT_PLAN_COMPLETION_PROMISE,
-              maxIterations: config.ralph?.defaultMaxIterations ?? 0,
+              maxIterations: config.loop?.defaultMaxIterations ?? 0,
               audit: audit,
               agent: 'code',
-              model: ralphModel,
-              inPlace: args.inPlace,
-              onLoopStarted: (id) => ralphHandler.startWatchdog(id),
+              model: loopModel,
+              worktree: args.worktree,
+              onLoopStarted: (id) => loopHandler.startWatchdog(id),
             })
           },
         }),
@@ -966,46 +967,46 @@ Do NOT output text without also making this tool call.
           },
         }),
 
-        'ralph-cancel': tool({
-          description: 'Cancel an active Ralph loop and optionally clean up the worktree.',
+        'memory-loop-cancel': tool({
+          description: 'Cancel an active memory loop and optionally clean up the worktree.',
           args: {
-            name: z.string().optional().describe('Worktree name of the Ralph loop to cancel'),
+            name: z.string().optional().describe('Worktree name of the memory loop to cancel'),
           },
           execute: async (args) => {
-            let state: RalphState | null = null
+            let state: LoopState | null = null
 
             if (args.name) {
               const name = args.name
-              state = ralphService.findByWorktreeName(name)
+              state = loopService.findByWorktreeName(name)
               if (!state) {
-                const candidates = ralphService.findCandidatesByPartialName(name)
+                const candidates = loopService.findCandidatesByPartialName(name)
                 if (candidates.length > 0) {
                   return `Multiple loops match "${name}":\n${candidates.map((s) => `- ${s.worktreeName}`).join('\n')}\n\nBe more specific.`
                 }
-                const recent = ralphService.listRecent()
+                const recent = loopService.listRecent()
                 const foundRecent = recent.find((s) => s.worktreeName === name || (s.worktreeBranch && s.worktreeBranch.toLowerCase().includes(name.toLowerCase())))
                 if (foundRecent) {
-                  return `Ralph loop "${foundRecent.worktreeName}" has already completed.`
+                  return `Memory loop "${foundRecent.worktreeName}" has already completed.`
                 }
-                return `No active Ralph loop found for worktree "${name}".`
+                return `No active memory loop found for worktree "${name}".`
               }
               if (!state.active) {
-                return `Ralph loop "${state.worktreeName}" has already completed.`
+                return `Memory loop "${state.worktreeName}" has already completed.`
               }
             } else {
-              const active = ralphService.listActive()
-              if (active.length === 0) return 'No active Ralph loops.'
+              const active = loopService.listActive()
+              if (active.length === 0) return 'No active memory loops.'
               if (active.length === 1) {
                 state = active[0]
               } else {
-                return `Multiple active Ralph loops. Specify a name:\n${active.map((s) => `- ${s.worktreeName} (iteration ${s.iteration})`).join('\n')}`
+                return `Multiple active memory loops. Specify a name:\n${active.map((s) => `- ${s.worktreeName} (iteration ${s.iteration})`).join('\n')}`
               }
             }
 
-            await ralphHandler.cancelBySessionId(state.sessionId)
-            logger.log(`ralph-cancel: cancelled loop for session=${state.sessionId} at iteration ${state.iteration}`)
+            await loopHandler.cancelBySessionId(state.sessionId)
+            logger.log(`memory-loop-cancel: cancelled loop for session=${state.sessionId} at iteration ${state.iteration}`)
 
-            if (config.ralph?.cleanupWorktree && !state.inPlace && state.worktreeDir) {
+            if (config.loop?.cleanupWorktree && state.worktree && state.worktreeDir) {
               try {
                 const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
                 const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
@@ -1013,32 +1014,32 @@ Do NOT output text without also making this tool call.
                 if (removeResult.status !== 0) {
                   throw new Error(removeResult.stderr || 'git worktree remove failed')
                 }
-                logger.log(`ralph-cancel: removed worktree ${state.worktreeDir}`)
+                logger.log(`memory-loop-cancel: removed worktree ${state.worktreeDir}`)
               } catch (err) {
-                logger.error(`ralph-cancel: failed to remove worktree`, err)
+                logger.error(`memory-loop-cancel: failed to remove worktree`, err)
               }
             }
 
-            const modeInfo = state.inPlace ? ' (in-place)' : ''
+            const modeInfo = !state.worktree ? ' (in-place)' : ''
             const branchInfo = state.worktreeBranch ? `\nBranch: ${state.worktreeBranch}` : ''
-            return `Cancelled Ralph loop "${state.worktreeName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir}${branchInfo}`
+            return `Cancelled memory loop "${state.worktreeName}"${modeInfo} (was at iteration ${state.iteration}).\nDirectory: ${state.worktreeDir}${branchInfo}`
           },
         }),
-        'ralph-status': tool({
-          description: 'Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop. Use restart to resume an inactive loop.',
+        'memory-loop-status': tool({
+          description: 'Check the status of memory loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status of a specific loop. Use restart to resume an inactive loop.',
           args: {
             name: z.string().optional().describe('Worktree name to check for detailed status'),
             restart: z.boolean().optional().describe('Restart an inactive loop by name'),
           },
           execute: async (args) => {
-            const active = ralphService.listActive()
+            const active = loopService.listActive()
 
             if (args.restart) {
               if (!args.name) {
-                return 'Specify a loop name to restart. Use ralph-status to see available loops.'
+                return 'Specify a loop name to restart. Use memory-loop-status to see available loops.'
               }
 
-              const recent = ralphService.listRecent()
+              const recent = loopService.listRecent()
               const allStates = [...active, ...recent]
               const { match: stoppedState, candidates } = findPartialMatch(args.name, allStates, (s) => [s.worktreeName, s.worktreeBranch])
               if (!stoppedState && candidates.length > 0) {
@@ -1046,7 +1047,7 @@ Do NOT output text without also making this tool call.
               }
               if (!stoppedState) {
                 const available = [...active, ...recent].map((s) => `- ${s.worktreeName}`).join('\n')
-                return `No Ralph loop found for "${args.name}".\n\nAvailable loops:\n${available}`
+                return `No memory loop found for "${args.name}".\n\nAvailable loops:\n${available}`
               }
 
               if (stoppedState.active) {
@@ -1057,7 +1058,7 @@ Do NOT output text without also making this tool call.
                 return `Loop "${stoppedState.worktreeName}" completed successfully and cannot be restarted.`
               }
 
-              if (!stoppedState.inPlace && stoppedState.worktreeDir) {
+              if (!stoppedState.worktree && stoppedState.worktreeDir) {
                 if (!existsSync(stoppedState.worktreeDir)) {
                   return `Cannot restart "${stoppedState.worktreeName}": worktree directory no longer exists at ${stoppedState.worktreeDir}. The worktree may have been cleaned up.`
                 }
@@ -1069,15 +1070,15 @@ Do NOT output text without also making this tool call.
               })
 
               if (createResult.error || !createResult.data) {
-                logger.error(`ralph-restart: failed to create session`, createResult.error)
+                logger.error(`memory-loop-restart: failed to create session`, createResult.error)
                 return `Failed to create new session for restart.`
               }
 
               const newSessionId = createResult.data.id
 
-              ralphService.deleteState(stoppedState.worktreeName!)
+              loopService.deleteState(stoppedState.worktreeName!)
 
-              const newState: RalphState = {
+              const newState: LoopState = {
                 active: true,
                 sessionId: newSessionId,
                 worktreeName: stoppedState.worktreeName!,
@@ -1093,18 +1094,18 @@ Do NOT output text without also making this tool call.
                 audit: stoppedState.audit,
                 errorCount: 0,
                 auditCount: 0,
-                inPlace: stoppedState.inPlace,
+                worktree: stoppedState.worktree,
               }
 
-              ralphService.setState(stoppedState.worktreeName!, newState)
-              ralphService.registerSession(newSessionId, stoppedState.worktreeName!)
+              loopService.setState(stoppedState.worktreeName!, newState)
+              loopService.registerSession(newSessionId, stoppedState.worktreeName!)
 
               let promptText = stoppedState.prompt ?? ''
               if (stoppedState.completionPromise) {
                 promptText += `\n\n---\n\n**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully, you MUST output the following tag exactly: <promise>${stoppedState.completionPromise}</promise>\n\nDo NOT output this tag until every phase is truly complete. The loop will continue until this signal is detected.`
               }
 
-              const ralphModel = parseModelString(config.ralph?.model) ?? parseModelString(config.executionModel)
+              const loopModel = parseModelString(config.loop?.model) ?? parseModelString(config.executionModel)
 
               const { result: promptResult } = await retryWithModelFallback(
                 () => v2.session.promptAsync({
@@ -1112,7 +1113,7 @@ Do NOT output text without also making this tool call.
                   directory: stoppedState.worktreeDir!,
                   parts: [{ type: 'text' as const, text: promptText }],
                   agent: 'code',
-                  model: ralphModel!,
+                  model: loopModel!,
                 }),
                 () => v2.session.promptAsync({
                   sessionID: newSessionId,
@@ -1120,22 +1121,22 @@ Do NOT output text without also making this tool call.
                   parts: [{ type: 'text' as const, text: promptText }],
                   agent: 'code',
                 }),
-                ralphModel,
+                loopModel,
                 logger,
               )
 
               if (promptResult.error) {
-                logger.error(`ralph-restart: failed to send prompt`, promptResult.error)
-                ralphService.deleteState(stoppedState.worktreeName!)
+                logger.error(`memory-loop-restart: failed to send prompt`, promptResult.error)
+                loopService.deleteState(stoppedState.worktreeName!)
                 return `Restart failed: could not send prompt to new session.`
               }
 
-              ralphHandler.startWatchdog(stoppedState.worktreeName!)
+              loopHandler.startWatchdog(stoppedState.worktreeName!)
 
-              const modeInfo = stoppedState.inPlace ? ' (in-place)' : ''
+              const modeInfo = stoppedState.worktree ? ' (in-place)' : ''
               const branchInfo = stoppedState.worktreeBranch ? `\nBranch: ${stoppedState.worktreeBranch}` : ''
               return [
-                `Restarted Ralph loop "${stoppedState.worktreeName}"${modeInfo}`,
+                `Restarted memory loop "${stoppedState.worktreeName}"${modeInfo}`,
                 '',
                 `New session: ${newSessionId}`,
                 `Continuing from iteration: ${stoppedState.iteration}`,
@@ -1146,12 +1147,12 @@ Do NOT output text without also making this tool call.
             }
 
             if (!args.name) {
-              const recent = ralphService.listRecent()
+              const recent = loopService.listRecent()
 
               if (active.length === 0) {
-                if (recent.length === 0) return 'No Ralph loops found.'
+                if (recent.length === 0) return 'No memory loops found.'
 
-                const lines: string[] = ['Recently Completed Ralph Loops', '']
+                const lines: string[] = ['Recently Completed Memory Loops', '']
                 recent.forEach((s, i) => {
                   const duration = s.completedAt && s.startedAt
                     ? Math.round((new Date(s.completedAt).getTime() - new Date(s.startedAt).getTime()) / 1000)
@@ -1163,7 +1164,7 @@ Do NOT output text without also making this tool call.
                   lines.push(`   Reason: ${s.terminationReason ?? 'unknown'} | Iterations: ${s.iteration} | Duration: ${durationStr} | Completed: ${s.completedAt ?? 'unknown'}`)
                   lines.push('')
                 })
-                lines.push('Use ralph-status <name> for detailed info.')
+                lines.push('Use memory-loop-status <name> for detailed info.')
                 return lines.join('\n')
               }
 
@@ -1174,7 +1175,7 @@ Do NOT output text without also making this tool call.
               } catch {
               }
 
-              const lines: string[] = [`Active Ralph Loops (${active.length})`, '']
+              const lines: string[] = [`Active Memory Loops (${active.length})`, '']
               active.forEach((s, i) => {
                 const elapsed = s.startedAt ? Math.round((Date.now() - new Date(s.startedAt).getTime()) / 1000) : 0
                 const minutes = Math.floor(elapsed / 60)
@@ -1182,8 +1183,8 @@ Do NOT output text without also making this tool call.
                 const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
                 const iterInfo = s.maxIterations && s.maxIterations > 0 ? `${s.iteration} / ${s.maxIterations}` : `${s.iteration} (unlimited)`
                 const sessionStatus = statuses[s.sessionId]?.type ?? 'unknown'
-                const modeIndicator = s.inPlace ? ' (in-place)' : ''
-                const stallInfo = ralphHandler.getStallInfo(s.worktreeName)
+                const modeIndicator = !s.worktree ? ' (in-place)' : ''
+                const stallInfo = loopHandler.getStallInfo(s.worktreeName)
                 const stallCount = stallInfo?.consecutiveStalls ?? 0
                 const stallSuffix = stallCount > 0 ? ` | Stalls: ${stallCount}` : ''
                 lines.push(`${i + 1}. ${s.worktreeName}${modeIndicator}`)
@@ -1207,18 +1208,18 @@ Do NOT output text without also making this tool call.
                   lines.push('')
                 })
                 if (recent.length > 10) {
-                  lines.push(`   ... and ${recent.length - 10} more. Use ralph-status <name> for details.`)
+                  lines.push(`   ... and ${recent.length - 10} more. Use memory-loop-status <name> for details.`)
                   lines.push('')
                 }
               }
 
-              lines.push('Use ralph-status <name> for detailed info, or ralph-cancel <name> to stop a loop.')
+              lines.push('Use memory-loop-status <name> for detailed info, or memory-loop-cancel <name> to stop a loop.')
               return lines.join('\n')
             }
 
-            const state = ralphService.findByWorktreeName(args.name)
+            const state = loopService.findByWorktreeName(args.name)
             if (!state) {
-              const candidates = ralphService.findCandidatesByPartialName(args.name)
+              const candidates = loopService.findCandidatesByPartialName(args.name)
               if (candidates.length > 0) {
                 return `Multiple loops match "${args.name}":\n${candidates.map((s) => `- ${s.worktreeName}`).join('\n')}\n\nBe more specific.`
               }
@@ -1240,7 +1241,7 @@ Do NOT output text without also making this tool call.
                 `Name: ${state.worktreeName}`,
                 `Session: ${state.sessionId}`,
               ]
-              if (state.inPlace) {
+              if (!state.worktree) {
                 statusLines.push(`Mode: in-place | Directory: ${state.worktreeDir}`)
               } else {
                 statusLines.push(`Workspace: ${state.workspaceId}`)
@@ -1263,7 +1264,7 @@ Do NOT output text without also making this tool call.
                 statusLines.push(...formatAuditResult(state.lastAuditResult))
               }
 
-              const sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir!, logger)
+              const sessionOutput = state.worktreeDir ? await fetchSessionOutput(v2, state.sessionId, state.worktreeDir, logger) : null
               if (sessionOutput) {
                 statusLines.push('')
                 statusLines.push('Session Output:')
@@ -1295,7 +1296,7 @@ Do NOT output text without also making this tool call.
             const seconds = elapsed % 60
             const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
 
-            const stallInfo = ralphHandler.getStallInfo(state.worktreeName)
+            const stallInfo = loopHandler.getStallInfo(state.worktreeName)
             const secondsSinceActivity = stallInfo
               ? Math.round((Date.now() - stallInfo.lastActivityTime) / 1000)
               : null
@@ -1307,7 +1308,7 @@ Do NOT output text without also making this tool call.
               `Name: ${state.worktreeName}`,
               `Session: ${state.sessionId}`,
             ]
-            if (state.inPlace) {
+            if (!state.worktree) {
               statusLines.push(`Mode: in-place | Directory: ${state.worktreeDir}`)
             } else {
               statusLines.push(`Workspace: ${state.workspaceId}`)
@@ -1328,7 +1329,7 @@ Do NOT output text without also making this tool call.
               `Started: ${state.startedAt}`,
               ...(state.errorCount && state.errorCount > 0 ? [`Error count: ${state.errorCount} (retries before termination: ${MAX_RETRIES})`] : []),
               `Audit count: ${state.auditCount ?? 0}`,
-              `Model: ${config.ralph?.model || config.executionModel || 'default'}`,
+              `Model: ${config.loop?.model || config.executionModel || 'default'}`,
               `Auditor model: ${config.auditorModel || 'default'}`,
               ...(stallCount > 0 ? [`Stalls: ${stallCount}`] : []),
               ...(secondsSinceActivity !== null ? [`Last activity: ${secondsSinceActivity}s ago`] : []),
@@ -1340,7 +1341,7 @@ Do NOT output text without also making this tool call.
               statusLines.push(...formatAuditResult(state.lastAuditResult))
             }
 
-            const sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir!, logger)
+            const sessionOutput = state.worktreeDir ? await fetchSessionOutput(v2, state.sessionId, state.worktreeDir, logger) : null
             if (sessionOutput) {
               statusLines.push('')
               statusLines.push('Session Output:')
@@ -1365,22 +1366,22 @@ Do NOT output text without also making this tool call.
           cleanup()
           return
         }
-        await ralphHandler.onEvent(eventInput)
+        await loopHandler.onEvent(eventInput)
         await sessionHooks.onEvent(eventInput)
       },
       'tool.execute.before': async (
         input: { tool: string; sessionID: string; callID: string },
         output: { args: unknown }
       ) => {
-        const worktreeName = ralphService.resolveWorktreeName(input.sessionID)
-        const state = worktreeName ? ralphService.getActiveState(worktreeName) : null
+        const worktreeName = loopService.resolveWorktreeName(input.sessionID)
+        const state = worktreeName ? loopService.getActiveState(worktreeName) : null
         if (!state?.active) return
 
-        if (!(input.tool in RALPH_BLOCKED_TOOLS)) return
+        if (!(input.tool in LOOP_BLOCKED_TOOLS)) return
 
         logger.log(`Ralph: blocking ${input.tool} tool before execution in ${state.phase} phase for session ${input.sessionID}`)
 
-        throw new Error(RALPH_BLOCKED_TOOLS[input.tool]!)
+        throw new Error(LOOP_BLOCKED_TOOLS[input.tool]!)
       },
       'tool.execute.after': async (
         input: { tool: string; sessionID: string; callID: string; args: unknown },
@@ -1396,7 +1397,7 @@ Do NOT output text without also making this tool call.
               const metadata = output.metadata as { answers?: string[][] } | undefined
               const answer = metadata?.answers?.[0]?.[0]?.trim() ?? output.output.trim()
               const matchedLabel = PLAN_APPROVAL_LABELS.find((l) => answer === l || answer.startsWith(l))
-              const directive = matchedLabel ? PLAN_APPROVAL_DIRECTIVES[matchedLabel] : '<system-reminder>\nThe user provided a custom response instead of selecting a predefined option. Review their answer and respond accordingly. If they want to proceed with execution, use the appropriate tool (memory-plan-execute or memory-plan-ralph) based on their intent. If they want to cancel or revise the plan, help them with that instead.\n</system-reminder>'
+              const directive = matchedLabel ? PLAN_APPROVAL_DIRECTIVES[matchedLabel] : '<system-reminder>\nThe user provided a custom response instead of selecting a predefined option. Review their answer and respond accordingly. If they want to proceed with execution, use the appropriate tool (memory-plan-execute or memory-loop) based on their intent. If they want to cancel or revise the plan, help them with that instead.\n</system-reminder>'
               output.output = `${output.output}\n\n${directive}`
               logger.log(`Plan approval: detected "${matchedLabel ?? 'cancel/custom'}" answer, injected directive`)
             }
@@ -1404,21 +1405,21 @@ Do NOT output text without also making this tool call.
           return
         }
 
-        const worktreeName = ralphService.resolveWorktreeName(input.sessionID)
-        const state = worktreeName ? ralphService.getActiveState(worktreeName) : null
+        const worktreeName = loopService.resolveWorktreeName(input.sessionID)
+        const state = worktreeName ? loopService.getActiveState(worktreeName) : null
         if (!state?.active) return
 
-        if (!(input.tool in RALPH_BLOCKED_TOOLS)) return
+        if (!(input.tool in LOOP_BLOCKED_TOOLS)) return
 
         logger.log(`Ralph: blocked ${input.tool} tool in ${state.phase} phase for session ${input.sessionID}`)
         
         output.title = 'Tool blocked'
-        output.output = RALPH_BLOCKED_TOOLS[input.tool]!
+        output.output = LOOP_BLOCKED_TOOLS[input.tool]!
       },
       'permission.ask': async (input, output) => {
         const req = input as unknown as { sessionID: string; patterns: string[] }
-        const worktreeName = ralphService.resolveWorktreeName(req.sessionID)
-        const state = worktreeName ? ralphService.getActiveState(worktreeName) : null
+        const worktreeName = loopService.resolveWorktreeName(req.sessionID)
+        const state = worktreeName ? loopService.getActiveState(worktreeName) : null
         if (!state?.active) return
 
         if (req.patterns.some((p) => p.startsWith('git push'))) {
@@ -1492,7 +1493,7 @@ Do NOT output text without also making this tool call.
           text: `<system-reminder>
 Plan mode is active. You MUST NOT make any file edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
-You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list), the question tool, memory-plan-execute, and memory-plan-ralph.
+You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list), the question tool, memory-plan-execute, and memory-loop.
 
 You MUST always present your plan to the user for explicit approval before proceeding. Never execute a plan without approval. Use the question tool to collect approval — never ask for approval via plain text output.
 </system-reminder>`,

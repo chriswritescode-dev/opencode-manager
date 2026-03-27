@@ -138,7 +138,11 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
     messagesTransform: config.messagesTransform,
     executionModel: config.executionModel,
     auditorModel: config.auditorModel,
-    ralph: config.ralph,
+    loop: config.loop ?? config.ralph,
+  }
+  
+  if (config.ralph && !config.loop) {
+    console.warn('[memory] Config key "ralph" is deprecated, use "loop" instead')
   }
   
   if (normalized.embedding) {

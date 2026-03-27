@@ -59,7 +59,7 @@ export interface Logger {
   debug: (message: string, ...args: unknown[]) => void
 }
 
-export interface RalphConfig {
+export interface LoopConfig {
   enabled?: boolean
   defaultMaxIterations?: number
   cleanupWorktree?: boolean
@@ -79,7 +79,8 @@ export interface PluginConfig {
   messagesTransform?: MessagesTransformConfig
   executionModel?: string
   auditorModel?: string
-  ralph?: RalphConfig
+  loop?: LoopConfig
+  ralph?: LoopConfig
   defaultKvTtlMs?: number
 }
 

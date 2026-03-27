@@ -4,7 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { mkdtempSync, rmSync } from 'fs'
 
-interface RalphState {
+interface LoopState {
   sessionId: string
   worktreeName: string
   worktreeBranch: string
@@ -42,13 +42,13 @@ function createTestKvDb(tempDir: string): Database {
   return db
 }
 
-function insertRalphState(db: Database, projectId: string, worktreeName: string, state: Partial<RalphState>): void {
-  const defaultState: RalphState = {
+function insertLoopState(db: Database, projectId: string, worktreeName: string, state: Partial<LoopState>): void {
+  const defaultState: LoopState = {
     sessionId: 'test-session-id',
     worktreeName,
     worktreeBranch: 'main',
     worktreeDir: '/tmp/test-worktree',
-    inPlace: false,
+    worktree: true,
     iteration: 1,
     maxIterations: 10,
     phase: 'coding',
@@ -66,7 +66,7 @@ function insertRalphState(db: Database, projectId: string, worktreeName: string,
 
   db.run(
     'INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [projectId, `ralph:${worktreeName}`, data, expiresAt, now]
+    [projectId, `loop:${worktreeName}`, data, expiresAt, now]
   )
 }
 
@@ -88,8 +88,8 @@ describe('CLI Status - list-worktrees', () => {
 
   test('lists active worktree names', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'worktree-one', {})
-    insertRalphState(db, 'test-project', 'worktree-two', {})
+    insertLoopState(db, 'test-project', 'worktree-one', {})
+    insertLoopState(db, 'test-project', 'worktree-two', {})
     db.close()
 
     const outputLines: string[] = []
@@ -113,12 +113,12 @@ describe('CLI Status - list-worktrees', () => {
     const now = Date.now()
     const expiredAt = now - 86400000
 
-    const expiredState: RalphState = {
+    const expiredState: LoopState = {
       sessionId: 'test-session',
       worktreeName: 'expired-worktree',
       worktreeBranch: 'main',
       worktreeDir: '/tmp/test',
-      inPlace: false,
+      worktree: true,
       iteration: 1,
       maxIterations: 10,
       phase: 'coding',
@@ -131,7 +131,7 @@ describe('CLI Status - list-worktrees', () => {
 
     db2.run(
       'INSERT INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-      ['test-project', 'ralph:expired-worktree', JSON.stringify(expiredState), expiredAt, now]
+      ['test-project', 'loop:expired-worktree', JSON.stringify(expiredState), expiredAt, now]
     )
     db2.close()
 
@@ -151,7 +151,7 @@ describe('CLI Status - list-worktrees', () => {
 
   test('includes inactive loops in list', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'inactive-worktree', { active: false, completedAt: new Date().toISOString() })
+    insertLoopState(db, 'test-project', 'inactive-worktree', { active: false, completedAt: new Date().toISOString() })
     db.close()
 
     const outputLines: string[] = []
@@ -190,8 +190,8 @@ describe('CLI Status - summary', () => {
 
   test('shows active loops when no name given', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'active-one', { startedAt: new Date(Date.now() - 3600000).toISOString() })
-    insertRalphState(db, 'test-project', 'active-two', { startedAt: new Date(Date.now() - 1800000).toISOString() })
+    insertLoopState(db, 'test-project', 'active-one', { startedAt: new Date(Date.now() - 3600000).toISOString() })
+    insertLoopState(db, 'test-project', 'active-two', { startedAt: new Date(Date.now() - 1800000).toISOString() })
     db.close()
 
     const outputLines: string[] = []
@@ -205,7 +205,7 @@ describe('CLI Status - summary', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Active Ralph Loops:')
+    expect(output).toContain('Active Memory Loops:')
     expect(output).toContain('active-one')
     expect(output).toContain('active-two')
   })
@@ -225,12 +225,12 @@ describe('CLI Status - summary', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('No Ralph loops found')
+    expect(output).toContain('No memory loops found')
   })
 
   test('shows recently completed loops', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'completed-one', {
+    insertLoopState(db, 'test-project', 'completed-one', {
       active: false,
       completedAt: new Date().toISOString(),
       terminationReason: 'success',
@@ -274,10 +274,10 @@ describe('CLI Status - partial matching', () => {
 
   test('partial name matches single active loop', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
-    insertRalphState(db, 'test-project', 'ralph-fix-bug', {
+    insertLoopState(db, 'test-project', 'ralph-fix-bug', {
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
     db.close()
@@ -294,17 +294,17 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Ralph Loop: ralph-feat-auth')
+    expect(output).toContain('Memory Loop: ralph-feat-auth')
   })
 
   test('partial name matches single recent loop', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-completed-auth', {
+    insertLoopState(db, 'test-project', 'ralph-completed-auth', {
       active: false,
       completedAt: new Date().toISOString(),
       terminationReason: 'success',
     })
-    insertRalphState(db, 'test-project', 'ralph-fix-bug', {
+    insertLoopState(db, 'test-project', 'ralph-fix-bug', {
       active: true,
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
@@ -322,13 +322,13 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Ralph Loop (Completed): ralph-completed-auth')
+    expect(output).toContain('Memory Loop (Completed): ralph-completed-auth')
   })
 
   test('partial name matches multiple loops lists ambiguous', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {})
-    insertRalphState(db, 'test-project', 'ralph-auth-fix', {})
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
+    insertLoopState(db, 'test-project', 'ralph-auth-fix', {})
     db.close()
 
     const outputLines: string[] = []
@@ -363,11 +363,11 @@ describe('CLI Status - partial matching', () => {
 
   test('partial name matches via worktreeBranch field', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {
       worktreeBranch: 'feat/auth',
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
-    insertRalphState(db, 'test-project', 'ralph-fix-bug', {
+    insertLoopState(db, 'test-project', 'ralph-fix-bug', {
       worktreeBranch: 'fix/bug',
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
@@ -385,13 +385,13 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Ralph Loop: ralph-feat-auth')
+    expect(output).toContain('Memory Loop: ralph-feat-auth')
     expect(output).toContain('Branch:          feat/auth')
   })
 
   test('case-insensitive matching works', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
     db.close()
@@ -408,15 +408,15 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Ralph Loop: ralph-feat-auth')
+    expect(output).toContain('Memory Loop: ralph-feat-auth')
   })
 
   test('exact match takes priority over partial', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'auth', {
+    insertLoopState(db, 'test-project', 'auth', {
       startedAt: new Date(Date.now() - 3600000).toISOString(),
     })
-    insertRalphState(db, 'test-project', 'ralph-auth', {
+    insertLoopState(db, 'test-project', 'ralph-auth', {
       startedAt: new Date(Date.now() - 1800000).toISOString(),
     })
     db.close()
@@ -433,15 +433,15 @@ describe('CLI Status - partial matching', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('Ralph Loop: auth')
-    expect(output).not.toContain('Ralph Loop: ralph-auth')
+    expect(output).toContain('Memory Loop: auth')
+    expect(output).not.toContain('Memory Loop: ralph-auth')
   })
 
   test('--list-worktrees with filter returns filtered results', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', { worktreeBranch: 'feat/auth' })
-    insertRalphState(db, 'test-project', 'ralph-fix-bug', { worktreeBranch: 'fix/bug' })
-    insertRalphState(db, 'test-project', 'ralph-update-deps', {})
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', { worktreeBranch: 'feat/auth' })
+    insertLoopState(db, 'test-project', 'ralph-fix-bug', { worktreeBranch: 'fix/bug' })
+    insertLoopState(db, 'test-project', 'ralph-update-deps', {})
     db.close()
 
     const outputLines: string[] = []
@@ -464,8 +464,8 @@ describe('CLI Status - partial matching', () => {
 
   test('--list-worktrees without filter returns all', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {})
-    insertRalphState(db, 'test-project', 'ralph-fix-bug', {})
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
+    insertLoopState(db, 'test-project', 'ralph-fix-bug', {})
     db.close()
 
     const outputLines: string[] = []

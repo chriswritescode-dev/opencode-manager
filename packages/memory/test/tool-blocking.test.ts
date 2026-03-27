@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { createKvService } from '../src/services/kv'
-import { createRalphService } from '../src/services/ralph'
+import { createLoopService } from '../src/services/loop'
 import type { Logger } from '../src/types'
 
 const TEST_DIR = '/tmp/opencode-manager-tool-blocking-test-' + Date.now()
@@ -33,14 +33,14 @@ function createMockLogger(): Logger {
 
 describe('Tool Blocking Logic', () => {
   let db: Database
-  let ralphService: ReturnType<typeof createRalphService>
+  let loopService: ReturnType<typeof createLoopService>
   const projectId = 'test-project'
   const sessionID = 'test-session-123'
 
   beforeEach(() => {
     db = createTestDb()
     const kvService = createKvService(db)
-    ralphService = createRalphService(kvService, projectId, createMockLogger())
+    loopService = createLoopService(kvService, projectId, createMockLogger())
   })
 
   afterEach(() => {
@@ -67,15 +67,15 @@ describe('Tool Blocking Logic', () => {
         auditCount: 0,
         inPlace: false,
       }
-      ralphService.setState(sessionID, state)
+      loopService.setState(sessionID, state)
 
-      const retrieved = ralphService.getActiveState(sessionID)
+      const retrieved = loopService.getActiveState(sessionID)
       expect(retrieved).toEqual(state)
       expect(retrieved?.active).toBe(true)
     })
 
     test('getActiveState returns null when no Ralph loop exists', () => {
-      const retrieved = ralphService.getActiveState('non-existent-session')
+      const retrieved = loopService.getActiveState('non-existent-session')
       expect(retrieved).toBeNull()
     })
 
@@ -98,36 +98,36 @@ describe('Tool Blocking Logic', () => {
         auditCount: 0,
         inPlace: false,
       }
-      ralphService.setState(sessionID, inactiveState)
+      loopService.setState(sessionID, inactiveState)
 
-      const retrieved = ralphService.getActiveState(sessionID)
+      const retrieved = loopService.getActiveState(sessionID)
       expect(retrieved).toBeNull()
     })
   })
 
   describe('Blocked tools list', () => {
     test('includes question tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-loop']
       expect(blockedTools).toContain('question')
     })
 
     test('includes memory-plan-execute tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-loop']
       expect(blockedTools).toContain('memory-plan-execute')
     })
 
-    test('includes memory-plan-ralph tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
-      expect(blockedTools).toContain('memory-plan-ralph')
+    test('includes memory-loop tool', () => {
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-loop']
+      expect(blockedTools).toContain('memory-loop')
     })
 
     test('does not include memory-read tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-loop']
       expect(blockedTools).not.toContain('memory-read')
     })
 
     test('does not include memory-write tool', () => {
-      const blockedTools = ['question', 'memory-plan-execute', 'memory-plan-ralph']
+      const blockedTools = ['question', 'memory-plan-execute', 'memory-loop']
       expect(blockedTools).not.toContain('memory-write')
     })
   })
@@ -135,18 +135,18 @@ describe('Tool Blocking Logic', () => {
   describe('Error messages', () => {
     test('question tool has appropriate error message', () => {
       const messages: Record<string, string> = {
-        'question': 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
-        'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
-        'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
+        'question': 'The question tool is not available during a memory loop. Do not ask questions — continue working on the task autonomously.',
+        'memory-plan-execute': 'The memory-plan-execute tool is not available during a memory loop. Focus on executing the current plan.',
+        'memory-loop': 'The memory-loop tool is not available during a memory loop. Focus on executing the current plan.',
       }
       expect(messages['question']).toContain('question tool is not available')
     })
 
     test('memory-plan-execute tool has appropriate error message', () => {
       const messages: Record<string, string> = {
-        'question': 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
-        'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
-        'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
+        'question': 'The question tool is not available during a memory loop. Do not ask questions — continue working on the task autonomously.',
+        'memory-plan-execute': 'The memory-plan-execute tool is not available during a memory loop. Focus on executing the current plan.',
+        'memory-loop': 'The memory-loop tool is not available during a memory loop. Focus on executing the current plan.',
       }
       expect(messages['memory-plan-execute']).toContain('memory-plan-execute tool is not available')
     })

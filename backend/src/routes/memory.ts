@@ -17,9 +17,9 @@ import {
   PluginConfigSchema,
   CreateKvEntryRequestSchema,
   UpdateKvEntryRequestSchema,
-  RalphStateSchema,
+  LoopStateSchema,
   type PluginConfig,
-  type RalphState,
+  type LoopState,
 } from '@opencode-manager/shared/schemas'
 
 function resolveMemoryDataDir(): string {
@@ -528,7 +528,7 @@ export function createMemoryRoutes(db: Database): Hono {
     }
   })
 
-  app.get('/ralph/status', async (c) => {
+  app.get('/loop/status', async (c) => {
     const repoIdParam = c.req.query('repoId')
 
     if (!repoIdParam) {
@@ -554,26 +554,26 @@ export function createMemoryRoutes(db: Database): Hono {
         return c.json({ loops: [], projectId: null })
       }
 
-      const entries = pluginMemory.listKv(projectId, 'ralph:')
+      const entries = pluginMemory.listKv(projectId, 'loop:')
       const loops = entries
         .map(e => e.data)
         .filter((data): data is Record<string, unknown> =>
           data !== null && typeof data === 'object' && 'active' in data
         )
         .map(data => {
-          const result = RalphStateSchema.safeParse(data)
+          const result = LoopStateSchema.safeParse(data)
           return result.success ? result.data : null
         })
-        .filter((loop): loop is RalphState => loop !== null)
+        .filter((loop): loop is LoopState => loop !== null)
 
       return c.json({ loops, projectId })
     } catch (error) {
-      logger.error('Failed to get Ralph status:', error)
-      return c.json({ error: 'Failed to get Ralph status' }, 500)
+      logger.error('Failed to get Loop:', error)
+      return c.json({ error: 'Failed to get Loop' }, 500)
     }
   })
 
-  app.post('/ralph/cancel', async (c) => {
+  app.post('/loop/cancel', async (c) => {
     try {
       const body = await c.req.json()
       const { repoId, worktreeName, sessionId } = body
@@ -599,7 +599,7 @@ export function createMemoryRoutes(db: Database): Hono {
       if (worktreeName) {
         worktreeNameToUse = worktreeName
       } else if (sessionId) {
-        const sessionMappingEntry = pluginMemory.getKv(projectId, `ralph-session:${sessionId}`)
+        const sessionMappingEntry = pluginMemory.getKv(projectId, `loop-session:${sessionId}`)
         if (!sessionMappingEntry) {
           return c.json({ cancelled: false })
         }
@@ -610,15 +610,15 @@ export function createMemoryRoutes(db: Database): Hono {
         return c.json({ cancelled: false })
       }
 
-      const kvEntry = pluginMemory.getKv(projectId, `ralph:${worktreeNameToUse}`)
+      const kvEntry = pluginMemory.getKv(projectId, `loop:${worktreeNameToUse}`)
       if (!kvEntry) {
         return c.json({ cancelled: false })
       }
 
-      const result = RalphStateSchema.safeParse(kvEntry.data)
+      const result = LoopStateSchema.safeParse(kvEntry.data)
 
       if (!result.success) {
-        logger.warn('Failed to parse Ralph state for cancel:', result.error)
+        logger.warn('Failed to parse Loop state for cancel:', result.error)
         return c.json({ cancelled: false })
       }
 
@@ -635,7 +635,7 @@ export function createMemoryRoutes(db: Database): Hono {
         completedAt: new Date().toISOString(),
       }
 
-      pluginMemory.setKv(projectId, `ralph:${worktreeNameToUse}`, updatedState)
+      pluginMemory.setKv(projectId, `loop:${worktreeNameToUse}`, updatedState)
 
       try {
         const abortUrl = new URL(`${OPENCODE_SERVER_URL}/session/${state.sessionId}/abort`)
@@ -647,8 +647,8 @@ export function createMemoryRoutes(db: Database): Hono {
 
       return c.json({ cancelled: true, worktreeName: state.worktreeName })
     } catch (error) {
-      logger.error('Failed to cancel Ralph loop:', error)
-      return c.json({ error: 'Failed to cancel Ralph loop' }, 500)
+      logger.error('Failed to cancel Loop:', error)
+      return c.json({ error: 'Failed to cancel Loop' }, 500)
     }
   })
 

@@ -74,7 +74,7 @@ The file is only created if it does not already exist. The config is validated o
   },
   "executionModel": "",
   "auditorModel": "",
-  "ralph": {
+  "loop": {
     "enabled": true,
     "defaultMaxIterations": 15,
     "cleanupWorktree": false,
@@ -158,7 +158,7 @@ The plugin is composed of several subsystems that work together:
 │  Embedding   │   Vec Search   │   Cache          │
 │  Service     │   (sqlite-vec) │   (In-Memory)    │
 ├──────────────┴────────────────┬───────────────────┤
-│   KV Service    │  Ralph Service  │  Auto-Cleanup │
+│   KV Service    │  Loop Service  │  Auto-Cleanup │
 │   (TTL state)   │  (loop mgmt)    │  (30min)      │
 ├─────────────────┴─────────────────┴───────────────┤
 │              SQLite Database (WAL)                 │
@@ -194,11 +194,11 @@ The KV store provides ephemeral project state management with automatic TTL-base
 
 The KV service is initialized on plugin startup and begins its cleanup interval automatically. Call `kvService.destroy()` during cleanup to stop the interval.
 
-### Ralph Service
+### Loop Service
 
 The Ralph service manages iterative development loops using the KV store for state persistence:
 
-- **State Management**: Each loop's state is stored in the KV store under `ralph:{sessionId}` with fields: `active` (boolean), `sessionId`, `worktreeName`, `worktreeDir`, `worktreeBranch`, `workspaceId`, `iteration`, `maxIterations`, `completionPromise`, `startedAt`, `prompt`, `phase` (coding/auditing), `audit`, `lastAuditResult`, `errorCount`, `auditCount`, `terminationReason`, `completedAt`, `parentSessionId`, `inPlace`
+- **State Management**: Each loop's state is stored in the KV store under `loop:{sessionId}` with fields: `active` (boolean), `sessionId`, `worktreeName`, `worktreeDir`, `worktreeBranch`, `workspaceId`, `iteration`, `maxIterations`, `completionPromise`, `startedAt`, `prompt`, `phase` (coding/auditing), `audit`, `lastAuditResult`, `errorCount`, `auditCount`, `terminationReason`, `completedAt`, `parentSessionId`, `inPlace`
 - **Two-Phase Cycle**: Alternates between coding (Code agent works on the task) and auditing (Auditor agent reviews changes). Audit findings feed back into the next coding iteration
 - **Completion Criteria**: Requires the `completionPromise` to be detected in `<promise>` tags AND `minAudits` (default 1) audit iterations before marking the loop as completed. Without a `completionPromise`, the loop only terminates via other conditions (max iterations, errors, cancellation, etc.)
 - **Error Handling**: Tracks consecutive errors with `MAX_RETRIES` (3). If 3 consecutive iterations fail, the loop terminates with reason `error_max_retries`
@@ -425,7 +425,7 @@ No parameters required.
 
 Returns a list of all stored keys with their values and expiration times. Useful for debugging or inspecting current project state.
 
-### ralph-cancel
+### memory-loop-cancel
 
 Cancel an active Ralph loop and optionally clean up the worktree.
 
@@ -433,7 +433,7 @@ Cancel an active Ralph loop and optionally clean up the worktree.
 |-----------|------|----------|-------------|
 | `name` | string | No | Worktree name of the loop to cancel (auto-selects if only one active) |
 
-### ralph-status
+### memory-loop-status
 
 Check the status of Ralph loops. With no arguments, lists all active loops for the current project. Pass a worktree name for detailed status.
 
@@ -443,7 +443,7 @@ Check the status of Ralph loops. With no arguments, lists all active loops for t
 
 Returns iteration count, current phase, audit results, model configuration, and termination status.
 
-### memory-plan-ralph
+### memory-loop
 
 Execute an architect plan using a Ralph iterative development loop. Designed to be called by the Architect agent after the user approves a plan with the "Execute with Ralph loop" or "Ralph in place" option.
 
@@ -471,7 +471,7 @@ The Architect and Code agents work together in a plan-then-execute pattern. The 
 3. **Review the plan** — the Architect presents a structured plan with objectives, phases, and decisions for your approval
 4. **Approve the plan** — choose an execution mode:
     - **Approve plan** → `memory-plan-execute` creates a new Code session with the plan
-    - **Execute with Ralph loop** → `memory-plan-ralph` runs the plan in an isolated worktree with iterative coding/auditing
+    - **Execute with Ralph loop** → `memory-loop` runs the plan in an isolated worktree with iterative coding/auditing
     - **Ralph in place** → Same as Ralph loop but in the current directory (no worktree isolation)
     - **Reject plan** → Cancel
 5. **Switch to the new session** — the Code agent executes the plan phase by phase
@@ -497,7 +497,7 @@ Or set it from the UI: **Settings > Memory Plugin > Execution Model**.
 !!! tip "Cost Optimization"
     With this setup, only the planning phase uses the expensive model. The Code session — which typically consumes far more tokens implementing the plan — runs on the cheaper model. The Architect's plan provides enough structure and detail that the Code agent doesn't need the same level of reasoning capability.
 
-### Ralph Loop
+### Loop
 
 The Ralph loop is an iterative development system that alternates between coding and auditing phases until the task is complete.
 
@@ -515,7 +515,7 @@ The Ralph loop is an iterative development system that alternates between coding
     - **Error limit**: 3 consecutive failures (`MAX_RETRIES`)
     - **Stall timeout**: 5 consecutive stalls detected by the watchdog (`MAX_CONSECUTIVE_STALLS`)
     - **Worktree failure**: The worktree becomes unavailable
-    - **Cancelled**: User cancels via `ralph-cancel` or `/cancel-ralph`
+    - **Cancelled**: User cancels via `memory-loop-cancel` or `/cancel-loop`
     - **User abort**: Session is aborted
 
 #### Worktree vs In-Place
@@ -582,7 +582,7 @@ During a Ralph loop, certain tools are blocked to keep the agent focused:
 
 - `question` — No interactive questions; work autonomously
 - `memory-plan-execute` — Cannot start new plan sessions
-- `memory-plan-ralph` — Cannot start nested Ralph loops
+- `memory-loop` — Cannot start nested Ralph loops
 
 Blocking is enforced via `tool.execute.before` (throws error) with `tool.execute.after` as defense in depth.
 
@@ -603,8 +603,8 @@ The fallback is permanent within a loop — once triggered, the `modelFailed` fl
 
 | Command | Description |
 |---------|-------------|
-| `/ralph-loop <prompt>` | Start a Ralph loop (delegates to memory-plan-ralph) |
-| `/cancel-ralph` | Cancel the active Ralph loop |
+| `/loop <prompt>` | Start a Ralph loop (delegates to memory-loop) |
+| `/cancel-loop` | Cancel the active Ralph loop |
 
 ---
 
@@ -655,9 +655,9 @@ The Architect agent follows a Research → Design → Plan → Execute workflow:
 1. **Research** — Reads relevant files, searches the codebase, checks memory for conventions and decisions
 2. **Design** — Considers approaches, weighs tradeoffs, asks clarifying questions
 3. **Plan** — Presents a structured plan with objectives, phases, decisions, conventions, and key context
-4. **Execute** — When the user approves via the question tool, calls `memory-plan-execute` or `memory-plan-ralph` depending on the chosen execution mode.
+4. **Execute** — When the user approves via the question tool, calls `memory-plan-execute` or `memory-loop` depending on the chosen execution mode.
 
-The Architect is the only agent with access to `memory-plan-execute` and `memory-plan-ralph`. Plans must be fully self-contained since the Code agent receiving them has no access to the Architect's conversation.
+The Architect is the only agent with access to `memory-plan-execute` and `memory-loop`. Plans must be fully self-contained since the Code agent receiving them has no access to the Architect's conversation.
 
 ### Auditor Agent (subagent)
 
@@ -669,7 +669,7 @@ The Architect is the only agent with access to `memory-plan-execute` and `memory
 
 The Auditor agent is a read-only subagent invoked by other agents via the Task tool to review diffs, commits, branches, or PRs. It checks changes against stored project conventions and decisions, then returns a structured review summary with issues (bug/warning/suggestion), observations, and next steps.
 
-The agent can read memory (`memory-read`) but cannot write, edit, or delete memories. It also cannot execute plans — `memory-plan-execute`, `memory-plan-ralph`, `memory-health`, `memory-write`, `memory-edit`, and `memory-delete` are excluded.
+The agent can read memory (`memory-read`) but cannot write, edit, or delete memories. It also cannot execute plans — `memory-plan-execute`, `memory-loop`, `memory-health`, `memory-write`, `memory-edit`, and `memory-delete` are excluded.
 
 The Auditor persists review findings to the KV store (key pattern: `review-finding:<file_path>:<line_number>`) and retrieves past findings at the start of every review for continuity. Each finding is a JSON object containing severity, file, line, description, scenario, status, date, and branch. Only bugs and warnings are persisted — suggestions are not stored. Resolved findings are deleted during subsequent reviews. See [Review Finding Persistence](#review-finding-persistence) for the full lifecycle.
 
@@ -691,8 +691,8 @@ The default agent is set to `code`.
 | Command | Description | Agent | Mode |
 |---------|-------------|-------|------|
 | `/review` | Run a code review on current changes | auditor | subtask |
-| `/ralph-loop` | Start a Ralph loop (delegates to memory-plan-ralph) | code | direct |
-| `/cancel-ralph` | Cancel the active Ralph loop | code | direct |
+| `/loop` | Start a Ralph loop (delegates to memory-loop) | code | direct |
+| `/cancel-loop` | Cancel the active Ralph loop | code | direct |
 
 ---
 
@@ -748,7 +748,7 @@ Memory injection is controlled independently by `memoryInjection.enabled` (defau
 
 ### tool.execute.before
 
-Blocks certain tools during active Ralph loops to keep the agent focused on the current task. Throws an error with a descriptive message when a blocked tool is called. Blocked tools: `question`, `memory-plan-execute`, `memory-plan-ralph`.
+Blocks certain tools during active Ralph loops to keep the agent focused on the current task. Throws an error with a descriptive message when a blocked tool is called. Blocked tools: `question`, `memory-plan-execute`, `memory-loop`.
 
 ### tool.execute.after
 

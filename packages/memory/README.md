@@ -78,23 +78,23 @@ Ephemeral key-value storage for project state with automatic TTL-based expiratio
 | `memory-kv-list` | List all active KV entries for the project. Optionally filter by key prefix. |
 | `memory-kv-delete` | Delete a key-value pair by key |
 
-### Ralph Loop Tools
+### Loop Tools
 
 Iterative development loops with automatic auditing. Runs in an isolated git worktree by default, or in the current directory with `inPlace`.
 
 | Tool | Description |
 |------|-------------|
-| `ralph-cancel` | Cancel an active Ralph loop by worktree name |
-| `ralph-status` | Check status of Ralph loops. Supports `restart` to resume inactive loops. |
-| `memory-plan-ralph` | Execute an architect plan using a Ralph iterative loop. Supports `inPlace` parameter. |
+| `memory-loop-cancel` | Cancel an active Ralph loop by worktree name |
+| `memory-loop-status` | Check status of Ralph loops. Supports `restart` to resume inactive loops. |
+| `memory-loop` | Execute an architect plan using a Ralph iterative loop. Supports `inPlace` parameter. |
 
 ## Slash Commands
 
 | Command | Description | Agent |
 |---------|-------------|-------|
 | `/review` | Run a code review on current changes | auditor (subtask) |
-| `/ralph-loop` | Start a Ralph loop (delegates to memory-plan-ralph) | code |
-| `/cancel-ralph` | Cancel the active Ralph loop | code |
+| `/loop` | Start a Ralph loop (delegates to memory-loop) | code |
+| `/cancel-loop` | Cancel the active Ralph loop | code |
 
 ## CLI
 
@@ -259,7 +259,7 @@ You can edit this file to customize settings. The file is created only if it doe
   },
   "executionModel": "",
   "auditorModel": "",
-  "ralph": {
+  "loop": {
     "enabled": true,
     "defaultMaxIterations": 15,
     "cleanupWorktree": false,
@@ -351,14 +351,14 @@ After the architect presents a plan, the user approves via one of four execution
 
 - **New session** — Creates a new Code session via `memory-plan-execute`
 - **Execute here** — Executes the plan in the current session (code agent takes over immediately)
-- **Ralph (worktree)** — Runs the plan in an isolated git worktree with iterative coding/auditing via `memory-plan-ralph`
+- **Ralph (worktree)** — Runs the plan in an isolated git worktree with iterative coding/auditing via `memory-loop`
 - **Ralph (in place)** — Same as Ralph worktree but runs in the current directory (no worktree isolation)
 
 Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the architect session.
 
 See the [full workflow guide](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#architect--code) for setup details.
 
-## Ralph Loop
+## Loop
 
 The Ralph loop is an iterative development system that alternates between coding and auditing phases:
 

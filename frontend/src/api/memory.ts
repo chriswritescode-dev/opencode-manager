@@ -1,6 +1,6 @@
 import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { Memory, MemoryStats, CreateMemoryRequest, UpdateMemoryRequest, PluginConfig, KvEntry, CreateKvEntryRequest, UpdateKvEntryRequest, RalphState } from '@opencode-manager/shared/types'
+import type { Memory, MemoryStats, CreateMemoryRequest, UpdateMemoryRequest, PluginConfig, KvEntry, CreateKvEntryRequest, UpdateKvEntryRequest, LoopState } from '@opencode-manager/shared/types'
 
 export async function listMemories(filters?: {
   projectId?: string
@@ -123,12 +123,12 @@ export async function updateKvEntry(projectId: string, key: string, data: Update
   })
 }
 
-export async function getRalphStatus(repoId: number): Promise<{ loops: RalphState[]; projectId?: string | null }> {
-  return fetchWrapper(`${API_BASE_URL}/api/memory/ralph/status?repoId=${repoId}`)
+export async function getLoopStatus(repoId: number): Promise<{ loops: LoopState[]; projectId?: string | null }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/loop/status?repoId=${repoId}`)
 }
 
-export async function cancelRalphLoop(repoId: number, sessionId: string): Promise<{ cancelled: boolean; worktreeName?: string }> {
-  return fetchWrapper(`${API_BASE_URL}/api/memory/ralph/cancel`, {
+export async function cancelLoop(repoId: number, sessionId: string): Promise<{ cancelled: boolean; worktreeName?: string }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/loop/cancel`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ repoId, sessionId }),

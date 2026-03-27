@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { createKvQuery } from '../src/storage/kv-queries'
 import { createKvService } from '../src/services/kv'
-import { createRalphService } from '../src/services/ralph'
+import { createLoopService } from '../src/services/loop'
 
 const TEST_DIR = '/tmp/opencode-manager-ralph-test-' + Date.now()
 
@@ -31,16 +31,16 @@ function createMockLogger() {
   }
 }
 
-describe('RalphService', () => {
+describe('LoopService', () => {
   let db: Database
   let kvService: ReturnType<typeof createKvService>
-  let ralphService: ReturnType<typeof createRalphService>
+  let loopService: ReturnType<typeof createLoopService>
   const projectId = 'test-project'
 
   beforeEach(() => {
     db = createTestDb()
     kvService = createKvService(db)
-    ralphService = createRalphService(kvService, projectId, createMockLogger())
+    loopService = createLoopService(kvService, projectId, createMockLogger())
   })
 
   afterEach(() => {
@@ -66,16 +66,16 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('session-123', state)
-    const retrieved = ralphService.getActiveState('session-123')
+    loopService.setState('session-123', state)
+    const retrieved = loopService.getActiveState('session-123')
     expect(retrieved).toEqual(state)
 
-    ralphService.setState('session-123', { ...state, iteration: 2 })
-    const updated = ralphService.getActiveState('session-123')
+    loopService.setState('session-123', { ...state, iteration: 2 })
+    const updated = loopService.getActiveState('session-123')
     expect(updated?.iteration).toBe(2)
 
-    ralphService.deleteState('session-123')
-    const deleted = ralphService.getActiveState('session-123')
+    loopService.deleteState('session-123')
+    const deleted = loopService.getActiveState('session-123')
     expect(deleted).toBeNull()
   })
 
@@ -98,45 +98,45 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('session-456', inactiveState)
-    const retrieved = ralphService.getActiveState('session-456')
+    loopService.setState('session-456', inactiveState)
+    const retrieved = loopService.getActiveState('session-456')
     expect(retrieved).toBeNull()
   })
 
   test('getActiveState returns null for non-existent session', () => {
-    const retrieved = ralphService.getActiveState('non-existent')
+    const retrieved = loopService.getActiveState('non-existent')
     expect(retrieved).toBeNull()
   })
 
   test('checkCompletionPromise matches exact promise', () => {
     const text = 'Some response text <promise>DONE</promise> more text'
-    expect(ralphService.checkCompletionPromise(text, 'DONE')).toBe(true)
+    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(true)
   })
 
   test('checkCompletionPromise returns false when no promise tags', () => {
     const text = 'Some response text without promise tags'
-    expect(ralphService.checkCompletionPromise(text, 'DONE')).toBe(false)
+    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(false)
   })
 
   test('checkCompletionPromise returns false when promise does not match', () => {
     const text = 'Some response <promise>NOT_DONE</promise> text'
-    expect(ralphService.checkCompletionPromise(text, 'DONE')).toBe(false)
+    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(false)
   })
 
   test('checkCompletionPromise handles whitespace normalization', () => {
     const text = 'Response <promise>  DONE   WITH   SPACES  </promise> text'
-    expect(ralphService.checkCompletionPromise(text, 'DONE WITH SPACES')).toBe(true)
+    expect(loopService.checkCompletionPromise(text, 'DONE WITH SPACES')).toBe(true)
   })
 
   test('checkCompletionPromise matches first promise tag when multiple present', () => {
     const text = 'First <promise>FIRST</promise> second <promise>SECOND</promise>'
-    expect(ralphService.checkCompletionPromise(text, 'FIRST')).toBe(true)
-    expect(ralphService.checkCompletionPromise(text, 'SECOND')).toBe(false)
+    expect(loopService.checkCompletionPromise(text, 'FIRST')).toBe(true)
+    expect(loopService.checkCompletionPromise(text, 'SECOND')).toBe(false)
   })
 
   test('checkCompletionPromise handles multiline promise', () => {
     const text = 'Response <promise>\n  MULTI\n  LINE\n</promise> text'
-    expect(ralphService.checkCompletionPromise(text, 'MULTI LINE')).toBe(true)
+    expect(loopService.checkCompletionPromise(text, 'MULTI LINE')).toBe(true)
   })
 
   test('buildContinuationPrompt includes iteration number', () => {
@@ -158,8 +158,8 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    const prompt = ralphService.buildContinuationPrompt(state)
-    expect(prompt).toContain('Ralph iteration 3')
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('Loop iteration 3')
     expect(prompt).toContain('My test prompt')
   })
 
@@ -182,8 +182,8 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    const prompt = ralphService.buildContinuationPrompt(state)
-    expect(prompt).toContain('[Ralph iteration 1 | To stop: output <promise>COMPLETE_TASK</promise> (ONLY when all requirements are met)]')
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('[Loop iteration 1 | To stop: output <promise>COMPLETE_TASK</promise> (ONLY when all requirements are met)]')
   })
 
   test('buildContinuationPrompt includes max iterations when no promise', () => {
@@ -205,8 +205,8 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    const prompt = ralphService.buildContinuationPrompt(state)
-    expect(prompt).toContain('[Ralph iteration 2 / 10]')
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('[Loop iteration 2 / 10]')
   })
 
   test('buildContinuationPrompt shows unlimited message when no promise and no max', () => {
@@ -228,8 +228,8 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    const prompt = ralphService.buildContinuationPrompt(state)
-    expect(prompt).toContain('[Ralph iteration 1 | No completion promise set - loop runs until cancelled]')
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('[Loop iteration 1 | No completion promise set - loop runs until cancelled]')
   })
 
   test('state persists across service recreation', () => {
@@ -251,12 +251,12 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('session-persist', state)
+    loopService.setState('session-persist', state)
 
     const newKvService = createKvService(db)
-    const newRalphService = createRalphService(newKvService, projectId, createMockLogger())
+    const newLoopService = createLoopService(newKvService, projectId, createMockLogger())
 
-    const retrieved = newRalphService.getActiveState('session-persist')
+    const retrieved = newLoopService.getActiveState('session-persist')
     expect(retrieved).toEqual(state)
   })
 
@@ -279,7 +279,7 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    const prompt = ralphService.buildAuditPrompt(state)
+    const prompt = loopService.buildAuditPrompt(state)
     expect(prompt).toContain('Review the code changes')
     expect(prompt).toContain('bugs, logic errors, missing error handling')
     expect(prompt).toContain('No issues found')
@@ -306,8 +306,8 @@ describe('RalphService', () => {
     }
 
     const auditFindings = 'Found a bug in line 10'
-    const prompt = ralphService.buildContinuationPrompt(state, auditFindings)
-    expect(prompt).toContain('Ralph iteration 2')
+    const prompt = loopService.buildContinuationPrompt(state, auditFindings)
+    expect(prompt).toContain('Loop iteration 2')
     expect(prompt).toContain('Test prompt')
     expect(prompt).toContain('The code auditor reviewed your changes')
     expect(prompt).toContain('do not dismiss findings as unrelated to the task')
@@ -333,8 +333,8 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    const prompt = ralphService.buildContinuationPrompt(state)
-    expect(prompt).toContain('Ralph iteration 2')
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('Loop iteration 2')
     expect(prompt).toContain('Test prompt')
     expect(prompt).not.toContain('The following issues were found')
   })
@@ -359,7 +359,7 @@ describe('RalphService', () => {
     }
 
     const auditFindings = 'Found a bug in line 10'
-    const prompt = ralphService.buildContinuationPrompt(state, auditFindings)
+    const prompt = loopService.buildContinuationPrompt(state, auditFindings)
     expect(prompt).toContain('After fixing all issues, output the completion signal')
     expect(prompt).toContain('without creating a plan or asking for approval')
   })
@@ -419,11 +419,11 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('active-1', activeState1)
-    ralphService.setState('active-2', activeState2)
-    ralphService.setState('inactive-1', inactiveState)
+    loopService.setState('active-1', activeState1)
+    loopService.setState('active-2', activeState2)
+    loopService.setState('inactive-1', inactiveState)
 
-    const active = ralphService.listActive()
+    const active = loopService.listActive()
     expect(active.length).toBe(2)
     expect(active.map((s) => s.sessionId)).toContain('active-1')
     expect(active.map((s) => s.sessionId)).toContain('active-2')
@@ -449,12 +449,12 @@ describe('RalphService', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('session-1', state1)
+    loopService.setState('session-1', state1)
 
-    const found = ralphService.findByWorktreeName('unique-worktree-name')
+    const found = loopService.findByWorktreeName('unique-worktree-name')
     expect(found).toEqual(state1)
 
-    const notFound = ralphService.findByWorktreeName('non-existent')
+    const notFound = loopService.findByWorktreeName('non-existent')
     expect(notFound).toBeNull()
   })
 
@@ -477,8 +477,8 @@ describe('RalphService', () => {
       auditCount: 1,
       terminationReason: undefined,
     }
-    ralphService.setState('session-err', state)
-    const retrieved = ralphService.getActiveState('session-err')
+    loopService.setState('session-err', state)
+    const retrieved = loopService.getActiveState('session-err')
     expect(retrieved?.errorCount).toBe(2)
     expect(retrieved?.auditCount).toBe(1)
   })
@@ -501,8 +501,8 @@ describe('RalphService', () => {
       errorCount: 0,
       auditCount: 0,
     }
-    ralphService.setState('session-default', state)
-    const retrieved = ralphService.getActiveState('session-default')
+    loopService.setState('session-default', state)
+    const retrieved = loopService.getActiveState('session-default')
     expect(retrieved?.errorCount).toBe(0)
     expect(retrieved?.auditCount).toBe(0)
   })
@@ -524,11 +524,11 @@ describe('RalphService', () => {
       audit: false,
       errorCount: 0,
       auditCount: 0,
-      inPlace: true,
+      worktree: false,
     }
-    ralphService.setState('session-inplace', inPlaceState)
-    const retrieved = ralphService.getActiveState('session-inplace')
-    expect(retrieved?.inPlace).toBe(true)
+    loopService.setState('session-inplace', inPlaceState)
+    const retrieved = loopService.getActiveState('session-inplace')
+    expect(retrieved?.worktree).toBe(false)
     expect(retrieved?.workspaceId).toBe('')
     expect(retrieved?.worktreeDir).toBe('/path/to/project')
   })
@@ -550,12 +550,12 @@ describe('RalphService', () => {
       audit: true,
       errorCount: 0,
       auditCount: 1,
-      inPlace: true,
+      worktree: false,
     }
-    ralphService.setState('session-inplace-2', inPlaceState)
-    const found = ralphService.findByWorktreeName('unique-inplace-name')
+    loopService.setState('session-inplace-2', inPlaceState)
+    const found = loopService.findByWorktreeName('unique-inplace-name')
     expect(found).toEqual(inPlaceState)
-    expect(found?.inPlace).toBe(true)
+    expect(found?.worktree).toBe(false)
   })
 
   test('buildContinuationPrompt works with inPlace state', () => {
@@ -575,10 +575,10 @@ describe('RalphService', () => {
       audit: false,
       errorCount: 0,
       auditCount: 0,
-      inPlace: true,
+      worktree: false,
     }
-    const prompt = ralphService.buildContinuationPrompt(inPlaceState)
-    expect(prompt).toContain('Ralph iteration 3')
+    const prompt = loopService.buildContinuationPrompt(inPlaceState)
+    expect(prompt).toContain('Loop iteration 3')
     expect(prompt).toContain('In-place prompt test')
     expect(prompt).toContain('<promise>COMPLETE</promise>')
   })
@@ -600,11 +600,11 @@ describe('RalphService', () => {
       audit: true,
       errorCount: 0,
       auditCount: 0,
-      inPlace: true,
+      worktree: false,
     }
     const auditFindings = 'Bug found in component'
-    const prompt = ralphService.buildContinuationPrompt(inPlaceState, auditFindings)
-    expect(prompt).toContain('Ralph iteration 2')
+    const prompt = loopService.buildContinuationPrompt(inPlaceState, auditFindings)
+    expect(prompt).toContain('Loop iteration 2')
     expect(prompt).toContain('In-place audit test')
     expect(prompt).toContain('The code auditor reviewed your changes')
     expect(prompt).toContain('do not dismiss findings as unrelated to the task')
@@ -612,14 +612,14 @@ describe('RalphService', () => {
   })
 
   test('getMinAudits returns default when not configured', () => {
-    const minAudits = ralphService.getMinAudits()
+    const minAudits = loopService.getMinAudits()
     expect(minAudits).toBe(1)
   })
 
   test('getMinAudits returns configured value', () => {
     const kvService = createKvService(db)
-    const customRalphService = createRalphService(kvService, projectId, createMockLogger(), { minAudits: 3 })
-    expect(customRalphService.getMinAudits()).toBe(3)
+    const customLoopService = createLoopService(kvService, projectId, createMockLogger(), { minAudits: 3 })
+    expect(customLoopService.getMinAudits()).toBe(3)
   })
 })
 
@@ -627,7 +627,7 @@ describe('Stall Detection', () => {
   test('getStallInfo returns null when no watchdog running', () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const ralphService = createRalphService(kvService, 'test-project', createMockLogger())
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger())
     const mockClient = {
       session: {
         promptAsync: async () => ({ data: undefined, error: undefined }),
@@ -653,9 +653,9 @@ describe('Stall Detection', () => {
       },
     } as any
 
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const info = handler.getStallInfo('test')
     expect(info).toBeNull()
@@ -664,7 +664,7 @@ describe('Stall Detection', () => {
   test('startWatchdog initializes stall state', () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 100 })
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 100 })
     const mockClient = {
       session: {
         promptAsync: async () => ({ data: undefined, error: undefined }),
@@ -690,13 +690,13 @@ describe('Stall Detection', () => {
       },
     } as any
 
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
     const worktreeName = 'test'
-    ralphService.setState(worktreeName, {
+    loopService.setState(worktreeName, {
       active: true,
       sessionId,
       worktreeName,
@@ -726,7 +726,7 @@ describe('Stall Detection', () => {
   test('session.created event tracks child sessions', async () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
     const mockClient = {
       session: {
         promptAsync: async () => ({ data: undefined, error: undefined }),
@@ -752,15 +752,15 @@ describe('Stall Detection', () => {
       },
     } as any
 
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const parentId = 'parent-session'
     const childId = 'child-session'
     const worktreeName = 'test'
 
-    ralphService.setState(worktreeName, {
+    loopService.setState(worktreeName, {
       active: true,
       sessionId: parentId,
       worktreeName: 'test',
@@ -801,7 +801,7 @@ describe('Stall Detection', () => {
   test('session.status event updates activity time', async () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
     const mockClient = {
       session: {
         promptAsync: async () => ({ data: undefined, error: undefined }),
@@ -827,13 +827,13 @@ describe('Stall Detection', () => {
       },
     } as any
 
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
     const worktreeName = 'test'
-    ralphService.setState(worktreeName, {
+    loopService.setState(worktreeName, {
       active: true,
       sessionId,
       worktreeName: 'test',
@@ -873,7 +873,7 @@ describe('Stall Detection', () => {
   test('stopWatchdog cleans up all state', () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { stallTimeoutMs: 1000 })
     const mockClient = {
       session: {
         promptAsync: async () => ({ data: undefined, error: undefined }),
@@ -899,13 +899,13 @@ describe('Stall Detection', () => {
       },
     } as any
 
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const sessionId = 'test-session'
     const worktreeName = 'test'
-    ralphService.setState(worktreeName, {
+    loopService.setState(worktreeName, {
       active: true,
       sessionId,
       worktreeName: 'test',
@@ -935,21 +935,21 @@ describe('Minimum Audits', () => {
   test('getMinAudits returns configured value', () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const ralphService = createRalphService(kvService, 'test-project', createMockLogger(), { minAudits: 2 })
-    expect(ralphService.getMinAudits()).toBe(2)
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { minAudits: 2 })
+    expect(loopService.getMinAudits()).toBe(2)
   })
 })
 
 describe('session rotation', () => {
   let db: Database
   let kvService: ReturnType<typeof createKvService>
-  let ralphService: ReturnType<typeof createRalphService>
+  let loopService: ReturnType<typeof createLoopService>
   const projectId = 'test-project'
 
   beforeEach(() => {
     db = createTestDb()
     kvService = createKvService(db)
-    ralphService = createRalphService(kvService, projectId, createMockLogger())
+    loopService = createLoopService(kvService, projectId, createMockLogger())
   })
 
   afterEach(() => {
@@ -957,7 +957,7 @@ describe('session rotation', () => {
   })
 
   test('rotates session on coding phase iteration boundary', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const oldSessionId = 'old-session-id'
     const newSessionId = 'new-session-id'
 
@@ -987,7 +987,7 @@ describe('session rotation', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1007,8 +1007,8 @@ describe('session rotation', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(oldSessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(oldSessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1017,18 +1017,18 @@ describe('session rotation', () => {
       },
     })
 
-    const oldState = ralphService.getActiveState('test-worktree')
+    const oldState = loopService.getActiveState('test-worktree')
     expect(oldState).not.toBeNull()
     expect(oldState?.sessionId).toBe(newSessionId)
 
-    const newState = ralphService.getActiveState('test-worktree')
+    const newState = loopService.getActiveState('test-worktree')
     expect(newState).not.toBeNull()
     expect(newState?.iteration).toBe(2)
     expect(newState?.sessionId).toBe(newSessionId)
   })
 
   test('rotates session on auditing phase completion', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const oldSessionId = 'old-session-id'
     const newSessionId = 'new-session-id'
 
@@ -1072,7 +1072,7 @@ describe('session rotation', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1092,8 +1092,8 @@ describe('session rotation', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(oldSessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(oldSessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1102,7 +1102,7 @@ describe('session rotation', () => {
       },
     })
 
-    const newState = ralphService.getActiveState('test-worktree')
+    const newState = loopService.getActiveState('test-worktree')
     expect(newState).not.toBeNull()
     expect(newState?.phase).toBe('coding')
     expect(newState?.iteration).toBe(2)
@@ -1110,7 +1110,7 @@ describe('session rotation', () => {
   })
 
   test('falls back to existing session when rotation fails', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'existing-session-id'
 
     const mockClient = {
@@ -1139,7 +1139,7 @@ describe('session rotation', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1159,8 +1159,8 @@ describe('session rotation', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(sessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1169,7 +1169,7 @@ describe('session rotation', () => {
       },
     })
 
-    const existingState = ralphService.getActiveState('test-worktree')
+    const existingState = loopService.getActiveState('test-worktree')
     expect(existingState).not.toBeNull()
     expect(existingState?.iteration).toBe(2)
     expect(existingState?.sessionId).toBe(sessionId)
@@ -1179,13 +1179,13 @@ describe('session rotation', () => {
 describe('Assistant Error Detection', () => {
   let db: Database
   let kvService: ReturnType<typeof createKvService>
-  let ralphService: ReturnType<typeof createRalphService>
+  let loopService: ReturnType<typeof createLoopService>
   const projectId = 'test-project'
 
   beforeEach(() => {
     db = createTestDb()
     kvService = createKvService(db)
-    ralphService = createRalphService(kvService, projectId, createMockLogger())
+    loopService = createLoopService(kvService, projectId, createMockLogger())
   })
 
   afterEach(() => {
@@ -1193,7 +1193,7 @@ describe('Assistant Error Detection', () => {
   })
 
   test('detects assistant error in coding phase and triggers error handling', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'error-session'
 
     const mockClient = {
@@ -1232,7 +1232,7 @@ describe('Assistant Error Detection', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1252,8 +1252,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(sessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1262,13 +1262,13 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState('test-worktree')
+    const updatedState = loopService.getActiveState('test-worktree')
     expect(updatedState?.errorCount).toBe(1)
     expect(updatedState?.modelFailed).toBe(true)
   })
 
   test('detects assistant error in auditing phase and triggers error handling', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'audit-error-session'
 
     const mockClient = {
@@ -1307,7 +1307,7 @@ describe('Assistant Error Detection', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1327,8 +1327,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(sessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1337,13 +1337,13 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState('test-worktree')
+    const updatedState = loopService.getActiveState('test-worktree')
     expect(updatedState?.errorCount).toBe(1)
     expect(updatedState?.modelFailed).toBe(true)
   })
 
   test('session.error event with non-abort error sets modelFailed flag', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'session-error-test'
 
     const mockClient = {
@@ -1372,7 +1372,7 @@ describe('Assistant Error Detection', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1392,8 +1392,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(sessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1408,12 +1408,12 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState('test-worktree')
+    const updatedState = loopService.getActiveState('test-worktree')
     expect(updatedState?.modelFailed).toBe(true)
   })
 
   test('session.error event with abort error terminates loop immediately', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'abort-session'
 
     const mockClient = {
@@ -1442,7 +1442,7 @@ describe('Assistant Error Detection', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1462,8 +1462,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(sessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1477,12 +1477,12 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const updatedState = ralphService.getActiveState('test-worktree')
+    const updatedState = loopService.getActiveState('test-worktree')
     expect(updatedState).toBeNull()
   })
 
   test('modelFailed flag causes default model usage in coding phase', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'model-fail-session'
 
     let modelUsed: string | undefined
@@ -1520,7 +1520,7 @@ describe('Assistant Error Detection', () => {
       executionModel: 'execution/model',
       auditorModel: undefined,
     })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1541,7 +1541,7 @@ describe('Assistant Error Detection', () => {
       modelFailed: true,
     }
 
-    ralphService.setState('test-worktree', state)
+    loopService.setState('test-worktree', state)
 
     await handler.onEvent({
       event: {
@@ -1554,7 +1554,7 @@ describe('Assistant Error Detection', () => {
   })
 
   test('three consecutive errors terminate loop', async () => {
-    const { createRalphEventHandler } = require('../src/hooks/ralph')
+    const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'three-errors-session'
 
     const mockClient = {
@@ -1593,7 +1593,7 @@ describe('Assistant Error Detection', () => {
     } as any
 
     const mockGetConfig = () => ({ ralph: {}, executionModel: undefined, auditorModel: undefined })
-    const handler = createRalphEventHandler(ralphService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
 
     const state = {
       active: true,
@@ -1613,8 +1613,8 @@ describe('Assistant Error Detection', () => {
       auditCount: 0,
     }
 
-    ralphService.setState('test-worktree', state)
-    ralphService.registerSession(sessionId, 'test-worktree')
+    loopService.setState('test-worktree', state)
+    loopService.registerSession(sessionId, 'test-worktree')
 
     await handler.onEvent({
       event: {
@@ -1623,7 +1623,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    let stateAfterSecondError = ralphService.getActiveState('test-worktree')
+    let stateAfterSecondError = loopService.getActiveState('test-worktree')
     expect(stateAfterSecondError?.errorCount).toBe(1)
 
     await handler.onEvent({
@@ -1633,7 +1633,7 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    let stateAfterThirdError = ralphService.getActiveState('test-worktree')
+    let stateAfterThirdError = loopService.getActiveState('test-worktree')
     expect(stateAfterThirdError?.errorCount).toBe(2)
 
     await handler.onEvent({
@@ -1643,10 +1643,10 @@ describe('Assistant Error Detection', () => {
       },
     })
 
-    const finalState = ralphService.getActiveState('test-worktree')
+    const finalState = loopService.getActiveState('test-worktree')
     expect(finalState).toBeNull()
 
-    const terminatedState = ralphService.getAnyState('test-worktree')
+    const terminatedState = loopService.getAnyState('test-worktree')
     expect(terminatedState?.active).toBe(false)
     expect(terminatedState?.terminationReason).toContain('error_max_retries')
   })

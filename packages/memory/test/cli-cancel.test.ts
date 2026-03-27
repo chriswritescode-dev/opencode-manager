@@ -4,7 +4,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { mkdtempSync, rmSync } from 'fs'
 
-interface RalphState {
+interface LoopState {
   sessionId: string
   worktreeName: string
   worktreeBranch: string
@@ -42,13 +42,13 @@ function createTestKvDb(tempDir: string): Database {
   return db
 }
 
-function insertRalphState(db: Database, projectId: string, worktreeName: string, state: Partial<RalphState>): void {
-  const defaultState: RalphState = {
+function insertLoopState(db: Database, projectId: string, worktreeName: string, state: Partial<LoopState>): void {
+  const defaultState: LoopState = {
     sessionId: 'test-session-id',
     worktreeName,
     worktreeBranch: 'main',
     worktreeDir: '/tmp/test-worktree',
-    inPlace: false,
+    worktree: true,
     iteration: 1,
     maxIterations: 10,
     phase: 'coding',
@@ -66,7 +66,7 @@ function insertRalphState(db: Database, projectId: string, worktreeName: string,
 
   db.run(
     'INSERT OR REPLACE INTO project_kv (project_id, key, data, expires_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-    [projectId, `ralph:${worktreeName}`, data, expiresAt, now]
+    [projectId, `loop:${worktreeName}`, data, expiresAt, now]
   )
 }
 
@@ -104,12 +104,12 @@ describe('CLI Cancel', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('No active Ralph loops')
+    expect(output).toContain('No active memory loops')
   })
 
   test('shows no active loops when all are inactive', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'inactive-worktree', {
+    insertLoopState(db, 'test-project', 'inactive-worktree', {
       active: false,
       completedAt: new Date().toISOString(),
     })
@@ -126,12 +126,12 @@ describe('CLI Cancel', () => {
     })
 
     const output = outputLines.join('\n')
-    expect(output).toContain('No active Ralph loops')
+    expect(output).toContain('No active memory loops')
   })
 
   test('auto-selects single active loop with force', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'single-loop', {})
+    insertLoopState(db, 'test-project', 'single-loop', {})
     db.close()
 
     const outputLines: string[] = []
@@ -145,8 +145,8 @@ describe('CLI Cancel', () => {
     })
 
     const db2 = new Database(join(tempDir, 'memory.db'))
-    const row = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('ralph:single-loop') as { data: string }
-    const state = JSON.parse(row.data) as RalphState
+    const row = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:single-loop') as { data: string }
+    const state = JSON.parse(row.data) as LoopState
     db2.close()
 
     expect(state.active).toBe(false)
@@ -156,7 +156,7 @@ describe('CLI Cancel', () => {
 
   test('cancellation sets correct state fields', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'test-loop', {})
+    insertLoopState(db, 'test-project', 'test-loop', {})
     db.close()
 
     const beforeCancel = new Date()
@@ -168,8 +168,8 @@ describe('CLI Cancel', () => {
     })
 
     const db2 = new Database(join(tempDir, 'memory.db'))
-    const row = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('ralph:test-loop') as { data: string }
-    const state = JSON.parse(row.data) as RalphState
+    const row = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:test-loop') as { data: string }
+    const state = JSON.parse(row.data) as LoopState
     db2.close()
 
     expect(state.active).toBe(false)
@@ -180,8 +180,8 @@ describe('CLI Cancel', () => {
 
   test('lists active loops when multiple exist and no name given', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'loop-one', {})
-    insertRalphState(db, 'test-project', 'loop-two', {})
+    insertLoopState(db, 'test-project', 'loop-one', {})
+    insertLoopState(db, 'test-project', 'loop-two', {})
     db.close()
 
     const outputLines: string[] = []
@@ -208,15 +208,15 @@ describe('CLI Cancel', () => {
 
     expect(exited).toBe(true)
     const output = outputLines.join('\n')
-    expect(output).toContain('Multiple active Ralph loops')
+    expect(output).toContain('Multiple active memory loops')
     expect(output).toContain('loop-one')
     expect(output).toContain('loop-two')
   })
 
   test('finds loop by name when multiple active', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'loop-alpha', {})
-    insertRalphState(db, 'test-project', 'loop-beta', {})
+    insertLoopState(db, 'test-project', 'loop-alpha', {})
+    insertLoopState(db, 'test-project', 'loop-beta', {})
     db.close()
 
     const outputLines: string[] = []
@@ -231,10 +231,10 @@ describe('CLI Cancel', () => {
     })
 
     const db2 = new Database(join(tempDir, 'memory.db'))
-    const alphaRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('ralph:loop-alpha') as { data: string }
-    const betaRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('ralph:loop-beta') as { data: string }
-    const alphaState = JSON.parse(alphaRow.data) as RalphState
-    const betaState = JSON.parse(betaRow.data) as RalphState
+    const alphaRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:loop-alpha') as { data: string }
+    const betaRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:loop-beta') as { data: string }
+    const alphaState = JSON.parse(alphaRow.data) as LoopState
+    const betaState = JSON.parse(betaRow.data) as LoopState
     db2.close()
 
     expect(alphaState.active).toBe(true)
@@ -244,8 +244,8 @@ describe('CLI Cancel', () => {
 
   test('partial name matches single loop proceeds with cancel', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {})
-    insertRalphState(db, 'test-project', 'ralph-fix-bug', {})
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
+    insertLoopState(db, 'test-project', 'ralph-fix-bug', {})
     db.close()
 
     const outputLines: string[] = []
@@ -260,8 +260,8 @@ describe('CLI Cancel', () => {
     })
 
     const db2 = new Database(join(tempDir, 'memory.db'))
-    const authRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('ralph:ralph-feat-auth') as { data: string }
-    const authState = JSON.parse(authRow.data) as RalphState
+    const authRow = db2.prepare('SELECT data FROM project_kv WHERE key = ?').get('loop:ralph-feat-auth') as { data: string }
+    const authState = JSON.parse(authRow.data) as LoopState
     db2.close()
 
     expect(authState.active).toBe(false)
@@ -270,8 +270,8 @@ describe('CLI Cancel', () => {
 
   test('partial name matches multiple loops lists ambiguous and exits', async () => {
     const db = createTestKvDb(tempDir)
-    insertRalphState(db, 'test-project', 'ralph-feat-auth', {})
-    insertRalphState(db, 'test-project', 'ralph-auth-fix', {})
+    insertLoopState(db, 'test-project', 'ralph-feat-auth', {})
+    insertLoopState(db, 'test-project', 'ralph-auth-fix', {})
     db.close()
 
     const outputLines: string[] = []

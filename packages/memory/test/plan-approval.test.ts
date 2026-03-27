@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Database } from 'bun:sqlite'
 import { createKvService } from '../src/services/kv'
-import { createRalphService } from '../src/services/ralph'
+import { createLoopService } from '../src/services/loop'
 import type { Logger } from '../src/types'
 
 const TEST_DIR = '/tmp/opencode-manager-plan-approval-test-' + Date.now()
@@ -33,11 +33,11 @@ function createMockLogger(): Logger {
 
 describe('Plan Approval Tool Interception', () => {
   let db: Database
-  let ralphService: ReturnType<typeof createRalphService>
+  let ralphService: ReturnType<typeof createLoopService>
   const projectId = 'test-project'
   const sessionID = 'test-session-123'
 
-  const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Ralph (worktree)', 'Ralph (in place)']
+  const PLAN_APPROVAL_LABELS = ['New session', 'Execute here', 'Loop (worktree)', 'Loop']
 
   const PLAN_APPROVAL_DIRECTIVES: Record<string, string> = {
     'New session': `<system-reminder>
@@ -54,28 +54,28 @@ The user selected "Execute here". You MUST now call memory-plan-execute in this 
 - inPlace: true
 Do NOT output text without also making this tool call.
 </system-reminder>`,
-    'Ralph (worktree)': `<system-reminder>
-The user selected "Ralph (worktree)". You MUST now call memory-plan-ralph in this response with:
-- plan: The FULL self-contained implementation plan (Ralph runs in an isolated worktree with no prior context)
+    'Loop (worktree)': `<system-reminder>
+The user selected "Loop (worktree)". You MUST now call memory-loop in this response with:
+- plan: The FULL self-contained implementation plan (runs in an isolated worktree with no prior context)
 - title: A short descriptive title for the session
-- inPlace: false (or omit)
+- worktree: true
 Do NOT output text without also making this tool call.
 </system-reminder>`,
-    'Ralph (in place)': `<system-reminder>
-The user selected "Ralph (in place)". You MUST now call memory-plan-ralph in this response with:
-- plan: The FULL self-contained implementation plan (Ralph runs in the current directory with no prior context)
+    'Loop': `<system-reminder>
+The user selected "Loop". You MUST now call memory-loop in this response with:
+- plan: The FULL self-contained implementation plan (runs in the current directory with no prior context)
 - title: A short descriptive title for the session
-- inPlace: true
+- worktree: false
 Do NOT output text without also making this tool call.
 </system-reminder>`,
   }
 
-  const CANCEL_DIRECTIVE = '<system-reminder>\nThe user provided a custom response instead of selecting a predefined option. Review their answer and respond accordingly. If they want to proceed with execution, use the appropriate tool (memory-plan-execute or memory-plan-ralph) based on their intent. If they want to cancel or revise the plan, help them with that instead.\n</system-reminder>'
+  const CANCEL_DIRECTIVE = '<system-reminder>\nThe user provided a custom response instead of selecting a predefined option. Review their answer and respond accordingly. If they want to proceed with execution, use the appropriate tool (memory-plan-execute or memory-loop) based on their intent. If they want to cancel or revise the plan, help them with that instead.\n</system-reminder>'
 
   beforeEach(() => {
     db = createTestDb()
     const kvService = createKvService(db)
-    ralphService = createRalphService(kvService, projectId, createMockLogger())
+    ralphService = createLoopService(kvService, projectId, createMockLogger())
   })
 
   afterEach(() => {
@@ -130,9 +130,9 @@ Do NOT output text without also making this tool call.
     if (!sessionActive) return
 
     const RALPH_BLOCKED_TOOLS: Record<string, string> = {
-      question: 'The question tool is not available during a Ralph loop. Do not ask questions — continue working on the task autonomously.',
-      'memory-plan-execute': 'The memory-plan-execute tool is not available during a Ralph loop. Focus on executing the current plan.',
-      'memory-plan-ralph': 'The memory-plan-ralph tool is not available during a Ralph loop. Focus on executing the current plan.',
+      question: 'The question tool is not available during a memory loop. Do not ask questions — continue working on the task autonomously.',
+      'memory-plan-execute': 'The memory-plan-execute tool is not available during a memory loop. Focus on executing the current plan.',
+      'memory-loop': 'The memory-loop tool is not available during a memory loop. Focus on executing the current plan.',
     }
 
     if (!(tool in RALPH_BLOCKED_TOOLS)) return
@@ -148,8 +148,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -170,8 +170,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -185,48 +185,48 @@ Do NOT output text without also making this tool call.
     expect(output.output).toContain('inPlace: true')
   })
 
-  test('Detects plan approval question and injects "Ralph (worktree)" directive', () => {
+  test('Detects plan approval question and injects "Loop (worktree)" directive', () => {
     const args = {
       questions: [{
         question: 'How would you like to proceed?',
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
-    const output = { title: '', output: 'Ralph (worktree)', metadata: {} }
+    const output = { title: '', output: 'Loop (worktree)', metadata: {} }
 
     simulateToolExecuteAfter('question', args, output)
 
-    expect(output.output).toContain('Ralph (worktree)')
+    expect(output.output).toContain('Loop (worktree)')
     expect(output.output).toContain('<system-reminder>')
-    expect(output.output).toContain('memory-plan-ralph')
-    expect(output.output).toContain('inPlace: false')
+    expect(output.output).toContain('memory-loop')
+    expect(output.output).toContain('worktree: true')
   })
 
-  test('Detects plan approval question and injects "Ralph (in place)" directive', () => {
+  test('Detects plan approval question and injects "Loop" directive', () => {
     const args = {
       questions: [{
         question: 'How would you like to proceed?',
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
-    const output = { title: '', output: 'Ralph (in place)', metadata: {} }
+    const output = { title: '', output: 'Loop', metadata: {} }
 
     simulateToolExecuteAfter('question', args, output)
 
-    expect(output.output).toContain('Ralph (in place)')
+    expect(output.output).toContain('Loop')
     expect(output.output).toContain('<system-reminder>')
-    expect(output.output).toContain('memory-plan-ralph')
-    expect(output.output).toContain('inPlace: true')
+    expect(output.output).toContain('memory-loop')
+    expect(output.output).toContain('worktree: false')
   })
 
   test('Injects cancel directive for unknown answer', () => {
@@ -236,8 +236,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -258,8 +258,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -279,8 +279,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -339,13 +339,13 @@ Do NOT output text without also making this tool call.
     expect(output.output).toContain('memory-plan-execute tool is not available')
   })
 
-  test('Ralph blocking works for memory-plan-ralph tool', () => {
+  test('Ralph blocking works for memory-loop tool', () => {
     const output = { title: '', output: 'test', metadata: {} }
 
-    simulateToolExecuteAfter('memory-plan-ralph', {}, output, true)
+    simulateToolExecuteAfter('memory-loop', {}, output, true)
 
     expect(output.title).toBe('Tool blocked')
-    expect(output.output).toContain('memory-plan-ralph tool is not available')
+    expect(output.output).toContain('memory-loop tool is not available')
   })
 
   test('Ralph blocking does not affect non-blocked tools', () => {
@@ -373,49 +373,49 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
     const output = {
       title: 'Asked 1 question',
-      output: 'User has answered your questions: "How would you like to proceed?"="Ralph (worktree)". You can now continue with the user\'s answers in mind.',
-      metadata: { answers: [['Ralph (worktree)']] },
+      output: 'User has answered your questions: "How would you like to proceed?"="Loop (worktree)". You can now continue with the user\'s answers in mind.',
+      metadata: { answers: [['Loop (worktree)']] },
     }
 
     simulateToolExecuteAfter('question', args, output)
 
-    expect(output.output).toContain('Ralph (worktree)')
+    expect(output.output).toContain('Loop (worktree)')
     expect(output.output).toContain('<system-reminder>')
-    expect(output.output).toContain('memory-plan-ralph')
-    expect(output.output).toContain('inPlace: false')
+    expect(output.output).toContain('memory-loop')
+    expect(output.output).toContain('worktree: true')
   })
 
-  test('Detects "Ralph (in place)" using metadata.answers when output is full sentence', () => {
+  test('Detects "Loop" using metadata.answers when output is full sentence', () => {
     const args = {
       questions: [{
         question: 'How would you like to proceed?',
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
     const output = {
       title: 'Asked 1 question',
-      output: 'User has answered your questions: "How would you like to proceed?"="Ralph (in place)". You can now continue with the user\'s answers in mind.',
-      metadata: { answers: [['Ralph (in place)']] },
+      output: 'User has answered your questions: "How would you like to proceed?"="Loop". You can now continue with the user\'s answers in mind.',
+      metadata: { answers: [['Loop']] },
     }
 
     simulateToolExecuteAfter('question', args, output)
 
-    expect(output.output).toContain('Ralph (in place)')
+    expect(output.output).toContain('Loop')
     expect(output.output).toContain('<system-reminder>')
-    expect(output.output).toContain('memory-plan-ralph')
-    expect(output.output).toContain('inPlace: true')
+    expect(output.output).toContain('memory-loop')
+    expect(output.output).toContain('worktree: false')
   })
 
   test('Detects "New session" using metadata.answers when output is full sentence', () => {
@@ -425,8 +425,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -451,8 +451,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -477,8 +477,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }
@@ -503,8 +503,8 @@ Do NOT output text without also making this tool call.
         options: [
           { label: 'New session', description: 'Create new session' },
           { label: 'Execute here', description: 'Execute here' },
-          { label: 'Ralph (worktree)', description: 'Ralph worktree' },
-          { label: 'Ralph (in place)', description: 'Ralph in place' },
+          { label: 'Loop (worktree)', description: 'Loop worktree' },
+          { label: 'Loop', description: 'Loop in place' },
         ],
       }],
     }

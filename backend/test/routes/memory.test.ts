@@ -63,7 +63,7 @@ import { getRepoById } from '../../src/db/queries'
 const mockResolveProjectId = resolveProjectId as ReturnType<typeof vi.fn>
 const mockGetRepoById = getRepoById as ReturnType<typeof vi.fn>
 
-describe('Memory Routes - Ralph Status', () => {
+describe('Memory Routes - Loop Status', () => {
   let memoryApp: ReturnType<typeof createMemoryRoutes>
   let testDb: any
 
@@ -77,9 +77,9 @@ describe('Memory Routes - Ralph Status', () => {
     memoryApp = createMemoryRoutes(testDb)
   })
 
-  describe('GET /ralph/status', () => {
+  describe('GET /loop/status', () => {
     it('should return 400 when repoId query param is missing', async () => {
-      const req = new Request('http://localhost/ralph/status')
+      const req = new Request('http://localhost/loop/status')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(400)
@@ -88,7 +88,7 @@ describe('Memory Routes - Ralph Status', () => {
     })
 
     it('should return 400 when repoId is not a valid number', async () => {
-      const req = new Request('http://localhost/ralph/status?repoId=abc')
+      const req = new Request('http://localhost/loop/status?repoId=abc')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(400)
@@ -99,7 +99,7 @@ describe('Memory Routes - Ralph Status', () => {
     it('should return 200 with empty loops when repo is not found in DB', async () => {
       mockGetRepoById.mockReturnValue(null)
 
-      const req = new Request('http://localhost/ralph/status?repoId=1')
+      const req = new Request('http://localhost/loop/status?repoId=1')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(200)
@@ -122,7 +122,7 @@ describe('Memory Routes - Ralph Status', () => {
       })
       mockResolveProjectId.mockResolvedValue(null)
 
-      const req = new Request('http://localhost/ralph/status?repoId=1')
+      const req = new Request('http://localhost/loop/status?repoId=1')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(200)
@@ -147,7 +147,7 @@ describe('Memory Routes - Ralph Status', () => {
       mockResolveProjectId.mockResolvedValue('test-project-id')
       mockListKv.mockReturnValue([
         {
-          key: 'ralph:test-worktree',
+          key: 'loop:test-worktree',
           data: {
             active: true,
             sessionId: 'session-123',
@@ -168,7 +168,7 @@ describe('Memory Routes - Ralph Status', () => {
         },
       ])
 
-      const req = new Request('http://localhost/ralph/status?repoId=1')
+      const req = new Request('http://localhost/loop/status?repoId=1')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(200)
@@ -235,7 +235,7 @@ describe('Memory Routes - Ralph Status', () => {
         },
       ])
 
-      const req = new Request('http://localhost/ralph/status?repoId=1')
+      const req = new Request('http://localhost/loop/status?repoId=1')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(200)
@@ -249,12 +249,12 @@ describe('Memory Routes - Ralph Status', () => {
         throw new Error('Database error')
       })
 
-      const req = new Request('http://localhost/ralph/status?repoId=1')
+      const req = new Request('http://localhost/loop/status?repoId=1')
       const res = await memoryApp.fetch(req)
 
       expect(res.status).toBe(500)
       const json = await res.json() as Record<string, unknown>
-      expect(json.error).toBe('Failed to get Ralph status')
+      expect(json.error).toBe('Failed to get Loop')
     })
   })
 })

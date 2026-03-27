@@ -9,7 +9,7 @@ export const librarianAgent: AgentDefinition = {
   mode: 'subagent',
   temperature: 0.0,
   tools: {
-    exclude: ['memory-plan-execute', 'memory-plan-ralph', 'memory-health', 'memory-kv-set', 'memory-kv-get', 'memory-kv-list'],
+    exclude: ['memory-plan-execute', 'memory-loop', 'memory-health', 'memory-kv-set', 'memory-kv-get', 'memory-kv-list'],
   },
   systemPrompt: `You are a memory management agent. Your purpose is to capture, organize, and retrieve knowledge that persists across sessions.
 

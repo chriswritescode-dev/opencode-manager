@@ -1,11 +1,11 @@
 import { truncate } from '../cli/utils'
-import type { RalphSessionOutput } from '../services/ralph'
+import type { LoopSessionOutput } from '../services/loop'
 
 export function formatTokens(n: number): string {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
 }
 
-export function formatSessionOutput(sessionOutput: RalphSessionOutput): string[] {
+export function formatSessionOutput(sessionOutput: LoopSessionOutput): string[] {
   const lines: string[] = []
   const costStr = `$${sessionOutput.totalCost.toFixed(4)}`
   const t = sessionOutput.totalTokens

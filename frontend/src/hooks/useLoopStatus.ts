@@ -1,13 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getRalphStatus, cancelRalphLoop } from '@/api/memory'
+import { getLoopStatus, cancelLoop } from '@/api/memory'
 import { showToast } from '@/lib/toast'
 
-export function useRalphStatus(repoId: number | undefined, open: boolean) {
+export function useLoopStatus(repoId: number | undefined, open: boolean) {
   const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['ralph-status', repoId],
-    queryFn: () => getRalphStatus(repoId!),
+    queryKey: ['memory-loop-status', repoId],
+    queryFn: () => getLoopStatus(repoId!),
     enabled: open && !!repoId,
     staleTime: 0,
     refetchInterval: ({ state }) => {
@@ -18,16 +18,16 @@ export function useRalphStatus(repoId: number | undefined, open: boolean) {
 
   const cancelMutation = useMutation({
     mutationFn: ({ sessionId }: { sessionId: string }) =>
-      cancelRalphLoop(repoId!, sessionId),
+      cancelLoop(repoId!, sessionId),
     onSuccess: (result) => {
       if (result.cancelled) {
-        queryClient.invalidateQueries({ queryKey: ['ralph-status', repoId] })
+        queryClient.invalidateQueries({ queryKey: ['memory-loop-status', repoId] })
       } else {
-        showToast.error('Ralph loop is no longer active')
+        showToast.error('Memory loop is no longer active')
       }
     },
     onError: () => {
-      showToast.error('Unable to cancel the Ralph loop. Please try again.')
+      showToast.error('Unable to cancel the memory loop. Please try again.')
     },
   })
 
@@ -36,10 +36,10 @@ export function useRalphStatus(repoId: number | undefined, open: boolean) {
   return { data, isLoading, error, cancelMutation, pendingSessionId }
 }
 
-export function useRalphActiveCount(repoId: number | undefined, enabled: boolean) {
+export function useLoopActiveCount(repoId: number | undefined, enabled: boolean) {
   const { data } = useQuery({
-    queryKey: ['ralph-status', repoId],
-    queryFn: () => getRalphStatus(repoId!),
+    queryKey: ['memory-loop-status', repoId],
+    queryFn: () => getLoopStatus(repoId!),
     enabled: enabled && !!repoId,
     staleTime: 0,
     refetchInterval: 10000,

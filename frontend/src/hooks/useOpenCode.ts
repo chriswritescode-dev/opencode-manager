@@ -3,7 +3,7 @@ import { useMemo, useRef, useEffect, useCallback, useState } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { API_BASE_URL } from "../config";
 import { fetchWrapper } from "../api/fetchWrapper";
-import { cancelRalphLoop } from "../api/memory";
+import { cancelLoop } from "../api/memory";
 import type {
   Message,
   Part,
@@ -544,7 +544,7 @@ export const useAbortSession = (
       attemptAbort();
 
       if (repoId) {
-        cancelRalphLoop(repoId, targetSessionID).catch(() => {})
+        cancelLoop(repoId, targetSessionID).catch(() => {})
       }
 
       retryIntervalRef.current = setInterval(() => {
