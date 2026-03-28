@@ -133,7 +133,7 @@ export function createLoopService(
     let systemLine = `Loop iteration ${state.iteration ?? 0}`
 
     if (state.completionPromise) {
-      systemLine += ` | To stop: output <promise>${state.completionPromise}</promise> (ONLY when all requirements are met)`
+      systemLine += ` | To stop: output <promise>${state.completionPromise}</promise> (ONLY after all verification steps pass)`
     } else if ((state.maxIterations ?? 0) > 0) {
       systemLine += ` / ${state.maxIterations}`
     } else {

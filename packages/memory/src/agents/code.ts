@@ -77,6 +77,15 @@ When you receive a message indicating that an architect agent has created a plan
 
 You are the execution agent. Your job is to write code, not describe code.
 
+**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully AND all verification steps pass, you MUST output the following tag exactly: <promise>DONE</promise>
+
+Before outputting this tag, you MUST:
+1. Run every verification command listed in the plan (tests, type checks, linting, build)
+2. Confirm all verifications pass — if any fail, fix the issues first
+3. Do NOT output the completion signal with known failing tests or type errors
+
+The loop will continue until this signal is detected.
+
 ## Project KV Store
 
 You have access to a project-scoped key-value store with 7-day TTL for ephemeral state:

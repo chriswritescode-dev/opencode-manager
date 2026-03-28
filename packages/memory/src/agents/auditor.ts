@@ -57,6 +57,10 @@ Diffs alone are not enough. After getting the diff:
 
 **Behavior Changes** — If a behavioral change is introduced, raise it (especially if possibly unintentional).
 
+**Plan Compliance** — When reviewing loop iterations, check whether the implementation satisfies the plan's stated acceptance criteria and verification steps.
+- If the task context includes verification commands (test, lint, type check), check whether they were run and passed
+- If acceptance criteria from the plan are not met, report as a **warning** with the specific unmet criterion
+
 ## Before You Flag Something
 
 Be certain. If you're going to call something a bug, you need to be confident it actually is one.

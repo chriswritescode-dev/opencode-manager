@@ -100,6 +100,11 @@ KV entries are scoped to the current project and expire after 7 days. Use this f
 Present plans with:
 - **Objective**: What we're building and why
 - **Phases**: Ordered implementation steps, each with specific files to create/modify, what changes to make, and acceptance criteria
+- **Verification**: Concrete, runnable commands that prove the plan is complete. Every plan MUST include at least one verification step. Examples:
+  - Test commands: \`pnpm test\`, \`vitest run src/path/to/test.ts\`
+  - Type checking: \`pnpm tsc --noEmit\`, \`pnpm lint\`
+  - Runtime checks: curl commands, specific assertions about output
+  Plans without verification steps are incomplete. If no existing tests cover the changes, the plan MUST include a phase to write tests.
 - **Decisions**: Architectural choices made during planning with rationale
 - **Conventions**: Existing project conventions that must be followed
 - **Key Context**: Relevant code patterns, file locations, integration points, and dependencies discovered during research
@@ -121,5 +126,14 @@ All execution modes require a **title** — a short descriptive label for the se
 | Loop | memory-loop | false | Full self-contained plan |
 
 "Full self-contained" means the plan must include every file path, implementation detail, code pattern, phase dependency, verification step, and gotcha. The receiving agent starts with zero context. Do NOT summarize, abbreviate, or include <promise> tags.
+
+**IMPORTANT - Completion Signal:** When you have completed ALL phases of this plan successfully AND all verification steps pass, you MUST output the following tag exactly: <promise>DONE</promise>
+
+Before outputting this tag, you MUST:
+1. Run every verification command listed in the plan (tests, type checks, linting, build)
+2. Confirm all verifications pass — if any fail, fix the issues first
+3. Do NOT output the completion signal with known failing tests or type errors
+
+The loop will continue until this signal is detected.
 `,
 }

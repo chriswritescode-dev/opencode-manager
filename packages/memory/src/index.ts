@@ -1180,8 +1180,15 @@ Do NOT output text without also making this tool call.
 
               let statuses: Record<string, { type: string; attempt?: number; message?: string; next?: number }> = {}
               try {
-                const statusResult = await v2.session.status()
-                statuses = (statusResult.data ?? {}) as typeof statuses
+                const uniqueDirs = [...new Set(active.map((s) => s.worktreeDir).filter(Boolean))]
+                const results = await Promise.allSettled(
+                  uniqueDirs.map((dir) => v2.session.status({ directory: dir })),
+                )
+                for (const result of results) {
+                  if (result.status === 'fulfilled' && result.value.data) {
+                    Object.assign(statuses, result.value.data)
+                  }
+                }
               } catch {
               }
 
@@ -1192,7 +1199,7 @@ Do NOT output text without also making this tool call.
                 const seconds = elapsed % 60
                 const duration = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`
                 const iterInfo = s.maxIterations && s.maxIterations > 0 ? `${s.iteration} / ${s.maxIterations}` : `${s.iteration} (unlimited)`
-                const sessionStatus = statuses[s.sessionId]?.type ?? 'unknown'
+                const sessionStatus = statuses[s.sessionId]?.type ?? 'unavailable'
                 const modeIndicator = !s.worktree ? ' (in-place)' : ''
                 const stallInfo = loopHandler.getStallInfo(s.worktreeName)
                 const stallCount = stallInfo?.consecutiveStalls ?? 0
@@ -1289,7 +1296,7 @@ Do NOT output text without also making this tool call.
 
             let sessionStatus = 'unknown'
             try {
-              const statusResult = await v2.session.status()
+              const statusResult = await v2.session.status({ directory: state.worktreeDir })
               const statuses = statusResult.data as Record<string, { type: string; attempt?: number; message?: string; next?: number }> | undefined
               const status = statuses?.[state.sessionId]
               if (status) {
@@ -1334,7 +1341,27 @@ Do NOT output text without also making this tool call.
             if (state.worktreeBranch) {
               statusLines.push(`Branch: ${state.worktreeBranch}`)
             }
+
+            let sessionOutput: LoopSessionOutput | null = null
+            if (state.worktreeDir) {
+              try {
+                sessionOutput = await fetchSessionOutput(v2, state.sessionId, state.worktreeDir, logger)
+              } catch {
+                // Silently ignore fetch errors to avoid cluttering output
+              }
+            }
+            if (sessionOutput) {
+              statusLines.push('')
+              statusLines.push('Session Output:')
+              statusLines.push(...formatSessionOutput(sessionOutput))
+            }
+
+            if (state.lastAuditResult) {
+              statusLines.push(...formatAuditResult(state.lastAuditResult))
+            }
+
             statusLines.push(
+              '',
               `Completion promise: ${state.completionPromise ?? 'none'}`,
               `Started: ${state.startedAt}`,
               ...(state.errorCount && state.errorCount > 0 ? [`Error count: ${state.errorCount} (retries before termination: ${MAX_RETRIES})`] : []),
@@ -1346,17 +1373,6 @@ Do NOT output text without also making this tool call.
               '',
               `Prompt: ${promptPreview}`,
             )
-
-            if (state.lastAuditResult) {
-              statusLines.push(...formatAuditResult(state.lastAuditResult))
-            }
-
-            const sessionOutput = state.worktreeDir ? await fetchSessionOutput(v2, state.sessionId, state.worktreeDir, logger) : null
-            if (sessionOutput) {
-              statusLines.push('')
-              statusLines.push('Session Output:')
-              statusLines.push(...formatSessionOutput(sessionOutput))
-            }
 
             return statusLines.join('\n')
           },

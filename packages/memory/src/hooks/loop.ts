@@ -115,7 +115,7 @@ export function createLoopEventHandler(
 
       const sessionId = state.sessionId
       try {
-        const statusResult = await v2Client.session.status()
+        const statusResult = await v2Client.session.status({ directory: state.worktreeDir })
         const statuses = (statusResult.data ?? {}) as Record<string, { type: string }>
 
         const status = statuses[sessionId]?.type
