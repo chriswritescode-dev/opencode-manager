@@ -86,6 +86,13 @@ export const MessagesTransformConfigSchema = z.object({
 })
 export type MessagesTransformConfig = z.infer<typeof MessagesTransformConfigSchema>
 
+export const TuiConfigSchema = z.object({
+  sidebar: z.boolean().optional(),
+  showLoops: z.boolean().optional(),
+  showVersion: z.boolean().optional(),
+})
+export type TuiConfig = z.infer<typeof TuiConfigSchema>
+
 export const LoopConfigSchema = z.object({
   enabled: z.boolean().optional(),
   defaultMaxIterations: z.number().optional(),
@@ -109,6 +116,7 @@ export const PluginConfigSchema = z.object({
   auditorModel: z.string().optional(),
   loop: LoopConfigSchema.optional(),
   ralph: LoopConfigSchema.optional(),
+  tui: TuiConfigSchema.optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>
 

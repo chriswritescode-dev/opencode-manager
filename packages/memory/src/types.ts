@@ -83,6 +83,7 @@ export interface PluginConfig {
   /** @deprecated Use `loop` instead */
   ralph?: LoopConfig
   defaultKvTtlMs?: number
+  tui?: TuiConfig
 }
 
 export interface ListMemoriesFilter {
@@ -108,6 +109,12 @@ export interface MemoryInjectionConfig {
 export interface MessagesTransformConfig {
   enabled?: boolean
   debug?: boolean
+}
+
+export interface TuiConfig {
+  sidebar?: boolean
+  showLoops?: boolean
+  showVersion?: boolean
 }
 
 export interface HealthStatus {

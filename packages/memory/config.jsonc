@@ -36,5 +36,10 @@
     "model": "",
     "minAudits": 1,
     "stallTimeoutMs": 60000
+  },
+  "tui": {
+    "sidebar": true,
+    "showLoops": true,
+    "showVersion": true
   }
 }
