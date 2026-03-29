@@ -194,6 +194,33 @@ export function createLoopEventHandler(
 
     logger.log(`Loop terminated: reason="${reason}", worktree="${state.worktreeName}", iteration=${state.iteration}`)
 
+    if (v2Client.tui) {
+      const toastVariant = reason === 'completed' ? 'success'
+        : reason === 'cancelled' || reason === 'user_aborted' ? 'info'
+        : reason === 'max_iterations' ? 'warning'
+        : 'error'
+
+      const toastMessage = reason === 'completed' ? `Completed after ${state.iteration} iteration${state.iteration !== 1 ? 's' : ''}`
+        : reason === 'cancelled' ? 'Loop cancelled'
+        : reason === 'max_iterations' ? `Reached max iterations (${state.maxIterations})`
+        : reason === 'stall_timeout' ? `Stalled after ${state.iteration} iteration${state.iteration !== 1 ? 's' : ''}`
+        : reason === 'user_aborted' ? 'Loop aborted by user'
+        : `Loop ended: ${reason}`
+
+      v2Client.tui.publish({
+        directory: state.worktreeDir,
+        body: {
+          type: 'tui.toast.show',
+          properties: {
+            title: state.worktreeName,
+            message: toastMessage,
+            variant: toastVariant,
+            duration: reason === 'completed' ? 5000 : 3000,
+          },
+        },
+      }).catch(() => {})
+    }
+
     let commitResult: { committed: boolean; cleaned: boolean } | undefined
     if (reason === 'completed' || reason === 'cancelled') {
       commitResult = await commitAndCleanupWorktree(state)
