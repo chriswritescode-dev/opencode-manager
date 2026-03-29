@@ -67,6 +67,7 @@ export interface LoopConfig {
   model?: string
   stallTimeoutMs?: number
   minAudits?: number
+  useWorkspaces?: boolean
 }
 
 export interface PluginConfig {

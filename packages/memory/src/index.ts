@@ -449,12 +449,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           logger.log(`loop: no git branch detected, running without branch info`)
         }
 
-        const workspaceId = `memory-loop-${autoWorktreeName}`
-
         const createResult = await v2.session.create({
           title: options.sessionTitle,
           directory: projectDir,
-          workspaceID: workspaceId,
         })
 
         if (createResult.error || !createResult.data) {
@@ -466,8 +463,46 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           sessionId: createResult.data.id,
           directory: projectDir,
           branch: currentBranch,
-          workspaceId,
+          workspaceId: undefined,
           worktree: false,
+        }
+      } else if (config.loop?.useWorkspaces) {
+        const workspaceResult = await v2.experimental.workspace.create({
+          type: 'worktree',
+          branch: null,
+          extra: null,
+        })
+
+        if (workspaceResult.error || !workspaceResult.data) {
+          logger.error(`loop: failed to create workspace`, workspaceResult.error)
+          return 'Failed to create workspace.'
+        }
+
+        const workspace = workspaceResult.data
+        logger.log(`loop: workspace created at ${workspace.directory} (branch: ${workspace.branch}, name: ${workspace.name})`)
+
+        const createResult = await v2.session.create({
+          title: options.sessionTitle,
+          directory: workspace.directory ?? undefined,
+          workspaceID: workspace.id,
+        })
+
+        if (createResult.error || !createResult.data) {
+          logger.error(`loop: failed to create session`, createResult.error)
+          try {
+            await v2.experimental.workspace.remove({ id: workspace.id })
+          } catch (cleanupErr) {
+            logger.error(`loop: failed to cleanup workspace`, cleanupErr)
+          }
+          return 'Failed to create loop session.'
+        }
+
+        loopContext = {
+          sessionId: createResult.data.id,
+          directory: workspace.directory ?? '',
+          branch: workspace.branch ?? undefined,
+          workspaceId: workspace.id,
+          worktree: true,
         }
       } else {
         const worktreeResult = await v2.worktree.create({
@@ -482,12 +517,9 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         const worktreeInfo = worktreeResult.data
         logger.log(`loop: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
 
-        const workspaceId = `memory-loop-${autoWorktreeName}`
-
         const createResult = await v2.session.create({
           title: options.sessionTitle,
           directory: worktreeInfo.directory,
-          workspaceID: workspaceId,
         })
 
         if (createResult.error || !createResult.data) {
@@ -504,7 +536,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           sessionId: createResult.data.id,
           directory: worktreeInfo.directory,
           branch: worktreeInfo.branch,
-          workspaceId,
+          workspaceId: undefined,
           worktree: true,
         }
       }
@@ -560,7 +592,11 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         loopService.deleteState(autoWorktreeName)
         if (options.worktree && loopContext.workspaceId) {
           try {
-            await v2.worktree.remove({ worktreeRemoveInput: { directory: loopContext.directory } })
+            if (loopContext.workspaceId.startsWith('wrk_loop_')) {
+              await v2.worktree.remove({ worktreeRemoveInput: { directory: loopContext.directory } })
+            } else {
+              await v2.experimental.workspace.remove({ id: loopContext.workspaceId })
+            }
           } catch (cleanupErr) {
             logger.error(`loop: failed to cleanup worktree`, cleanupErr)
           }
@@ -594,8 +630,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         if (loopContext.branch) {
           lines.push(`Branch: ${loopContext.branch} (in-place)`)
         }
-      } else {
+      } else if (loopContext.workspaceId) {
         lines.push(`Workspace: ${loopContext.workspaceId}`)
+        lines.push(`Worktree name: ${autoWorktreeName}`)
+        lines.push(`Worktree: ${loopContext.directory}`)
+        lines.push(`Branch: ${loopContext.branch}`)
+      } else {
         lines.push(`Worktree name: ${autoWorktreeName}`)
         lines.push(`Worktree: ${loopContext.directory}`)
         lines.push(`Branch: ${loopContext.branch}`)
@@ -1036,13 +1076,18 @@ Do NOT output text without also making this tool call.
 
             if (config.loop?.cleanupWorktree && state.worktree && state.worktreeDir) {
               try {
-                const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
-                const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
-                const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
-                if (removeResult.status !== 0) {
-                  throw new Error(removeResult.stderr || 'git worktree remove failed')
+                if (state.workspaceId && !state.workspaceId.startsWith('wrk_loop_')) {
+                  await v2.experimental.workspace.remove({ id: state.workspaceId })
+                  logger.log(`memory-loop-cancel: removed workspace ${state.workspaceId}`)
+                } else {
+                  const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
+                  const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
+                  const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
+                  if (removeResult.status !== 0) {
+                    throw new Error(removeResult.stderr || 'git worktree remove failed')
+                  }
+                  logger.log(`memory-loop-cancel: removed worktree ${state.worktreeDir}`)
                 }
-                logger.log(`memory-loop-cancel: removed worktree ${state.worktreeDir}`)
               } catch (err) {
                 logger.error(`memory-loop-cancel: failed to remove worktree`, err)
               }
@@ -1092,11 +1137,19 @@ Do NOT output text without also making this tool call.
                 }
               }
 
-              const createResult = await v2.session.create({
+              const workspaceId = stoppedState.workspaceId && !stoppedState.workspaceId.startsWith('wrk_loop_')
+                ? stoppedState.workspaceId
+                : undefined
+
+              const createParams: { title: string; directory: string; workspaceID?: string } = {
                 title: stoppedState.worktreeName!,
                 directory: stoppedState.worktreeDir!,
-                workspaceID: stoppedState.workspaceId || undefined,
-              })
+              }
+              if (workspaceId) {
+                createParams.workspaceID = workspaceId
+              }
+
+              const createResult = await v2.session.create(createParams)
 
               if (createResult.error || !createResult.data) {
                 logger.error(`memory-loop-restart: failed to create session`, createResult.error)
@@ -1113,7 +1166,7 @@ Do NOT output text without also making this tool call.
                 worktreeName: stoppedState.worktreeName!,
                 worktreeDir: stoppedState.worktreeDir!,
                 worktreeBranch: stoppedState.worktreeBranch,
-                workspaceId: stoppedState.workspaceId,
+                workspaceId,
                 iteration: stoppedState.iteration!,
                 maxIterations: stoppedState.maxIterations!,
                 completionPromise: stoppedState.completionPromise,

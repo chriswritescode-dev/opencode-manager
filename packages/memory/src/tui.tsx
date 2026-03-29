@@ -1,14 +1,24 @@
 /** @jsxImportSource @opentui/solid */
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from '@opencode-ai/plugin/tui'
-import { createMemo, createSignal, onCleanup, Show, For } from 'solid-js'
+import { createMemo, createSignal, onCleanup, createEffect, Show, For } from 'solid-js'
+import { readFileSync, existsSync } from 'fs'
+import { homedir, platform } from 'os'
+import { join } from 'path'
+import { execSync } from 'child_process'
+import { Database } from 'bun:sqlite'
 import { VERSION } from './version'
 import { compareVersions } from './utils/upgrade'
-import { loadPluginConfig } from './setup'
 
 type TuiOptions = {
   sidebar: boolean
   showLoops: boolean
   showVersion: boolean
+}
+
+type TuiConfig = {
+  sidebar?: boolean
+  showLoops?: boolean
+  showVersion?: boolean
 }
 
 type LoopInfo = {
@@ -17,66 +27,156 @@ type LoopInfo = {
   iteration: number
   maxIterations: number
   sessionId: string
-  status: string
+  active: boolean
+  startedAt?: string
+  completedAt?: string
+  terminationReason?: string
+  worktreeBranch?: string
+  errorCount: number
+  auditCount: number
+}
+
+function loadTuiConfig(): TuiConfig | undefined {
+  try {
+    const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.config')
+    const configDir = process.env['XDG_CONFIG_HOME'] || defaultBase
+    const raw = readFileSync(join(configDir, 'opencode', 'memory-config.jsonc'), 'utf-8')
+    const stripped = raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    const parsed = JSON.parse(stripped)
+    return parsed?.tui
+  } catch {
+    return undefined
+  }
+}
+
+function resolveProjectId(directory: string): string | null {
+  const cachePath = join(directory, '.git', 'opencode')
+  if (existsSync(cachePath)) {
+    try {
+      const id = readFileSync(cachePath, 'utf-8').trim()
+      if (id) return id
+    } catch {}
+  }
+  try {
+    const output = execSync('git rev-list --max-parents=0 --all', { cwd: directory, encoding: 'utf-8' }).trim()
+    const commits = output.split('\n').filter(Boolean).sort()
+    if (commits[0]) return commits[0]
+  } catch {}
+  return null
+}
+
+function readLoopStates(projectId: string): LoopInfo[] {
+  const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.local', 'share')
+  const xdgDataHome = process.env['XDG_DATA_HOME'] || defaultBase
+  const dbPath = join(xdgDataHome, 'opencode', 'memory', 'memory.db')
+  
+  if (!existsSync(dbPath)) return []
+  
+  let db: Database | null = null
+  try {
+    db = new Database(dbPath, { readonly: true })
+    const now = Date.now()
+    const stmt = db.prepare('SELECT key, data FROM project_kv WHERE project_id = ? AND key LIKE ? AND expires_at > ?')
+    const rows = stmt.all(projectId, 'loop:%', now) as Array<{ key: string; data: string }>
+    
+    const loops: LoopInfo[] = []
+    for (const row of rows) {
+      try {
+        const state = JSON.parse(row.data)
+        if (!state.worktreeName || !state.sessionId) continue
+        loops.push({
+          name: state.worktreeName,
+          phase: state.phase ?? 'coding',
+          iteration: state.iteration ?? 0,
+          maxIterations: state.maxIterations ?? 0,
+          sessionId: state.sessionId,
+          active: state.active ?? false,
+          startedAt: state.startedAt,
+          completedAt: state.completedAt,
+          terminationReason: state.terminationReason,
+          worktreeBranch: state.worktreeBranch,
+          errorCount: state.errorCount ?? 0,
+          auditCount: state.auditCount ?? 0,
+        })
+      } catch {}
+    }
+    return loops
+  } catch {
+    return []
+  } finally {
+    try { db?.close() } catch {}
+  }
 }
 
 function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
   const [open, setOpen] = createSignal(true)
   const [loops, setLoops] = createSignal<LoopInfo[]>([])
   const theme = () => props.api.theme.current
+  const directory = props.api.state.path.directory
+  const pid = resolveProjectId(directory)
+
+  createEffect(() => {
+    if (props.api.route.current.name === 'home') {
+      const wasSet = props.api.workspace.current()
+      props.api.workspace.set(undefined)
+      if (wasSet) {
+        props.api.route.navigate('home')
+      }
+    }
+  })
 
   const title = createMemo(() => {
     return props.opts.showVersion ? `Memory v${VERSION}` : 'Memory'
   })
 
-  const dot = (phase: string, status: string) => {
-    if (status === 'error') return theme().error
-    if (phase === 'auditing') return theme().warning
-    if (status === 'busy') return theme().success
-    return theme().textMuted
+  const dot = (loop: LoopInfo) => {
+    if (!loop.active) {
+      if (loop.terminationReason === 'completed') return theme().success
+      if (loop.terminationReason === 'cancelled' || loop.terminationReason === 'user_aborted') return theme().textMuted
+      return theme().error
+    }
+    if (loop.phase === 'auditing') return theme().warning
+    return theme().success
   }
 
   const statusText = (loop: LoopInfo) => {
     const max = loop.maxIterations > 0 ? `/${loop.maxIterations}` : ''
-    return `${loop.phase} · iter ${loop.iteration}${max}`
+    if (loop.active) return `${loop.phase} · iter ${loop.iteration}${max}`
+    if (loop.terminationReason === 'completed') return `completed · ${loop.iteration} iter${loop.iteration !== 1 ? 's' : ''}`
+    return loop.terminationReason?.replace(/_/g, ' ') ?? 'ended'
   }
 
-  let pollInterval: ReturnType<typeof setInterval> | undefined
+  let pollInterval: ReturnType<typeof setTimeout> | undefined
   let isPolling = true
 
-  async function refreshLoops() {
+  function refreshLoops() {
     if (!isPolling) return
-    try {
-      const result = await props.api.client.session.status()
-      if (!result.data) return
-
-      const sessions = await props.api.client.session.list()
-      if (!sessions.data) return
-
-      const active: LoopInfo[] = []
-      for (const session of sessions.data) {
-        const status = result.data[session.id]
-        if (status && (status.type === 'busy' || status.type === 'retry')) {
-          if (session.workspaceID?.startsWith('memory-loop-')) {
-            const name = session.workspaceID.replace('memory-loop-', '')
-            active.push({
-              name,
-              phase: 'coding',
-              iteration: 0,
-              maxIterations: 0,
-              sessionId: session.id,
-              status: status.type,
-            })
-          }
-        }
-      }
-      setLoops(active)
-    } catch {
-    }
+    if (!pid) return
+    
+    const states = readLoopStates(pid)
+    const cutoff = Date.now() - 5 * 60 * 1000
+    const visible = states.filter(l => 
+      l.active || (l.completedAt && new Date(l.completedAt).getTime() > cutoff)
+    )
+    visible.sort((a, b) => {
+      if (a.active && !b.active) return -1
+      if (!a.active && b.active) return 1
+      const aTime = a.completedAt ?? a.startedAt ?? ''
+      const bTime = b.completedAt ?? b.startedAt ?? ''
+      return bTime.localeCompare(aTime)
+    })
+    setLoops(visible)
   }
 
-  refreshLoops()
-  pollInterval = setInterval(refreshLoops, 5000)
+  function scheduleNextRefresh() {
+    if (!isPolling) return
+    const hasActive = loops().some(l => l.active)
+    const interval = hasActive ? 3000 : 15000
+    pollInterval = setTimeout(scheduleNextRefresh, interval)
+    refreshLoops()
+  }
+  
+  scheduleNextRefresh()
 
   const unsub = props.api.event.on('session.status', () => {
     refreshLoops()
@@ -84,13 +184,17 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
 
   onCleanup(() => {
     isPolling = false
-    if (pollInterval) clearInterval(pollInterval)
+    if (pollInterval) clearTimeout(pollInterval)
     unsub()
   })
 
   const hasContent = createMemo(() => {
     if (props.opts.showLoops && loops().length > 0) return true
     return false
+  })
+  
+  const activeCount = createMemo(() => {
+    return loops().filter(l => l.active).length
   })
 
   return (
@@ -102,9 +206,9 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
           </Show>
           <text fg={theme().text}>
             <b>{title()}</b>
-            <Show when={!open() && loops().length > 0}>
+            <Show when={!open() && activeCount() > 0}>
               <span style={{ fg: theme().textMuted }}>
-                {' '}({loops().length} active loop{loops().length !== 1 ? 's' : ''})
+                {' '}({activeCount()} active)
               </span>
             </Show>
           </text>
@@ -112,8 +216,15 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
         <Show when={open() && props.opts.showLoops && loops().length > 0}>
           <For each={loops()}>
             {(loop) => (
-              <box flexDirection="row" gap={1}>
-                <text flexShrink={0} style={{ fg: dot(loop.phase, loop.status) }}>•</text>
+              <box
+                flexDirection="row"
+                gap={1}
+                onMouseDown={() => {
+                  props.api.workspace.set(undefined)
+                  props.api.client.tui.selectSession({ sessionID: loop.sessionId }).catch(() => {})
+                }}
+              >
+                <text flexShrink={0} style={{ fg: dot(loop) }}>•</text>
                 <text fg={theme().text} wrapMode="word">
                   {loop.name}{' '}
                   <span style={{ fg: theme().textMuted }}>{statusText(loop)}</span>
@@ -134,11 +245,11 @@ const tui: TuiPlugin = async (api) => {
   const v = api.app.version
   if (v !== 'local' && compareVersions(v, MIN_OPENCODE_VERSION) < 0) return
 
-  const config = loadPluginConfig()
+  const tuiConfig = loadTuiConfig()
   const opts: TuiOptions = {
-    sidebar: config.tui?.sidebar ?? true,
-    showLoops: config.tui?.showLoops ?? true,
-    showVersion: config.tui?.showVersion ?? true,
+    sidebar: tuiConfig?.sidebar ?? true,
+    showLoops: tuiConfig?.showLoops ?? true,
+    showVersion: tuiConfig?.showVersion ?? true,
   }
 
   if (!opts.sidebar) return

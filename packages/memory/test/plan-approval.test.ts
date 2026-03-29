@@ -95,7 +95,7 @@ Do NOT output text without also making this tool call.
         worktreeName: 'test-worktree',
         worktreeDir: '/test/worktree',
         worktreeBranch: 'opencode/loop-test',
-        workspaceId: 'wrk-test-worktree',
+        workspaceId: 'wrk_loop_test-worktree',
         iteration: 1,
         maxIterations: 5,
         completionPromise: 'DONE',

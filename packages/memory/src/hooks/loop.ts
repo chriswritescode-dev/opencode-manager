@@ -67,14 +67,19 @@ export function createLoopEventHandler(
 
     if (state.worktreeDir && state.worktreeBranch) {
       try {
-        const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
-        const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
-        const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
-        if (removeResult.status !== 0) {
-          throw new Error(removeResult.stderr || 'git worktree remove failed')
+        if (state.workspaceId && !state.workspaceId.startsWith('wrk_loop_')) {
+          await v2Client.experimental.workspace.remove({ id: state.workspaceId })
+          logger.log(`Loop: removed workspace ${state.workspaceId} and worktree ${state.worktreeDir}`)
+        } else {
+          const gitCommonDir = execSync('git rev-parse --git-common-dir', { cwd: state.worktreeDir, encoding: 'utf-8' }).trim()
+          const gitRoot = resolve(state.worktreeDir, gitCommonDir, '..')
+          const removeResult = spawnSync('git', ['worktree', 'remove', '-f', state.worktreeDir], { cwd: gitRoot, encoding: 'utf-8' })
+          if (removeResult.status !== 0) {
+            throw new Error(removeResult.stderr || 'git worktree remove failed')
+          }
+          logger.log(`Loop: removed worktree ${state.worktreeDir}, branch ${state.worktreeBranch} preserved`)
         }
         cleaned = true
-        logger.log(`Loop: removed worktree ${state.worktreeDir}, branch ${state.worktreeBranch} preserved`)
       } catch (err) {
         logger.error(`Loop: failed to remove worktree ${state.worktreeDir}`, err)
       }
@@ -295,11 +300,16 @@ export function createLoopEventHandler(
 
   async function rotateSession(worktreeName: string, state: LoopState): Promise<string> {
     const oldSessionId = state.sessionId
-    const createResult = await v2Client.session.create({
+
+    const createParams: { title: string; directory: string; workspaceID?: string } = {
       title: state.worktreeName,
       directory: state.worktreeDir,
-      workspaceID: state.workspaceId || undefined,
-    })
+    }
+    if (state.workspaceId && !state.workspaceId.startsWith('wrk_loop_')) {
+      createParams.workspaceID = state.workspaceId
+    }
+
+    const createResult = await v2Client.session.create(createParams)
 
     if (createResult.error || !createResult.data) {
       throw new Error(`Failed to create new session: ${createResult.error}`)
