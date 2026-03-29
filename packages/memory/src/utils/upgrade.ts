@@ -46,7 +46,7 @@ export interface UpgradeCheckResult {
   updateAvailable: boolean
 }
 
-function compareVersions(a: string, b: string): number {
+export function compareVersions(a: string, b: string): number {
   const aParts = a.split('.').map(Number)
   const bParts = b.split('.').map(Number)
   for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
