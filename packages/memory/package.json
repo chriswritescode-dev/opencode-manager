@@ -2,12 +2,24 @@
   "name": "@opencode-manager/memory",
   "version": "0.0.28",
   "type": "module",
+  "oc-plugin": [
+    "server",
+    "tui"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./server": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./tui": {
+      "import": "./dist/tui.js",
+      "types": "./dist/tui.d.ts"
     }
   },
   "files": [
@@ -37,10 +49,22 @@
   "homepage": "https://chriswritescode-dev.github.io/opencode-manager/features/memory/",
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
-    "@opencode-ai/plugin": "^1.2.16",
+    "@opencode-ai/plugin": "^1.3.5",
     "@opencode-ai/sdk": "^1.2.26",
     "jsonc-parser": "^3.3.1",
     "sqlite-vec": "0.1.7-alpha.2"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.1.92",
+    "@opentui/solid": ">=0.1.92"
+  },
+  "peerDependenciesMeta": {
+    "@opentui/core": {
+      "optional": true
+    },
+    "@opentui/solid": {
+      "optional": true
+    }
   },
   "optionalDependencies": {
     "sqlite-vec-darwin-arm64": "0.1.7-alpha.2",
@@ -50,11 +74,14 @@
     "sqlite-vec-windows-x64": "0.1.7-alpha.2"
   },
   "devDependencies": {
+    "@opentui/core": "0.1.92",
+    "@opentui/solid": "0.1.92",
     "bun-types": "latest",
+    "solid-js": "^1.9.12",
     "typescript": "^5.7.3"
   },
   "scripts": {
-    "build": "bun scripts/inject-version.ts && tsc -p tsconfig.build.json",
+    "build": "bun scripts/build.ts",
     "postinstall": "node scripts/download-models.js",
     "prepublishOnly": "pnpm build",
     "test": "bun test",

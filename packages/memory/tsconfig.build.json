@@ -8,6 +8,6 @@
     "sourceMap": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*"],
-  "exclude": ["test/**/*", "node_modules", "dist"]
+  "include": ["src/**/*.ts"],
+  "exclude": ["test/**/*", "node_modules", "dist", "src/tui.tsx"]
 }

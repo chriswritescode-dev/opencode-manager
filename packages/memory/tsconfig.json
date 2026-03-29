@@ -11,6 +11,8 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "@opentui/solid",
     "types": ["bun-types"]
   },
   "include": ["src/**/*"]
