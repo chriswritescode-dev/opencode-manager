@@ -82,6 +82,11 @@ The file is only created if it does not already exist. The config is validated o
     "model": "",
     "minAudits": 1,
     "stallTimeoutMs": 60000
+  },
+  "tui": {
+    "sidebar": true,
+    "showLoops": true,
+    "showVersion": true
   }
 }
 ```
@@ -140,6 +145,9 @@ Set `baseUrl` to point at any OpenAI-compatible self-hosted service (vLLM, Ollam
 | `loop.model` | Model override for loop sessions (`provider/model`), falls back to `executionModel` | — |
 | `loop.minAudits` | Minimum audit iterations required before completion | `1` |
 | `loop.stallTimeoutMs` | Watchdog stall detection timeout (ms) | `60000` |
+| `tui.sidebar` | Show the Memory plugin sidebar in the TUI | `true` |
+| `tui.showLoops` | Show active loops in the sidebar | `true` |
+| `tui.showVersion` | Show version number in sidebar title | `true` |
 
 !!! note "Deprecated Options"
     The `ralph.*` prefix is deprecated but still accepted for backward compatibility. Use `loop.*` instead.
