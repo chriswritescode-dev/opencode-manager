@@ -19,7 +19,6 @@ import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
 import { createLogger, slugify } from './utils/logger'
 import { stripPromiseTags } from './utils/strip-promise-tags'
-import { truncate } from './cli/utils'
 import { formatSessionOutput, formatAuditResult } from './utils/loop-format'
 import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig, HealthStatus, Logger } from './types'
@@ -34,7 +33,7 @@ import { existsSync } from 'fs'
 
 const z = tool.schema
 
-const DEFAULT_PLAN_COMPLETION_PROMISE = 'All phases of the plan have been completed successfully'
+const DEFAULT_PLAN_COMPLETION_PROMISE = 'DONE'
 
 async function getHealthStatus(
   projectId: string,
@@ -751,17 +750,29 @@ Do NOT output text without also making this tool call.
           },
         }),
         'memory-health': tool({
-          description: 'Check memory plugin health or trigger a reindex of all embeddings. Use action "check" (default) to view status, "reindex" to regenerate all embeddings when model has changed or embeddings are missing, or "upgrade" to update the plugin to the latest version. Always report the plugin version from the output. Never run reindex unless the user explicitly asks for it.',
+          description: 'Check memory plugin health or trigger a reindex of all embeddings. Use action "check" (default) to view status, "reindex" to regenerate all embeddings when model has changed or embeddings are missing, "upgrade" to update the plugin to the latest version, or "reload" to reload the plugin without restarting OpenCode. Always report the plugin version from the output. Never run reindex unless the user explicitly asks for it.',
           args: {
-            action: z.enum(['check', 'reindex', 'upgrade']).optional().default('check').describe('Action to perform: "check" for health status, "reindex" to regenerate embeddings, "upgrade" to update plugin'),
+            action: z.enum(['check', 'reindex', 'upgrade', 'reload']).optional().default('check').describe('Action to perform: "check" for health status, "reindex" to regenerate embeddings, "upgrade" to update plugin, "reload" to reload the plugin without restarting OpenCode'),
           },
           execute: async (args) => {
+            if (args.action === 'reload') {
+              logger.log('memory-health: reload triggered via health tool')
+              await cleanup()
+              v2.instance.dispose().catch(() => {})
+              return 'Plugin reload triggered. The instance will reinitialize on next interaction.'
+            }
             if (args.action === 'upgrade') {
               const result = await performUpgrade(async (cacheDir, version) => {
                 const pkg = `@opencode-manager/memory@${version}`
                 const output = await input.$`bun add --force --no-cache --exact --cwd ${cacheDir} ${pkg}`.nothrow().quiet()
                 return { exitCode: output.exitCode, stderr: output.stderr.toString() }
               })
+              if (result.upgraded) {
+                logger.log(`memory-health: upgrade successful (${result.from} -> ${result.to}), triggering reload`)
+                await cleanup()
+                v2.instance.dispose().catch(() => {})
+                return `${result.message}. Reloading plugin — new version will be active on next interaction.`
+              }
               return result.message
             }
             if (args.action === 'reindex') {
