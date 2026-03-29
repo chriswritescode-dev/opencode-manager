@@ -449,9 +449,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           logger.log(`loop: no git branch detected, running without branch info`)
         }
 
+        const workspaceId = `memory-loop-${autoWorktreeName}`
+
         const createResult = await v2.session.create({
           title: options.sessionTitle,
           directory: projectDir,
+          workspaceID: workspaceId,
         })
 
         if (createResult.error || !createResult.data) {
@@ -463,6 +466,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           sessionId: createResult.data.id,
           directory: projectDir,
           branch: currentBranch,
+          workspaceId,
           worktree: false,
         }
       } else {
@@ -478,9 +482,12 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
         const worktreeInfo = worktreeResult.data
         logger.log(`loop: worktree created at ${worktreeInfo.directory} (branch: ${worktreeInfo.branch})`)
 
+        const workspaceId = `memory-loop-${autoWorktreeName}`
+
         const createResult = await v2.session.create({
           title: options.sessionTitle,
           directory: worktreeInfo.directory,
+          workspaceID: workspaceId,
         })
 
         if (createResult.error || !createResult.data) {
@@ -497,7 +504,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           sessionId: createResult.data.id,
           directory: worktreeInfo.directory,
           branch: worktreeInfo.branch,
-          workspaceId: `wrk-${autoWorktreeName}`,
+          workspaceId,
           worktree: true,
         }
       }
@@ -1088,6 +1095,7 @@ Do NOT output text without also making this tool call.
               const createResult = await v2.session.create({
                 title: stoppedState.worktreeName!,
                 directory: stoppedState.worktreeDir!,
+                workspaceID: stoppedState.workspaceId || undefined,
               })
 
               if (createResult.error || !createResult.data) {

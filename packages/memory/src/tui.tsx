@@ -57,8 +57,8 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
       for (const session of sessions.data) {
         const status = result.data[session.id]
         if (status && (status.type === 'busy' || status.type === 'retry')) {
-          if (session.workspaceID?.startsWith('wrk-loop-')) {
-            const name = session.workspaceID.replace('wrk-loop-', '')
+          if (session.workspaceID?.startsWith('memory-loop-')) {
+            const name = session.workspaceID.replace('memory-loop-', '')
             active.push({
               name,
               phase: 'coding',

@@ -298,6 +298,7 @@ export function createLoopEventHandler(
     const createResult = await v2Client.session.create({
       title: state.worktreeName,
       directory: state.worktreeDir,
+      workspaceID: state.workspaceId || undefined,
     })
 
     if (createResult.error || !createResult.data) {
