@@ -1,20 +1,21 @@
 import { tool } from '@opencode-ai/plugin'
 import type { ToolContext } from './types'
+import { execSync } from 'child_process'
 
 const z = tool.schema
 
 export function createKvTools(ctx: ToolContext): Record<string, ReturnType<typeof tool>> {
-  const { kvService, projectId, logger } = ctx
+  const { kvService, projectId, logger, loopService } = ctx
 
   return {
     'memory-kv-set': tool({
-      description: 'Store a key-value pair for the current project. Values expire after 7 days by default. Use for ephemeral project state like planning progress, code review patterns, or session context.',
+      description: 'Store a key-value pair for the current project. Values expire after 7 days by default. Keys prefixed with "review-finding:" get an automatic "branch" field injected.',
       args: {
         key: z.string().describe('The key to store the value under'),
         value: z.string().describe('The value to store (JSON string)'),
         ttlMs: z.number().optional().describe('Time-to-live in milliseconds (default: 7 days)'),
       },
-      execute: async (args) => {
+      execute: async (args, context) => {
         logger.log(`memory-kv-set: key="${args.key}"`)
         let parsed: unknown
         try {
@@ -22,6 +23,24 @@ export function createKvTools(ctx: ToolContext): Record<string, ReturnType<typeo
         } catch {
           parsed = args.value
         }
+
+        if (args.key.startsWith('review-finding:') && typeof parsed === 'object' && parsed !== null) {
+          const active = loopService.listActive()
+          const loop = active.find((s) => s.worktreeDir === context.directory)
+          if (loop?.worktreeBranch) {
+            ;(parsed as Record<string, unknown>).branch = loop.worktreeBranch
+          } else {
+            try {
+              const branch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: context.directory, encoding: 'utf-8' }).trim()
+              if (branch) {
+                ;(parsed as Record<string, unknown>).branch = branch
+              }
+            } catch {
+              // git not available or not a repo
+            }
+          }
+        }
+
         kvService.set(projectId, args.key, parsed, args.ttlMs)
         const expiresAt = new Date(Date.now() + (args.ttlMs ?? 7 * 24 * 60 * 60 * 1000))
         logger.log(`memory-kv-set: stored key="${args.key}", expires=${expiresAt.toISOString()}`)

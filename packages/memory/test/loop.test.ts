@@ -986,15 +986,177 @@ describe('hasOutstandingFindings', () => {
   })
 
   test('returns true when findings exist', () => {
-    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import' })
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'test-branch' })
     expect(loopService.hasOutstandingFindings()).toBe(true)
   })
 
   test('returns false after findings are deleted', () => {
-    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import' })
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'test-branch' })
     expect(loopService.hasOutstandingFindings()).toBe(true)
     kvService.delete(projectId, 'review-finding:src/index.ts:42')
     expect(loopService.hasOutstandingFindings()).toBe(false)
+  })
+
+  test('getOutstandingFindings returns empty array when no findings exist', () => {
+    expect(loopService.getOutstandingFindings()).toEqual([])
+  })
+
+  test('getOutstandingFindings returns entries when findings exist', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'test-branch' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'missing error handling', branch: 'test-branch' })
+    const findings = loopService.getOutstandingFindings()
+    expect(findings).toHaveLength(2)
+    expect(findings.map((f) => f.key)).toContain('review-finding:src/index.ts:42')
+    expect(findings.map((f) => f.key)).toContain('review-finding:src/utils.ts:10')
+  })
+
+  test('returns false when findings exist on a different branch', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'other-branch' })
+    expect(loopService.hasOutstandingFindings('feature/main')).toBe(false)
+  })
+
+  test('returns true only for findings on the specified branch', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'feature/main' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'other-branch' })
+    expect(loopService.hasOutstandingFindings('feature/main')).toBe(true)
+  })
+
+  test('returns all findings when no branch specified', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'branch-a' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'branch-b' })
+    expect(loopService.hasOutstandingFindings()).toBe(true)
+  })
+
+  test('getOutstandingFindings filters by branch', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'feature/main' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'other-branch' })
+    const findings = loopService.getOutstandingFindings('feature/main')
+    expect(findings).toHaveLength(1)
+    expect(findings[0].key).toBe('review-finding:src/index.ts:42')
+  })
+
+  test('getOutstandingFindings returns all when no branch specified', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'branch-a' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'branch-b' })
+    expect(loopService.getOutstandingFindings()).toHaveLength(2)
+  })
+})
+
+describe('buildContinuationPrompt with outstanding findings', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('buildContinuationPrompt includes outstanding findings when present', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-findings',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 3,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'opencode/loop-test' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'missing error handling', branch: 'opencode/loop-test' })
+
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('Outstanding Review Findings (2)')
+    expect(prompt).toContain('blocking loop completion')
+    expect(prompt).toContain('`review-finding:src/index.ts:42`')
+    expect(prompt).toContain('`review-finding:src/utils.ts:10`')
+  })
+
+  test('buildContinuationPrompt excludes findings section when no findings exist', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-no-findings',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 2,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).not.toContain('Outstanding Review Findings')
+  })
+
+  test('buildContinuationPrompt includes both audit findings and outstanding findings', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-both',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 3,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    kvService.set(projectId, 'review-finding:src/api.ts:8', { description: 'logic error', branch: 'opencode/loop-test' })
+
+    const prompt = loopService.buildContinuationPrompt(state, 'Found a bug in line 10')
+    expect(prompt).toContain('The code auditor reviewed your changes')
+    expect(prompt).toContain('Found a bug in line 10')
+    expect(prompt).toContain('Outstanding Review Findings (1)')
+    expect(prompt).toContain('`review-finding:src/api.ts:8`')
+  })
+
+  test('buildContinuationPrompt excludes findings from other branches', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-branch-filter',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 2,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'other-branch' })
+
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).not.toContain('Outstanding Review Findings')
   })
 })
 

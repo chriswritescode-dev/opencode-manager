@@ -1,4 +1,4 @@
-import type { KvService } from './kv'
+import type { KvService, KvEntry } from './kv'
 import type { Logger, LoopConfig } from '../types'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import { findPartialMatch } from '../utils/partial-match'
@@ -78,7 +78,8 @@ export interface LoopService {
   getMinAudits(): number
   terminateAll(): void
   reconcileStale(): number
-  hasOutstandingFindings(): boolean
+  hasOutstandingFindings(branch?: string): boolean
+  getOutstandingFindings(branch?: string): KvEntry[]
 }
 
 export function createLoopService(
@@ -148,6 +149,12 @@ export function createLoopService(
         ? '\n\nAfter fixing all issues, output the completion signal.'
         : ''
       prompt += `\n\n---\nThe code auditor reviewed your changes. You MUST address all bugs and convention violations below — do not dismiss findings as unrelated to the task. Fix them directly without creating a plan or asking for approval.\n\n${auditFindings}${completionInstruction}`
+    }
+
+    const outstandingFindings = getOutstandingFindings(state.worktreeBranch)
+    if (outstandingFindings.length > 0) {
+      const findingKeys = outstandingFindings.map((f) => `- \`${f.key}\``).join('\n')
+      prompt += `\n\n---\n⚠️ Outstanding Review Findings (${outstandingFindings.length})\n\nThese review findings are blocking loop completion. Fix these issues so they pass the next audit review.\n\n${findingKeys}`
     }
 
     return prompt
@@ -242,9 +249,17 @@ export function createLoopService(
     return active.length
   }
 
-  function hasOutstandingFindings(): boolean {
+  function getOutstandingFindings(branch?: string): KvEntry[] {
     const findings = kvService.listByPrefix(projectId, 'review-finding:')
-    return findings.length > 0
+    if (!branch) return findings
+    return findings.filter((f) => {
+      const data = f.data as Record<string, unknown> | null
+      return data && data.branch === branch
+    })
+  }
+
+  function hasOutstandingFindings(branch?: string): boolean {
+    return getOutstandingFindings(branch).length > 0
   }
 
   return {
@@ -267,6 +282,7 @@ export function createLoopService(
     terminateAll,
     reconcileStale,
     hasOutstandingFindings,
+    getOutstandingFindings,
   }
 }
 

@@ -135,7 +135,7 @@ After completing a review, store each **bug** and **warning** finding in the pro
 Use \`memory-kv-set\` with a structured key and JSON value:
 
 **Key pattern**: \`review-finding:<file_path>:<line_number>\`
-**Value**: JSON object with the finding details. Include the current branch name (via \`git branch --show-current\`) in the \`branch\` field.
+**Value**: JSON object with the finding details. The \`branch\` field is auto-set by the tool — you do not need to include it.
 
 Example:
 \`\`\`json
@@ -146,8 +146,7 @@ Example:
   "description": "Missing null check on user.session before accessing .token — throws TypeError when session expires mid-request.",
   "scenario": "User's session expires between the auth check and token access on line 45.",
   "status": "open",
-  "date": "2026-03-07",
-  "branch": "feature/auth-refactor"
+  "date": "2026-03-07"
 }
 \`\`\`
 

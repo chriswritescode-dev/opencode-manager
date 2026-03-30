@@ -384,7 +384,7 @@ export function createLoopEventHandler(
       if (textContent && currentState.completionPromise && loopService.checkCompletionPromise(textContent, currentState.completionPromise)) {
         const currentAuditCount = currentState.auditCount ?? 0
         if (!currentState.audit || currentAuditCount >= minAudits) {
-          if (loopService.hasOutstandingFindings()) {
+          if (loopService.hasOutstandingFindings(currentState.worktreeBranch)) {
             logger.log(`Loop: completion promise detected but outstanding review findings remain, continuing`)
           } else {
             await terminateLoop(worktreeName, currentState, 'completed')
@@ -577,7 +577,7 @@ export function createLoopEventHandler(
     if (currentState.completionPromise && auditText) {
       if (loopService.checkCompletionPromise(auditText, currentState.completionPromise)) {
         if (!currentState.audit || newAuditCount >= minAudits) {
-          if (loopService.hasOutstandingFindings()) {
+          if (loopService.hasOutstandingFindings(currentState.worktreeBranch)) {
             logger.log(`Loop: completion promise detected but outstanding review findings remain, continuing`)
           } else {
             await terminateLoop(worktreeName, currentState, 'completed')
