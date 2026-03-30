@@ -42,6 +42,7 @@ services:
       - VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY:-}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-}
+      - INSTALL_MEMORY_PLUGIN=${INSTALL_MEMORY_PLUGIN:-true}
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
