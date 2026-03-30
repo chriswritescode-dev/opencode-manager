@@ -4,9 +4,7 @@ import { createOpencodeClient as createV2Client } from '@opencode-ai/sdk/v2'
 import { agents } from './agents'
 import { createConfigHandler } from './config'
 import { createSessionHooks, createMemoryInjectionHook, createLoopEventHandler } from './hooks'
-import { resolve } from 'path'
 import { initializeDatabase, resolveDataDir, closeDatabase } from './storage'
-import type { MemoryService } from './services/memory'
 import { createVecService, createNoopVecService } from './storage/vec'
 import { createEmbeddingProvider, killEmbeddingServer } from './embedding'
 import { createMemoryService } from './services/memory'
@@ -16,14 +14,11 @@ import { createLoopService, migrateRalphKeys } from './services/loop'
 import { loadPluginConfig } from './setup'
 import { resolveLogPath } from './storage'
 import { createLogger } from './utils/logger'
-import type { Database } from 'bun:sqlite'
 import type { PluginConfig, CompactionConfig } from './types'
 import { createTools, createToolExecuteBeforeHook, createToolExecuteAfterHook, autoValidateOnLoad, scopeEnum } from './tools'
 import type { DimensionMismatchState, InitState, ToolContext } from './tools'
 import type { VecService } from './storage/vec-types'
-import { VERSION } from './version'
 
-const z = tool.schema
 
 export function createMemoryPlugin(config: PluginConfig): Plugin {
   return async (input: PluginInput): Promise<Hooks> => {
@@ -316,6 +311,11 @@ const plugin: Plugin = async (input: PluginInput): Promise<Hooks> => {
   return factory(input)
 }
 
-export default plugin
+const pluginModule = {
+  id: '@opencode-manager/memory',
+  server: plugin,
+}
+
+export default pluginModule
 export type { PluginConfig, CompactionConfig } from './types'
 export { VERSION } from './version'
