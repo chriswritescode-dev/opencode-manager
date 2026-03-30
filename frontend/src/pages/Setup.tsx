@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
@@ -29,7 +29,7 @@ export function Setup() {
     handleSubmit,
     formState: { errors },
   } = useForm<SetupFormData>({
-    resolver: zodResolver(setupSchema),
+    resolver: standardSchemaResolver(setupSchema),
   })
 
   const onSubmit = async (data: SetupFormData) => {

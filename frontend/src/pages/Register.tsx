@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
@@ -36,7 +36,7 @@ export function Register() {
     handleSubmit,
     formState: { errors },
   } = useForm<RegisterFormData>({
-    resolver: zodResolver(registerSchema),
+    resolver: standardSchemaResolver(registerSchema),
   })
 
   const onSubmit = async (data: RegisterFormData) => {

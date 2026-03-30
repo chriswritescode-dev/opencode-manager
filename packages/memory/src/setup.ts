@@ -139,6 +139,8 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
     executionModel: config.executionModel,
     auditorModel: config.auditorModel,
     loop: config.loop ?? config.ralph,
+    tui: config.tui,
+    agents: config.agents,
   }
   
   if (config.ralph && !config.loop) {

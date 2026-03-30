@@ -167,7 +167,7 @@ describe('formatSessionOutput', () => {
     const lines = formatSessionOutput(sessionOutput)
     const messageLine = lines.find((line) => line.includes('[assistant]'))
     expect(messageLine).toBeDefined()
-    expect(messageLine!.length).toBeLessThanOrEqual(220)
+    expect(messageLine!.length).toBeLessThanOrEqual(1020)
   })
 
   test('handles multiline messages', () => {

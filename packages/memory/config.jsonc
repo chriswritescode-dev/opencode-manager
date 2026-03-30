@@ -28,6 +28,13 @@
   },
   "executionModel": "",
   "auditorModel": "",
+  // Per-agent overrides (temperature range: 0.0 - 2.0)
+  // "agents": {
+  //   "architect": { "temperature": 0.0 },
+  //   "librarian": { "temperature": 0.0 },
+  //   "auditor": { "temperature": 0.0 },
+  //   "code": {}
+  // },
   "loop": {
     "enabled": true,
     "defaultMaxIterations": 15,
@@ -36,5 +43,10 @@
     "model": "",
     "minAudits": 1,
     "stallTimeoutMs": 60000
+  },
+  "tui": {
+    "sidebar": true,
+    "showLoops": true,
+    "showVersion": true
   }
 }

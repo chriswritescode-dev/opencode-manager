@@ -29,23 +29,43 @@ export interface StatusArgs {
 export async function run(argv: StatusArgs): Promise<void> {
   const db = openDatabase(argv.dbPath)
 
+  function createStatusClient(serverUrl: string, directory: string) {
+    const url = new URL(serverUrl)
+    const password = url.password || process.env['OPENCODE_SERVER_PASSWORD']
+    const cleanUrl = new URL(url.toString())
+    cleanUrl.username = ''
+    cleanUrl.password = ''
+    const clientConfig: Parameters<typeof createOpencodeClient>[0] = { baseUrl: cleanUrl.toString(), directory }
+    if (password) {
+      clientConfig.headers = {
+        Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`,
+      }
+    }
+    return createOpencodeClient(clientConfig)
+  }
+
   async function tryFetchSessionOutput(serverUrl: string, sessionId: string, directory: string) {
     try {
-      const url = new URL(serverUrl)
-      const password = url.password || process.env['OPENCODE_SERVER_PASSWORD']
-      const cleanUrl = new URL(url.toString())
-      cleanUrl.username = ''
-      cleanUrl.password = ''
-      const clientConfig: Parameters<typeof createOpencodeClient>[0] = { baseUrl: cleanUrl.toString(), directory }
-      if (password) {
-        clientConfig.headers = {
-          Authorization: `Basic ${Buffer.from(`opencode:${password}`).toString('base64')}`,
-        }
-      }
-      const client = createOpencodeClient(clientConfig)
+      const client = createStatusClient(serverUrl, directory)
       return await fetchSessionOutput(client, sessionId, directory)
     } catch {
       return null
+    }
+  }
+
+  async function tryFetchSessionStatus(serverUrl: string, sessionId: string, directory: string): Promise<string> {
+    try {
+      const client = createStatusClient(serverUrl, directory)
+      const statusResult = await client.session.status({ directory })
+      const statuses = (statusResult.data ?? {}) as Record<string, { type: string; attempt?: number; message?: string; next?: number }>
+      const status = statuses[sessionId]
+      if (!status) return 'unknown'
+      if (status.type === 'retry') {
+        return `retry (attempt ${status.attempt}, next in ${Math.round(((status.next ?? 0) - Date.now()) / 1000)}s)`
+      }
+      return status.type
+    } catch {
+      return 'unavailable'
     }
   }
 
@@ -201,6 +221,8 @@ export async function run(argv: StatusArgs): Promise<void> {
         console.log(`  Error Count:     ${state.errorCount ?? 0}`)
         console.log(`  Audit Count:     ${state.auditCount ?? 0}`)
         console.log(`  Started:         ${new Date(startedAt).toISOString()}`)
+        const sessionStatus = await tryFetchSessionStatus(argv.server ?? 'http://localhost:5551', state.sessionId, state.worktreeDir!)
+        console.log(`  Status:          ${sessionStatus}`)
         if (state.completionPromise) {
           console.log(`  Completion:      ${state.completionPromise}`)
         }

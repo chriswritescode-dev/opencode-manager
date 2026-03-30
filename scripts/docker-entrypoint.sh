@@ -59,10 +59,18 @@ fi
 
 echo "🔍 Checking memory plugin..."
 
-if [ -d "$NODE_PATH/@opencode-manager/memory" ]; then
-    echo "✅ Memory plugin found at $NODE_PATH/@opencode-manager/memory"
+if [ "$INSTALL_MEMORY_PLUGIN" = "false" ] || [ "$INSTALL_MEMORY_PLUGIN" = "0" ]; then
+  echo "⏭️  Memory plugin install disabled (INSTALL_MEMORY_PLUGIN=$INSTALL_MEMORY_PLUGIN)"
+elif [ -d "$NODE_PATH/@opencode-manager/memory" ]; then
+  echo "✅ Memory plugin found at $NODE_PATH/@opencode-manager/memory"
 else
-    echo "⚠️  Memory plugin not found at $NODE_PATH/@opencode-manager/memory"
+  echo "📦 Installing memory plugin..."
+  npm install --global-style --prefix /opt/opencode-plugins @opencode-manager/memory@latest 2>&1 || true
+  if [ -d "$NODE_PATH/@opencode-manager/memory" ]; then
+    echo "✅ Memory plugin installed successfully"
+  else
+    echo "⚠️  Memory plugin installation failed"
+  fi
 fi
 
 echo "🚀 Starting OpenCode Manager Backend..."

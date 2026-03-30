@@ -2,5 +2,5 @@ packages:
   - 'shared'
   - 'backend'
   - 'frontend'
-  - 'packages/memory'
   - '!workspace/**'
+

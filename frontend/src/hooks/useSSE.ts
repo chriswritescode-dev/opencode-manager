@@ -308,8 +308,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         })
       }
     } catch (err) {
-      if (err instanceof Error && !err.message.includes('aborted')) {
-        throw err
+      if (err instanceof Error && !err.message.includes('aborted') && import.meta.env.DEV) {
+        console.warn('Failed to fetch initial session data:', err)
       }
     }
   }, [client, setSessionStatus])

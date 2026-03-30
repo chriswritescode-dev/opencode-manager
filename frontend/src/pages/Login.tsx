@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useAuth } from '@/hooks/useAuth'
 import { useTheme } from '@/hooks/useTheme'
@@ -33,7 +33,7 @@ export function Login() {
     handleSubmit,
     formState: { errors },
   } = useForm<LoginFormData>({
-    resolver: zodResolver(loginSchema),
+    resolver: standardSchemaResolver(loginSchema),
   })
 
   const onSubmit = async (data: LoginFormData) => {

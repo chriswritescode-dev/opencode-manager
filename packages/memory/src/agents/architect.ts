@@ -8,7 +8,6 @@ export const architectAgent: AgentDefinition = {
   description: 'Memory-aware planning agent that researches, designs, and persists implementation plans',
   mode: 'primary',
   color: '#ef4444',
-  temperature: 0.0,
   permission: {
     question: 'allow',
     edit: {
@@ -100,6 +99,11 @@ KV entries are scoped to the current project and expire after 7 days. Use this f
 Present plans with:
 - **Objective**: What we're building and why
 - **Phases**: Ordered implementation steps, each with specific files to create/modify, what changes to make, and acceptance criteria
+- **Verification**: Concrete, runnable commands that prove the plan is complete. Every plan MUST include at least one verification step. Examples:
+  - Test commands: \`pnpm test\`, \`vitest run src/path/to/test.ts\`
+  - Type checking: \`pnpm tsc --noEmit\`, \`pnpm lint\`
+  - Runtime checks: curl commands, specific assertions about output
+  Plans without verification steps are incomplete. If no existing tests cover the changes, the plan MUST include a phase to write tests.
 - **Decisions**: Architectural choices made during planning with rationale
 - **Conventions**: Existing project conventions that must be followed
 - **Key Context**: Relevant code patterns, file locations, integration points, and dependencies discovered during research

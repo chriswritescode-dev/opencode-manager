@@ -189,7 +189,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
     })
   }
 
-  const handleNestedChange = <K extends 'logging' | 'compaction' | 'memoryInjection' | 'messagesTransform'>(
+  const handleNestedChange = <K extends 'logging' | 'compaction' | 'memoryInjection' | 'messagesTransform' | 'tui'>(
     section: K,
     field: string,
     value: string | number | boolean | undefined,
@@ -557,6 +557,40 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
                       id="transformDebug"
                       checked={displayConfig.messagesTransform?.debug ?? false}
                       onCheckedChange={(checked) => handleNestedChange('messagesTransform', 'debug', checked)}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Layers className="h-4 w-4 text-indigo-500" />
+                    <span className="text-sm font-medium">TUI</span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="tuiSidebar">Show Sidebar</Label>
+                    <Switch
+                      id="tuiSidebar"
+                      checked={displayConfig.tui?.sidebar ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('tui', 'sidebar', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="tuiShowLoops">Show Loops</Label>
+                    <Switch
+                      id="tuiShowLoops"
+                      checked={displayConfig.tui?.showLoops ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('tui', 'showLoops', checked)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="tuiShowVersion">Show Version</Label>
+                    <Switch
+                      id="tuiShowVersion"
+                      checked={displayConfig.tui?.showVersion ?? true}
+                      onCheckedChange={(checked) => handleNestedChange('tui', 'showVersion', checked)}
                     />
                   </div>
                 </div>

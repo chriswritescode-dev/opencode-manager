@@ -54,10 +54,9 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -86,7 +85,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -109,23 +107,23 @@ describe('LoopService', () => {
   })
 
   test('checkCompletionPromise matches exact promise', () => {
-    const text = 'Some response text <promise>DONE</promise> more text'
-    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(true)
+    const text = 'Some response text <promise>ALL_PHASES_COMPLETE</promise> more text'
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE')).toBe(true)
   })
 
   test('checkCompletionPromise returns false when no promise tags', () => {
     const text = 'Some response text without promise tags'
-    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(false)
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE')).toBe(false)
   })
 
   test('checkCompletionPromise returns false when promise does not match', () => {
-    const text = 'Some response <promise>NOT_DONE</promise> text'
-    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(false)
+    const text = 'Some response <promise>NOT_COMPLETE</promise> text'
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE')).toBe(false)
   })
 
   test('checkCompletionPromise handles whitespace normalization', () => {
-    const text = 'Response <promise>  DONE   WITH   SPACES  </promise> text'
-    expect(loopService.checkCompletionPromise(text, 'DONE WITH SPACES')).toBe(true)
+    const text = 'Response <promise>  ALL_PHASES_COMPLETE   WITH   SPACES  </promise> text'
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE WITH SPACES')).toBe(true)
   })
 
   test('checkCompletionPromise matches first promise tag when multiple present', () => {
@@ -146,7 +144,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 3,
       maxIterations: 0,
       completionPromise: null,
@@ -170,7 +167,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
       completionPromise: 'COMPLETE_TASK',
@@ -183,7 +179,7 @@ describe('LoopService', () => {
     }
 
     const prompt = loopService.buildContinuationPrompt(state)
-    expect(prompt).toContain('[Loop iteration 1 | To stop: output <promise>COMPLETE_TASK</promise> (ONLY when all requirements are met)]')
+    expect(prompt).toContain('[Loop iteration 1 | To stop: output <promise>COMPLETE_TASK</promise> (ONLY after all verification steps pass)]')
   })
 
   test('buildContinuationPrompt includes max iterations when no promise', () => {
@@ -193,7 +189,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 10,
       completionPromise: null,
@@ -216,7 +211,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -239,7 +233,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 5,
       maxIterations: 10,
       completionPromise: 'PERSIST_TEST',
@@ -267,7 +260,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -293,7 +285,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 0,
       completionPromise: null,
@@ -321,7 +312,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 0,
       completionPromise: null,
@@ -346,10 +336,9 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 2,
       maxIterations: 0,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -371,7 +360,6 @@ describe('LoopService', () => {
       worktreeName: 'worktree-1',
       worktreeDir: '/path/to/worktree1',
       worktreeBranch: 'opencode/loop-worktree-1',
-      workspaceId: 'wrk-worktree-1',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -389,7 +377,6 @@ describe('LoopService', () => {
       worktreeName: 'worktree-2',
       worktreeDir: '/path/to/worktree2',
       worktreeBranch: 'opencode/loop-worktree-2',
-      workspaceId: 'loop-worktree-2',
       iteration: 2,
       maxIterations: 0,
       completionPromise: null,
@@ -407,7 +394,6 @@ describe('LoopService', () => {
       worktreeName: 'worktree-3',
       worktreeDir: '/path/to/worktree3',
       worktreeBranch: 'opencode/loop-worktree-3',
-      workspaceId: 'loop-worktree-3',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -437,7 +423,6 @@ describe('LoopService', () => {
       worktreeName: 'unique-worktree-name',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-unique-worktree-name',
-      workspaceId: 'wrk-unique-worktree-name',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -465,10 +450,9 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -490,7 +474,6 @@ describe('LoopService', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/path/to/worktree',
       worktreeBranch: 'opencode/loop-test',
-      workspaceId: 'wrk-test-worktree',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -514,10 +497,9 @@ describe('LoopService', () => {
       worktreeName: 'inplace-worktree',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'In-place test prompt',
       phase: 'coding' as const,
@@ -529,7 +511,6 @@ describe('LoopService', () => {
     loopService.setState('session-inplace', inPlaceState)
     const retrieved = loopService.getActiveState('session-inplace')
     expect(retrieved?.worktree).toBe(false)
-    expect(retrieved?.workspaceId).toBe('')
     expect(retrieved?.worktreeDir).toBe('/path/to/project')
   })
 
@@ -540,7 +521,6 @@ describe('LoopService', () => {
       worktreeName: 'unique-inplace-name',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'develop',
-      workspaceId: '',
       iteration: 2,
       maxIterations: 0,
       completionPromise: null,
@@ -565,7 +545,6 @@ describe('LoopService', () => {
       worktreeName: 'inplace-prompt-test',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 3,
       maxIterations: 0,
       completionPromise: 'COMPLETE',
@@ -590,7 +569,6 @@ describe('LoopService', () => {
       worktreeName: 'inplace-audit-test',
       worktreeDir: '/path/to/project',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 2,
       maxIterations: 0,
       completionPromise: null,
@@ -702,7 +680,6 @@ describe('Stall Detection', () => {
       worktreeName,
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -766,7 +743,6 @@ describe('Stall Detection', () => {
       worktreeName: 'test',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -839,7 +815,6 @@ describe('Stall Detection', () => {
       worktreeName: 'test',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -911,7 +886,6 @@ describe('Stall Detection', () => {
       worktreeName: 'test',
       worktreeDir: '/tmp/test',
       worktreeBranch: 'main',
-      workspaceId: '',
       iteration: 1,
       maxIterations: 0,
       completionPromise: null,
@@ -935,8 +909,254 @@ describe('Minimum Audits', () => {
   test('getMinAudits returns configured value', () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { minAudits: 2 })
-    expect(loopService.getMinAudits()).toBe(2)
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { minAudits: 3 })
+    expect(loopService.getMinAudits()).toBe(3)
+  })
+})
+
+describe('reconcileStale', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('marks active loops as shutdown', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-stale',
+      worktreeName: 'stale-worktree',
+      worktreeDir: '/tmp/stale',
+      worktreeBranch: 'main',
+      iteration: 3,
+      maxIterations: 10,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+    }
+    loopService.setState('stale-worktree', state)
+    expect(loopService.listActive()).toHaveLength(1)
+
+    const count = loopService.reconcileStale()
+    expect(count).toBe(1)
+    expect(loopService.listActive()).toHaveLength(0)
+
+    const recent = loopService.listRecent()
+    expect(recent).toHaveLength(1)
+    expect(recent[0].terminationReason).toBe('shutdown')
+    expect(recent[0].completedAt).toBeTruthy()
+  })
+
+  test('returns 0 when no stale loops exist', () => {
+    expect(loopService.reconcileStale()).toBe(0)
+  })
+})
+
+describe('hasOutstandingFindings', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('returns false when no findings exist', () => {
+    expect(loopService.hasOutstandingFindings()).toBe(false)
+  })
+
+  test('returns true when findings exist', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'test-branch' })
+    expect(loopService.hasOutstandingFindings()).toBe(true)
+  })
+
+  test('returns false after findings are deleted', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'test-branch' })
+    expect(loopService.hasOutstandingFindings()).toBe(true)
+    kvService.delete(projectId, 'review-finding:src/index.ts:42')
+    expect(loopService.hasOutstandingFindings()).toBe(false)
+  })
+
+  test('getOutstandingFindings returns empty array when no findings exist', () => {
+    expect(loopService.getOutstandingFindings()).toEqual([])
+  })
+
+  test('getOutstandingFindings returns entries when findings exist', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'test-branch' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'missing error handling', branch: 'test-branch' })
+    const findings = loopService.getOutstandingFindings()
+    expect(findings).toHaveLength(2)
+    expect(findings.map((f) => f.key)).toContain('review-finding:src/index.ts:42')
+    expect(findings.map((f) => f.key)).toContain('review-finding:src/utils.ts:10')
+  })
+
+  test('returns false when findings exist on a different branch', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'other-branch' })
+    expect(loopService.hasOutstandingFindings('feature/main')).toBe(false)
+  })
+
+  test('returns true only for findings on the specified branch', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'feature/main' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'other-branch' })
+    expect(loopService.hasOutstandingFindings('feature/main')).toBe(true)
+  })
+
+  test('returns all findings when no branch specified', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'branch-a' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'branch-b' })
+    expect(loopService.hasOutstandingFindings()).toBe(true)
+  })
+
+  test('getOutstandingFindings filters by branch', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'feature/main' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'other-branch' })
+    const findings = loopService.getOutstandingFindings('feature/main')
+    expect(findings).toHaveLength(1)
+    expect(findings[0].key).toBe('review-finding:src/index.ts:42')
+  })
+
+  test('getOutstandingFindings returns all when no branch specified', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'branch-a' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'bug', branch: 'branch-b' })
+    expect(loopService.getOutstandingFindings()).toHaveLength(2)
+  })
+})
+
+describe('buildContinuationPrompt with outstanding findings', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('buildContinuationPrompt includes outstanding findings when present', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-findings',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 3,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'opencode/loop-test' })
+    kvService.set(projectId, 'review-finding:src/utils.ts:10', { description: 'missing error handling', branch: 'opencode/loop-test' })
+
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).toContain('Outstanding Review Findings (2)')
+    expect(prompt).toContain('blocking loop completion')
+    expect(prompt).toContain('`review-finding:src/index.ts:42`')
+    expect(prompt).toContain('`review-finding:src/utils.ts:10`')
+  })
+
+  test('buildContinuationPrompt excludes findings section when no findings exist', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-no-findings',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 2,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).not.toContain('Outstanding Review Findings')
+  })
+
+  test('buildContinuationPrompt includes both audit findings and outstanding findings', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-both',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 3,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    kvService.set(projectId, 'review-finding:src/api.ts:8', { description: 'logic error', branch: 'opencode/loop-test' })
+
+    const prompt = loopService.buildContinuationPrompt(state, 'Found a bug in line 10')
+    expect(prompt).toContain('The code auditor reviewed your changes')
+    expect(prompt).toContain('Found a bug in line 10')
+    expect(prompt).toContain('Outstanding Review Findings (1)')
+    expect(prompt).toContain('`review-finding:src/api.ts:8`')
+  })
+
+  test('buildContinuationPrompt excludes findings from other branches', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-branch-filter',
+      worktreeName: 'test-worktree',
+      worktreeDir: '/path/to/worktree',
+      worktreeBranch: 'opencode/loop-test',
+      iteration: 2,
+      maxIterations: 0,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: true,
+      errorCount: 0,
+      auditCount: 0,
+    }
+
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import', branch: 'other-branch' })
+
+    const prompt = loopService.buildContinuationPrompt(state)
+    expect(prompt).not.toContain('Outstanding Review Findings')
   })
 })
 
@@ -995,7 +1215,6 @@ describe('session rotation', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1080,7 +1299,6 @@ describe('session rotation', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1147,7 +1365,6 @@ describe('session rotation', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1240,10 +1457,9 @@ describe('Assistant Error Detection', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -1315,7 +1531,6 @@ describe('Assistant Error Detection', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1380,7 +1595,6 @@ describe('Assistant Error Detection', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1450,7 +1664,6 @@ describe('Assistant Error Detection', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1528,7 +1741,6 @@ describe('Assistant Error Detection', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
       completionPromise: null,
@@ -1551,6 +1763,70 @@ describe('Assistant Error Detection', () => {
     })
 
     expect(modelUsed).toBeUndefined()
+  })
+
+  test('modelFailed resets after successful iteration in coding phase', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'model-reset-session'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'model-reset-test',
+      worktreeDir: '/tmp/model-reset',
+      worktreeBranch: 'main',
+      iteration: 2,
+      maxIterations: 10,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 1,
+      auditCount: 0,
+      modelFailed: true,
+    }
+
+    loopService.setState('model-reset-test', state)
+    loopService.registerSession(sessionId, 'model-reset-test')
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    const updatedState = loopService.getActiveState('model-reset-test')
+    expect(updatedState?.modelFailed).toBe(false)
   })
 
   test('three consecutive errors terminate loop', async () => {
@@ -1601,10 +1877,9 @@ describe('Assistant Error Detection', () => {
       worktreeName: 'test-worktree',
       worktreeDir: '/tmp/test-worktree',
       worktreeBranch: 'main',
-      workspaceId: 'wrk-test',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,

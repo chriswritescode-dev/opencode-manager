@@ -39,7 +39,7 @@ Do something
 ## Phase 2
 Do something else
 
-<promise>DONE</promise>`
+<promise>ALL_PHASES_COMPLETE</promise>`
     const { cleaned, stripped } = stripPromiseTags(plan)
     expect(cleaned).toContain('## Phase 1')
     expect(cleaned).toContain('## Phase 2')

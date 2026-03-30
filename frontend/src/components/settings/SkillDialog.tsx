@@ -1,5 +1,5 @@
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
@@ -58,7 +58,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
   }
 
   const form = useForm<SkillFormValues>({
-    resolver: zodResolver(skillFormSchema),
+    resolver: standardSchemaResolver(skillFormSchema),
     defaultValues: getDefaultValues(editingSkill)
   })
 

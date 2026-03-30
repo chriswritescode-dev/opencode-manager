@@ -1,4 +1,5 @@
 import type { AgentRole, AgentDefinition, AgentConfig } from './agents'
+import type { PluginConfig } from './types'
 
 const REPLACED_BUILTIN_AGENTS = ['build', 'plan']
 
@@ -21,19 +22,90 @@ const PLUGIN_COMMANDS: Record<string, { template: string; description: string; a
     description: 'Start a memory iterative development loop in a worktree',
     agent: 'code',
     subtask: false,
-    template: 'Use the memory-loop tool to start a loop. Use the following as the plan: $ARGUMENTS. Derive a short title from the plan.',
+    template: `## Step 1: Prepare the Plan
+
+Ensure you have a clear implementation plan ready.
+
+## Step 2: Choose Execution Mode
+
+Decide whether to run in:
+- Worktree mode (isolated git worktree) for safe experimentation
+- In-place mode (current directory) for quick iterations
+
+## Step 3: Execute the Loop
+
+Run \`memory-loop\` with:
+- plan: The full implementation plan
+- title: A short descriptive title
+- worktree: true for worktree mode, false for in-place
+
+The loop will automatically continue through iterations until complete.
+Use \`memory-loop-status\` to check progress or \`memory-loop-cancel\` to stop.
+
+$ARGUMENTS`,
+  },
+  'memory-loop-status': {
+    description: 'Check status of all active memory loops',
+    agent: 'code',
+    subtask: true,
+    template: `Check the status of all memory loops.
+
+## Step 1: List Active Loops
+
+Run \`memory-loop-status\` with no arguments to list all active loops for the current project.
+
+## Step 2: Get Detailed Status
+
+For each active loop found, run \`memory-loop-status\` with the loop name to get detailed status.
+
+## Step 3: Report
+
+Present a summary showing:
+- Total number of active loops
+- For each loop: name, status, and any additional details
+
+If no loops are active, report that there are no active memory loops.
+
+$ARGUMENTS`,
   },
   'memory-loop-cancel': {
     description: 'Cancel the active memory loop',
     agent: 'code',
     subtask: false,
-    template: 'Use the memory-loop-cancel tool to cancel the active memory loop. $ARGUMENTS',
+    template: `## Step 1: Identify the Loop
+
+Run \`memory-loop-status\` to see all active loops if you don't know the name.
+
+## Step 2: Cancel the Loop
+
+Run \`memory-loop-cancel\` with:
+- name: The worktree name of the loop to cancel (optional if only one active)
+
+## Step 3: Verify Cancellation
+
+Confirm the loop was cancelled and check if worktree cleanup is needed.
+
+$ARGUMENTS`,
   },
 }
 
-export function createConfigHandler(agents: Record<AgentRole, AgentDefinition>) {
+export function createConfigHandler(
+  agents: Record<AgentRole, AgentDefinition>,
+  agentOverrides?: Record<string, { temperature?: number }>
+) {
   return async (config: Record<string, unknown>) => {
-    const agentConfigs = createAgentConfigs(agents)
+    const effectiveAgents = { ...agents }
+    if (agentOverrides) {
+      for (const [name, overrides] of Object.entries(agentOverrides)) {
+        const role = Object.keys(effectiveAgents).find(
+          (r) => effectiveAgents[r as AgentRole].displayName === name
+        ) as AgentRole | undefined
+        if (role) {
+          effectiveAgents[role] = { ...effectiveAgents[role], ...overrides }
+        }
+      }
+    }
+    const agentConfigs = createAgentConfigs(effectiveAgents)
 
     const userAgentConfigs = config.agent as Record<string, AgentConfig> | undefined
     const mergedAgents = { ...agentConfigs }

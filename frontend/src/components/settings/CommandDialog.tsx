@@ -1,5 +1,5 @@
 import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
+import { standardSchemaResolver } from "@hookform/resolvers/standard-schema";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,7 +63,7 @@ export function CommandDialog({
   editingCommand,
 }: CommandDialogProps) {
   const form = useForm<CommandFormValues>({
-    resolver: zodResolver(commandFormSchema),
+    resolver: standardSchemaResolver(commandFormSchema),
     defaultValues: {
       name: editingCommand?.name || "",
       template: editingCommand?.command.template || "",

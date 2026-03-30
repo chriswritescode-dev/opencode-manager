@@ -1,4 +1,4 @@
-import type { KvService } from './kv'
+import type { KvService, KvEntry } from './kv'
 import type { Logger, LoopConfig } from '../types'
 import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import { findPartialMatch } from '../utils/partial-match'
@@ -43,7 +43,6 @@ export interface LoopState {
   worktreeName: string
   worktreeDir: string
   worktreeBranch?: string
-  workspaceId?: string
   iteration: number
   maxIterations: number
   completionPromise: string | null
@@ -78,6 +77,9 @@ export interface LoopService {
   getStallTimeoutMs(): number
   getMinAudits(): number
   terminateAll(): void
+  reconcileStale(): number
+  hasOutstandingFindings(branch?: string): boolean
+  getOutstandingFindings(branch?: string): KvEntry[]
 }
 
 export function createLoopService(
@@ -133,7 +135,7 @@ export function createLoopService(
     let systemLine = `Loop iteration ${state.iteration ?? 0}`
 
     if (state.completionPromise) {
-      systemLine += ` | To stop: output <promise>${state.completionPromise}</promise> (ONLY when all requirements are met)`
+      systemLine += ` | To stop: output <promise>${state.completionPromise}</promise> (ONLY after all verification steps pass)`
     } else if ((state.maxIterations ?? 0) > 0) {
       systemLine += ` / ${state.maxIterations}`
     } else {
@@ -147,6 +149,12 @@ export function createLoopService(
         ? '\n\nAfter fixing all issues, output the completion signal.'
         : ''
       prompt += `\n\n---\nThe code auditor reviewed your changes. You MUST address all bugs and convention violations below — do not dismiss findings as unrelated to the task. Fix them directly without creating a plan or asking for approval.\n\n${auditFindings}${completionInstruction}`
+    }
+
+    const outstandingFindings = getOutstandingFindings(state.worktreeBranch)
+    if (outstandingFindings.length > 0) {
+      const findingKeys = outstandingFindings.map((f) => `- \`${f.key}\``).join('\n')
+      prompt += `\n\n---\n⚠️ Outstanding Review Findings (${outstandingFindings.length})\n\nThese review findings are blocking loop completion. Fix these issues so they pass the next audit review.\n\n${findingKeys}`
     }
 
     return prompt
@@ -167,7 +175,7 @@ export function createLoopService(
       'If you find bugs in related code that affect the correctness of this task, report them — even if the buggy code was not directly modified.',
       'If everything looks good, state "No issues found." clearly.',
       '',
-      'Before reviewing, retrieve all existing review findings from the KV store using `memory-kv-list` with prefix `review-finding:`. For each existing finding, verify whether the issue has been resolved in the current code. Delete resolved findings using `memory-kv-delete`. Report any unresolved findings that still apply.',
+      'Before reviewing, retrieve all existing review findings by calling the memory-kv-list tool with the prefix parameter set to "review-finding:". For each existing finding, verify whether the issue has been resolved in the current code. Delete resolved findings by calling the memory-kv-delete tool. Report any unresolved findings that still apply.',
       '',
       'This is an automated loop — do not direct the agent to "create a plan" or "present for approval." Just report findings directly.',
     ].join('\n')
@@ -227,6 +235,33 @@ export function createLoopService(
     logger.log(`Loop: terminated ${active.length} active loop(s)`)
   }
 
+  function reconcileStale(): number {
+    const active = listActive()
+    for (const state of active) {
+      setState(state.worktreeName, {
+        ...state,
+        active: false,
+        completedAt: new Date().toISOString(),
+        terminationReason: 'shutdown',
+      })
+      logger.log(`Reconciled stale active loop: ${state.worktreeName} (was at iteration ${state.iteration})`)
+    }
+    return active.length
+  }
+
+  function getOutstandingFindings(branch?: string): KvEntry[] {
+    const findings = kvService.listByPrefix(projectId, 'review-finding:')
+    if (!branch) return findings
+    return findings.filter((f) => {
+      const data = f.data as Record<string, unknown> | null
+      return data && data.branch === branch
+    })
+  }
+
+  function hasOutstandingFindings(branch?: string): boolean {
+    return getOutstandingFindings(branch).length > 0
+  }
+
   return {
     getActiveState,
     getAnyState,
@@ -245,6 +280,9 @@ export function createLoopService(
     getStallTimeoutMs,
     getMinAudits,
     terminateAll,
+    reconcileStale,
+    hasOutstandingFindings,
+    getOutstandingFindings,
   }
 }
 

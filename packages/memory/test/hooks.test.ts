@@ -276,3 +276,52 @@ describe('SessionHooks', () => {
     expect(promptCalled).toBe(false)
   })
 })
+
+describe('MemoryInjectionHook', () => {
+  test('clearCache invalidates cached results', async () => {
+    const { createMemoryInjectionHook } = require('../src/hooks/memory-injection')
+    const { InMemoryCacheService } = require('../src/cache/memory-cache')
+
+    const mockMemoryService = {
+      search: async () => [],
+    } as any
+
+    const mockLogger = {
+      log: () => {},
+      error: () => {},
+      debug: () => {},
+    }
+
+    const config = {
+      enabled: true,
+      debug: false,
+      maxResults: 5,
+      distanceThreshold: 0.5,
+      maxTokens: 2000,
+      cacheTtlMs: 30000,
+    }
+
+    const hook = createMemoryInjectionHook({
+      projectId: 'test-project',
+      memoryService: mockMemoryService,
+      logger: mockLogger,
+      config,
+    })
+
+    let searchCallCount = 0
+    mockMemoryService.search = async () => {
+      searchCallCount++
+      return []
+    }
+
+    await hook.handler('test query')
+    expect(searchCallCount).toBe(1)
+
+    await hook.clearCache()
+
+    await hook.handler('test query')
+    expect(searchCallCount).toBe(2)
+
+    hook.destroy()
+  })
+})

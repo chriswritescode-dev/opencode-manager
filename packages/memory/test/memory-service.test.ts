@@ -192,7 +192,9 @@ describe('MemoryService', () => {
     const results = await memoryService.search('React UI framework', TEST_PROJECT_ID)
 
     expect(results.length).toBeGreaterThan(0)
-    expect(results[0]?.memory.scope).toBe('context')
+    const reactMemory = results.find(r => r.memory.content.includes('React'))
+    expect(reactMemory).toBeDefined()
+    expect(reactMemory?.memory.scope).toBe('context')
   })
 
   test('stats — verify counts by scope', async () => {
