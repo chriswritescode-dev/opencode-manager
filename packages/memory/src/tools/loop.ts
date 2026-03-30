@@ -412,7 +412,7 @@ export function createLoopTools(ctx: ToolContext): Record<string, ReturnType<typ
 
           loopHandler.startWatchdog(stoppedState.worktreeName!)
 
-          const modeInfo = stoppedState.worktree ? ' (in-place)' : ''
+          const modeInfo = !stoppedState.worktree ? ' (in-place)' : ''
           const branchInfo = stoppedState.worktreeBranch ? `\nBranch: ${stoppedState.worktreeBranch}` : ''
           return [
             `Restarted memory loop "${stoppedState.worktreeName}"${modeInfo}`,
