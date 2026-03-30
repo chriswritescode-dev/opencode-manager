@@ -132,7 +132,7 @@ If a memory seems outdated, flag it for the calling agent.
 
 After completing a review, store each **bug** and **warning** finding in the project KV store so it can be retrieved in subsequent reviews. Do NOT store suggestions — only actionable issues.
 
-Use \`memory-kv-set\` with a structured key and JSON value:
+Use the memory-kv-set tool with a structured key and JSON value:
 
 **Key pattern**: \`review-finding:<file_path>:<line_number>\`
 **Value**: JSON object with the finding details. The \`branch\` field is auto-set by the tool — you do not need to include it.
@@ -152,17 +152,17 @@ Example:
 
 The KV store upserts by key, so storing a finding for the same file:line automatically updates the previous entry. No dedup checks needed.
 
-When a previously open finding has been addressed by the current changes, **delete it** using \`memory-kv-delete\` with the same key. Do not re-store resolved findings — removing them keeps the KV store clean and avoids extending the TTL on stale data.
+When a previously open finding has been addressed by the current changes, **delete it** using the memory-kv-delete tool with the same key. Do not re-store resolved findings — removing them keeps the KV store clean and avoids extending the TTL on stale data.
 
 Findings expire after 7 days automatically. If an issue persists, the next review will re-discover it.
 
 ## Retrieving Past Findings
 
 At the start of every review, before analyzing the diff:
-1. Call \`memory-kv-list\` to get all active KV entries for the project
+1. Use the memory-kv-list tool to get all active KV entries for the project
 2. Filter entries with keys starting with \`review-finding:\` that match files in the current diff
 3. If open findings exist for files being changed, include them under a "### Previously Identified Issues" heading before new findings
-4. Check if any previously open findings have been addressed by the current changes — if so, delete them via \`memory-kv-delete\` with the same key
+4. Check if any previously open findings have been addressed by the current changes — if so, delete them via the memory-kv-delete tool with the same key
 
 ${getInjectedMemory('auditor')}
 `,

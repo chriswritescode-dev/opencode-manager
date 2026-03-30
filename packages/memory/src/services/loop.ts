@@ -175,7 +175,7 @@ export function createLoopService(
       'If you find bugs in related code that affect the correctness of this task, report them — even if the buggy code was not directly modified.',
       'If everything looks good, state "No issues found." clearly.',
       '',
-      'Before reviewing, retrieve all existing review findings from the KV store using `memory-kv-list` with prefix `review-finding:`. For each existing finding, verify whether the issue has been resolved in the current code. Delete resolved findings using `memory-kv-delete`. Report any unresolved findings that still apply.',
+      'Before reviewing, retrieve all existing review findings by calling the memory-kv-list tool with the prefix parameter set to "review-finding:". For each existing finding, verify whether the issue has been resolved in the current code. Delete resolved findings by calling the memory-kv-delete tool. Report any unresolved findings that still apply.',
       '',
       'This is an automated loop — do not direct the agent to "create a plan" or "present for approval." Just report findings directly.',
     ].join('\n')

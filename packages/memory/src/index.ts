@@ -294,7 +294,7 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
           text: `<system-reminder>
 Plan mode is active. You MUST NOT make any file edits, run any non-readonly tools (including changing configs or making commits), or otherwise make any changes to the system. This supersedes any other instructions you have received.
 
-You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list), the question tool, memory-plan-execute, and memory-loop.
+You may ONLY: observe, analyze, plan, and use memory tools (memory-read, memory-write, memory-edit, memory-delete, memory-kv-set, memory-kv-get, memory-kv-list, memory-kv-delete), the question tool, memory-plan-execute, and memory-loop.
 
 You MUST always present your plan to the user for explicit approval before proceeding. Never execute a plan without approval. Use the question tool to collect approval — never ask for approval via plain text output.
 </system-reminder>`,
