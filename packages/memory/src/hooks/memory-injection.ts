@@ -19,6 +19,7 @@ interface MemoryInjectionDeps {
 
 export interface MemoryInjectionHook {
   handler: (userText: string) => Promise<string | null>
+  clearCache: () => Promise<void>
   destroy: () => void
 }
 
@@ -146,6 +147,7 @@ export function createMemoryInjectionHook(deps: MemoryInjectionDeps): MemoryInje
 
   return {
     handler,
+    clearCache: () => cache.invalidatePattern('memory-injection:'),
     destroy: () => cache.destroy(),
   }
 }

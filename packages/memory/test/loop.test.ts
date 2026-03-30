@@ -56,7 +56,7 @@ describe('LoopService', () => {
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -107,23 +107,23 @@ describe('LoopService', () => {
   })
 
   test('checkCompletionPromise matches exact promise', () => {
-    const text = 'Some response text <promise>DONE</promise> more text'
-    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(true)
+    const text = 'Some response text <promise>ALL_PHASES_COMPLETE</promise> more text'
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE')).toBe(true)
   })
 
   test('checkCompletionPromise returns false when no promise tags', () => {
     const text = 'Some response text without promise tags'
-    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(false)
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE')).toBe(false)
   })
 
   test('checkCompletionPromise returns false when promise does not match', () => {
-    const text = 'Some response <promise>NOT_DONE</promise> text'
-    expect(loopService.checkCompletionPromise(text, 'DONE')).toBe(false)
+    const text = 'Some response <promise>NOT_COMPLETE</promise> text'
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE')).toBe(false)
   })
 
   test('checkCompletionPromise handles whitespace normalization', () => {
-    const text = 'Response <promise>  DONE   WITH   SPACES  </promise> text'
-    expect(loopService.checkCompletionPromise(text, 'DONE WITH SPACES')).toBe(true)
+    const text = 'Response <promise>  ALL_PHASES_COMPLETE   WITH   SPACES  </promise> text'
+    expect(loopService.checkCompletionPromise(text, 'ALL_PHASES_COMPLETE WITH SPACES')).toBe(true)
   })
 
   test('checkCompletionPromise matches first promise tag when multiple present', () => {
@@ -338,7 +338,7 @@ describe('LoopService', () => {
       worktreeBranch: 'opencode/loop-test',
       iteration: 2,
       maxIterations: 0,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -452,7 +452,7 @@ describe('LoopService', () => {
       worktreeBranch: 'opencode/loop-test',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -499,7 +499,7 @@ describe('LoopService', () => {
       worktreeBranch: 'main',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'In-place test prompt',
       phase: 'coding' as const,
@@ -909,8 +909,92 @@ describe('Minimum Audits', () => {
   test('getMinAudits returns configured value', () => {
     const db = createTestDb()
     const kvService = createKvService(db)
-    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { minAudits: 2 })
-    expect(loopService.getMinAudits()).toBe(2)
+    const loopService = createLoopService(kvService, 'test-project', createMockLogger(), { minAudits: 3 })
+    expect(loopService.getMinAudits()).toBe(3)
+  })
+})
+
+describe('reconcileStale', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('marks active loops as shutdown', () => {
+    const state = {
+      active: true,
+      sessionId: 'session-stale',
+      worktreeName: 'stale-worktree',
+      worktreeDir: '/tmp/stale',
+      worktreeBranch: 'main',
+      iteration: 3,
+      maxIterations: 10,
+      completionPromise: 'ALL_PHASES_COMPLETE',
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 0,
+      auditCount: 0,
+    }
+    loopService.setState('stale-worktree', state)
+    expect(loopService.listActive()).toHaveLength(1)
+
+    const count = loopService.reconcileStale()
+    expect(count).toBe(1)
+    expect(loopService.listActive()).toHaveLength(0)
+
+    const recent = loopService.listRecent()
+    expect(recent).toHaveLength(1)
+    expect(recent[0].terminationReason).toBe('shutdown')
+    expect(recent[0].completedAt).toBeTruthy()
+  })
+
+  test('returns 0 when no stale loops exist', () => {
+    expect(loopService.reconcileStale()).toBe(0)
+  })
+})
+
+describe('hasOutstandingFindings', () => {
+  let db: Database
+  let kvService: ReturnType<typeof createKvService>
+  let loopService: ReturnType<typeof createLoopService>
+  const projectId = 'test-project'
+
+  beforeEach(() => {
+    db = createTestDb()
+    kvService = createKvService(db)
+    loopService = createLoopService(kvService, projectId, createMockLogger())
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  test('returns false when no findings exist', () => {
+    expect(loopService.hasOutstandingFindings()).toBe(false)
+  })
+
+  test('returns true when findings exist', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import' })
+    expect(loopService.hasOutstandingFindings()).toBe(true)
+  })
+
+  test('returns false after findings are deleted', () => {
+    kvService.set(projectId, 'review-finding:src/index.ts:42', { description: 'unused import' })
+    expect(loopService.hasOutstandingFindings()).toBe(true)
+    kvService.delete(projectId, 'review-finding:src/index.ts:42')
+    expect(loopService.hasOutstandingFindings()).toBe(false)
   })
 })
 
@@ -1213,7 +1297,7 @@ describe('Assistant Error Detection', () => {
       worktreeBranch: 'main',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,
@@ -1519,6 +1603,70 @@ describe('Assistant Error Detection', () => {
     expect(modelUsed).toBeUndefined()
   })
 
+  test('modelFailed resets after successful iteration in coding phase', async () => {
+    const { createLoopEventHandler } = require('../src/hooks/loop')
+    const sessionId = 'model-reset-session'
+
+    const mockClient = {
+      session: {
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+      worktree: {
+        create: async () => ({ data: { id: 'wt-1', directory: '/tmp/wt', branch: 'main' }, error: undefined }),
+        remove: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockV2Client = {
+      session: {
+        create: async () => ({ data: { id: sessionId }, error: undefined }),
+        delete: async () => ({ data: undefined, error: undefined }),
+        promptAsync: async () => ({ data: undefined, error: undefined }),
+        messages: async () => ({ data: [] }),
+        status: async () => ({ data: {} }),
+        abort: async () => ({ data: undefined, error: undefined }),
+      },
+    } as any
+
+    const mockGetConfig = () => ({ loop: {}, executionModel: undefined, auditorModel: undefined })
+    const handler = createLoopEventHandler(loopService, mockClient, mockV2Client, createMockLogger(), mockGetConfig)
+
+    const state = {
+      active: true,
+      sessionId,
+      worktreeName: 'model-reset-test',
+      worktreeDir: '/tmp/model-reset',
+      worktreeBranch: 'main',
+      iteration: 2,
+      maxIterations: 10,
+      completionPromise: null,
+      startedAt: new Date().toISOString(),
+      prompt: 'Test prompt',
+      phase: 'coding' as const,
+      audit: false,
+      errorCount: 1,
+      auditCount: 0,
+      modelFailed: true,
+    }
+
+    loopService.setState('model-reset-test', state)
+    loopService.registerSession(sessionId, 'model-reset-test')
+
+    await handler.onEvent({
+      event: {
+        type: 'session.idle',
+        properties: { sessionID: sessionId },
+      },
+    })
+
+    const updatedState = loopService.getActiveState('model-reset-test')
+    expect(updatedState?.modelFailed).toBe(false)
+  })
+
   test('three consecutive errors terminate loop', async () => {
     const { createLoopEventHandler } = require('../src/hooks/loop')
     const sessionId = 'three-errors-session'
@@ -1569,7 +1717,7 @@ describe('Assistant Error Detection', () => {
       worktreeBranch: 'main',
       iteration: 1,
       maxIterations: 5,
-      completionPromise: 'DONE',
+      completionPromise: 'ALL_PHASES_COMPLETE',
       startedAt: new Date().toISOString(),
       prompt: 'Test prompt',
       phase: 'coding' as const,

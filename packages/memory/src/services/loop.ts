@@ -77,6 +77,8 @@ export interface LoopService {
   getStallTimeoutMs(): number
   getMinAudits(): number
   terminateAll(): void
+  reconcileStale(): number
+  hasOutstandingFindings(): boolean
 }
 
 export function createLoopService(
@@ -226,6 +228,25 @@ export function createLoopService(
     logger.log(`Loop: terminated ${active.length} active loop(s)`)
   }
 
+  function reconcileStale(): number {
+    const active = listActive()
+    for (const state of active) {
+      setState(state.worktreeName, {
+        ...state,
+        active: false,
+        completedAt: new Date().toISOString(),
+        terminationReason: 'shutdown',
+      })
+      logger.log(`Reconciled stale active loop: ${state.worktreeName} (was at iteration ${state.iteration})`)
+    }
+    return active.length
+  }
+
+  function hasOutstandingFindings(): boolean {
+    const findings = kvService.listByPrefix(projectId, 'review-finding:')
+    return findings.length > 0
+  }
+
   return {
     getActiveState,
     getAnyState,
@@ -244,6 +265,8 @@ export function createLoopService(
     getStallTimeoutMs,
     getMinAudits,
     terminateAll,
+    reconcileStale,
+    hasOutstandingFindings,
   }
 }
 

@@ -93,6 +93,11 @@ export const TuiConfigSchema = z.object({
 })
 export type TuiConfig = z.infer<typeof TuiConfigSchema>
 
+export const AgentOverrideConfigSchema = z.object({
+  temperature: z.number().min(0).max(2).optional(),
+})
+export type AgentOverrideConfig = z.infer<typeof AgentOverrideConfigSchema>
+
 export const LoopConfigSchema = z.object({
   enabled: z.boolean().optional(),
   defaultMaxIterations: z.number().optional(),
@@ -117,6 +122,7 @@ export const PluginConfigSchema = z.object({
   loop: LoopConfigSchema.optional(),
   ralph: LoopConfigSchema.optional(),
   tui: TuiConfigSchema.optional(),
+  agents: z.record(z.string(), AgentOverrideConfigSchema).optional(),
 })
 export type PluginConfig = z.infer<typeof PluginConfigSchema>
 

@@ -33,7 +33,7 @@ import { existsSync } from 'fs'
 
 const z = tool.schema
 
-const DEFAULT_PLAN_COMPLETION_PROMISE = 'DONE'
+const DEFAULT_PLAN_COMPLETION_PROMISE = 'ALL_PHASES_COMPLETE'
 
 async function getHealthStatus(
   projectId: string,
@@ -312,6 +312,10 @@ export function createMemoryPlugin(config: PluginConfig): Plugin {
 
     const loopService = createLoopService(kvService, projectId, logger, config.loop)
     await migrateRalphKeys(kvService, projectId, logger)
+    const reconciledCount = loopService.reconcileStale()
+    if (reconciledCount > 0) {
+      logger.log(`Reconciled ${reconciledCount} stale loop(s) from previous session`)
+    }
     const loopHandler = createLoopEventHandler(loopService, client, v2, logger, () => config)
 
     const mismatchState: DimensionMismatchState = {
@@ -697,6 +701,7 @@ Do NOT output text without also making this tool call.
             })
 
             logger.log(`memory-write: created id=${result.id}, deduplicated=${result.deduplicated}`)
+            await memoryInjection.clearCache()
             return withDimensionWarning(`Memory stored (ID: #${result.id}, scope: ${args.scope}).${result.deduplicated ? ' (matched existing memory)' : ''}`)
           },
         }),
@@ -722,6 +727,7 @@ Do NOT output text without also making this tool call.
             })
             
             logger.log(`memory-edit: updated id=${args.id}`)
+            await memoryInjection.clearCache()
             return withDimensionWarning(`Updated memory #${args.id} (scope: ${args.scope ?? memory.scope}).`)
           },
         }),
@@ -741,6 +747,7 @@ Do NOT output text without also making this tool call.
             }
 
             await memoryService.delete(id)
+            await memoryInjection.clearCache()
             logger.log(`memory-delete: deleted id=${id}`)
             return withDimensionWarning(`Deleted memory #${id}: "${memory.content.substring(0, 50)}..." (${memory.scope})`)
           },
@@ -791,7 +798,7 @@ Do NOT output text without also making this tool call.
           args: {
             plan: z.string().describe('The full implementation plan to send to the Code agent'),
             title: z.string().describe('Short title for the session (shown in session list)'),
-            inPlace: z.boolean().optional().default(false).describe('Execute in the current session as a subtask instead of creating a new session'),
+            inPlace: z.boolean().optional().default(false).describe('Execute in the current session, instead of creating a new session'),
           },
           execute: async (args, context) => {
             logger.log(`memory-plan-execute: ${args.inPlace ? 'switching to code agent' : 'creating session'} titled "${args.title}"`)
@@ -1387,7 +1394,8 @@ Do NOT output text without also making this tool call.
       config: createConfigHandler(
         config.auditorModel
           ? { ...agents, auditor: { ...agents.auditor, defaultModel: config.auditorModel } }
-          : agents
+          : agents,
+        config.agents
       ),
       'chat.message': async (input, output) => {
         await sessionHooks.onMessage(input, output)

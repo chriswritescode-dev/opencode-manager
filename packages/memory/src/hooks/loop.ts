@@ -28,6 +28,18 @@ export function createLoopEventHandler(
   const lastActivityTime = new Map<string, number>()
   const stallWatchdogs = new Map<string, NodeJS.Timeout>()
   const consecutiveStalls = new Map<string, number>()
+  const stateLocks = new Map<string, Promise<void>>()
+
+  function withStateLock(worktreeName: string, fn: () => Promise<void>): Promise<void> {
+    const prev = stateLocks.get(worktreeName) ?? Promise.resolve()
+    const next = prev.then(fn, fn).finally(() => {
+      if (stateLocks.get(worktreeName) === next) {
+        stateLocks.delete(worktreeName)
+      }
+    })
+    stateLocks.set(worktreeName, next)
+    return next
+  }
 
   async function commitAndCleanupWorktree(state: LoopState): Promise<{ committed: boolean; cleaned: boolean }> {
     if (!state.worktree) {
@@ -73,8 +85,8 @@ export function createLoopEventHandler(
         if (removeResult.status !== 0) {
           throw new Error(removeResult.stderr || 'git worktree remove failed')
         }
-        logger.log(`Loop: removed worktree ${state.worktreeDir}, branch ${state.worktreeBranch} preserved`)
         cleaned = true
+        logger.log(`Loop: removed worktree ${state.worktreeDir}, branch ${state.worktreeBranch} preserved`)
       } catch (err) {
         logger.error(`Loop: failed to remove worktree ${state.worktreeDir}`, err)
       }
@@ -328,6 +340,13 @@ export function createLoopEventHandler(
     })
 
     logger.log(`Loop: rotated session ${oldSessionId} → ${newSessionId}`)
+
+    if (!state.worktree && v2Client.tui) {
+      v2Client.tui.selectSession({ sessionID: newSessionId }).catch((err) => {
+        logger.error(`Loop: failed to navigate TUI to rotated session`, err)
+      })
+    }
+
     return newSessionId
   }
 
@@ -365,16 +384,21 @@ export function createLoopEventHandler(
       if (textContent && currentState.completionPromise && loopService.checkCompletionPromise(textContent, currentState.completionPromise)) {
         const currentAuditCount = currentState.auditCount ?? 0
         if (!currentState.audit || currentAuditCount >= minAudits) {
-          await terminateLoop(worktreeName, currentState, 'completed')
-          logger.log(`Loop completed: detected <promise>${currentState.completionPromise}</promise> at iteration ${currentState.iteration} (${currentAuditCount}/${minAudits} audits)`)
-          return
+          if (loopService.hasOutstandingFindings()) {
+            logger.log(`Loop: completion promise detected but outstanding review findings remain, continuing`)
+          } else {
+            await terminateLoop(worktreeName, currentState, 'completed')
+            logger.log(`Loop completed: detected <promise>${currentState.completionPromise}</promise> at iteration ${currentState.iteration} (${currentAuditCount}/${minAudits} audits)`)
+            return
+          }
+        } else {
+          logger.log(`Loop: completion promise detected but only ${currentAuditCount}/${minAudits} audits performed, continuing`)
         }
-        logger.log(`Loop: completion promise detected but only ${currentAuditCount}/${minAudits} audits performed, continuing`)
       }
     }
 
     if (!assistantErrorDetected && currentState.errorCount && currentState.errorCount > 0) {
-      loopService.setState(worktreeName, { ...currentState, errorCount: 0 })
+      loopService.setState(worktreeName, { ...currentState, errorCount: 0, modelFailed: false })
       logger.log(`Loop: resetting error count after successful retry in coding phase`)
       currentState = loopService.getActiveState(worktreeName)!
     }
@@ -433,6 +457,7 @@ export function createLoopEventHandler(
       sessionId: activeSessionId,
       iteration: nextIteration,
       errorCount: assistantErrorDetected ? currentState.errorCount : 0,
+      modelFailed: assistantErrorDetected ? currentState.modelFailed : false,
     })
 
     const continuationPrompt = loopService.buildContinuationPrompt({ ...currentState, iteration: nextIteration })
@@ -537,7 +562,7 @@ export function createLoopEventHandler(
     }
 
     if (!assistantErrorDetected && currentState.errorCount && currentState.errorCount > 0) {
-      loopService.setState(worktreeName, { ...currentState, errorCount: 0 })
+      loopService.setState(worktreeName, { ...currentState, errorCount: 0, modelFailed: false })
       logger.log(`Loop: resetting error count after successful retry in auditing phase`)
       currentState = loopService.getActiveState(worktreeName)!
     }
@@ -551,13 +576,17 @@ export function createLoopEventHandler(
 
     if (currentState.completionPromise && auditText) {
       if (loopService.checkCompletionPromise(auditText, currentState.completionPromise)) {
-        // Check if minimum audits have been performed
         if (!currentState.audit || newAuditCount >= minAudits) {
-          await terminateLoop(worktreeName, currentState, 'completed')
-          logger.log(`Loop completed: detected <promise>${currentState.completionPromise}</promise> in audit at iteration ${currentState.iteration} (${newAuditCount}/${minAudits} audits)`)
-          return
+          if (loopService.hasOutstandingFindings()) {
+            logger.log(`Loop: completion promise detected but outstanding review findings remain, continuing`)
+          } else {
+            await terminateLoop(worktreeName, currentState, 'completed')
+            logger.log(`Loop completed: detected <promise>${currentState.completionPromise}</promise> in audit at iteration ${currentState.iteration} (${newAuditCount}/${minAudits} audits)`)
+            return
+          }
+        } else {
+          logger.log(`Loop: completion promise detected but only ${newAuditCount}/${minAudits} audits performed, continuing`)
         }
-        logger.log(`Loop: completion promise detected but only ${newAuditCount}/${minAudits} audits performed, continuing`)
       }
     }
 
@@ -581,6 +610,7 @@ export function createLoopEventHandler(
       lastAuditResult: auditFindings,
       auditCount: newAuditCount,
       errorCount: assistantErrorDetected ? currentState.errorCount : 0,
+      modelFailed: assistantErrorDetected ? currentState.modelFailed : false,
     })
 
     const continuationPrompt = loopService.buildContinuationPrompt(
@@ -718,28 +748,30 @@ export function createLoopEventHandler(
     const worktreeName = loopService.resolveWorktreeName(sessionId)
     if (!worktreeName) return
 
-    const state = loopService.getActiveState(worktreeName)
-    if (!state || !state.active) return
+    await withStateLock(worktreeName, async () => {
+      const state = loopService.getActiveState(worktreeName)
+      if (!state || !state.active) return
 
-    try {
-      // Re-check state right before calling phase handler as extra safety
-      const freshState = loopService.getActiveState(worktreeName)
-      if (!freshState?.active) {
-        logger.log(`Loop: loop ${worktreeName} was terminated, skipping phase handler`)
-        return
+      try {
+        // Re-check state right before calling phase handler as extra safety
+        const freshState = loopService.getActiveState(worktreeName)
+        if (!freshState?.active) {
+          logger.log(`Loop: loop ${worktreeName} was terminated, skipping phase handler`)
+          return
+        }
+        
+        startWatchdog(worktreeName)
+        
+        if (freshState.phase === 'auditing') {
+          await handleAuditingPhase(worktreeName, freshState)
+        } else {
+          await handleCodingPhase(worktreeName, freshState)
+        }
+      } catch (err) {
+        const freshState = loopService.getActiveState(worktreeName)
+        await handlePromptError(worktreeName, freshState ?? state, `unhandled error in ${(freshState ?? state).phase} phase`, err)
       }
-      
-      startWatchdog(worktreeName)
-      
-      if (freshState.phase === 'auditing') {
-        await handleAuditingPhase(worktreeName, freshState)
-      } else {
-        await handleCodingPhase(worktreeName, freshState)
-      }
-    } catch (err) {
-      const freshState = loopService.getActiveState(worktreeName)
-      await handlePromptError(worktreeName, freshState ?? state, `unhandled error in ${(freshState ?? state).phase} phase`, err)
-    }
+    })
   }
 
   function terminateAll(): void {
@@ -757,6 +789,7 @@ export function createLoopEventHandler(
     }
     lastActivityTime.clear()
     consecutiveStalls.clear()
+    stateLocks.clear()
     logger.log('Loop: cleared all retry timeouts')
   }
 

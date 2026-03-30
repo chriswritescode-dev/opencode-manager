@@ -134,11 +134,7 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
     return loop.terminationReason?.replace(/_/g, ' ') ?? 'ended'
   }
 
-  let pollInterval: ReturnType<typeof setTimeout> | undefined
-  let isPolling = true
-
   function refreshLoops() {
-    if (!isPolling) return
     if (!pid) return
     
     const states = readLoopStates(pid)
@@ -155,27 +151,14 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
     })
     setLoops(visible)
   }
-
-  function scheduleNextRefresh() {
-    if (!isPolling) return
-    const hasActive = loops().some(l => l.active)
-    const interval = hasActive ? 3000 : 15000
-    pollInterval = setTimeout(() => {
-      if (!isPolling) return
-      refreshLoops()
-      scheduleNextRefresh()
-    }, interval)
-  }
   
-  refreshLoops()
-
   const unsub = props.api.event.on('session.status', () => {
     refreshLoops()
   })
 
+  refreshLoops()
+
   onCleanup(() => {
-    isPolling = false
-    if (pollInterval) clearTimeout(pollInterval)
     unsub()
   })
 

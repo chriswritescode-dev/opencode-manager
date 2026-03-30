@@ -69,23 +69,6 @@ export interface LoopConfig {
   minAudits?: number
 }
 
-export interface PluginConfig {
-  dataDir?: string
-  embedding: EmbeddingConfig
-  dedupThreshold?: number
-  logging?: LoggingConfig
-  compaction?: CompactionConfig
-  memoryInjection?: MemoryInjectionConfig
-  messagesTransform?: MessagesTransformConfig
-  executionModel?: string
-  auditorModel?: string
-  loop?: LoopConfig
-  /** @deprecated Use `loop` instead */
-  ralph?: LoopConfig
-  defaultKvTtlMs?: number
-  tui?: TuiConfig
-}
-
 export interface ListMemoriesFilter {
   scope?: MemoryScope
   limit?: number
@@ -115,6 +98,28 @@ export interface TuiConfig {
   sidebar?: boolean
   showLoops?: boolean
   showVersion?: boolean
+}
+
+export interface AgentOverrideConfig {
+  temperature?: number
+}
+
+export interface PluginConfig {
+  dataDir?: string
+  embedding: EmbeddingConfig
+  dedupThreshold?: number
+  logging?: LoggingConfig
+  compaction?: CompactionConfig
+  memoryInjection?: MemoryInjectionConfig
+  messagesTransform?: MessagesTransformConfig
+  executionModel?: string
+  auditorModel?: string
+  loop?: LoopConfig
+  /** @deprecated Use `loop` instead */
+  ralph?: LoopConfig
+  defaultKvTtlMs?: number
+  tui?: TuiConfig
+  agents?: Record<string, AgentOverrideConfig>
 }
 
 export interface HealthStatus {
