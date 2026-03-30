@@ -33,6 +33,7 @@ type LoopInfo = {
   terminationReason?: string
   worktreeBranch?: string
   worktree?: boolean
+  worktreeDir?: string
 }
 
 function loadTuiConfig(): TuiConfig | undefined {
@@ -95,6 +96,7 @@ function readLoopStates(projectId: string): LoopInfo[] {
           terminationReason: state.terminationReason,
           worktreeBranch: state.worktreeBranch,
           worktree: state.worktree,
+          worktreeDir: state.worktreeDir,
         })
       } catch {}
     }
@@ -194,7 +196,10 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
                 flexDirection="row"
                 gap={1}
                 onMouseDown={() => {
-                  props.api.client.tui.selectSession({ sessionID: loop.sessionId }).catch(() => {})
+                  props.api.client.tui.selectSession({
+                    sessionID: loop.sessionId,
+                    ...(loop.worktreeDir ? { directory: loop.worktreeDir } : {}),
+                  }).catch(() => {})
                 }}
               >
                 <text flexShrink={0} style={{ fg: dot(loop) }}>•</text>
