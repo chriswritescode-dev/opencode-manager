@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from '@opencode-ai/plugin/tui'
-import { createMemo, createSignal, onCleanup, createEffect, Show, For } from 'solid-js'
+import { createMemo, createSignal, onCleanup, Show, For } from 'solid-js'
 import { readFileSync, existsSync } from 'fs'
 import { homedir, platform } from 'os'
 import { join } from 'path'
@@ -32,6 +32,7 @@ type LoopInfo = {
   completedAt?: string
   terminationReason?: string
   worktreeBranch?: string
+  worktree?: boolean
   errorCount: number
   auditCount: number
 }
@@ -95,6 +96,7 @@ function readLoopStates(projectId: string): LoopInfo[] {
           completedAt: state.completedAt,
           terminationReason: state.terminationReason,
           worktreeBranch: state.worktreeBranch,
+          worktree: state.worktree,
           errorCount: state.errorCount ?? 0,
           auditCount: state.auditCount ?? 0,
         })
@@ -114,16 +116,6 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
   const theme = () => props.api.theme.current
   const directory = props.api.state.path.directory
   const pid = resolveProjectId(directory)
-
-  createEffect(() => {
-    if (props.api.route.current.name === 'home') {
-      const wasSet = props.api.workspace.current()
-      props.api.workspace.set(undefined)
-      if (wasSet) {
-        props.api.route.navigate('home')
-      }
-    }
-  })
 
   const title = createMemo(() => {
     return props.opts.showVersion ? `Memory v${VERSION}` : 'Memory'
@@ -220,7 +212,6 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
                 flexDirection="row"
                 gap={1}
                 onMouseDown={() => {
-                  props.api.workspace.set(undefined)
                   props.api.client.tui.selectSession({ sessionID: loop.sessionId }).catch(() => {})
                 }}
               >

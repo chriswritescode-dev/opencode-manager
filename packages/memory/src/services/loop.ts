@@ -43,7 +43,6 @@ export interface LoopState {
   worktreeName: string
   worktreeDir: string
   worktreeBranch?: string
-  workspaceId?: string
   iteration: number
   maxIterations: number
   completionPromise: string | null

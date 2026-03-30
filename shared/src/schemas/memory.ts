@@ -155,7 +155,6 @@ export const LoopStateSchema = z.object({
   worktreeName: z.string(),
   worktreeDir: z.string(),
   worktreeBranch: z.string().optional(),
-  workspaceId: z.string().optional(),
   iteration: z.number(),
   maxIterations: z.number(),
   completionPromise: z.string().nullable().optional(),
