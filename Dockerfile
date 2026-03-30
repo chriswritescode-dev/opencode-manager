@@ -96,7 +96,7 @@ RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
 
 COPY --from=builder /app/packages/memory /opt/opencode-plugins/src
 
-RUN cd /opt/opencode-plugins/src && npm install
+RUN cd /opt/opencode-plugins/src && npm install --omit=dev
 
 RUN mkdir -p /opt/opencode-plugins/node_modules/@opencode-manager/memory && \
     cp -r /opt/opencode-plugins/src/dist/* /opt/opencode-plugins/node_modules/@opencode-manager/memory/ && \
