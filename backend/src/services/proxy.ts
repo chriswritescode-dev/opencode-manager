@@ -118,13 +118,16 @@ export async function proxyRequest(request: Request) {
     })
 
     const responseHeaders: Record<string, string> = {}
+    const skipHeaders = new Set(['connection', 'transfer-encoding', 'content-encoding', 'content-length'])
     response.headers.forEach((value, key) => {
-      if (!['connection', 'transfer-encoding'].includes(key.toLowerCase())) {
+      if (!skipHeaders.has(key.toLowerCase())) {
         responseHeaders[key] = value
       }
     })
 
-    return new Response(response.body, {
+    const body = await response.text()
+
+    return new Response(body, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders,
@@ -159,13 +162,16 @@ export async function proxyToOpenCodeWithDirectory(
     })
     
     const responseHeaders: Record<string, string> = {}
+    const skipHeaders = new Set(['connection', 'transfer-encoding', 'content-encoding', 'content-length'])
     response.headers.forEach((value, key) => {
-      if (!['connection', 'transfer-encoding'].includes(key.toLowerCase())) {
+      if (!skipHeaders.has(key.toLowerCase())) {
         responseHeaders[key] = value
       }
     })
     
-    return new Response(response.body, {
+    const responseBody = await response.text()
+
+    return new Response(responseBody, {
       status: response.status,
       statusText: response.statusText,
       headers: responseHeaders,
