@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useTTS } from '@/hooks/useTTS'
@@ -85,7 +85,7 @@ export function TTSSettings() {
   const lastSavedDataRef = useRef<TTSFormValues | null>(null)
   
   const form = useForm<TTSFormValues>({
-    resolver: zodResolver(ttsFormSchema),
+    resolver: standardSchemaResolver(ttsFormSchema),
     defaultValues: DEFAULT_TTS_CONFIG,
   })
   

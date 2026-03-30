@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useCreateMemory, useUpdateMemory } from '@/hooks/useMemories'
 import type { Memory, CreateMemoryRequest, UpdateMemoryRequest } from '@opencode-manager/shared/types'
@@ -43,7 +43,7 @@ export function MemoryFormDialog({ memory, projectId, open, onOpenChange }: Memo
     reset,
     formState: { errors },
   } = useForm<MemoryFormData>({
-    resolver: zodResolver(memorySchema),
+    resolver: standardSchemaResolver(memorySchema),
     defaultValues: {
       content: '',
       scope: 'context',

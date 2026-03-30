@@ -1,5 +1,5 @@
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useMemo, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
@@ -110,7 +110,7 @@ export function AgentDialog({ open, onOpenChange, onSubmit, editingAgent }: Agen
   }
 
   const form = useForm<AgentFormValues>({
-    resolver: zodResolver(agentFormSchema),
+    resolver: standardSchemaResolver(agentFormSchema),
     defaultValues: getDefaultValues(editingAgent)
   })
 

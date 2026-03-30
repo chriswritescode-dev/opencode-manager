@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
 import { useSTT } from '@/hooks/useSTT'
@@ -50,7 +50,7 @@ export function STTSettings() {
   const isWebSpeechAvailable = isWebRecognitionSupported()
 
   const form = useForm<STTFormValues>({
-    resolver: zodResolver(sttFormSchema),
+    resolver: standardSchemaResolver(sttFormSchema),
     defaultValues: {
       ...DEFAULT_STT_CONFIG,
       model: DEFAULT_STT_CONFIG.model || 'whisper-1',

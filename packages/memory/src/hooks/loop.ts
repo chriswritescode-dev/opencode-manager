@@ -218,7 +218,9 @@ export function createLoopEventHandler(
             duration: reason === 'completed' ? 5000 : 3000,
           },
         },
-      }).catch(() => {})
+      }).catch((err) => {
+        logger.error('Loop: failed to publish toast notification', err)
+      })
     }
 
     let commitResult: { committed: boolean; cleaned: boolean } | undefined

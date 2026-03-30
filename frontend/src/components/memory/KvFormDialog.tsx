@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
+import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { z } from 'zod'
 import { useCreateKvEntry, useUpdateKvEntry } from '@/hooks/useMemories'
 import type { KvEntry, CreateKvEntryRequest, UpdateKvEntryRequest } from '@opencode-manager/shared/types'
@@ -44,7 +44,7 @@ export function KvFormDialog({ entry, projectId, open, onOpenChange }: KvFormDia
     reset,
     formState: { errors },
   } = useForm<KvFormData>({
-    resolver: zodResolver(kvSchema),
+    resolver: standardSchemaResolver(kvSchema),
     defaultValues: {
       key: '',
       data: '',

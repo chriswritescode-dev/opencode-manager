@@ -33,8 +33,6 @@ type LoopInfo = {
   terminationReason?: string
   worktreeBranch?: string
   worktree?: boolean
-  errorCount: number
-  auditCount: number
 }
 
 function loadTuiConfig(): TuiConfig | undefined {
@@ -97,8 +95,6 @@ function readLoopStates(projectId: string): LoopInfo[] {
           terminationReason: state.terminationReason,
           worktreeBranch: state.worktreeBranch,
           worktree: state.worktree,
-          errorCount: state.errorCount ?? 0,
-          auditCount: state.auditCount ?? 0,
         })
       } catch {}
     }
@@ -164,11 +160,14 @@ function Sidebar(props: { api: TuiPluginApi; opts: TuiOptions }) {
     if (!isPolling) return
     const hasActive = loops().some(l => l.active)
     const interval = hasActive ? 3000 : 15000
-    pollInterval = setTimeout(scheduleNextRefresh, interval)
-    refreshLoops()
+    pollInterval = setTimeout(() => {
+      if (!isPolling) return
+      refreshLoops()
+      scheduleNextRefresh()
+    }, interval)
   }
   
-  scheduleNextRefresh()
+  refreshLoops()
 
   const unsub = props.api.event.on('session.status', () => {
     refreshLoops()
