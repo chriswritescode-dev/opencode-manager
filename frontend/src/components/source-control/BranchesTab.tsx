@@ -226,13 +226,13 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
                   title={isCheckedOutElsewhere ? 'Branch is checked out in another worktree' : undefined}
                 >
                   {isRemote ? (
-                    <Globe className="w-4 h-4 text-blue-500" />
+                    <Globe className="w-4 h-4 text-info" />
                   ) : (
                     <GitBranch className={cn('w-4 h-4', isCurrent ? GIT_UI_COLORS.current : 'text-muted-foreground')} />
                   )}
                   <span className="flex-1 text-sm truncate">{branch.name}</span>
                   {(isCheckedOutElsewhere || (isCurrent && isRepoWorktree)) && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400">worktree</span>
+                    <span className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground">worktree</span>
                   )}
                   {branch.type === 'local' && !branch.upstream && !branch.isWorktree && !(isCurrent && isRepoWorktree) && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">local</span>

@@ -129,7 +129,7 @@ export function RepoDetail() {
       <div className="flex items-center gap-2 min-w-0">
         <Header.Title>{repoName}</Header.Title>
         {isWorktree ? (
-          <Badge className="text-xs px-1.5 sm:px-2.5 py-0.5 bg-purple-600/20 text-purple-400 border-purple-600/40" title="Worktree">
+          <Badge variant="secondary" className="px-1.5 py-0.5 text-xs sm:px-2.5" title="Worktree">
             <GitBranch className="h-3 w-3 sm:mr-1" />
             <span className="hidden sm:inline">WT: {currentBranch}</span>
           </Badge>
@@ -233,7 +233,7 @@ export function RepoDetail() {
           onClick={() => handleCreateSession()}
           disabled={!opcodeUrl || createSessionMutation.isPending}
           size="sm"
-          className="bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
+          className="transition-all duration-200 hover:scale-105"
         >
           <Plus className="w-4 h-4 sm:mr-2" />
           <span className="hidden sm:inline">New Session</span>

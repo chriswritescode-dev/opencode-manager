@@ -191,7 +191,7 @@ export function ProviderSettings() {
                         {provider.name || provider.id}
                       </CardTitle>
                       {hasKey ? (
-                        <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
+                        <Badge variant="success" className="shrink-0">
                           <Check className="h-3 w-3 mr-1" />
                           Connected
                         </Badge>
@@ -308,7 +308,7 @@ export function ProviderSettings() {
                             )}
                           </div>
                           <div className="flex items-center gap-1">
-                            <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0 text-xs">
+                            <Badge variant="success" className="shrink-0 text-xs">
                               <Check className="h-3 w-3 mr-1" />
                               Connected
                             </Badge>

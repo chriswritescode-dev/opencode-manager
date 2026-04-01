@@ -117,8 +117,8 @@ export function ContentDiffViewer({ before, after }: ContentDiffViewerProps) {
               key={index}
               className={cn(
                 'flex font-mono text-xs',
-                isAdd && 'bg-green-500/10',
-                isRemove && 'bg-red-500/10',
+                isAdd && 'bg-success/10',
+                isRemove && 'bg-destructive/10',
               )}
             >
               {!isMobile && (
@@ -132,14 +132,14 @@ export function ContentDiffViewer({ before, after }: ContentDiffViewerProps) {
                 </div>
               )}
               <div className="w-4 flex-shrink-0 flex items-center justify-center">
-                {isAdd && <Plus className="w-2.5 h-2.5 text-green-500" />}
-                {isRemove && <Minus className="w-2.5 h-2.5 text-red-500" />}
+                {isAdd && <Plus className="w-2.5 h-2.5 text-success" />}
+                {isRemove && <Minus className="w-2.5 h-2.5 text-destructive" />}
               </div>
               <pre
                 className={cn(
                   'flex-1 px-1 py-0.5 whitespace-pre-wrap break-all',
-                  isAdd && 'text-green-600 dark:text-green-400',
-                  isRemove && 'text-red-600 dark:text-red-400',
+                  isAdd && 'text-success',
+                  isRemove && 'text-destructive',
                 )}
               >
                 {truncateLine(line.content)}

@@ -56,13 +56,13 @@ describe("PageHeader", () => {
     render(<PageHeader data-testid="header">Content</PageHeader>);
     const header = screen.getByTestId("header");
     expect(header).toHaveClass("border-b");
-    expect(header).toHaveClass("border-border");
-    expect(header).toHaveClass("bg-gradient-to-b");
+    expect(header).toHaveClass("border-border/60");
+    expect(header).toHaveClass("bg-background/90");
   });
 
-  it("applies backdrop-blur-sm for frosted glass effect", () => {
+  it("applies backdrop-blur-xl for frosted glass effect", () => {
     render(<PageHeader data-testid="header">Content</PageHeader>);
     const header = screen.getByTestId("header");
-    expect(header).toHaveClass("backdrop-blur-sm");
+    expect(header).toHaveClass("backdrop-blur-xl");
   });
 });

@@ -252,12 +252,12 @@ export function TTSSettings() {
           )}
           {saveStatus === 'saved' && (
             <>
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-              <span className="text-green-600">Saved</span>
+              <CheckCircle2 className="h-4 w-4 text-success" />
+              <span className="text-success">Saved</span>
             </>
           )}
           {saveStatus === 'idle' && isDirty && isValid && (
-            <span className="text-amber-600">Unsaved changes</span>
+            <span className="text-warning">Unsaved changes</span>
           )}
           {saveStatus === 'idle' && !isDirty && (
             <span className="text-muted-foreground">All changes saved</span>
@@ -297,15 +297,15 @@ export function TTSSettings() {
                     form.setValue('provider', 'builtin', { shouldDirty: true })
                     form.setValue('apiKey', '', { shouldDirty: true })
                     form.setValue('endpoint', '', { shouldDirty: true })
-                  }}
-                  className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
-                    watchProvider === 'builtin'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-border hover:border-blue-300'
-                  }`}
-                >
-                  <MonitorSpeaker className={`h-6 w-6 ${watchProvider === 'builtin' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
-                  <span className={`font-medium ${watchProvider === 'builtin' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                   }}
+                   className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
+                     watchProvider === 'builtin'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/40'
+                   }`}
+                 >
+                  <MonitorSpeaker className={`h-6 w-6 ${watchProvider === 'builtin' ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className={`font-medium ${watchProvider === 'builtin' ? 'text-primary' : ''}`}>
                     Built-in Browser
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
@@ -316,15 +316,15 @@ export function TTSSettings() {
                   type="button"
                   onClick={() => {
                     form.setValue('provider', 'external', { shouldDirty: true })
-                  }}
-                  className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
-                    watchProvider === 'external'
-                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                      : 'border-border hover:border-blue-300'
-                  }`}
-                >
-                  <Globe className={`h-6 w-6 ${watchProvider === 'external' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
-                  <span className={`font-medium ${watchProvider === 'external' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
+                   }}
+                   className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 p-4 transition ${
+                     watchProvider === 'external'
+                      ? 'border-primary bg-primary/10'
+                      : 'border-border hover:border-primary/40'
+                   }`}
+                 >
+                  <Globe className={`h-6 w-6 ${watchProvider === 'external' ? 'text-primary' : 'text-muted-foreground'}`} />
+                  <span className={`font-medium ${watchProvider === 'external' ? 'text-primary' : ''}`}>
                     External API
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
@@ -540,8 +540,8 @@ export function TTSSettings() {
                   />
 
                   {!hasWebSpeechSupport && (
-                    <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-4">
-                      <div className="text-sm text-yellow-800 dark:text-yellow-200">
+                    <div className="rounded-lg border border-warning/30 bg-warning/12 p-4">
+                      <div className="text-sm text-warning">
                         <strong>Browser Not Supported</strong>: Your browser doesn't support Web Speech API. 
                         Please use Chrome, Safari, Firefox, or Edge, or switch to an external API provider.
                       </div>

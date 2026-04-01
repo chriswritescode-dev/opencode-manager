@@ -762,12 +762,12 @@ const { model, modelString } = useModelSelection(opcodeUrl, directory)
   
 
 return (
-    <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-orange-500/50 ring-1 ring-orange-500/30' : ''}`}>
+    <div className={`relative mb-4 w-full rounded-xl border border-border bg-background p-2 opacity-95 backdrop-blur-md transition-all md:mb-1 md:p-3 ${hasPendingPermissionForSession ? 'border-warning/40 ring-1 ring-warning/20' : ''}`}>
       {showStopButton && !(isFocused && prompt.trim().length > 0) && (
         <button
           onClick={handleStop}
           disabled={disabled}
-          className="border  fixed bottom-19 right-0 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
+          className="fixed bottom-19 right-0 z-50 rounded-xl border border-destructive/50 bg-destructive p-3 text-destructive-foreground shadow-lg shadow-destructive/20 transition-all duration-200 active:scale-95 hover:scale-105 hover:bg-destructive/92 md:hidden"
           title="Stop"
         >
           <SquareFill className="w-5 h-5" />
@@ -793,8 +793,8 @@ return (
         onBlur={() => setIsFocused(false)}
         className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
-            ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10'
-            : isDragging ? 'border-blue-500/50 border-dashed bg-blue-500/5' : ''
+            ? 'border-info/40 bg-info/6 focus:bg-info/10'
+            : isDragging ? 'border-info/40 border-dashed bg-info/6' : ''
         }`}
         rows={1}
       />
@@ -845,8 +845,8 @@ return (
                    >
                      <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
 {hasVariants && currentVariant && (
-                        <span className="text-[10px] text-orange-500 truncate w-full text-center capitalize">{currentVariant}</span>
-                      )}
+                        <span className="w-full truncate text-center text-[10px] capitalize text-warning">{currentVariant}</span>
+                       )}
                    </button>
                  </ModelQuickSelect>
                 )
@@ -854,20 +854,20 @@ return (
           
         </div>
 <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            <button
-               onClick={onScrollToBottom}
-               className={`p-2.5 md:p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${showScrollButton ? 'visible' : 'invisible'}`}
+             <button
+                onClick={onScrollToBottom}
+               className={`rounded-lg border border-info/25 bg-muted p-2 text-muted-foreground shadow-md shadow-info/10 ring-1 ring-info/15 transition-all duration-200 hover:scale-105 hover:border-info/40 hover:bg-muted-foreground/20 hover:text-foreground hover:shadow-info/15 active:scale-95 md:p-2 ${showScrollButton ? 'visible' : 'invisible'}`}
                title="Scroll to bottom"
-             >
-               <ArrowDown className="w-6 h-6" />
+              >
+               <ArrowDown className="w-5 h-5" />
              </button>
 {showStopButton && (
-            <button
-              onClick={handleStop}
-              disabled={disabled}
-              className="hidden md:block p-1.5 px-5 md:p-2 md:px-6 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
-              title="Stop"
-            >
+             <button
+               onClick={handleStop}
+               disabled={disabled}
+               className="hidden rounded-lg border border-destructive/50 bg-destructive p-1.5 px-5 text-destructive-foreground shadow-md shadow-destructive/20 transition-all duration-200 hover:scale-105 hover:border-destructive/70 hover:bg-destructive/92 hover:shadow-destructive/30 active:scale-95 md:block md:p-2 md:px-6"
+               title="Stop"
+             >
               <SquareFill className="w-4 h-4 md:w-5 md:h-5" />
             </button>
 )}
@@ -891,11 +891,11 @@ return (
               type="button"
               onClick={handleVoiceToggle}
               disabled={disabled || isProcessing}
-              className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center ${
-                isRecording
-                  ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
+               className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center ${
+                 isRecording
+                  ? 'animate-pulse border-destructive/50 bg-destructive text-destructive-foreground'
                   : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
-              }`}
+               }`}
               title={isRecording ? 'Stop recording' : 'Voice input'}
             >
               {isTogglingRecording && !isRecording ? (
@@ -913,11 +913,11 @@ return (
             <button
               onClick={handleVoiceToggle}
               disabled={disabled || isProcessing}
-              className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[52px] ${
-                isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                  ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
+               className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[52px] ${
+                 isRecording || isTogglingRecording || (isProcessing && !isRecording)
+                  ? 'animate-pulse border-2 border-destructive/50 bg-destructive text-destructive-foreground shadow-lg shadow-destructive/20'
                   : 'bg-primary hover:bg-primary/90 text-primary-foreground border border-white/30'
-              }`}
+               }`}
               title={isRecording ? 'Stop recording' : 'Voice input'}
             >
               {isTogglingRecording && !isRecording ? (
@@ -935,11 +935,11 @@ return (
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
               disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled)}
-              className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
-                hasPendingPermissionForSession
-                  ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
+               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
+                 hasPendingPermissionForSession
+                  ? 'border-warning/30 bg-warning text-warning-foreground ring-warning/20 hover:bg-warning/90'
                   : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
-              }`}
+               }`}
               title={hasPendingPermissionForSession ? 'View pending permission' : (hasActiveStream ? 'Queue message' : 'Send')}
             >
               <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (hasActiveStream ? 'Queue' : 'Send')}</span>

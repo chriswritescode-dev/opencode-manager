@@ -78,10 +78,10 @@ export function RepoCard({
     <div
       onClick={handleCardClick}
       className={`relative border rounded-xl overflow-hidden transition-all duration-200 w-full ${
-        isReady ? "cursor-pointer active:scale-[0.98] hover:border-blue-500/50 hover:bg-accent/50 hover:shadow-md" : "cursor-default"
+        isReady ? "cursor-pointer active:scale-[0.98] hover:border-primary/30 hover:bg-accent/50 hover:shadow-md" : "cursor-default"
       } ${
         isSelected
-          ? "border-blue-500 bg-blue-500/5"
+          ? "border-primary/40 bg-primary/6"
           : "border-border bg-card"
       }`}
     >
@@ -105,7 +105,7 @@ export function RepoCard({
                 {repoName}
               </h3>
               {isReady && (
-                <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-orange-500' : 'bg-green-500'}`} />
+                <div className={`w-2 h-2 rounded-full shrink-0 ${isDirty ? 'bg-warning' : 'bg-success'}`} />
               )}
 
             </div>
@@ -115,17 +115,17 @@ export function RepoCard({
             <div className="flex flex-1 items-center gap-2 min-w-0 overflow-hidden">
               {isCloning ? (
                 <span className="flex items-center gap-1.5">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" />
                   Cloning...
                 </span>
               ) : (
                 <>
-                  <span className={`flex items-center gap-1 shrink-0 ${repo.isWorktree ? 'text-purple-400' : ''}`}>
+                  <span className={`flex items-center gap-1 shrink-0 ${repo.isWorktree ? 'text-info' : ''}`}>
                     <GitBranch className="w-3.5 h-3.5 shrink-0" />
                     <span className="truncate max-w-[80px]">{branchToDisplay || "main"}</span>
                   </span>
                   {isDirty && (
-                    <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400 shrink-0">
+                    <span className="flex items-center gap-1 text-warning shrink-0">
                       <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                       <span className="text-xs whitespace-nowrap">
                         {unstagedCount > 0 && unstagedCount}
@@ -135,7 +135,7 @@ export function RepoCard({
                     </span>
                   )}
                   {(ahead > 0 || behind > 0) && (
-                    <span className="flex items-center gap-1 text-blue-600 dark:text-blue-400 shrink-0">
+                    <span className="flex items-center gap-1 text-info shrink-0">
                       <span className="text-xs whitespace-nowrap">
                         {ahead > 0 && `↑${ahead}`}
                         {behind > 0 && `↓${behind}`}

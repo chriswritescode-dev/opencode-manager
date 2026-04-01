@@ -51,7 +51,6 @@ export function DeleteDialog({
             variant="destructive" 
             onClick={onConfirm} 
             disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700 text-white font-semibold border-red-600"
           >
             {isDeleting && 'Deleting...'}
             {!isDeleting && (title.includes('Configuration') ? 'Delete Configuration' : 'Delete')}

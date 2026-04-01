@@ -1,9 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { Badge } from '@/components/ui/badge'
 import { createRepo, discoverRepos } from '@/api/repos'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Drawer, DrawerContent, DrawerDescription, DrawerFooter, DrawerHeader, DrawerTitle } from '@/components/ui/drawer'
+import { useMobile } from '@/hooks/useMobile'
+import { cn } from '@/lib/utils'
 import { Loader2 } from 'lucide-react'
 import { showToast } from '@/lib/toast'
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
@@ -15,6 +19,7 @@ interface AddRepoDialogProps {
 }
 
 export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
+  const isMobile = useMobile()
   const [repoType, setRepoType] = useState<'remote' | 'local' | 'folder'>('remote')
   const [repoUrl, setRepoUrl] = useState('')
   const [localPath, setLocalPath] = useState('')
@@ -97,168 +102,212 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px] bg-[#141414] border-[#2a2a2a]">
-        <DialogHeader>
-          <DialogTitle className="text-xl bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">
-            Add Repository
-          </DialogTitle>
-        </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-4 mt-4">
-          <div className="space-y-2">
-            <label className="text-sm text-zinc-400">Repository Type</label>
-            <div className="flex gap-4">
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="repoType"
-                  value="remote"
-                  checked={repoType === 'remote'}
-                  onChange={(e) => setRepoType(e.target.value as 'remote')}
-                  disabled={mutation.isPending}
-                  className="text-blue-600 bg-[#1a1a1a] border-[#2a2a2a]"
-                />
-                <span className="text-sm text-white">Remote Repository</span>
-              </label>
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="repoType"
-                  value="local"
-                  checked={repoType === 'local'}
-                  onChange={(e) => setRepoType(e.target.value as 'local')}
-                  disabled={mutation.isPending}
-                  className="text-blue-600 bg-[#1a1a1a] border-[#2a2a2a]"
-                />
-                <span className="text-sm text-white">Local Repository</span>
-              </label>
-              <label className="flex items-center space-x-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="repoType"
-                  value="folder"
-                  checked={repoType === 'folder'}
-                  onChange={(e) => setRepoType(e.target.value as 'folder')}
-                  disabled={mutation.isPending}
-                  className="text-blue-600 bg-[#1a1a1a] border-[#2a2a2a]"
-                />
-                <span className="text-sm text-white">Folder Discovery</span>
-              </label>
-            </div>
-          </div>
+  const repoTypeOptions = [
+    {
+      id: 'remote' as const,
+      label: 'Remote Repository',
+      description: 'Clone from GitHub, GitLab, or any accessible remote.',
+    },
+    {
+      id: 'local' as const,
+      label: 'Local Repository',
+      description: 'Import a local path or initialize a fresh workspace repo.',
+    },
+    {
+      id: 'folder' as const,
+      label: 'Folder Discovery',
+      description: 'Scan a parent folder and import every nested Git repository.',
+    },
+  ]
 
-          {repoType === 'remote' ? (
-            <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Repository URL</label>
-              <Input
-                placeholder="owner/repo or https://github.com/user/repo.git"
-                value={repoUrl}
-                onChange={(e) => handleRepoUrlChange(e.target.value)}
+  const sourceValue = repoType === 'remote' ? repoUrl : repoType === 'local' ? localPath : folderPath
+  const sourceLabel = repoType === 'remote' ? 'Repository URL' : repoType === 'local' ? 'Local Path' : 'Folder Path'
+  const sourcePlaceholder = repoType === 'remote'
+    ? 'owner/repo or https://github.com/user/repo.git'
+    : repoType === 'local'
+      ? 'my-local-project OR /absolute/path/to/git-repo'
+      : '/absolute/path/to/projects'
+  const sourceDescription = repoType === 'remote'
+    ? 'Full URL or shorthand format for GitHub repositories.'
+    : repoType === 'local'
+      ? 'Use a new directory name or an absolute path to an existing Git repository.'
+      : 'Scans the folder for nested Git repositories and links each one in place.'
+  const branchOutcome = branch
+    ? repoType === 'remote'
+      ? `Clones directly to '${branch}'.`
+      : repoType === 'folder'
+        ? 'Folder discovery keeps each repository on its current branch.'
+        : localPath?.startsWith('/')
+        ? `Copies the repo and checks out '${branch}' (creating it if needed).`
+        : `Initializes the repository with '${branch}'.`
+    : repoType === 'remote'
+      ? 'Clones the repository to its default branch.'
+      : repoType === 'folder'
+        ? 'Finds and links each repository on its current branch.'
+        : localPath?.startsWith('/')
+          ? 'Copies the repo and keeps the current branch.'
+          : "Initializes the repository with 'main'."
+  const submitLabel = mutation.isPending
+    ? repoType === 'folder'
+      ? 'Discovering...'
+      : repoType === 'local'
+        ? 'Initializing...'
+        : 'Cloning...'
+    : repoType === 'folder'
+      ? 'Discover Repositories'
+      : 'Add Repository'
+  const isSubmitDisabled = (!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending
+
+  const formSections = (
+    <div className="space-y-4">
+      <div className="surface-panel rounded-[1.5rem] p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground">Import Plan</p>
+          <Badge variant={repoType === 'remote' ? 'info' : repoType === 'folder' ? 'warning' : 'secondary'}>
+            {repoType === 'remote' ? 'Remote' : repoType === 'folder' ? 'Folder' : 'Local'}
+          </Badge>
+          {showSkipSSHCheckbox && skipSSHVerification && <Badge variant="warning">SSH verification disabled</Badge>}
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Source</p>
+            <p className="mt-1 text-sm text-foreground">
+              {sourceValue || (repoType === 'remote' ? 'Choose a remote repository' : repoType === 'folder' ? 'Choose a folder to scan' : 'Choose a local path')}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Branch</p>
+            <p className="mt-1 text-sm text-foreground">
+              {branch || (repoType === 'remote' ? 'Default branch' : repoType === 'folder' ? 'Current branch per repo' : localPath?.startsWith('/') ? 'Keep current branch' : 'main')}
+            </p>
+          </div>
+        </div>
+        <p className="mt-3 text-xs leading-5 text-muted-foreground">{branchOutcome}</p>
+      </div>
+
+      <div className="surface-panel-muted rounded-[1.5rem] p-4 sm:p-5">
+        <label className="text-sm font-medium text-foreground">Repository Type</label>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {repoTypeOptions.map((option) => {
+            const isSelected = repoType === option.id
+
+            return (
+              <button
+                key={option.id}
+                type="button"
+                onClick={() => setRepoType(option.id)}
                 disabled={mutation.isPending}
-                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
-              />
-              <p className="text-xs text-zinc-500">
-                Full URL or shorthand format (owner/repo for GitHub)
-              </p>
-            </div>
-          ) : repoType === 'local' ? (
-            <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Local Path</label>
-              <Input
-                placeholder="my-local-project OR /absolute/path/to/git-repo"
-                value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
-                disabled={mutation.isPending}
-                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
-              />
-              <p className="text-xs text-zinc-500">
-                Directory name for a new repo, or an absolute path to link an existing Git repo in place so its OpenCode sessions stay attached
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <label className="text-sm text-zinc-400">Folder Path</label>
-              <Input
-                placeholder="/absolute/path/to/projects"
-                value={folderPath}
-                onChange={(e) => setFolderPath(e.target.value)}
-                disabled={mutation.isPending}
-                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
-              />
-              <p className="text-xs text-zinc-500">
-                Scans the folder for nested Git repositories and links each one in place so existing OpenCode sessions show up immediately
-              </p>
-            </div>
-          )}
-          
+                className={cn(
+                  'rounded-2xl border border-border/70 bg-background/70 p-4 text-left transition-[transform,border-color,background-color] hover:border-primary/20 hover:-translate-y-0.5 disabled:pointer-events-none disabled:opacity-50',
+                  isSelected && 'border-primary/35 bg-primary/10'
+                )}
+              >
+                <p className={cn('text-sm font-semibold', isSelected ? 'text-primary' : 'text-foreground')}>
+                  {option.label}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">{option.description}</p>
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="surface-panel-muted rounded-[1.5rem] p-4 sm:p-5">
+        <div className="space-y-4">
           <div className="space-y-2">
-            <label className="text-sm text-zinc-400">Branch</label>
+            <label className="text-sm font-medium text-foreground">{sourceLabel}</label>
+            <Input
+              placeholder={sourcePlaceholder}
+              value={sourceValue}
+              onChange={(e) => {
+                if (repoType === 'remote') {
+                  handleRepoUrlChange(e.target.value)
+                } else if (repoType === 'local') {
+                  setLocalPath(e.target.value)
+                } else {
+                  setFolderPath(e.target.value)
+                }
+              }}
+              disabled={mutation.isPending}
+            />
+            <p className="text-xs leading-5 text-muted-foreground">{sourceDescription}</p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-foreground">Branch</label>
             <Input
               placeholder="Optional - uses default if empty"
               value={branch}
               onChange={(e) => setBranch(e.target.value)}
               disabled={mutation.isPending || repoType === 'folder'}
-              className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500"
             />
-            <p className="text-xs text-zinc-500">
-              {repoType === 'folder'
-                ? 'Folder discovery links each repository on its current branch'
-                : branch 
-                ? repoType === 'remote' 
-                  ? `Clones repository directly to '${branch}' branch`
-                  : localPath?.startsWith('/') 
-                    ? `Links the repo in place and checks out '${branch}' branch`
-                    : `Initializes repository with '${branch}' branch`
-                : repoType === 'remote'
-                  ? "Clones repository to default branch"
-                  : localPath?.startsWith('/')
-                    ? 'Links the repo in place and keeps its current branch'
-                    : "Initializes repository with 'main' branch"
-              }
-            </p>
+            <p className="text-xs leading-5 text-muted-foreground">{branchOutcome}</p>
           </div>
 
           {showSkipSSHCheckbox && (
-            <div className="flex items-start space-x-2">
+            <label className="rounded-2xl border border-warning/20 bg-warning/10 p-4 flex items-start gap-3">
               <input
                 type="checkbox"
                 id="skip-ssh-verification"
                 checked={skipSSHVerification}
                 onChange={(e) => setSkipSSHVerification(e.target.checked)}
                 disabled={mutation.isPending}
-                className="mt-1 h-4 w-4 rounded border-[#2a2a2a] bg-[#1a1a1a] text-blue-600 focus:ring-blue-600"
+                className="mt-1 h-4 w-4 rounded border-input bg-background accent-primary focus:ring-primary"
               />
               <div className="flex-1">
-                <label htmlFor="skip-ssh-verification" className="cursor-pointer text-sm text-white">
-                  Skip SSH host key verification
-                </label>
-                <p className="text-xs text-zinc-500">
-                  Auto-accept the SSH host key. Use for self-hosted or internal Git servers.
+                <span className="cursor-pointer text-sm font-medium text-foreground">Skip SSH host key verification</span>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Auto-accept the SSH host key for self-hosted or internal Git servers.
                 </p>
               </div>
-            </div>
+            </label>
           )}
+        </div>
+      </div>
 
-          <Button 
-            type="submit" 
-            disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            {mutation.isPending ? (
-              <>
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                {repoType === 'local' ? 'Linking...' : repoType === 'folder' ? 'Discovering...' : 'Cloning...'}
-              </>
-            ) : (
-              repoType === 'folder' ? 'Discover Repositories' : 'Add Repository'
-            )}
-          </Button>
-          {mutation.isError && (
-            <p className="text-sm text-red-400">
-              {mutation.error.message}
-            </p>
-          )}
+      {mutation.isError && (
+        <p className="px-1 text-sm text-destructive">{mutation.error.message}</p>
+      )}
+    </div>
+  )
+
+  const submitButton = (
+    <Button type="submit" disabled={isSubmitDisabled} className="w-full">
+      {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+      {submitLabel}
+    </Button>
+  )
+
+  if (isMobile) {
+    return (
+      <Drawer open={open} onOpenChange={onOpenChange}>
+        <DrawerContent className="max-h-[94dvh]">
+          <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
+          <DrawerHeader className="border-b border-border/60 pb-4">
+            <DrawerTitle className="heading-ink">Add Repository</DrawerTitle>
+            <DrawerDescription>Bring a remote repo into the workspace, import a local Git directory, or discover repos in a folder.</DrawerDescription>
+          </DrawerHeader>
+          <div className="scrollbar-thin flex-1 overflow-y-auto px-4 py-3 pb-safe">
+            {formSections}
+          </div>
+          <DrawerFooter className="border-t border-border/60 bg-background/90 pb-[calc(1rem+env(safe-area-inset-bottom))] supports-[backdrop-filter]:backdrop-blur-xl">
+            {submitButton}
+          </DrawerFooter>
+          </form>
+        </DrawerContent>
+      </Drawer>
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[620px]">
+        <DialogHeader>
+          <DialogTitle className="heading-ink text-xl">Add Repository</DialogTitle>
+          <DialogDescription>Bring a remote repo into the workspace, import a local Git directory, or discover repos in a folder.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="mt-2 space-y-4">
+          {formSections}
+          {submitButton}
         </form>
       </DialogContent>
     </Dialog>

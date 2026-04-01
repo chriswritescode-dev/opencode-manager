@@ -14,7 +14,7 @@ export function DiffStats({ additions, deletions, variant = 'default' }: DiffSta
   return (
     <span className="flex items-center gap-1 text-xs font-mono">
       {additions > 0 && (
-        <span className="text-green-600 dark:text-green-400">
+        <span className="text-success">
           {compact ? `+${additions}` : `+${additions}`}
         </span>
       )}
@@ -22,7 +22,7 @@ export function DiffStats({ additions, deletions, variant = 'default' }: DiffSta
         <span className="text-muted-foreground">{compact ? '/' : ' '}</span>
       )}
       {deletions > 0 && (
-        <span className="text-red-600 dark:text-red-400">
+        <span className="text-destructive">
           {compact ? `-${deletions}` : `-${deletions}`}
         </span>
       )}

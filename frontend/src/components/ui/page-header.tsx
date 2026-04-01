@@ -1,8 +1,9 @@
-import * as React from "react";
-import { cn } from "@/lib/utils";
+import * as React from 'react'
+
+import { cn } from '@/lib/utils'
 
 export interface PageHeaderProps extends React.HTMLAttributes<HTMLElement> {
-  children: React.ReactNode;
+  children: React.ReactNode
 }
 
 export const PageHeader = React.forwardRef<HTMLElement, PageHeaderProps>(
@@ -11,15 +12,15 @@ export const PageHeader = React.forwardRef<HTMLElement, PageHeaderProps>(
       <header
         ref={ref}
         className={cn(
-          "sticky top-0 z-10 bg-gradient-to-b from-background via-background to-background backdrop-blur-sm pt-safe",
+          'sticky top-0 z-10 border-b border-border/60 bg-background/90 shadow-[0_10px_30px_-24px_color-mix(in_oklab,var(--foreground)_55%,transparent)] supports-[backdrop-filter]:bg-background/76 backdrop-blur-xl pt-safe',
           className
         )}
         {...props}
       >
         {children}
       </header>
-    );
+    )
   }
-);
+)
 
-PageHeader.displayName = "PageHeader";
+PageHeader.displayName = 'PageHeader'

@@ -66,9 +66,9 @@ export function RepoMcpServerList({
 
     switch (status.status) {
       case 'connected':
-        return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+        return <Badge variant="success" className="text-xs">Connected</Badge>
       case 'disabled':
-        return <Badge className="text-xs bg-gray-700 text-gray-300 border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">Disabled</Badge>
+        return <Badge variant="secondary" className="text-xs">Disabled</Badge>
       case 'failed':
         return (
           <Badge variant="destructive" className="text-xs flex items-center gap-1">
@@ -78,7 +78,7 @@ export function RepoMcpServerList({
         )
       case 'needs_auth':
         return (
-          <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-600">
+          <Badge variant="warning" className="text-xs">
             Needs Auth
           </Badge>
         )
@@ -97,7 +97,7 @@ export function RepoMcpServerList({
         </div>
       ) : isLoadingStatus ? (
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+          <Loader2 className="w-4 h-4 animate-spin text-primary" />
           <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
         </div>
       ) : (
@@ -133,19 +133,19 @@ export function RepoMcpServerList({
                             title="Click for options"
                           >
                             {status?.status === 'connected' && (
-                              <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Badge variant="success" className="gap-1 px-2 py-0.5 text-[11px]">
                                 Connected<ChevronDown className="h-3 w-3" />
-                              </span>
+                              </Badge>
                             )}
                             {status?.status === 'needs_auth' && (
-                              <span className="text-xs border border-yellow-500 text-yellow-600 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Badge variant="warning" className="gap-1 px-2 py-0.5 text-[11px]">
                                 Needs Auth<ChevronDown className="h-3 w-3" />
-                              </span>
+                              </Badge>
                             )}
                             {status?.status === 'failed' && (
-                              <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
+                              <Badge variant="destructive" className="gap-1 px-2 py-0.5 text-[11px]">
                                 <AlertCircle className="h-3 w-3" />Failed<ChevronDown className="h-3 w-3" />
-                              </span>
+                              </Badge>
                             )}
                           </button>
                         </DropdownMenuTrigger>
@@ -184,7 +184,7 @@ export function RepoMcpServerList({
                     {serverConfig ? getDescription(serverConfig) : 'MCP server'}
                   </p>
                   {failed && status.status === 'failed' && (
-                    <div className="flex items-center gap-1 mt-1 text-xs text-red-500">
+                    <div className="mt-1 flex items-center gap-1 text-xs text-destructive">
                       <XCircle className="w-3 h-3 flex-shrink-0" />
                       <span className="truncate">{status.error}</span>
                     </div>

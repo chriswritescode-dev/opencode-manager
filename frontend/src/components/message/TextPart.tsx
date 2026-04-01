@@ -74,12 +74,12 @@ function MermaidBlock({ code }: MermaidBlockProps) {
   if (error) {
     return (
       <div className="relative my-4">
-        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-          <div className="flex items-center gap-2 text-red-500 mb-2">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4">
+          <div className="mb-2 flex items-center gap-2 text-destructive">
             <AlertCircle className="w-4 h-4" />
             <span className="text-sm font-medium">Mermaid Error</span>
           </div>
-          <pre className="text-xs text-red-400 mb-3 whitespace-pre-wrap">{error}</pre>
+          <pre className="mb-3 whitespace-pre-wrap text-xs text-destructive">{error}</pre>
           <pre className="bg-accent p-3 rounded-lg overflow-x-auto text-sm border border-border">
             <code>{code}</code>
           </pre>

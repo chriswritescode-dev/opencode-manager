@@ -107,7 +107,7 @@ export function ModelQuickSelect({
                 onClick={() => handleVariantSelect(variant)}
                 className="flex items-center justify-between"
               >
-                <span className="capitalize text-orange-500 text-center">{variant}</span>
+                <span className="text-center capitalize text-warning">{variant}</span>
                 {currentVariant === variant && <Check className="h-4 w-4" />}
               </DropdownMenuItem>
             ))}

@@ -5,7 +5,7 @@ export function MessageSkeleton() {
     <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
       {/* User message skeleton */}
       <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-blue-600/20 border border-blue-600/30">
+        <div className="w-full rounded-lg border border-primary/25 bg-primary/10 p-1.5">
           <div className="flex items-center gap-2 mb-1">
             <div className="h-3 w-12 bg-muted animate-pulse rounded" />
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
@@ -24,7 +24,7 @@ export function MessageSkeleton() {
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
             <div className="flex items-center gap-1">
-              <div className="h-3 w-20 bg-blue-600/20 animate-pulse rounded" />
+              <div className="h-3 w-20 rounded bg-primary/12 animate-pulse" />
             </div>
           </div>
           <div className="space-y-2">
@@ -36,7 +36,7 @@ export function MessageSkeleton() {
         </div>
       </div>
       <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-blue-600/20 border border-blue-600/30">
+        <div className="w-full rounded-lg border border-primary/25 bg-primary/10 p-1.5">
           <div className="flex items-center gap-2 mb-1">
             <div className="h-3 w-12 bg-muted animate-pulse rounded" />
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
@@ -55,7 +55,7 @@ export function MessageSkeleton() {
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
             <div className="flex items-center gap-1">
-              <div className="h-3 w-20 bg-blue-600/20 animate-pulse rounded" />
+              <div className="h-3 w-20 rounded bg-primary/12 animate-pulse" />
             </div>
           </div>
           <div className="space-y-2">
@@ -69,7 +69,7 @@ export function MessageSkeleton() {
 
       {/* Second user message skeleton */}
       <div className="flex flex-col">
-        <div className="w-full rounded-lg p-1.5 bg-blue-600/20 border border-blue-600/30">
+        <div className="w-full rounded-lg border border-primary/25 bg-primary/10 p-1.5">
           <div className="flex items-center gap-2 mb-1">
             <div className="h-3 w-12 bg-muted animate-pulse rounded" />
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
@@ -88,7 +88,7 @@ export function MessageSkeleton() {
             <div className="h-3 w-16 bg-muted animate-pulse rounded" />
             <div className="flex items-center gap-1">
               <span className="animate-pulse">●</span>
-              <div className="h-3 w-24 bg-blue-600/20 animate-pulse rounded" />
+              <div className="h-3 w-24 rounded bg-primary/12 animate-pulse" />
             </div>
           </div>
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -100,4 +100,3 @@ export function MessageSkeleton() {
     </div>
   );
 }
-
