@@ -32,6 +32,7 @@
 git clone https://github.com/chriswritescode-dev/opencode-manager.git
 cd opencode-manager
 cp .env.example .env
+echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
 docker-compose up -d
 # Open http://localhost:5003
 ```
@@ -55,6 +56,7 @@ For local development setup, see the [Development Guide](https://chriswritescode
 - **Git** — Multi-repo support, SSH authentication, worktrees, unified diffs with line numbers, PR creation
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download
 - **Chat** — Real-time streaming (SSE), slash commands, `@file` mentions, Plan/Build modes, Mermaid diagrams
+- **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, and markdown-rendered output
 - **Audio** — Text-to-speech (browser + OpenAI-compatible), speech-to-text (browser + OpenAI-compatible)
 - **AI** — Model selection, provider config, OAuth for Anthropic/GitHub Copilot, custom agents with system prompts
 - **MCP** — Local and remote MCP server support with pre-built templates

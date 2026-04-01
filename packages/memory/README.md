@@ -20,7 +20,7 @@ Add to your `opencode.json`:
 
 ```json
 {
-  "plugin": ["@opencode-manager/memory"]
+  "plugin": ["@opencode-manager/memory@latest"]
 }
 ```
 
@@ -33,8 +33,9 @@ The local embedding model downloads automatically on install. For API-based embe
 - **Automatic Deduplication** - Prevents duplicates via exact match and semantic similarity detection
 - **Compaction Context Injection** - Injects conventions and decisions into session compaction for seamless continuity
 - **Automatic Memory Injection** - Injects relevant project memories into user messages via semantic search with distance filtering and caching
-- **Bundled Agents** - Ships with Code, Architect, and Memory agents preconfigured for memory-aware workflows
-- **CLI Tools** - Export, import, list, stats, and cleanup commands via `ocm-mem` binary
+- **Project KV Store** - Ephemeral key-value storage with TTL management for project state
+- **Bundled Agents** - Ships with Code, Architect, Auditor and Librarian agents preconfigured for memory-aware workflows
+- **CLI Tools** - Export, import, list, stats, cleanup, upgrade, status, and cancel commands via `ocm-mem` binary
 - **Dimension Mismatch Detection** - Detects embedding model changes and guides recovery via reindex
 
 ## Agents
@@ -43,16 +44,19 @@ The plugin bundles four agents that integrate with the memory system:
 
 | Agent | ID | Mode | Description |
 |-------|----|------|-------------|
-| **Code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @Memory subagent. |
-| **Architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @Memory for broad knowledge retrieval, designs implementation plans, then hands off to Code via `memory-plan-execute`. |
-| **Memory** | `ocm-memory` | subagent | Expert agent for managing project memory. Handles post-compaction memory extraction and contradiction resolution. |
-| **Code Review** | `ocm-code-review` | subagent | Read-only code reviewer with access to project memory for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
+| **code** | `ocm-code` | primary | Primary coding agent with memory awareness. Checks memory before unfamiliar code, stores architectural decisions and conventions as it works. Delegates planning operations to @librarian subagent. |
+| **architect** | `ocm-architect` | primary | Read-only planning agent. Researches the codebase, delegates to @librarian for broad knowledge retrieval, designs implementation plans, then hands off to code via `memory-plan-execute`. |
+| **librarian** | `ocm-librarian` | subagent | Expert agent for managing project memory. Handles post-compaction memory extraction and contradiction resolution. |
+| **auditor** | `ocm-auditor` | subagent | Read-only code auditor with access to project memory for convention-aware reviews. Invoked via Task tool to review diffs, commits, branches, or PRs against stored conventions and decisions. |
 
-The Code Review agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
+The auditor agent is a read-only subagent (`temperature: 0.0`) that can read memory but cannot write, edit, or delete memories or execute plans. It is invoked by other agents via the Task tool to review code changes against stored project conventions and decisions.
 
-The Architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan, it calls `memory-plan-execute` which creates a new Code session with the full plan as context.
+The architect agent operates in read-only mode (`temperature: 0.0`, all edits denied) with additional message-level read-only enforcement via the `experimental.chat.messages.transform` hook. After the user approves a plan you can choose to execute the plan in the same session with your execution model (less advanced model needed for cost / speed), new session, loop in the same branch or in external worktree. 
+
 
 ## Tools
+
+### Memory Tools
 
 | Tool | Description |
 |------|-------------|
@@ -60,8 +64,37 @@ The Architect agent operates in read-only mode (`temperature: 0.0`, all edits de
 | `memory-write` | Store a new project memory |
 | `memory-edit` | Update an existing project memory |
 | `memory-delete` | Delete a project memory by ID |
-| `memory-health` | Health check or full reindex of the memory store |
+| `memory-health` | Health check, reindex, or upgrade the plugin to latest version |
 | `memory-plan-execute` | Create a new Code session and send an approved plan as the first prompt |
+
+### Project KV Tools
+
+Ephemeral key-value storage for project state with automatic TTL-based expiration.
+
+| Tool | Description |
+|------|-------------|
+| `memory-kv-set` | Store a value with optional TTL (default 7 days) |
+| `memory-kv-get` | Retrieve a value by key |
+| `memory-kv-list` | List all active KV entries for the project. Optionally filter by key prefix. |
+| `memory-kv-delete` | Delete a key-value pair by key |
+
+### Loop Tools
+
+Iterative development loops with automatic auditing. Runs in an isolated git worktree by default, or in the current directory with `inPlace`.
+
+| Tool | Description |
+|------|-------------|
+| `memory-loop-cancel` | Cancel an active loop by worktree name |
+| `memory-loop-status` | Check status of loops. Supports `restart` to resume inactive loops. |
+| `memory-loop` | Execute an architect plan using an iterative loop. Supports `inPlace` parameter. |
+
+## Slash Commands
+
+| Command | Description | Agent |
+|---------|-------------|-------|
+| `/review` | Run a code review on current changes | auditor (subtask) |
+| `/loop` | Start a loop (delegates to memory-loop) | code |
+| `/cancel-loop` | Cancel the active loop | code |
 
 ## CLI
 
@@ -151,13 +184,49 @@ ocm-mem cleanup --all --project my-project
 | `--dry-run` | Preview what would be deleted without deleting |
 | `--force` | Skip confirmation prompt |
 
+#### upgrade
+
+Check for plugin updates and install the latest version.
+
+```bash
+ocm-mem upgrade
+```
+
+#### status
+
+Show loop status for the current project.
+
+```bash
+ocm-mem status
+ocm-mem status --project my-project
+```
+
+| Flag | Description |
+|------|-------------|
+| `--project, -p <name>` | Project name or SHA (auto-detected from git) |
+
+#### cancel
+
+Cancel a loop by worktree name.
+
+```bash
+ocm-mem cancel my-worktree-name
+ocm-mem cancel --project my-project my-worktree-name
+```
+
+| Flag | Description |
+|------|-------------|
+| `--project, -p <name>` | Project name or SHA (auto-detected from git) |
+
 ## Configuration
 
-On first run, the plugin automatically copies the bundled config to your data directory:
-- Path: `~/.local/share/opencode/memory/config.json`
-- Falls back to: `$XDG_DATA_HOME/opencode/memory/config.json`
+On first run, the plugin automatically copies the bundled config to your config directory:
+- Path: `~/.config/opencode/memory-config.jsonc`
+- Falls back to: `$XDG_CONFIG_HOME/opencode/memory-config.jsonc`
 
-You can edit this file to customize settings. The file is created only if it doesn't already exist.
+The plugin supports JSONC format, allowing comments with `//` and `/* */`.
+
+You can edit this file to customize settings. The file is created only if it doesn't already exist. If a config exists at the old location (`~/.local/share/opencode/memory/config.json`), it will be automatically migrated to the new location.
 
 ```json
 {
@@ -188,7 +257,16 @@ You can edit this file to customize settings. The file is created only if it doe
     "enabled": true,
     "debug": false
   },
-  "executionModel": ""
+  "executionModel": "",
+  "auditorModel": "",
+  "loop": {
+    "enabled": true,
+    "defaultMaxIterations": 15,
+    "cleanupWorktree": false,
+    "defaultAudit": true,
+    "model": "",
+    "minAudits": 1
+  }
 }
 ```
 
@@ -220,10 +298,14 @@ For API-based embeddings:
 - `dataDir` - Directory for SQLite database storage (default: `"~/.local/share/opencode/memory"`)
 - `dedupThreshold` - Similarity threshold for deduplication (0–1, default: `0.25`, clamped to `0.05–0.40`)
 
+#### Config Location
+- Config file: `~/.config/opencode/memory-config.jsonc` (or `$XDG_CONFIG_HOME/opencode/memory-config.jsonc`)
+- Old config location (`~/.local/share/opencode/memory/config.json`) is automatically migrated on first load
+
 #### Logging
 - `logging.enabled` - Enable file logging (default: `false`)
 - `logging.debug` - Enable debug-level log output (default: `false`)
-- `logging.file` - Log file path. When empty, resolves to `~/.local/share/opencode/memory/logs/memory.log` (default: `""`)
+- `logging.file` - Log file path. When empty, resolves to `~/.local/share/opencode/memory/logs/memory.log` (default: `""`). Logs remain in the data directory, only config has moved.
 
 When enabled, logs are written to the specified file with timestamps. The log file has a 10MB size limit with automatic rotation.
 
@@ -246,13 +328,66 @@ When enabled, logs are written to the specified file with timestamps. The log fi
 #### Execution
 - `executionModel` - Model override for plan execution sessions, format: `provider/model` (e.g. `anthropic/claude-haiku-3-5-20241022`). When set, `memory-plan-execute` uses this model for the new Code session. When empty or omitted, OpenCode's default model is used (typically the `model` field from `opencode.json`). **Recommended:** Set this to a fast, cheap model (e.g. Haiku or MiniMax) and use a smart model (e.g. Opus) for the Architect session — planning needs reasoning, execution needs speed.
 
-## Architect → Code Workflow
+#### Loop
+- `loop.enabled` - Enable iterative development loops (default: `true`)
+- `loop.defaultMaxIterations` - Default max iterations for loops, 0 = unlimited (default: `15`)
+- `loop.cleanupWorktree` - Auto-remove worktree on cancel (default: `false`)
+- `loop.defaultAudit` - Run auditor after each coding iteration by default (default: `true`)
+- `loop.model` - Model override for loop sessions (`provider/model`), falls back to `executionModel` (default: `""`)
+- `loop.stallTimeoutMs` - Watchdog stall detection timeout in milliseconds (default: `60000`)
+- `loop.minAudits` - Minimum audit iterations required before completion (default: `1`)
 
-Plan with a smart model, execute with a fast model. The Architect agent researches and designs; the Code agent implements.
+#### Top-level
+- `defaultKvTtlMs` - Default TTL for KV store entries in milliseconds (default: `604800000` / 7 days)
 
-Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the Architect session.
+#### Auditor
+- `auditorModel` - Model override for the auditor agent (`provider/model`). When set, overrides the auditor agent's default model. When not set, uses platform default (default: `""`)
+
+## architect → code Workflow
+
+Plan with a smart model, execute with a fast model. The architect agent researches and designs; the code agent implements.
+
+After the architect presents a plan, the user approves via one of four execution modes:
+
+- **New session** — Creates a new Code session via `memory-plan-execute`
+- **Execute here** — Executes the plan in the current session (code agent takes over immediately)
+- **Loop (worktree)** — Runs the plan in an isolated git worktree with iterative coding/auditing via `memory-loop`
+- **Loop** — Same as loop (worktree) but runs in the current directory (no worktree isolation)
+
+Set `executionModel` in your config to a fast model (e.g., Haiku) and use a smart model (e.g., Opus) for the architect session.
 
 See the [full workflow guide](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#architect--code) for setup details.
+
+## Loop
+
+The loop is an iterative development system that alternates between coding and auditing phases:
+
+1. **Coding phase** — A Code session works on the task
+2. **Auditing phase** — The Auditor agent reviews changes against project conventions and stored review findings
+3. **Session rotation** — A fresh session is created for the next iteration
+4. **Repeat** — Audit findings feed back into the next coding iteration
+
+### Session Rotation
+
+Each iteration runs in a **fresh session** to keep context small and prioritize speed. After each phase completes, the current session is destroyed and a new one is created. The original task prompt and any audit findings are re-injected into the new session as a continuation prompt, so no context is lost while keeping the window clean.
+
+### Review Finding Persistence
+
+Audit findings survive session rotation via the **KV store**. The auditor stores each bug and warning as a KV entry with key `review-finding:<file>:<line>` containing severity, description, and status. At the start of each audit:
+
+- Existing findings are retrieved via `memory-kv-list` with prefix `review-finding:`
+- Resolved findings are deleted
+- Unresolved findings are carried forward into the review
+
+This ensures review findings are never lost between iterations, even as sessions rotate.
+
+### Completion and Termination
+
+The loop completes when the Code agent outputs the completion promise. It auto-terminates after `maxIterations` (if set) or after 3 consecutive errors.
+
+By default, loops run in an isolated git worktree. Set `inPlace: true` to run in the current directory instead (skips worktree creation, auto-commit, and cleanup).
+
+See the [full documentation](https://chriswritescode-dev.github.io/opencode-manager/features/memory/#loop) for details on worktree management, model configuration, and termination conditions.
 
 ## Documentation
 

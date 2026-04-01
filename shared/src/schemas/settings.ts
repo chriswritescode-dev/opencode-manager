@@ -200,6 +200,10 @@ export const OpenCodeConfigSchema = z.object({
   disabled_providers: z.array(z.string()).optional(),
   share: z.enum(["manual", "auto", "disabled"]).optional(),
   plugin: z.array(z.string()).optional(),
+  skills: z.object({
+    paths: z.array(z.string()).optional(),
+    urls: z.array(z.string()).optional(),
+  }).optional(),
 }).strip();
 
 export type OpenCodeConfigContent = z.infer<typeof OpenCodeConfigSchema>;

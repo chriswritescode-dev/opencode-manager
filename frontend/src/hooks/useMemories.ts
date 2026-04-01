@@ -6,8 +6,12 @@ import {
   updateMemory,
   deleteMemory,
   getProjectSummary,
+  listKvEntries,
+  deleteKvEntry,
+  createKvEntry,
+  updateKvEntry,
 } from '@/api/memory'
-import type { CreateMemoryRequest, UpdateMemoryRequest } from '@opencode-manager/shared/types'
+import type { CreateMemoryRequest, UpdateMemoryRequest, CreateKvEntryRequest, UpdateKvEntryRequest } from '@opencode-manager/shared/types'
 import { showToast } from '@/lib/toast'
 
 export function useMemories(filters?: {
@@ -90,5 +94,63 @@ export function useProjectSummary(repoId: number | undefined) {
       return getProjectSummary(repoId)
     },
     enabled: repoId !== undefined,
+  })
+}
+
+export function useKvEntries(projectId?: string, prefix?: string) {
+  return useQuery({
+    queryKey: ['kvEntries', projectId, prefix],
+    queryFn: () => listKvEntries(projectId!, prefix).then(r => r.entries),
+    enabled: !!projectId,
+  })
+}
+
+export function useDeleteKvEntry() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ projectId, key }: { projectId: string; key: string }) =>
+      deleteKvEntry(projectId, key),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['kvEntries'] })
+      queryClient.invalidateQueries({ queryKey: ['projectSummary'] })
+      showToast.success('KV entry deleted')
+    },
+    onError: (error) => {
+      showToast.error(`Failed to delete KV entry: ${error}`)
+    },
+  })
+}
+
+export function useCreateKvEntry() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (data: CreateKvEntryRequest) => createKvEntry(data).then(r => r.entry),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['kvEntries'] })
+      queryClient.invalidateQueries({ queryKey: ['projectSummary'] })
+      showToast.success('KV entry created')
+    },
+    onError: (error) => {
+      showToast.error(`Failed to create KV entry: ${error}`)
+    },
+  })
+}
+
+export function useUpdateKvEntry() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ projectId, key, data }: { projectId: string; key: string; data: UpdateKvEntryRequest }) =>
+      updateKvEntry(projectId, key, data).then(r => r.entry),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['kvEntries'] })
+      queryClient.invalidateQueries({ queryKey: ['projectSummary'] })
+      showToast.success('KV entry updated')
+    },
+    onError: (error) => {
+      showToast.error(`Failed to update KV entry: ${error}`)
+    },
   })
 }

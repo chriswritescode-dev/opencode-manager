@@ -8,6 +8,8 @@ export function invalidateConfigCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
   queryClient.invalidateQueries({ queryKey: ['providers'] })
   queryClient.invalidateQueries({ queryKey: ['opencode', 'providers'] })
+  queryClient.invalidateQueries({ queryKey: ['opencode-skills'] })
+  queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
 }
 
 export function invalidateSettingsCaches(queryClient: QueryClient, userId = 'default') {

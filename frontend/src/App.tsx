@@ -7,11 +7,14 @@ import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
 import { Memories } from './pages/Memories'
+import { Schedules } from './pages/Schedules'
+import { GlobalSchedules } from './pages/GlobalSchedules'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { VersionNotifier } from './components/VersionNotifier'
+import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -70,8 +73,9 @@ function AppShell() {
   useEffect(() => {
     const channel = new BroadcastChannel('notification-click')
     channel.onmessage = (event: MessageEvent) => {
-      if (event.data?.url) {
-        navigate(event.data.url)
+      const data = event.data as { url?: string } | null | undefined
+      if (typeof data?.url === 'string') {
+        navigate(data.url)
       }
     }
     return () => channel.close()
@@ -85,6 +89,7 @@ function AppShell() {
         <SSHHostKeyDialogWrapper />
         <SettingsDialog />
         <VersionNotifier />
+        <PwaUpdatePrompt />
         <Toaster
           position="bottom-right"
           expand={false}
@@ -134,6 +139,16 @@ const router = createBrowserRouter([
       {
         path: '/repos/:id/memories',
         element: <Memories />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/repos/:id/schedules',
+        element: <Schedules />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/schedules',
+        element: <GlobalSchedules />,
         loader: protectedLoader,
       },
     ],

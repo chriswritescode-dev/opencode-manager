@@ -1,8 +1,64 @@
 import "../sw?worker";
 
+type UpdateCallback = () => void;
+
+let updateCallback: UpdateCallback | null = null;
+let updatePending = false;
+
+function notifyUpdate() {
+  if (!updateCallback) {
+    updatePending = true;
+    return;
+  }
+  updatePending = false;
+  updateCallback();
+}
+
+export function onServiceWorkerUpdate(callback: UpdateCallback): void {
+  updateCallback = callback;
+  if (updatePending) {
+    updatePending = false;
+    callback();
+  }
+}
+
+export function offServiceWorkerUpdate(): void {
+  updateCallback = null;
+}
+
 export function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {});
+
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data?.type === "SW_UPDATED") {
+      notifyUpdate();
+    }
+  });
+
+  navigator.serviceWorker.ready.then((registration) => {
+    if (registration.waiting) {
+      notifyUpdate();
+    }
+  });
+
+  navigator.serviceWorker
+    .register("/sw.js", { scope: "/" })
+    .then((registration) => {
+      registration.addEventListener("updatefound", () => {
+        const installing = registration.installing;
+        if (!installing) return;
+        installing.addEventListener("statechange", () => {
+          if (installing.state === "installed" && navigator.serviceWorker.controller) {
+            notifyUpdate();
+          }
+        });
+      });
+
+      setInterval(() => {
+        registration.update().catch(() => {});
+      }, 60 * 60 * 1000);
+    })
+    .catch(() => {});
 }
 
 export async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {

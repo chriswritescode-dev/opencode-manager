@@ -8,6 +8,7 @@ export interface Repo extends BaseRepo {
 
 interface CreateRepoInputBase {
   localPath: string
+  sourcePath?: string
   branch?: string
   defaultBranch: string
   cloneStatus: 'cloning' | 'ready' | 'error'

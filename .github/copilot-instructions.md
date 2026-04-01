@@ -3,7 +3,7 @@
 ## Technology Stack
 
 - **Monorepo**: pnpm workspace with backend, frontend, and shared packages
-- **Backend**: Bun runtime + Hono framework + Better SQLite3
+- **Backend**: Bun runtime + Hono framework + Bun SQLite (bun:sqlite)
 - **Frontend**: React 19 + Vite 7 + Radix UI + Tailwind CSS 4
 - **Validation**: Zod schemas throughout
 - **State**: React Query + Zustand

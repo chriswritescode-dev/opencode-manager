@@ -96,6 +96,7 @@ interface EventContextValue {
     hasForSession: (sessionID: string) => boolean
     showDialog: boolean
     setShowDialog: (show: boolean) => void
+    navigateToCurrent: () => void
   }
   questions: {
     current: QuestionRequest | null
@@ -157,29 +158,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const currentPermission = allPermissions[0] ?? null
   const currentQuestion = allQuestions[0] ?? null
 
-  const getRepoIdForSession = useCallback((sessionID: string): number | null => {
-    if (!repos) return null
-    
-    const cache = queryClient.getQueryCache()
-    const queries = cache.getAll()
-    
-    for (const query of queries) {
-      const key = query.queryKey
-      if (key[0] === 'opencode' && key[1] === 'session' && key.length >= 5) {
-        const sessionData = query.state.data as { id: string } | undefined
-        if (sessionData?.id === sessionID) {
-          const directory = key[4] as string | undefined
-          if (directory) {
-            const repo = repos.find(r => r.fullPath === directory)
-            if (repo) return repo.id
-          }
-        }
-      }
-    }
-    return null
-  }, [repos, queryClient])
-
-  const getClient = useCallback((sessionID: string): OpenCodeClient | null => {
+  const findSessionInCache = useCallback((sessionID: string): { url: string; directory: string } | null => {
     const cache = queryClient.getQueryCache()
     const queries = cache.getAll()
 
@@ -189,26 +168,53 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         const sessionData = query.state.data as { id: string } | undefined
         if (sessionData?.id === sessionID) {
           const url = key[2] as string
-          const directory = key[4] as string | undefined
-
-          if (!url || typeof url !== 'string') continue
-
-          const clientKey = `${url}|${directory ?? ''}`
-          let client = clientsRef.current.get(clientKey)
-          if (!client) {
-            if (clientsRef.current.size >= MAX_CACHED_CLIENTS) {
-              const firstKey = clientsRef.current.keys().next().value
-              if (firstKey) clientsRef.current.delete(firstKey)
-            }
-            client = new OpenCodeClient(url, directory)
-            clientsRef.current.set(clientKey, client)
-          }
-          return client
+          const directory = key[4] as string
+          if (url && directory) return { url, directory }
         }
       }
     }
+
+    for (const query of queries) {
+      const key = query.queryKey
+      if (key[0] === 'opencode' && key[1] === 'sessions' && key.length >= 4) {
+        const sessionsList = query.state.data as Array<{ id: string }> | undefined
+        if (!sessionsList) continue
+        const found = sessionsList.find(s => s.id === sessionID)
+        if (found) {
+          const url = key[2] as string
+          const directory = key[3] as string
+          if (url && directory) return { url, directory }
+        }
+      }
+    }
+
     return null
   }, [queryClient])
+
+  const getRepoIdForSession = useCallback((sessionID: string): number | null => {
+    if (!repos) return null
+    const result = findSessionInCache(sessionID)
+    if (!result) return null
+    const repo = repos.find(r => r.fullPath === result.directory)
+    return repo?.id ?? null
+  }, [repos, findSessionInCache])
+
+  const getClient = useCallback((sessionID: string): OpenCodeClient | null => {
+    const result = findSessionInCache(sessionID)
+    if (!result) return null
+
+    const clientKey = `${result.url}|${result.directory}`
+    let client = clientsRef.current.get(clientKey)
+    if (!client) {
+      if (clientsRef.current.size >= MAX_CACHED_CLIENTS) {
+        const firstKey = clientsRef.current.keys().next().value
+        if (firstKey) clientsRef.current.delete(firstKey)
+      }
+      client = new OpenCodeClient(result.url, result.directory)
+      clientsRef.current.set(clientKey, client)
+    }
+    return client
+  }, [findSessionInCache])
 
   const addPermission = useCallback((permission: PermissionRequest) => {
     addToSessionKeyedState(setPermissionsBySession, permission)
@@ -322,6 +328,17 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentQuestion, getRepoIdForSession, navigate, location.pathname])
 
+  const navigateToCurrentPermission = useCallback(() => {
+    if (!currentPermission) return
+    const repoId = getRepoIdForSession(currentPermission.sessionID)
+    if (repoId) {
+      const targetPath = `/repos/${repoId}/sessions/${currentPermission.sessionID}`
+      if (location.pathname !== targetPath) {
+        navigate(targetPath)
+      }
+    }
+  }, [currentPermission, getRepoIdForSession, navigate, location.pathname])
+
   const fetchInitialPendingData = useCallback(async () => {
     if (!repos || repos.length === 0) return
 
@@ -386,6 +403,28 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             })
           }
           break
+        case 'session.updated':
+          if ('info' in event.properties) {
+            const sessionInfo = event.properties.info as { id: string }
+            const cache = queryClient.getQueryCache()
+            for (const query of cache.getAll()) {
+              const key = query.queryKey
+              if (key[0] === 'opencode' && key[1] === 'sessions' && key.length >= 4) {
+                const currentList = query.state.data as Array<{ id: string }> | undefined
+                if (!currentList) continue
+                const exists = currentList.some(s => s.id === sessionInfo.id)
+                if (!exists) {
+                  queryClient.setQueryData(key, [...currentList, sessionInfo])
+                }
+              }
+            }
+          }
+          break
+        case 'lsp.updated':
+          queryClient.invalidateQueries({
+            queryKey: ['opencode', 'lsp']
+          })
+          break
       }
     }
 
@@ -438,6 +477,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       hasForSession: hasPermissionsForSession,
       showDialog: showPermissionDialog,
       setShowDialog: setShowPermissionDialog,
+      navigateToCurrent: navigateToCurrentPermission,
     },
     questions: {
       current: currentQuestion,
@@ -461,6 +501,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     getPermissionForCallID,
     hasPermissionsForSession,
     showPermissionDialog,
+    navigateToCurrentPermission,
     currentQuestion,
     allQuestions.length,
     replyToQuestion,

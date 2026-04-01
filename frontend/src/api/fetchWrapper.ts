@@ -63,6 +63,7 @@ async function fetchWithTimeout(
 
   try {
     const response = await fetch(urlObj.toString(), {
+      credentials: 'include',
       ...fetchOptions,
       signal: controller.signal,
     })

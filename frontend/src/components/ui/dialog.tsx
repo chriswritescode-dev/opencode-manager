@@ -48,6 +48,7 @@ const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         data-slot="dialog-content"
+        autoFocus={false}
         aria-describedby={undefined}
         className={cn(
           "scrollbar-thin fixed z-50 grid gap-4 border-0 sm:border border-border/70 bg-popover text-popover-foreground shadow-[0_24px_90px_-36px_color-mix(in_oklab,var(--foreground)_38%,transparent)] duration-200 supports-[backdrop-filter]:bg-popover/92 supports-[backdrop-filter]:backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
@@ -101,7 +102,7 @@ const DialogFooter = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      "flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2",
+      "flex flex-row sm:flex-row sm:justify-end sm:space-x-2 gap-2",
       className
     )}
     {...props}

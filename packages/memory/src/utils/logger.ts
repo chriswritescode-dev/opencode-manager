@@ -5,6 +5,16 @@ import type { LoggingConfig } from '../types'
 const PREFIX = '[OpenCodeManagerMemory]'
 const MAX_LOG_FILE_SIZE = 10 * 1024 * 1024
 
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .substring(0, 50)
+}
+
 function ensureLogDir(filePath: string): void {
   const dir = dirname(filePath)
   if (!existsSync(dir)) {

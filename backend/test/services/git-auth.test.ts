@@ -8,19 +8,27 @@ vi.mock('bun:sqlite', () => ({
 }))
 
 vi.mock('@opencode-manager/shared/config/env', () => ({
-  ENV: {
-    AUTH: {
-      SECRET: 'test-secret-for-encryption'
-    },
-    OPENCODE: {
-      PORT: 5551
-    },
-    SERVER: {
-      PORT: 5003
-    }
-  },
+  getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
-  getWorkspacePath: vi.fn(() => '/tmp/test-workspace')
+  getOpenCodeConfigFilePath: vi.fn(() => '/tmp/test-workspace/.config/opencode.json'),
+  getAgentsMdPath: vi.fn(() => '/tmp/test-workspace/AGENTS.md'),
+  getDatabasePath: vi.fn(() => ':memory:'),
+  getConfigPath: vi.fn(() => '/tmp/test-workspace/config'),
+  ENV: {
+    SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
+    AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
+    WORKSPACE: { BASE_PATH: '/tmp/test-workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
+    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    DATABASE: { PATH: ':memory:' },
+    FILE_LIMITS: {
+      MAX_SIZE_BYTES: 1024 * 1024,
+      MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
+    },
+  },
+  FILE_LIMITS: {
+    MAX_SIZE_BYTES: 1024 * 1024,
+    MAX_UPLOAD_SIZE_BYTES: 10 * 1024 * 1024,
+  },
 }))
 
 vi.mock('@opencode-manager/shared/config', () => ({
@@ -56,6 +64,14 @@ vi.mock('../../src/utils/ssh-key-manager', () => ({
   buildSSHCommandWithKnownHosts: vi.fn((knownHostsPath: string) => 
     `ssh -o UserKnownHostsFile="${knownHostsPath}" -o StrictHostKeyChecking=accept-new -o PasswordAuthentication=no`
   ),
+}))
+
+vi.mock('../../src/utils/crypto', () => ({
+  encryptSecret: vi.fn((s: string) => `encrypted:${s}`),
+  decryptSecret: vi.fn((s: string) => {
+    if (!s.startsWith('encrypted:')) throw new Error('Decryption failed')
+    return s.slice(10)
+  }),
 }))
 
 import { GitAuthService } from '../../src/services/git-auth'

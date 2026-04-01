@@ -32,9 +32,7 @@ echo "✅ Git is installed"
 # Check if OpenCode TUI is installed
 if ! opencode --version &> /dev/null; then
   echo "❌ OpenCode TUI is not installed. Please install it with:"
-  echo "   npm install -g @opencode/tui"
-  echo "   or"
-  echo "   bun add -g @opencode/tui"
+  echo "   curl -fsSL https://opencode.ai/install | bash"
   exit 1
 fi
 

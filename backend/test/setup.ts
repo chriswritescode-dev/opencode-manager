@@ -1,12 +1,21 @@
-import { beforeAll, afterAll, vi } from 'vitest'
+import { beforeAll, afterAll } from 'vitest'
+
+const originalEnv: Record<string, string | undefined> = {}
 
 beforeAll(() => {
-  vi.stubEnv('NODE_ENV', 'test')
-  vi.stubEnv('PORT', '3001')
-  vi.stubEnv('DATABASE_PATH', ':memory:')
-  vi.stubEnv('AUTH_SECRET', 'test-secret-for-encryption')
+  originalEnv.NODE_ENV = process.env.NODE_ENV
+  originalEnv.PORT = process.env.PORT
+  originalEnv.DATABASE_PATH = process.env.DATABASE_PATH
+  originalEnv.AUTH_SECRET = process.env.AUTH_SECRET
+  originalEnv.WORKSPACE_PATH = process.env.WORKSPACE_PATH
 })
 
 afterAll(() => {
-  vi.unstubAllEnvs()
+  for (const [key, value] of Object.entries(originalEnv)) {
+    if (value === undefined) {
+      delete process.env[key]
+    } else {
+      process.env[key] = value
+    }
+  }
 })

@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
-import { X, VolumeX, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff } from "lucide-react";
+import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
+import { X, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff, Code, Sparkles } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
@@ -34,10 +35,15 @@ import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
+import { LspStatusButton } from "@/components/repo/LspStatusButton";
+import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
+import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import { useQuestions } from "@/contexts/EventContext";
+import type { QuestionRequest } from "@/api/types";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
+import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
 import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
@@ -54,23 +60,27 @@ export function SessionDetail() {
   const navigate = useNavigate();
   const repoId = Number(id) || 0;
   const { preferences, updateSettings } = useSettings();
+  const { open: openSettings } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
   const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [lspDialogOpen, setLspDialogOpen] = useState(false);
   const [mcpDialogOpen, setMcpDialogOpen] = useState(false);
+  const [skillsDialogOpen, setSkillsDialogOpen] = useState(false);
   const [sourceControlOpen, setSourceControlOpen] = useState(false);
   const [resetPermissionsOpen, setResetPermissionsOpen] = useState(false);
   const [selectedFilePath, setSelectedFilePath] = useState<string | undefined>();
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
-  
+  const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
+
   const handleSwipeBack = useCallback(() => {
     navigate(`/repos/${repoId}`);
   }, [navigate, repoId]);
-  
+
   const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
     enabled: !fileBrowserOpen && !modelDialogOpen && !sessionsDialogOpen,
   });
@@ -78,10 +88,29 @@ export function SessionDetail() {
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
+  const promptOverlayRef = useRef<HTMLDivElement>(null);
+  const [promptOverlayHeight, setPromptOverlayHeight] = useState(112);
 
   useEffect(() => {
     return bindSwipe(pageRef.current);
   }, [bindSwipe]);
+
+  useEffect(() => {
+    const el = promptOverlayRef.current;
+    if (!el) return;
+    let mounted = true;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry && mounted) {
+        setPromptOverlayHeight(entry.contentRect.height);
+      }
+    });
+    observer.observe(el);
+    return () => {
+      mounted = false;
+      observer.disconnect();
+    };
+  }, []);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -124,22 +153,36 @@ export function SessionDetail() {
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
   const isTitleGenerating = useTitleGenerating(sessionId);
-  const { open: openSettings } = useSettingsDialog();
   const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
-  const { isPlaying, stop } = useTTS();
+  const { isEnabled: ttsEnabled } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion } = useQuestions();
 
   const sessionStatus = useSessionStatusForSession(sessionId);
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'retry';
+  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
+  const lastAssistantText = (lastAssistantMessage?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const hasActiveStream = hasIncompleteMessages && isSessionActive;
 
   const handleShowModelsDialog = useCallback(() => setModelDialogOpen(true), []);
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowHelpDialog = useCallback(() => openSettings(), [openSettings]);
+
+  const handleMinimizeQuestion = useCallback((question: QuestionRequest) => {
+    setMinimizedQuestion(question)
+  }, [])
+
+  const handleRestoreQuestion = useCallback(() => {
+    setMinimizedQuestion(null)
+  }, [])
+
+  useEffect(() => {
+    if (minimizedQuestion && minimizedQuestion.sessionID !== sessionId) {
+      setMinimizedQuestion(null)
+    }
+  }, [sessionId, minimizedQuestion])
 
   const handleNewSession = useCallback(async () => {
     try {
@@ -352,7 +395,7 @@ export function SessionDetail() {
           <Header.EditableTitle
             value={session?.title || "Untitled Session"}
             onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-warning">{getRepoDisplayName(repo.repoUrl, repo.localPath)}</span>}
+            subtitle={<span className="text-warning">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>}
             generating={isTitleGenerating}
           />
         </div>
@@ -375,6 +418,20 @@ export function SessionDetail() {
           >
             <FolderOpen className="w-4 h-4 sm:mr-2" />
             <span className="hidden sm:inline">Files</span>
+          </Button>
+          <LspStatusButton
+            opcodeUrl={opcodeUrl}
+            directory={repoDirectory}
+            onClick={() => setLspDialogOpen(true)}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setSkillsDialogOpen(true)}
+            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
+          >
+            <Sparkles className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Skills</span>
           </Button>
           <Button
             variant="outline"
@@ -422,20 +479,26 @@ export function SessionDetail() {
             <span className="hidden sm:inline">Settings</span>
           </Button>
           <Header.MobileDropdown>
+            <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
+              <FolderOpen className="w-4 h-4 mr-2" /> Files
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => navigate(`/repos/${repoId}/memories`)}>
               <Brain className="w-4 h-4 mr-2" /> Memory
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
-              <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setMcpDialogOpen(true)}>
               <Plug className="w-4 h-4 mr-2" /> MCP
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setFileBrowserOpen(true)}>
-              <FolderOpen className="w-4 h-4 mr-2" /> Files
+            <DropdownMenuItem onClick={() => setSkillsDialogOpen(true)}>
+              <Sparkles className="w-4 h-4 mr-2" /> Skills
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setLspDialogOpen(true)}>
+              <Code className="w-4 h-4 mr-2" /> LSP
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => setResetPermissionsOpen(true)}>
               <ShieldOff className="w-4 h-4 mr-2" /> Reset Permissions
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setSourceControlOpen(true)}>
+              <GitCommitHorizontal className="w-4 h-4 mr-2" /> Source Control
             </DropdownMenuItem>
           </Header.MobileDropdown>
         </Header.Actions>
@@ -444,7 +507,7 @@ export function SessionDetail() {
       <SessionTodoDisplay sessionID={sessionId} />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden pb-28 overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
           {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
@@ -462,6 +525,7 @@ export function SessionDetail() {
         </div>
         {opcodeUrl && repoDirectory && !isEditingMessage && (
           <div
+            ref={promptOverlayRef}
             className="absolute left-0 right-0 flex justify-center"
             style={{ bottom: inputBottomOffset }}
           >
@@ -486,27 +550,23 @@ export function SessionDetail() {
                   <span className="text-sm font-medium">Waiting for shortcut key...</span>
                 </div>
               )}
-              {isPlaying && !leaderActive && (
-                <button
-                  onMouseDown={(e) => e.preventDefault()}
-                  onTouchEnd={(e) => {
-                    e.preventDefault()
-                    stop()
-                  }}
-                  onClick={stop}
-                  className="absolute -top-12 left-0 z-50 flex items-center gap-2 rounded-xl border border-destructive/60 bg-destructive px-4 py-2 text-destructive-foreground shadow-2xl shadow-destructive/30 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 hover:border-destructive/80 hover:bg-destructive/92 hover:shadow-destructive/40 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite] md:left-4"
-                  aria-label="Stop Audio"
-                >
-                  <VolumeX className="w-6 h-6" />
-                  <span className="text-sm font-medium hidden sm:inline">Stop Audio</span>
-                </button>
+              {ttsEnabled && lastAssistantText && !hasPromptContent && !hasActiveStream && (
+                <FloatingTTSButton content={lastAssistantText} />
               )}
-              {currentQuestion && currentQuestion.sessionID === sessionId && (
+              {minimizedQuestion && minimizedQuestion.sessionID === sessionId && (
+                <MinimizedQuestionIndicator
+                  question={minimizedQuestion}
+                  onRestore={handleRestoreQuestion}
+                  onDismiss={() => rejectQuestion(minimizedQuestion.id)}
+                />
+              )}
+              {!minimizedQuestion && currentQuestion && currentQuestion.sessionID === sessionId && (
                 <QuestionPrompt
                   key={currentQuestion.id}
                   question={currentQuestion}
                   onReply={replyToQuestion}
                   onReject={rejectQuestion}
+                  onMinimize={() => handleMinimizeQuestion(currentQuestion)}
                 />
               )}
               <PromptInput
@@ -514,6 +574,7 @@ export function SessionDetail() {
                 opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 sessionID={sessionId}
+                repoId={repoId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton}
                 hasActiveStream={hasActiveStream}
@@ -561,9 +622,22 @@ export function SessionDetail() {
         isOpen={fileBrowserOpen}
         onClose={handleFileBrowserClose}
         basePath={repo.localPath}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
         repoId={repoId}
         initialSelectedFile={selectedFilePath}
+      />
+
+      <RepoLspDialog
+        open={lspDialogOpen}
+        onOpenChange={setLspDialogOpen}
+        opcodeUrl={opcodeUrl}
+        directory={repoDirectory}
+      />
+
+      <RepoSkillsDialog
+        open={skillsDialogOpen}
+        onOpenChange={setSkillsDialogOpen}
+        repoId={repoId}
       />
 
       <RepoMcpDialog
@@ -577,7 +651,7 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath)}
+        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
       />
 
       <ResetPermissionsDialog

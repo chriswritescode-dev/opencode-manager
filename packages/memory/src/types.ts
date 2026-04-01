@@ -59,6 +59,16 @@ export interface Logger {
   debug: (message: string, ...args: unknown[]) => void
 }
 
+export interface LoopConfig {
+  enabled?: boolean
+  defaultMaxIterations?: number
+  cleanupWorktree?: boolean
+  defaultAudit?: boolean
+  model?: string
+  stallTimeoutMs?: number
+  minAudits?: number
+}
+
 export interface PluginConfig {
   dataDir?: string
   embedding: EmbeddingConfig
@@ -68,6 +78,11 @@ export interface PluginConfig {
   memoryInjection?: MemoryInjectionConfig
   messagesTransform?: MessagesTransformConfig
   executionModel?: string
+  auditorModel?: string
+  loop?: LoopConfig
+  /** @deprecated Use `loop` instead */
+  ralph?: LoopConfig
+  defaultKvTtlMs?: number
 }
 
 export interface ListMemoriesFilter {

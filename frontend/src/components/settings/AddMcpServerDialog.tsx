@@ -179,7 +179,7 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-3xl max-h-[90vh] sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
+      <DialogContent mobileFullscreen className="sm:max-w-3xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle>Add MCP Server</DialogTitle>
         </DialogHeader>
@@ -365,13 +365,14 @@ export function AddMcpServerDialog({ open, onOpenChange, onUpdate }: AddMcpServe
           </div>
         </div>
 
-        <DialogFooter className="p-3 sm:p-4 border-t gap-2">
-          <Button variant="outline" onClick={handleClose}>
+        <DialogFooter className="p-3 sm:p-4 border-t gap-2 pb-4">
+          <Button variant="outline" onClick={handleClose} className="flex-1 sm:flex-none">
             Cancel
           </Button>
           <Button
             onClick={handleAdd}
             disabled={!serverId || isPending}
+            className="flex-1 sm:flex-none"
           >
             {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Add MCP Server

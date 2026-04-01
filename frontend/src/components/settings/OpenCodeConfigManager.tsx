@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -13,10 +13,11 @@ import { CommandsEditor } from './CommandsEditor'
 import { AgentsEditor } from './AgentsEditor'
 import { AgentsMdEditor } from './AgentsMdEditor'
 import { McpManager } from './McpManager'
+import { SkillsEditor } from './SkillsEditor'
 import { VersionSelectDialog } from './VersionSelectDialog'
 import { MemoryPluginConfig } from './MemoryPluginConfig'
 import { settingsApi } from '@/api/settings'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
@@ -62,6 +63,7 @@ export function OpenCodeConfigManager() {
     agentsMd: false,
     commands: false,
     agents: false,
+    skills: false,
     mcp: false,
   })
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
@@ -72,8 +74,15 @@ export function OpenCodeConfigManager() {
   const agentsMdRef = useRef<HTMLButtonElement>(null)
   const commandsRef = useRef<HTMLButtonElement>(null)
   const agentsRef = useRef<HTMLButtonElement>(null)
+  const skillsRef = useRef<HTMLButtonElement>(null)
   const mcpRef = useRef<HTMLButtonElement>(null)
   
+  const { data: managedSkills = [] } = useQuery({
+    queryKey: ['managed-skills'],
+    queryFn: () => settingsApi.listManagedSkills(),
+    staleTime: 5 * 60 * 1000,
+  })
+
   const scrollToSection = (ref: React.RefObject<HTMLButtonElement | null>) => {
     if (ref.current) {
       ref.current.scrollIntoView({ 
@@ -186,7 +195,8 @@ export function OpenCodeConfigManager() {
 
       const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
       const pluginsChanged = JSON.stringify(previousContent?.plugin) !== JSON.stringify(newContent.plugin)
-      if (restartServer || agentsChanged || pluginsChanged) {
+      const skillsChanged = JSON.stringify(previousContent?.skills) !== JSON.stringify(newContent.skills)
+      if (restartServer || agentsChanged || pluginsChanged || skillsChanged) {
         showToast.loading('Reloading server...', { id: 'update-restart' })
         try {
           await reloadConfigMutation.mutateAsync()
@@ -477,7 +487,7 @@ export function OpenCodeConfigManager() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle className="text-base">{config.name}</CardTitle>
+                      <CardTitle className="text-sm sm:text-base">{config.name}</CardTitle>
                       {config.isDefault && (
                         <Badge variant="success">
                           Current
@@ -559,7 +569,7 @@ export function OpenCodeConfigManager() {
           <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0 mb-6">
             <button
               ref={agentsMdRef}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+              className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.agentsMd ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
               onClick={() => {
                 const isExpanding = !expandedSections.agentsMd
                 setExpandedSections(prev => ({ ...prev, agentsMd: isExpanding }))
@@ -572,7 +582,7 @@ export function OpenCodeConfigManager() {
                 <FileText className="h-4 w-4 text-info" />
                 <h4 className="text-sm font-medium truncate">Global Agent Instructions (AGENTS.md)</h4>
               </div>
-              <Edit className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
+              <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
             </button>
             <div className={`${expandedSections.agentsMd ? 'block' : 'hidden'} border-t border-border`}>
               <div className="p-4">
@@ -581,7 +591,7 @@ export function OpenCodeConfigManager() {
             </div>
           </div>
 
-          <h3 className="text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
+          <h3 className="text-base sm:text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
           <p className="text-sm text-muted-foreground mb-6">
             Add custom commands, agents, and MCP servers to your OpenCode configurations. Select a configuration below to edit its settings.
           </p>
@@ -589,7 +599,7 @@ export function OpenCodeConfigManager() {
           {configs.length > 0 && (
             <div className="space-y-6">
               <div className='px-1'>
-                <Label className="text-base font-medium">Select Configuration to Edit</Label>
+                <Label className="text-sm sm:text-base font-medium">Select Configuration to Edit</Label>
                 <Select 
                   onValueChange={(value) => {
                     const config = configs.find(c => c.name === value)
@@ -616,7 +626,7 @@ export function OpenCodeConfigManager() {
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={commandsRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.commands ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.commands
                           setExpandedSections(prev => ({ ...prev, commands: isExpanding }))
@@ -632,7 +642,7 @@ export function OpenCodeConfigManager() {
                             {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length} configured
                           </span>
                         </div>
-                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-1 sm:p-4 max-h-[50vh] overflow-y-auto">
@@ -653,7 +663,7 @@ export function OpenCodeConfigManager() {
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={agentsRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.agents ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.agents
                           setExpandedSections(prev => ({ ...prev, agents: isExpanding }))
@@ -669,7 +679,7 @@ export function OpenCodeConfigManager() {
                             {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length} configured
                           </span>
                         </div>
-                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-4 max-h-[50vh] overflow-y-auto">
@@ -689,8 +699,47 @@ export function OpenCodeConfigManager() {
 
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
+                        ref={skillsRef}
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.skills ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
+                        onClick={() => {
+                          const isExpanding = !expandedSections.skills
+                          setExpandedSections(prev => ({ ...prev, skills: isExpanding }))
+                          if (isExpanding) {
+                            setTimeout(() => scrollToSection(skillsRef), 100)
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <h4 className="text-sm font-medium truncate">Skills</h4>
+                          <span className="text-xs text-muted-foreground">
+                            {managedSkills.length + (selectedConfig.content?.skills?.paths?.length ?? 0) + (selectedConfig.content?.skills?.urls?.length ?? 0)} configured
+                          </span>
+                        </div>
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.skills ? 'rotate-90' : ''}`} />
+                      </button>
+                        <div className={`${expandedSections.skills ? 'block' : 'hidden'} border-t border-border`}>
+                          <div className="p-4 max-h-[50vh] overflow-y-auto">
+                            <SkillsEditor
+                              skills={selectedConfig.content?.skills}
+                              managedSkills={managedSkills}
+                              onChange={(skills) => {
+                                const paths = skills?.paths?.filter(Boolean)
+                                const urls = skills?.urls?.filter(Boolean)
+                                const updatedContent = {
+                                  ...selectedConfig.content,
+                                  skills: (paths?.length || urls?.length) ? { paths: paths?.length ? paths : undefined, urls: urls?.length ? urls : undefined } : undefined
+                                }
+                                updateConfigContent(selectedConfig.name, updatedContent)
+                              }}
+                            />
+                          </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
+                      <button
                         ref={mcpRef}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors min-w-0"
+                        className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.mcp ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}
                         onClick={() => {
                           const isExpanding = !expandedSections.mcp
                           setExpandedSections(prev => ({ ...prev, mcp: isExpanding }))
@@ -706,7 +755,7 @@ export function OpenCodeConfigManager() {
                             {Object.keys((selectedConfig.content?.mcp as Record<string, unknown> | undefined) ?? {}).length} configured
                           </span>
                         </div>
-                        <Edit className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
+                        <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.mcp ? 'block' : 'hidden'} border-t border-border`}>
                         <div className="p-4 max-h-[50vh] overflow-y-auto">

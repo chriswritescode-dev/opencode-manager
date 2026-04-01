@@ -1,5 +1,6 @@
 import { spawn, execSync } from 'child_process'
 import path from 'path'
+import { promises as fs } from 'fs'
 import { logger } from '../utils/logger'
 import { createGitEnv, createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
 import type { GitCredential } from '@opencode-manager/shared'
@@ -21,10 +22,13 @@ import { compareVersions } from '../utils/version-utils'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
-const OPENCODE_SERVER_DIRECTORY = getWorkspacePath()
-const OPENCODE_CONFIG_PATH = getOpenCodeConfigFilePath()
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
+
+// Helper getters to ensure values are computed at runtime (not module load time)
+// This allows proper mocking in tests
+const getOpenCodeServerDirectory = () => getWorkspacePath()
+const getOpenCodeConfigPath = () => getOpenCodeConfigFilePath()
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
@@ -46,6 +50,14 @@ class OpenCodeServerManager {
       OpenCodeServerManager.instance = new OpenCodeServerManager()
     }
     return OpenCodeServerManager.instance
+  }
+
+  /**
+   * Test-only method to reset the singleton instance.
+   * Should only be used in test setup/teardown.
+   */
+  static resetInstance(): void {
+    OpenCodeServerManager.instance = null as unknown as OpenCodeServerManager
   }
 
   async start(): Promise<void> {
@@ -109,8 +121,10 @@ class OpenCodeServerManager {
       }
     }
 
-    logger.info(`OpenCode server working directory: ${OPENCODE_SERVER_DIRECTORY}`)
-    logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(OPENCODE_SERVER_DIRECTORY, '.config')}`)
+    const openCodeServerDirectory = getOpenCodeServerDirectory()
+    const openCodeConfigPath = getOpenCodeConfigPath()
+    logger.info(`OpenCode server working directory: ${openCodeServerDirectory}`)
+    logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(openCodeServerDirectory, '.config')}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
 
     const gitEnv = createGitEnv(gitCredentials)
@@ -160,13 +174,15 @@ class OpenCodeServerManager {
 
     logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
+    await this.initializeOpencodeBinDirectory()
+
     let stderrOutput = ''
 
     this.serverProcess = spawn(
       'opencode',
       ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', OPENCODE_SERVER_HOST],
       {
-        cwd: OPENCODE_SERVER_DIRECTORY,
+        cwd: openCodeServerDirectory,
         detached: !isDevelopment,
         stdio: isDevelopment ? 'inherit' : ['ignore', 'pipe', 'pipe'],
         env: {
@@ -174,9 +190,9 @@ class OpenCodeServerManager {
           ...gitEnv,
           ...gitIdentityEnv,
           GIT_SSH_COMMAND: gitSshCommand,
-          XDG_DATA_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.opencode/state'),
-          XDG_CONFIG_HOME: path.join(OPENCODE_SERVER_DIRECTORY, '.config'),
-          OPENCODE_CONFIG: OPENCODE_CONFIG_PATH,
+          XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
+          XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
+          OPENCODE_CONFIG: openCodeConfigPath,
         }
       }
     )
@@ -261,6 +277,46 @@ class OpenCodeServerManager {
     }
   }
 
+  private async initializeOpencodeBinDirectory(): Promise<void> {
+    const binDir = path.join(
+      getOpenCodeServerDirectory(),
+      '.opencode',
+      'state',
+      'opencode',
+      'bin'
+    )
+
+    const packageJsonPath = path.join(binDir, 'package.json')
+
+    try {
+      await fs.mkdir(binDir, { recursive: true })
+
+      const packageJsonExists = await fs.access(packageJsonPath)
+        .then(() => true)
+        .catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') return false
+          throw error
+        })
+
+      if (!packageJsonExists) {
+        try {
+          execSync('bun init -y', {
+            cwd: binDir,
+            stdio: 'inherit',
+            timeout: 30000
+          })
+          logger.info('OpenCode bin directory initialized successfully')
+        } catch (error) {
+          logger.error('bun init failed:', error)
+          throw new Error(`bun init failed: ${error}`)
+        }
+      }
+
+    } catch (error) {
+      logger.error('Failed to initialize OpenCode bin directory:', error)
+    }
+  }
+
   async restart(): Promise<void> {
     logger.info('Restarting OpenCode server (full process restart)')
     await this.stop()
@@ -328,6 +384,11 @@ class OpenCodeServerManager {
     this.lastStartupError = null
   }
 
+  async reinitializeBinDirectory(): Promise<void> {
+    logger.info('Reinitializing OpenCode bin directory')
+    await this.initializeOpencodeBinDirectory()
+  }
+
   async checkHealth(): Promise<boolean> {
     try {
       const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
@@ -375,3 +436,4 @@ class OpenCodeServerManager {
 }
 
 export const opencodeServerManager = OpenCodeServerManager.getInstance()
+export { OpenCodeServerManager }

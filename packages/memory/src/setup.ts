@@ -1,37 +1,53 @@
 import { readFileSync, existsSync, mkdirSync, copyFileSync } from 'fs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
+import { homedir, platform } from 'os'
 import { resolveDataDir, resolveLogPath } from './storage'
 import type { PluginConfig, EmbeddingConfig } from './types'
+import { parse as parseJsoncLib, type ParseError } from 'jsonc-parser'
 
 function resolveBundledConfigPath(): string {
   const pluginDir = dirname(fileURLToPath(import.meta.url))
-  return join(pluginDir, '..', 'config.json')
+  return join(pluginDir, '..', 'config.jsonc')
+}
+
+function resolveConfigDir(): string {
+  const defaultBase = join(homedir(), platform() === 'win32' ? 'AppData' : '.config')
+  const xdgConfigHome = process.env['XDG_CONFIG_HOME'] || defaultBase
+  return join(xdgConfigHome, 'opencode')
 }
 
 export function resolveConfigPath(): string {
+  return join(resolveConfigDir(), 'memory-config.jsonc')
+}
+
+function resolveOldConfigPath(): string {
   const dataDir = resolveDataDir()
-  return `${dataDir}/config.json`
+  return join(dataDir, 'config.json')
 }
 
 function ensureGlobalConfig(): void {
-  const dataDir = resolveDataDir()
-  const globalConfigPath = resolveConfigPath()
+  const configDir = resolveConfigDir()
+  const newConfigPath = resolveConfigPath()
 
-  if (existsSync(globalConfigPath)) {
+  if (existsSync(newConfigPath)) {
+    return
+  }
+
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true })
+  }
+
+  const oldConfigPath = resolveOldConfigPath()
+  if (existsSync(oldConfigPath)) {
+    copyFileSync(oldConfigPath, newConfigPath)
     return
   }
 
   const bundledConfigPath = resolveBundledConfigPath()
-  if (!existsSync(bundledConfigPath)) {
-    return
+  if (existsSync(bundledConfigPath)) {
+    copyFileSync(bundledConfigPath, newConfigPath)
   }
-
-  if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true })
-  }
-
-  copyFileSync(bundledConfigPath, globalConfigPath)
 }
 
 function getDefaultEmbeddingConfig(): EmbeddingConfig {
@@ -72,6 +88,18 @@ function isValidPluginConfig(config: unknown): config is PluginConfig {
   return true
 }
 
+function parseJsonc<T = unknown>(content: string): T {
+  const errors: ParseError[] = []
+  const result = parseJsoncLib(content, errors, {
+    allowTrailingComma: true,
+    disallowComments: false,
+  })
+  if (errors.length > 0) {
+    throw new SyntaxError(`Invalid JSONC at offset ${errors[0]!.offset}`)
+  }
+  return result as T
+}
+
 export function loadPluginConfig(): PluginConfig {
   ensureGlobalConfig()
   
@@ -83,8 +111,7 @@ export function loadPluginConfig(): PluginConfig {
 
   try {
     const content = readFileSync(configPath, 'utf-8')
-    const sanitized = sanitizeJson(content)
-    const parsed = JSON.parse(sanitized)
+    const parsed = parseJsonc(content)
 
     if (!isValidPluginConfig(parsed)) {
       console.warn(`[memory] Invalid config at ${configPath}, using defaults`)
@@ -99,13 +126,10 @@ export function loadPluginConfig(): PluginConfig {
   }
 }
 
-function sanitizeJson(raw: string): string {
-  return raw.replace(/,(\s*[}\]])/g, '$1')
-}
-
 function normalizeConfig(config: PluginConfig): PluginConfig {
   const normalized: PluginConfig = {
     dataDir: config.dataDir,
+    defaultKvTtlMs: config.defaultKvTtlMs,
     embedding: config.embedding,
     dedupThreshold: config.dedupThreshold,
     logging: config.logging,
@@ -113,6 +137,12 @@ function normalizeConfig(config: PluginConfig): PluginConfig {
     memoryInjection: config.memoryInjection,
     messagesTransform: config.messagesTransform,
     executionModel: config.executionModel,
+    auditorModel: config.auditorModel,
+    loop: config.loop ?? config.ralph,
+  }
+  
+  if (config.ralph && !config.loop) {
+    console.warn('[memory] Config key "ralph" is deprecated, use "loop" instead')
   }
   
   if (normalized.embedding) {

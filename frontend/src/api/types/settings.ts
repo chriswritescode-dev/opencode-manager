@@ -7,10 +7,14 @@ import {
   type TTSConfig,
   type STTConfig,
   type OpenCodeConfigContent,
+  type SkillFileInfo,
+  type CreateSkillRequest,
+  type UpdateSkillRequest,
+  type SkillScope,
 } from '@opencode-manager/shared'
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 
-export type { TTSConfig, STTConfig, OpenCodeConfigContent, NotificationPreferences }
+export type { TTSConfig, STTConfig, OpenCodeConfigContent, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope }
 export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY }
 
 export interface CustomCommand {

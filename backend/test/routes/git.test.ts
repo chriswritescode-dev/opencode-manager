@@ -5,6 +5,7 @@ import { getRepoById } from '../../src/db/queries'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '../../../shared/src/types'
 import type { GitAuthService } from '../../src/services/git-auth'
+import type { ScheduleService } from '../../src/services/schedules'
 
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
@@ -58,7 +59,7 @@ describe('Git Routes', () => {
     mockGitAuthService = {
       getGitEnvironment: vi.fn().mockReturnValue({}),
     } as unknown as GitAuthService
-    app = createRepoRoutes(mockDatabase, mockGitAuthService)
+    app = createRepoRoutes(mockDatabase, mockGitAuthService, {} as unknown as ScheduleService)
   })
 
   describe('GET /:id/git/status', () => {
@@ -77,6 +78,20 @@ describe('Git Routes', () => {
       const body = await response.json()
 
       expect(response.status).toBe(500)
+      expect(body).toHaveProperty('error')
+    })
+  })
+
+  describe('POST /discover', () => {
+    it('should reject invalid maxDepth values', async () => {
+      const response = await app.request('/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rootPath: '/Users/test/projects', maxDepth: 99 }),
+      })
+      const body = await response.json()
+
+      expect(response.status).toBe(400)
       expect(body).toHaveProperty('error')
     })
   })

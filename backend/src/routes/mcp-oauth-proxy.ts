@@ -5,9 +5,8 @@ import path from 'path'
 import { readFile, writeFile, mkdir } from 'fs/promises'
 import { storeMcpOAuthFlow, consumeMcpOAuthFlow, deleteMcpOAuthFlow, markMcpOAuthFlowCompleted, markMcpOAuthFlowFailed, getMcpOAuthFlowResult } from '../services/mcp-oauth-state'
 import { logger } from '../utils/logger'
-import { getWorkspacePath, ENV } from '@opencode-manager/shared/config/env'
-
-const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { OPENCODE_SERVER_URL } from '../services/proxy'
 
 const StartSchema = z.object({
   serverName: z.string(),

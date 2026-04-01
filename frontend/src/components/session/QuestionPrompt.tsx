@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { X, ChevronLeft, ChevronRight, Check, Loader2 } from 'lucide-react'
+import { X, ChevronRight, ChevronDown, ChevronUp, Check, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import type { QuestionRequest, QuestionInfo } from '@/api/types'
@@ -10,19 +10,45 @@ interface QuestionPromptProps {
   question: QuestionRequest
   onReply: (requestID: string, answers: string[][]) => Promise<void>
   onReject: (requestID: string) => Promise<void>
+  onMinimize?: () => void
 }
 
-export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptProps) {
+export function QuestionPrompt({ question, onReply, onReject, onMinimize }: QuestionPromptProps) {
   const questions = question.questions
   const isSingleSelect = questions.length === 1 && !questions[0]?.multiple
   const totalSteps = isSingleSelect ? 1 : questions.length + 1
 
+  const [isMinimized, setIsMinimized] = useState(false)
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<string[][]>(() => questions.map(() => []))
   const [customInputs, setCustomInputs] = useState<string[]>(() => questions.map(() => ''))
   const [confirmedCustoms, setConfirmedCustoms] = useState<string[]>(() => questions.map(() => ''))
   const [expandedOther, setExpandedOther] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [touchStartY, setTouchStartY] = useState<number | null>(null)
+
+  const handleMinimize = useCallback(() => {
+    setIsMinimized(true)
+    onMinimize?.()
+  }, [onMinimize])
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    setTouchStartY(e.touches[0].clientY)
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (touchStartY === null) return
+    const touchY = e.touches[0].clientY
+    const diff = touchY - touchStartY
+    if (diff > 100) {
+      handleMinimize()
+      setTouchStartY(null)
+    }
+  }, [touchStartY, handleMinimize])
+
+  const handleTouchEnd = useCallback(() => {
+    setTouchStartY(null)
+  }, [])
 
   const isConfirmStep = !isSingleSelect && currentIndex === questions.length
   const currentQuestion = isConfirmStep ? null : questions[currentIndex]
@@ -34,13 +60,6 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
       setExpandedOther(null)
     }
   }, [currentIndex, totalSteps])
-
-  const goToPrev = useCallback(() => {
-    if (currentIndex > 0) {
-      setCurrentIndex(prev => prev - 1)
-      setExpandedOther(null)
-    }
-  }, [currentIndex])
 
   const handleSubmitSingle = useCallback(async (label: string) => {
     setIsSubmitting(true)
@@ -177,94 +196,73 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
 
   const allQuestionsAnswered = questions.every((_, i) => hasAnswerForQuestion(i))
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isMinimized && !expandedOther) {
+        handleMinimize()
+        onMinimize?.()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [isMinimized, expandedOther, handleMinimize, onMinimize])
+
   return (
-    <div 
-      className="surface-panel mb-3 w-full overflow-hidden rounded-2xl border-info/25 bg-info/10"
-    >
-      <div className="flex items-center justify-between border-b border-info/20 bg-info/8 px-2 py-1.5 sm:px-3 sm:py-2">
-        <div className="flex items-center gap-2">
-          {totalSteps > 1 && (
-            <button
-              onClick={goToPrev}
-              disabled={currentIndex === 0}
-              className="rounded p-0.5 transition-colors hover:bg-primary/12 disabled:cursor-not-allowed disabled:opacity-30 sm:p-1"
-            >
-              <ChevronLeft className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
-            </button>
-          )}
-          <span className="text-xs font-semibold text-primary sm:text-sm">
-            {isConfirmStep ? 'Review' : (
-              totalSteps > 1 
-                ? `Question ${currentIndex + 1}/${questions.length}` 
-                : (currentQuestion?.header || 'Question')
-            )}
-          </span>
-          {totalSteps > 1 && (
-            <button
-              onClick={goToNext}
-              disabled={currentIndex === totalSteps - 1}
-              className="rounded p-0.5 transition-colors hover:bg-primary/12 disabled:cursor-not-allowed disabled:opacity-30 sm:p-1"
-            >
-              <ChevronRight className="h-3.5 w-3.5 text-primary sm:h-4 sm:w-4" />
-            </button>
-          )}
-        </div>
+    <div className="surface-panel mb-1 w-full overflow-hidden rounded-2xl border-info/25 bg-info/10 shadow-lg shadow-info/10">
+      <div className="flex items-center border-b border-info/20 bg-info/8 px-3 py-2 sm:px-4 sm:py-2.5">
+        <button
+          onClick={() => isMinimized ? setIsMinimized(false) : handleMinimize()}
+          className="flex flex-1 items-center gap-1.5 text-left text-xs font-semibold text-primary sm:text-sm"
+        >
+          {isMinimized
+            ? <ChevronUp className="h-3 w-3 flex-shrink-0 opacity-60" />
+            : <ChevronDown className="h-3 w-3 flex-shrink-0 opacity-60" />
+          }
+          {isConfirmStep ? 'Review' : (currentQuestion?.header || 'Question')}
+        </button>
         <button
           onClick={handleReject}
           disabled={isSubmitting}
-          className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-destructive/12 hover:text-destructive sm:p-1.5"
+          className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-destructive/12 hover:text-destructive sm:p-2"
         >
           <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </button>
       </div>
 
-      <div className="scrollbar-thin max-h-[50vh] overflow-y-auto overflow-x-hidden bg-background/60 p-2 sm:max-h-[70vh] sm:p-3 dark:bg-black/30">
-        {isConfirmStep ? (
-          <ConfirmStep 
-            questions={questions} 
-            answers={answers} 
-            onEditQuestion={setCurrentIndex}
-          />
-        ) : currentQuestion && (
-          <QuestionStep
-            question={currentQuestion}
-            answers={answers[currentIndex] ?? []}
-            customInput={customInputs[currentIndex] ?? ''}
-            confirmedCustom={confirmedCustoms[currentIndex] ?? ''}
-            expandedOther={expandedOther === currentIndex}
-            isMultiSelect={isMultiSelect}
-            onSelectOption={(label) => selectOption(currentIndex, label)}
-            onExpandOther={() => handleExpandOther(currentIndex)}
-            onCustomInputChange={(value) => handleCustomInput(currentIndex, value)}
-            onConfirmCustomInput={() => confirmCustomInput(currentIndex)}
-            onCollapseOther={() => setExpandedOther(null)}
-          />
-        )}
-      </div>
-
-      {totalSteps > 1 && (
-        <div className="flex justify-center gap-1 border-t border-info/20 py-1.5 sm:gap-1.5 sm:py-2">
-          {Array.from({ length: totalSteps }).map((_, i) => (
-            <button
-              key={i}
-              onClick={() => {
-                setCurrentIndex(i)
-                setExpandedOther(null)
-              }}
-              className={cn(
-                "w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full transition-all duration-200",
-                i === currentIndex 
-                  ? "bg-primary scale-125" 
-                  : i < questions.length && hasAnswerForQuestion(i)
-                    ? "bg-success/70 hover:bg-success"
-                    : "bg-primary/30 hover:bg-primary/50"
-              )}
+      {!isMinimized ? (
+        <div
+          className="scrollbar-thin max-h-[50vh] overflow-y-auto overflow-x-hidden bg-background/60 p-2 sm:max-h-[70vh] sm:p-3 dark:bg-black/30"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          {isConfirmStep ? (
+            <ConfirmStep
+              questions={questions}
+              answers={answers}
+              onEditQuestion={setCurrentIndex}
             />
-          ))}
+          ) : currentQuestion && (
+            <QuestionStep
+              question={currentQuestion}
+              answers={answers[currentIndex] ?? []}
+              customInput={customInputs[currentIndex] ?? ''}
+              confirmedCustom={confirmedCustoms[currentIndex] ?? ''}
+              expandedOther={expandedOther === currentIndex}
+              isMultiSelect={isMultiSelect}
+              onSelectOption={(label) => selectOption(currentIndex, label)}
+              onExpandOther={() => handleExpandOther(currentIndex)}
+              onCustomInputChange={(value) => handleCustomInput(currentIndex, value)}
+              onConfirmCustomInput={() => confirmCustomInput(currentIndex)}
+              onCollapseOther={() => setExpandedOther(null)}
+            />
+          )}
         </div>
-      )}
+      ) : null}
 
-      <div className="flex gap-1.5 sm:gap-2 px-2 py-2 sm:px-3 sm:py-3">
+      <div className="flex gap-1.5 border-t border-info/20 px-2 py-2 sm:gap-2 sm:px-3 sm:py-3">
         <Button
           size="sm"
           onClick={handleReject}
@@ -279,7 +277,7 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
               size="sm"
               onClick={handleSubmit}
               disabled={isSubmitting || !allQuestionsAnswered}
-              className="h-8 flex-1 bg-success text-success-foreground hover:bg-success/90 sm:h-10 sm:text-sm text-xs"
+              className="h-8 flex-1 bg-success text-success-foreground hover:bg-success/90 text-xs sm:h-10 sm:text-sm"
             >
               {isSubmitting ? (
                 <Loader2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin" />
@@ -291,12 +289,10 @@ export function QuestionPrompt({ question, onReply, onReject }: QuestionPromptPr
             <Button
               size="sm"
               onClick={handleNext}
-              disabled={currentIndex === totalSteps - 1 || (expandedOther === currentIndex && !customInputs[currentIndex]?.trim())}
-              className="h-8 flex-1 bg-success text-success-foreground hover:bg-success/90 sm:h-10 sm:text-sm text-xs"
+              disabled={isSubmitting || (expandedOther === currentIndex && !customInputs[currentIndex]?.trim())}
+              className="h-8 flex-1 bg-success text-success-foreground hover:bg-success/90 text-xs sm:h-10 sm:text-sm"
             >
-              <span className="hidden sm:inline">{expandedOther === currentIndex ? 'Confirm' : (currentIndex === questions.length - 1 ? 'Review' : 'Next')}</span>
-              <span className="sm:hidden">{expandedOther === currentIndex ? 'OK' : (currentIndex === questions.length - 1 ? 'Review' : '→')}</span>
-              <ChevronRight className="hidden sm:block w-4 h-4 ml-1" />
+              {expandedOther === currentIndex ? 'Confirm' : 'Next'}
             </Button>
           )
         )}

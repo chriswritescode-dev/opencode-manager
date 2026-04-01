@@ -1,16 +1,13 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { proxyRequest } from '../services/proxy'
+import { proxyRequest, OPENCODE_SERVER_URL } from '../services/proxy'
 import { logger } from '../utils/logger'
-import { ENV } from '@opencode-manager/shared/config/env'
 import {
   OAuthAuthorizeRequestSchema,
   OAuthAuthorizeResponseSchema,
   OAuthCallbackRequestSchema
 } from '../../../shared/src/schemas/auth'
 import { opencodeServerManager } from '../services/opencode-single-server'
-
-const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
 
 export function createOAuthRoutes() {
   const app = new Hono()

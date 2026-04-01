@@ -173,7 +173,7 @@ function HeaderActions({ children, className }: { children: ReactNode; className
 
 function HeaderMobileDropdown({ children, className }: { children: ReactNode; className?: string }) {
   const isMobile = useMobile();
-  const { pendingCount: permissionCount, setShowDialog } = usePermissions();
+  const { pendingCount: permissionCount, setShowDialog, navigateToCurrent: navigateToPermission } = usePermissions();
   const { pendingCount: questionCount, navigateToCurrent } = useQuestions();
   const { open } = useSettingsDialog();
 
@@ -200,10 +200,10 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {permissionCount > 0 && (
-          <DropdownMenuItem onClick={() => setShowDialog(true)} className="gap-2">
-            <Bell className="w-4 h-4 text-warning" />
+        <DropdownMenuContent align="end">
+          {permissionCount > 0 && (
+            <DropdownMenuItem onClick={() => { navigateToPermission(); setShowDialog(true); }} className="gap-2">
+              <Bell className="w-4 h-4 text-warning" />
             <span>{permissionCount} pending permission{permissionCount > 1 ? 's' : ''}</span>
           </DropdownMenuItem>
         )}
@@ -216,7 +216,7 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
         {totalPending > 0 && children && <DropdownMenuSeparator />}
         {children}
         {children && <DropdownMenuSeparator />}
-        <DropdownMenuItem onClick={open} className="gap-2">
+        <DropdownMenuItem onClick={open} className="gap-2 bg-muted">
           <Settings className="w-4 h-4" />
           <span>Settings</span>
         </DropdownMenuItem>

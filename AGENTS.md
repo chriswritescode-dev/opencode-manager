@@ -3,11 +3,11 @@
 ## Commands
 
 - `pnpm dev` - Start both backend (5003) and frontend (5173)
-- `pnpm dev:backend` - Backend only: `bun --watch backend/src/index.ts`
-- `pnpm dev:frontend` - Frontend only: `cd frontend && vite`
+- `pnpm dev:backend` - Backend only: `bun --watch-path backend/src --watch backend/src/index.ts`
+- `pnpm dev:frontend` - Frontend only: `pnpm --filter frontend dev`
 - `pnpm build` - Build both backend and frontend
-- `pnpm test` - Run backend tests: `cd backend && bun test`
-- `cd backend && bun test <filename>` - Run single test file
+- `pnpm test` - Run backend tests: `pnpm --filter backend test` (vitest)
+- `cd backend && vitest <filename>` - Run single test file
 - `cd backend && vitest --ui` - Test UI with coverage
 - `cd backend && vitest --coverage` - Coverage report (80% threshold)
 - `pnpm lint` - Lint both backend and frontend
@@ -23,7 +23,7 @@
 
 ### Backend (Bun + Hono)
 
-- Hono framework with Zod validation, Better SQLite3 database
+- Hono framework with Zod validation, Bun SQLite (bun:sqlite) database
 - Error handling with try/catch and structured logging
 - Follow existing route/service/utility structure
 - Use async/await consistently, avoid .then() chains

@@ -9,6 +9,9 @@ Docker is the fastest way to get started and recommended for production use.
 ```bash
 git clone https://github.com/chriswritescode-dev/opencode-manager.git
 cd opencode-manager
+cp .env.example .env
+# Generate AUTH_SECRET and add to .env
+echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
 docker-compose up -d
 ```
 

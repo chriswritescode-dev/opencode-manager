@@ -3,6 +3,7 @@ import { useMemo, useRef, useEffect, useCallback, useState } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { API_BASE_URL } from "../config";
 import { fetchWrapper } from "../api/fetchWrapper";
+import { cancelLoop } from "../api/memory";
 import type {
   Message,
   Part,
@@ -421,7 +422,8 @@ const MAX_ABORT_RETRIES = 10;
 export const useAbortSession = (
   opcodeUrl: string | null | undefined,
   directory?: string,
-  sessionID?: string
+  sessionID?: string,
+  repoId?: number
 ) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
@@ -540,6 +542,10 @@ export const useAbortSession = (
       };
 
       attemptAbort();
+
+      if (repoId) {
+        cancelLoop(repoId, targetSessionID).catch(() => {})
+      }
 
       retryIntervalRef.current = setInterval(() => {
         retryCountRef.current++;

@@ -7,11 +7,17 @@ import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import {
+  normalizeToBaseUrl,
+  ensureDiscoveryCacheDir,
+  getCachedDiscovery,
+  cacheDiscovery,
+  generateDiscoveryCacheKey,
+  fetchAvailableModels,
+} from '../utils/discovery-cache'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
-const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'discovery')
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000
-const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000
 const MAX_CACHE_SIZE_MB = 200
 const MAX_CACHE_SIZE_BYTES = MAX_CACHE_SIZE_MB * 1024 * 1024
 
@@ -25,19 +31,8 @@ function generateCacheKey(text: string, voice: string, model: string, speed: num
   return hash.digest('hex')
 }
 
-function normalizeToBaseUrl(endpoint: string): string {
-  return endpoint
-    .replace(/\/v1\/audio\/speech$/, '')
-    .replace(/\/audio\/speech$/, '')
-    .replace(/\/$/, '')
-}
-
 async function ensureCacheDir(): Promise<void> {
   await mkdir(TTS_CACHE_DIR, { recursive: true })
-}
-
-async function ensureDiscoveryCacheDir(): Promise<void> {
-  await mkdir(DISCOVERY_CACHE_DIR, { recursive: true })
 }
 
 async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
@@ -117,80 +112,7 @@ async function cacheAudio(cacheKey: string, audioData: Buffer): Promise<void> {
   await writeFile(filePath, audioData)
 }
 
-async function getCachedDiscovery(cacheKey: string): Promise<string[] | null> {
-  try {
-    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
-    const fileStat = await stat(filePath)
-    
-    if (Date.now() - fileStat.mtimeMs > DISCOVERY_CACHE_TTL_MS) {
-      await unlink(filePath)
-      return null
-    }
-    
-    const content = await readFile(filePath, 'utf-8')
-    return JSON.parse(content)
-  } catch {
-    return null
-  }
-}
 
-async function cacheDiscovery(cacheKey: string, data: string[]): Promise<void> {
-  try {
-    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
-    await writeFile(filePath, JSON.stringify(data))
-  } catch (error) {
-    logger.error(`Failed to cache discovery data for ${cacheKey}:`, error)
-  }
-}
-
-function generateDiscoveryCacheKey(endpoint: string, apiKey: string, type: 'models' | 'voices'): string {
-  const hash = createHash('sha256')
-  hash.update(`${endpoint}|${apiKey.substring(0, 8)}|${type}`)
-  return hash.digest('hex')
-}
-
-async function fetchAvailableModels(endpoint: string, apiKey: string): Promise<string[]> {
-  const baseUrl = normalizeToBaseUrl(endpoint)
-  const endpointVariations = [
-    `${baseUrl}/v1/models`,
-    `${baseUrl}/models`,
-  ]
-  
-  for (const modelEndpoint of endpointVariations) {
-    try {
-      const response = await fetch(modelEndpoint, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      })
-      
-      if (response.ok) {
-        const data = await response.json() as { data?: { id?: string }[] } | unknown[]
-        
-        // Handle different response formats
-        if ('data' in data && Array.isArray(data.data)) {
-          // OpenAI format: { data: [{ id: "gpt-4" }, ...] }
-          return data.data
-            .filter((model) => model.id && typeof model.id === 'string')
-            .filter((model) => 
-              model.id!.toLowerCase().includes('tts') || 
-              model.id!.toLowerCase().includes('audio') ||
-              model.id!.toLowerCase().includes('speech')
-            )
-            .map((model) => model.id!)
-        } else if (Array.isArray(data)) {
-          return data.filter((item): item is string => typeof item === 'string')
-        }
-      }
-    } catch (error) {
-      logger.warn(`Failed to fetch models from ${modelEndpoint}:`, error)
-      continue
-    }
-  }
-  
-  return ['tts-1', 'tts-1-hd']
-}
 
 async function fetchAvailableVoices(endpoint: string, apiKey: string): Promise<string[]> {
   const baseUrl = normalizeToBaseUrl(endpoint)
@@ -439,7 +361,7 @@ export function createTTSRoutes(db: Database) {
       
       // Check cache first (unless force refresh)
       if (!forceRefresh) {
-        const cachedModels = await getCachedDiscovery(cacheKey)
+        const cachedModels = await getCachedDiscovery<string[]>(cacheKey)
         if (cachedModels) {
           logger.info(`Models cache hit for user ${userId}`)
           return c.json({ models: cachedModels, cached: true })
@@ -450,7 +372,12 @@ export function createTTSRoutes(db: Database) {
       await ensureDiscoveryCacheDir()
       logger.info(`Fetching TTS models for user ${userId}`)
       
-      const models = await fetchAvailableModels(ttsConfig.endpoint, ttsConfig.apiKey)
+      const models = await fetchAvailableModels(
+        ttsConfig.endpoint,
+        ttsConfig.apiKey,
+        /tts|audio|speech/,
+        ['tts-1', 'tts-1-hd'],
+      )
       await cacheDiscovery(cacheKey, models)
       
       // Update user preferences with available models
@@ -487,7 +414,7 @@ export function createTTSRoutes(db: Database) {
       
       // Check cache first (unless force refresh)
       if (!forceRefresh) {
-        const cachedVoices = await getCachedDiscovery(cacheKey)
+        const cachedVoices = await getCachedDiscovery<string[]>(cacheKey)
         if (cachedVoices) {
           logger.info(`Voices cache hit for user ${userId}`)
           return c.json({ voices: cachedVoices, cached: true })

@@ -26,5 +26,15 @@
     "enabled": true,
     "debug": false
   },
-  "executionModel": ""
+  "executionModel": "",
+  "auditorModel": "",
+  "loop": {
+    "enabled": true,
+    "defaultMaxIterations": 15,
+    "cleanupWorktree": false,
+    "defaultAudit": true,
+    "model": "",
+    "minAudits": 1,
+    "stallTimeoutMs": 60000
+  }
 }

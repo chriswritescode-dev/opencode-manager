@@ -4,7 +4,11 @@ import type {
   OpenCodeConfig,
   OpenCodeConfigResponse,
   CreateOpenCodeConfigRequest,
-  UpdateOpenCodeConfigRequest
+  UpdateOpenCodeConfigRequest,
+  SkillFileInfo,
+  CreateSkillRequest,
+  UpdateSkillRequest,
+  SkillScope,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
@@ -213,6 +217,43 @@ export const settingsApi = {
 
   getMemoryPluginStatus: async (): Promise<{ memoryPluginEnabled: boolean }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/memory-plugin-status`)
+  },
+
+  listManagedSkills: async (repoId?: number): Promise<SkillFileInfo[]> => {
+    const params = repoId ? `?repoId=${repoId}` : ''
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills${params}`)
+  },
+
+  getSkill: async (name: string, scope: SkillScope, repoId?: number): Promise<SkillFileInfo> => {
+    const params = new URLSearchParams({ scope })
+    if (repoId) params.set('repoId', String(repoId))
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/${name}?${params}`)
+  },
+
+  createSkill: async (data: CreateSkillRequest): Promise<SkillFileInfo> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  updateSkill: async (name: string, scope: SkillScope, data: UpdateSkillRequest, repoId?: number): Promise<SkillFileInfo> => {
+    const params = new URLSearchParams({ scope })
+    if (repoId) params.set('repoId', String(repoId))
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/${name}?${params}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteSkill: async (name: string, scope: SkillScope, repoId?: number): Promise<{ success: boolean }> => {
+    const params = new URLSearchParams({ scope })
+    if (repoId) params.set('repoId', String(repoId))
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/${name}?${params}`, {
+      method: 'DELETE',
+    })
   },
 }
 

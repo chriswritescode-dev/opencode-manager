@@ -6,7 +6,7 @@ Guide for setting up a local development environment.
 
 - [pnpm](https://pnpm.io/installation) - Package manager (required for workspaces)
 - [Bun](https://bun.sh) - Backend runtime
-- [OpenCode TUI](https://opencode.ai) - `npm install -g @opencode/tui`
+- [OpenCode TUI](https://opencode.ai) - `curl -fsSL https://opencode.ai/install | bash`
 
 ## Installation
 

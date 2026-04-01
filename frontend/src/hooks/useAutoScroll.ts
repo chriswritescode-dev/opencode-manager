@@ -53,7 +53,6 @@ export function useAutoScroll({
     const markDisengaged = () => {
       userScrolledAtRef.current = Date.now()
       userDisengagedRef.current = true
-      onScrollStateChangeRef.current?.(true)
     }
 
     const handlePointerDown = (e: PointerEvent) => {
@@ -85,7 +84,7 @@ export function useAutoScroll({
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < 150
       
       if (isAtBottom) {
         if (userDisengagedRef.current) {
@@ -93,10 +92,12 @@ export function useAutoScroll({
           userDisengagedRef.current = false
           onScrollStateChangeRef.current?.(false)
         }
-      } else if (!userDisengagedRef.current) {
-        userScrolledAtRef.current = Date.now()
-        userDisengagedRef.current = true
-        onScrollStateChangeRef.current?.(true)
+      } else {
+        if (!userDisengagedRef.current) {
+          userScrolledAtRef.current = Date.now()
+          userDisengagedRef.current = true
+          onScrollStateChangeRef.current?.(true)
+        }
       }
     }
     

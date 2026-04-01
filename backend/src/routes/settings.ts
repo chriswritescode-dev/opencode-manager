@@ -13,12 +13,24 @@ import {
   OpenCodeConfigSchema,
 } from '../types/settings'
 import type { GitCredential } from '@opencode-manager/shared'
+import {
+  CreateSkillRequestSchema,
+  UpdateSkillRequestSchema,
+  SkillScopeSchema,
+} from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
-import { compareVersions } from '../utils/version-utils'
+import { compareVersions, isValidVersion } from '../utils/version-utils'
+import {
+  listManagedSkills,
+  getSkill,
+  createSkill,
+  updateSkill,
+  deleteSkill,
+} from '../services/skills'
 
 function getOpenCodeInstallMethod(): string {
   const homePath = process.env.HOME || ''
@@ -41,7 +53,27 @@ function getOpenCodeInstallMethod(): string {
   return 'curl'
 }
 
-function execWithTimeout(command: string, timeoutMs: number, env?: Record<string, string>): { output: string; timedOut: boolean } {
+function execWithTimeout(
+  command: string | [executable: string, ...args: string[]],
+  timeoutMs: number,
+  env?: Record<string, string>
+): { output: string; timedOut: boolean } {
+  if (Array.isArray(command)) {
+    const result = spawnSync(command[0], command.slice(1), {
+      encoding: 'utf8',
+      timeout: timeoutMs,
+      killSignal: 'SIGKILL',
+      env: env ? { ...process.env, ...env } : undefined
+    })
+
+    if (result.signal === 'SIGKILL' || result.error?.message?.includes('TIMEOUT')) {
+      return { output: '', timedOut: true }
+    }
+
+    const output = (result.stdout || '') + (result.stderr || '')
+    return { output, timedOut: false }
+  }
+
   try {
     const output = execSync(command, {
       encoding: 'utf8',
@@ -629,12 +661,20 @@ export function createSettingsRoutes(db: Database) {
       const body = await c.req.json()
       const { version } = z.object({ version: z.string().min(1) }).parse(body)
 
+      const versionWithoutPrefix = version.replace(/^v/, '')
+      if (!isValidVersion(versionWithoutPrefix)) {
+        throw new Error('Invalid version format. Must be in MAJOR.MINOR.PATCH format (e.g., 1.2.27)')
+      }
+
       logger.info(`Installing OpenCode version: ${version}`)
       const versionArg = version.startsWith('v') ? version : `v${version}`
       const installMethod = getOpenCodeInstallMethod()
       logger.info(`Running opencode upgrade ${versionArg} --method ${installMethod} with 90s timeout...`)
 
-      const { output: upgradeOutput, timedOut } = execWithTimeout(`opencode upgrade ${versionArg} --method ${installMethod} 2>&1`, 90000)
+      const { output: upgradeOutput, timedOut } = execWithTimeout(
+        ['opencode', 'upgrade', versionArg, '--method', installMethod],
+        90000
+      )
       logger.info(`Upgrade output: ${upgradeOutput}`)
 
       if (timedOut) {
@@ -833,6 +873,160 @@ export function createSettingsRoutes(db: Database) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to update AGENTS.md' }, 500)
+    }
+  })
+
+  app.get('/skills', async (c) => {
+    try {
+      const repoIdParam = c.req.query('repoId')
+      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
+      if (repoId !== undefined && isNaN(repoId)) {
+        return c.json({ error: 'Invalid repoId' }, 400)
+      }
+      
+      const skills = await listManagedSkills(db, repoId)
+      return c.json(skills)
+    } catch (error) {
+      logger.error('Failed to list skills:', error)
+      return c.json({ error: 'Failed to list skills' }, 500)
+    }
+  })
+
+  app.get('/skills/:name', async (c) => {
+    try {
+      const name = c.req.param('name')
+      const scope = SkillScopeSchema.parse(c.req.query('scope'))
+      const repoIdParam = c.req.query('repoId')
+      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
+      if (repoId !== undefined && isNaN(repoId)) {
+        return c.json({ error: 'Invalid repoId' }, 400)
+      }
+
+      if (scope === 'project' && !repoId) {
+        return c.json({ error: 'repoId is required for project scope' }, 400)
+      }
+
+      const skill = await getSkill(db, name, scope, repoId)
+      return c.json(skill)
+    } catch (error) {
+      logger.error('Failed to get skill:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid scope parameter. Must be "global" or "project"' }, 400)
+      }
+      if (error instanceof Error && error.message.includes('not found')) {
+        return c.json({ error: error.message }, 404)
+      }
+      if (error instanceof Error && error.message.includes('Invalid skill name')) {
+        return c.json({ error: error.message }, 400)
+      }
+      return c.json({ error: 'Failed to get skill' }, 500)
+    }
+  })
+
+  app.post('/skills', async (c) => {
+    try {
+      const body = await c.req.json()
+      const validated = CreateSkillRequestSchema.parse(body)
+
+      const skill = await createSkill(db, validated)
+      
+      try {
+        await opencodeServerManager.restart()
+        logger.info('Restarted OpenCode server after skill creation')
+      } catch (restartError) {
+        logger.warn('Failed to restart OpenCode server after skill creation:', restartError)
+      }
+      
+      return c.json(skill)
+    } catch (error) {
+      logger.error('Failed to create skill:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid skill data', details: error.issues }, 400)
+      }
+      if (error instanceof Error && error.message.includes('already exists')) {
+        return c.json({ error: error.message }, 409)
+      }
+      return c.json({ error: 'Failed to create skill' }, 500)
+    }
+  })
+
+  app.put('/skills/:name', async (c) => {
+    try {
+      const name = c.req.param('name')
+      const scope = SkillScopeSchema.parse(c.req.query('scope'))
+      const repoIdParam = c.req.query('repoId')
+      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
+      if (repoId !== undefined && isNaN(repoId)) {
+        return c.json({ error: 'Invalid repoId' }, 400)
+      }
+      const body = await c.req.json()
+      const validated = UpdateSkillRequestSchema.parse(body)
+
+      if (scope === 'project' && !repoId) {
+        return c.json({ error: 'repoId is required for project scope' }, 400)
+      }
+
+      const skill = await updateSkill(db, name, scope, validated, repoId)
+      
+      try {
+        await opencodeServerManager.restart()
+        logger.info('Restarted OpenCode server after skill update')
+      } catch (restartError) {
+        logger.warn('Failed to restart OpenCode server after skill update:', restartError)
+      }
+      
+      return c.json(skill)
+    } catch (error) {
+      logger.error('Failed to update skill:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      if (error instanceof Error && error.message.includes('not found')) {
+        return c.json({ error: error.message }, 404)
+      }
+      if (error instanceof Error && error.message.includes('Invalid skill name')) {
+        return c.json({ error: error.message }, 400)
+      }
+      return c.json({ error: 'Failed to update skill' }, 500)
+    }
+  })
+
+  app.delete('/skills/:name', async (c) => {
+    try {
+      const name = c.req.param('name')
+      const scope = SkillScopeSchema.parse(c.req.query('scope'))
+      const repoIdParam = c.req.query('repoId')
+      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
+      if (repoId !== undefined && isNaN(repoId)) {
+        return c.json({ error: 'Invalid repoId' }, 400)
+      }
+
+      if (scope === 'project' && !repoId) {
+        return c.json({ error: 'repoId is required for project scope' }, 400)
+      }
+
+      await deleteSkill(db, name, scope, repoId)
+      
+      try {
+        await opencodeServerManager.restart()
+        logger.info('Restarted OpenCode server after skill deletion')
+      } catch (restartError) {
+        logger.warn('Failed to restart OpenCode server after skill deletion:', restartError)
+      }
+      
+      return c.json({ success: true })
+    } catch (error) {
+      logger.error('Failed to delete skill:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid scope parameter. Must be "global" or "project"' }, 400)
+      }
+      if (error instanceof Error && error.message.includes('not found')) {
+        return c.json({ error: error.message }, 404)
+      }
+      if (error instanceof Error && error.message.includes('Invalid skill name')) {
+        return c.json({ error: error.message }, 400)
+      }
+      return c.json({ error: 'Failed to delete skill' }, 500)
     }
   })
 

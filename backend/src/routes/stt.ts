@@ -1,11 +1,15 @@
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
-import { createHash } from 'crypto'
-import { mkdir, readFile, writeFile, stat, unlink } from 'fs/promises'
-import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
-import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import {
+  normalizeToBaseUrl,
+  ensureDiscoveryCacheDir,
+  getCachedDiscovery,
+  cacheDiscovery,
+  generateDiscoveryCacheKey,
+  fetchAvailableModels,
+} from '../utils/discovery-cache'
 
 type STTConfigExtended = {
   enabled: boolean
@@ -16,103 +20,6 @@ type STTConfigExtended = {
   language: string
   availableModels?: string[]
   lastModelsFetch?: number
-}
-
-const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'stt-discovery')
-const DISCOVERY_CACHE_TTL_MS = 60 * 60 * 1000
-
-function normalizeToBaseUrl(endpoint: string): string {
-  return endpoint
-    .replace(/\/v1\/audio\/transcriptions$/, '')
-    .replace(/\/audio\/transcriptions$/, '')
-    .replace(/\/$/, '')
-}
-
-async function ensureDiscoveryCacheDir(): Promise<void> {
-  await mkdir(DISCOVERY_CACHE_DIR, { recursive: true })
-}
-
-async function getCachedDiscovery(cacheKey: string): Promise<string[] | null> {
-  try {
-    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
-    const fileStat = await stat(filePath)
-
-    if (Date.now() - fileStat.mtimeMs > DISCOVERY_CACHE_TTL_MS) {
-      await unlink(filePath)
-      return null
-    }
-
-    const content = await readFile(filePath, 'utf-8')
-    return JSON.parse(content)
-  } catch {
-    return null
-  }
-}
-
-async function cacheDiscovery(cacheKey: string, data: string[]): Promise<void> {
-  try {
-    await ensureDiscoveryCacheDir()
-    const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
-    await writeFile(filePath, JSON.stringify(data))
-  } catch (error) {
-    logger.error(`Failed to cache STT discovery data for ${cacheKey}:`, error)
-  }
-}
-
-function generateDiscoveryCacheKey(endpoint: string, apiKey: string, type: 'models'): string {
-  const hash = createHash('sha256')
-  hash.update(`stt|${endpoint}|${apiKey ? apiKey.substring(0, 8) : 'no-key'}|${type}`)
-  return hash.digest('hex')
-}
-
-async function fetchAvailableModels(endpoint: string, apiKey: string): Promise<string[]> {
-  const baseUrl = normalizeToBaseUrl(endpoint)
-  const endpointVariations = [
-    `${baseUrl}/v1/models`,
-    `${baseUrl}/models`,
-  ]
-
-  for (const modelEndpoint of endpointVariations) {
-    try {
-      const response = await fetch(modelEndpoint, {
-        headers: {
-          ...(apiKey && { 'Authorization': `Bearer ${apiKey}` }),
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (response.ok) {
-        const data = await response.json() as { data?: { id?: string }[] } | unknown[]
-
-        if ('data' in data && Array.isArray(data.data)) {
-          const sttModels = data.data
-            .filter((model) => model.id && typeof model.id === 'string')
-            .filter((model) =>
-              model.id!.toLowerCase().includes('whisper') ||
-              model.id!.toLowerCase().includes('transcri')
-            )
-            .map((model) => model.id!)
-
-          if (sttModels.length > 0) {
-            return sttModels
-          }
-        } else if (Array.isArray(data)) {
-          const filtered = data.filter((item): item is string =>
-            typeof item === 'string' &&
-            (item.toLowerCase().includes('whisper') || item.toLowerCase().includes('transcri'))
-          )
-          if (filtered.length > 0) {
-            return filtered
-          }
-        }
-      }
-    } catch (error) {
-      logger.warn(`Failed to fetch STT models from ${modelEndpoint}:`, error)
-      continue
-    }
-  }
-
-  return ['whisper-1']
 }
 
 export function createSTTRoutes(db: Database) {
@@ -248,7 +155,7 @@ export function createSTTRoutes(db: Database) {
       const cacheKey = generateDiscoveryCacheKey(sttConfig.endpoint, sttConfig.apiKey, 'models')
 
       if (!forceRefresh) {
-        const cachedModels = await getCachedDiscovery(cacheKey)
+        const cachedModels = await getCachedDiscovery<string[]>(cacheKey)
         if (cachedModels) {
           logger.info(`STT models cache hit for user ${userId}`)
           return c.json({ models: cachedModels, cached: true })
@@ -258,7 +165,12 @@ export function createSTTRoutes(db: Database) {
       await ensureDiscoveryCacheDir()
       logger.info(`Fetching STT models for user ${userId}`)
 
-      const models = await fetchAvailableModels(sttConfig.endpoint, sttConfig.apiKey)
+      const models = await fetchAvailableModels(
+        sttConfig.endpoint,
+        sttConfig.apiKey,
+        /whisper|transcri/,
+        ['whisper-1'],
+      )
       await cacheDiscovery(cacheKey, models)
 
       await settingsService.updateSettings({

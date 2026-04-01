@@ -13,9 +13,21 @@ const ENHANCED_BUILTIN_AGENTS: Record<string, { tools: Record<string, boolean> }
 const PLUGIN_COMMANDS: Record<string, { template: string; description: string; agent: string; subtask: boolean }> = {
   review: {
     description: 'Run a code review on current changes',
-    agent: 'Code Review',
+    agent: 'auditor',
     subtask: true,
     template: 'Review the current code changes. $ARGUMENTS',
+  },
+  'memory-loop': {
+    description: 'Start a memory iterative development loop in a worktree',
+    agent: 'code',
+    subtask: false,
+    template: 'Use the memory-loop tool to start a loop. Use the following as the plan: $ARGUMENTS. Derive a short title from the plan.',
+  },
+  'memory-loop-cancel': {
+    description: 'Cancel the active memory loop',
+    agent: 'code',
+    subtask: false,
+    template: 'Use the memory-loop-cancel tool to cancel the active memory loop. $ARGUMENTS',
   },
 }
 
@@ -50,7 +62,7 @@ export function createConfigHandler(agents: Record<AgentRole, AgentDefinition>) 
     }
 
     config.agent = mergedAgents
-    config.default_agent = 'Code'
+    config.default_agent = 'code'
 
     const userCommands = config.command as Record<string, unknown> | undefined
     const mergedCommands: Record<string, unknown> = { ...PLUGIN_COMMANDS }

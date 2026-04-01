@@ -7,52 +7,12 @@ interface ProjectMemoryStats {
   newest: number
 }
 
-function parseArgs(args: string[]): { dbPath?: string; help?: boolean } {
-  const options: { dbPath?: string; help?: boolean } = {}
-  let i = 0
-
-  while (i < args.length) {
-    const arg = args[i]
-
-    if (arg === '--db-path') {
-      options.dbPath = args[++i]
-    } else if (arg === '--help' || arg === '-h') {
-      options.help = true
-    } else {
-      console.error(`Unknown option: ${arg}`)
-      help()
-      process.exit(1)
-    }
-
-    i++
-  }
-
-  return options
+export interface ListArgs {
+  dbPath?: string
 }
 
-export function help(): void {
-  console.log(`
-List projects with memory counts
-
-Usage:
-  ocm-mem list [options]
-
-Options:
-  --db-path <path>    Path to memory database
-  --help, -h          Show this help message
-  `.trim())
-}
-
-export function run(args: string[], globalOpts: { dbPath?: string; projectId?: string }): void {
-  const options = parseArgs(args)
-  options.dbPath = options.dbPath || globalOpts.dbPath
-
-  if (options.help) {
-    help()
-    process.exit(0)
-  }
-
-  const db = openDatabase(options.dbPath)
+export function run(argv: ListArgs): void {
+  const db = openDatabase(argv.dbPath)
   const nameMap = resolveProjectNames()
 
   try {
@@ -83,4 +43,28 @@ export function run(args: string[], globalOpts: { dbPath?: string; projectId?: s
   } finally {
     db.close()
   }
+}
+
+export function help(): void {
+  console.log(`
+List projects with memory counts
+
+Usage:
+  ocm-mem list [options]
+
+Options:
+  --db-path <path>    Path to memory database
+  --help, -h          Show this help message
+  `.trim())
+}
+
+export function cli(args: string[], globalOpts: { dbPath?: string; resolvedProjectId?: string }): void {
+  for (const arg of args) {
+    if (arg === '--help' || arg === '-h') {
+      help()
+      process.exit(0)
+    }
+  }
+
+  run({ dbPath: globalOpts.dbPath })
 }

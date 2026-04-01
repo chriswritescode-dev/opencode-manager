@@ -1,6 +1,6 @@
 import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { Memory, MemoryStats, CreateMemoryRequest, UpdateMemoryRequest, PluginConfig } from '@opencode-manager/shared/types'
+import type { Memory, MemoryStats, CreateMemoryRequest, UpdateMemoryRequest, PluginConfig, KvEntry, CreateKvEntryRequest, UpdateKvEntryRequest, LoopState } from '@opencode-manager/shared/types'
 
 export async function listMemories(filters?: {
   projectId?: string
@@ -92,5 +92,45 @@ export async function testEmbeddingConfig(): Promise<TestEmbeddingResult> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({}),
+  })
+}
+
+export async function listKvEntries(projectId: string, prefix?: string): Promise<{ entries: KvEntry[] }> {
+  const params = new URLSearchParams({ projectId })
+  if (prefix) params.set('prefix', prefix)
+  return fetchWrapper(`${API_BASE_URL}/api/memory/kv?${params.toString()}`)
+}
+
+export async function deleteKvEntry(projectId: string, key: string): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/memory/kv/${encodeURIComponent(key)}?projectId=${encodeURIComponent(projectId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function createKvEntry(data: CreateKvEntryRequest): Promise<{ entry: KvEntry }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/kv`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function updateKvEntry(projectId: string, key: string, data: UpdateKvEntryRequest): Promise<{ entry: KvEntry }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/kv/${encodeURIComponent(key)}?projectId=${encodeURIComponent(projectId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getLoopStatus(repoId: number): Promise<{ loops: LoopState[]; projectId?: string | null }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/loop/status?repoId=${repoId}`)
+}
+
+export async function cancelLoop(repoId: number, sessionId: string): Promise<{ cancelled: boolean; worktreeName?: string }> {
+  return fetchWrapper(`${API_BASE_URL}/api/memory/loop/cancel`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ repoId, sessionId }),
   })
 }

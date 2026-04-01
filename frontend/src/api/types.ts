@@ -1,8 +1,9 @@
 export interface Repo {
   id: number
-  repoUrl: string
+  repoUrl?: string
   localPath: string
   fullPath: string
+  sourcePath?: string
   branch?: string
   currentBranch?: string
   defaultBranch: string
@@ -11,6 +12,7 @@ export interface Repo {
   lastPulled?: number
   openCodeConfigName?: string
   isWorktree?: boolean
+  isLocal?: boolean
 }
 
 import type { components } from './opencode-types'
@@ -179,6 +181,11 @@ export interface SSESessionErrorEvent {
   }
 }
 
+export interface SSELspUpdatedEvent {
+  type: 'lsp.updated'
+  properties: Record<string, never>
+}
+
 export interface SSESSHHostKeyRequestEvent {
   type: 'ssh.host-key-request'
   properties: SSHHostKeyRequest
@@ -203,6 +210,7 @@ export type SSEEvent =
   | SSEQuestionRejectedEvent
   | SSEInstallationUpdatedEvent
   | SSEInstallationUpdateAvailableEvent
+  | SSELspUpdatedEvent
   | SSESSHHostKeyRequestEvent
 
 export type ContentPart = 

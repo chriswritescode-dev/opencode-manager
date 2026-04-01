@@ -13,7 +13,7 @@ import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
-import { ChevronDown, Upload, X, Mic, MicOff } from 'lucide-react'
+import { ArrowDown, Upload, X, Mic, MicOff } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
 
@@ -54,6 +54,7 @@ interface PromptInputProps {
   opcodeUrl: string
   directory?: string
   sessionID: string
+  repoId?: number
   disabled?: boolean
   showScrollButton?: boolean
   hasActiveStream?: boolean
@@ -69,7 +70,8 @@ interface PromptInputProps {
 export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(function PromptInput({ 
   opcodeUrl,
   directory,
-  sessionID, 
+  sessionID,
+  repoId,
   disabled,
   showScrollButton,
   hasActiveStream = false,
@@ -139,7 +141,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }), [imageAttachments, clearSTT, isRecording, abortRecording])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
-  const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
+  const abortSession = useAbortSession(opcodeUrl, directory, sessionID, repoId)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
     opcodeUrl,
@@ -854,10 +856,10 @@ return (
 <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
              <button
                 onClick={onScrollToBottom}
-                className={`rounded-lg border border-info/25 bg-muted p-1.5 text-muted-foreground shadow-md shadow-info/10 ring-1 ring-info/15 transition-all duration-200 hover:scale-105 hover:border-info/40 hover:bg-muted-foreground/20 hover:text-foreground hover:shadow-info/15 active:scale-95 md:p-2 ${showScrollButton ? 'visible' : 'invisible'}`}
-                title="Scroll to bottom"
+               className={`rounded-lg border border-info/25 bg-muted p-2 text-muted-foreground shadow-md shadow-info/10 ring-1 ring-info/15 transition-all duration-200 hover:scale-105 hover:border-info/40 hover:bg-muted-foreground/20 hover:text-foreground hover:shadow-info/15 active:scale-95 md:p-2 ${showScrollButton ? 'visible' : 'invisible'}`}
+               title="Scroll to bottom"
               >
-               <ChevronDown className="w-5 h-5" />
+               <ArrowDown className="w-5 h-5" />
              </button>
 {showStopButton && (
              <button

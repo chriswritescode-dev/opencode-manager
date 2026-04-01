@@ -11,6 +11,12 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((names) =>
       Promise.all(names.map((name) => caches.delete(name)))
     ).then(() => self.clients.claim())
+    .then(() => self.clients.matchAll({ type: "window" }))
+    .then((clients) => {
+      for (const client of clients) {
+        client.postMessage({ type: "SW_UPDATED" });
+      }
+    })
   );
 });
 
