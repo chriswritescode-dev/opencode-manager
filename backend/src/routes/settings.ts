@@ -20,10 +20,13 @@ import {
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
 import { encryptSecret } from '../utils/crypto'
 import { compareVersions, isValidVersion } from '../utils/version-utils'
+import { getImportedSessionDirectories, getOpenCodeImportStatus, syncOpenCodeImport } from '../services/opencode-import'
+import { relinkReposFromSessionDirectories } from '../services/repo'
 import {
   listManagedSkills,
   getSkill,
@@ -153,6 +156,10 @@ const TestSSHConnectionSchema = z.object({
   passphrase: z.string().optional(),
 })
 
+const SyncOpenCodeImportSchema = z.object({
+  overwriteState: z.boolean().optional(),
+})
+
 
 async function extractOpenCodeError(response: Response, defaultError: string): Promise<string> {
   const errorObj = await response.json().catch(() => null)
@@ -161,7 +168,7 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
     : defaultError
 }
 
-export function createSettingsRoutes(db: Database) {
+export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
 
@@ -428,6 +435,61 @@ export function createSettingsRoutes(db: Database) {
       return c.json({
         error: 'Failed to restart OpenCode server',
         details: startupError || (error instanceof Error ? error.message : 'Unknown error')
+      }, 500)
+    }
+  })
+
+  app.get('/opencode-import/status', async (c) => {
+    try {
+      return c.json(await getOpenCodeImportStatus())
+    } catch (error) {
+      logger.error('Failed to get OpenCode import status:', error)
+      return c.json({
+        error: 'Failed to get OpenCode import status',
+        details: error instanceof Error ? error.message : 'Unknown error'
+      }, 500)
+    }
+  })
+
+  app.post('/opencode-import', async (c) => {
+    try {
+      const userId = c.req.query('userId') || 'default'
+      const rawBody = c.req.header('content-type')?.includes('application/json') ? await c.req.json() : {}
+      const body = SyncOpenCodeImportSchema.parse(rawBody)
+      const result = await syncOpenCodeImport({
+        db,
+        userId,
+        overwriteState: body.overwriteState ?? true,
+      })
+
+      if (!result.configImported && !result.stateImported) {
+        return c.json({
+          error: 'No importable OpenCode host data found',
+          ...result,
+        }, 404)
+      }
+
+      const importedSessions = await getImportedSessionDirectories(result.workspaceStatePath)
+      const relinkedRepos = await relinkReposFromSessionDirectories(db, gitAuthService, importedSessions.directories)
+
+      opencodeServerManager.clearStartupError()
+      await opencodeServerManager.restart()
+
+      return c.json({
+        success: true,
+        message: 'Imported existing OpenCode host data and restarted the server',
+        serverRestarted: true,
+        relinkedRepos,
+        ...result,
+      })
+    } catch (error) {
+      logger.error('Failed to import existing OpenCode host data:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid OpenCode import request', details: error.issues }, 400)
+      }
+      return c.json({
+        error: 'Failed to import existing OpenCode host data',
+        details: error instanceof Error ? error.message : 'Unknown error'
       }, 500)
     }
   })

@@ -2,10 +2,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
-import os from 'os'
-import path from 'path'
-import { cp, readdir, readFile, rm } from 'fs/promises'
-import { Database as SQLiteDatabase } from 'bun:sqlite'
+import { readFile } from 'fs/promises'
 import { initializeDatabase } from './db/schema'
 import { createRepoRoutes } from './routes/repos'
 import { createIPCServer, type IPCServer } from './ipc/ipcServer'
@@ -47,6 +44,7 @@ import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './ser
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { migrateGlobalSkills } from './services/skills'
+import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 
 import { logger } from './utils/logger'
 import { 
@@ -58,8 +56,7 @@ import {
   getDatabasePath,
   ENV
 } from '@opencode-manager/shared/config/env'
-import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { parse as parseJsonc } from 'jsonc-parser'
+
 
 const { PORT, HOST } = ENV.SERVER
 const DB_PATH = getDatabasePath()
@@ -86,72 +83,6 @@ import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
-const OPENCODE_STATE_DB_FILENAMES = new Set(['opencode.db', 'opencode.db-shm', 'opencode.db-wal'])
-
-function getImportPathCandidates(envKey: string, fallbackPath: string): string[] {
-  const candidates = [process.env[envKey], fallbackPath]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => path.resolve(value))
-
-  return Array.from(new Set(candidates))
-}
-
-async function getFirstExistingPath(paths: string[]): Promise<string | undefined> {
-  for (const candidate of paths) {
-    if (await fileExists(candidate)) {
-      return candidate
-    }
-  }
-
-  return undefined
-}
-
-function escapeSqliteValue(value: string): string {
-  return value.replace(/'/g, "''")
-}
-
-async function copyOpenCodeStateFiles(sourcePath: string, targetPath: string): Promise<void> {
-  const entries = await readdir(sourcePath, { withFileTypes: true })
-
-  for (const entry of entries) {
-    if (OPENCODE_STATE_DB_FILENAMES.has(entry.name)) {
-      continue
-    }
-
-    await cp(path.join(sourcePath, entry.name), path.join(targetPath, entry.name), {
-      recursive: true,
-      force: false,
-      errorOnExist: false,
-    })
-  }
-}
-
-async function snapshotOpenCodeDatabase(sourcePath: string, targetPath: string): Promise<void> {
-  await rm(targetPath, { force: true })
-
-  const database = new SQLiteDatabase(sourcePath)
-
-  try {
-    database.exec(`VACUUM INTO '${escapeSqliteValue(targetPath)}'`)
-  } finally {
-    database.close()
-  }
-}
-
-async function importOpenCodeStateDirectory(sourcePath: string, targetPath: string): Promise<void> {
-  await ensureDirectoryExists(targetPath)
-  await copyOpenCodeStateFiles(sourcePath, targetPath)
-
-  const sourceDbPath = path.join(sourcePath, 'opencode.db')
-  if (!await fileExists(sourceDbPath)) {
-    return
-  }
-
-  await rm(path.join(targetPath, 'opencode.db-shm'), { force: true })
-  await rm(path.join(targetPath, 'opencode.db-wal'), { force: true })
-  await snapshotOpenCodeDatabase(sourceDbPath, path.join(targetPath, 'opencode.db'))
-}
-
 async function ensureDefaultConfigExists(): Promise<void> {
   const settingsService = new SettingsService(db)
   const workspaceConfigPath = getOpenCodeConfigFilePath()
@@ -188,36 +119,13 @@ async function ensureDefaultConfigExists(): Promise<void> {
     }
   }
   
-  const importConfigPath = await getFirstExistingPath(
-    getImportPathCandidates(
-      'OPENCODE_IMPORT_CONFIG_PATH',
-      path.join(os.homedir(), '.config/opencode/opencode.json')
-    )
-  )
+  const { configSourcePath: importConfigPath } = await getOpenCodeImportStatus()
 
   if (importConfigPath) {
     logger.info(`Found importable OpenCode config at ${importConfigPath}, importing...`)
     try {
-      const rawContent = await readFileContent(importConfigPath)
-      const parsed = parseJsonc(rawContent)
-      const validation = OpenCodeConfigSchema.safeParse(parsed)
-      
-      if (validation.success) {
-        const existingDefault = settingsService.getOpenCodeConfigByName('default')
-        if (existingDefault) {
-          settingsService.updateOpenCodeConfig('default', {
-            content: rawContent,
-            isDefault: true,
-          })
-        } else {
-          settingsService.createOpenCodeConfig({
-            name: 'default',
-            content: rawContent,
-            isDefault: true,
-          })
-        }
-        
-        await writeFileContent(workspaceConfigPath, rawContent)
+      const result = await syncOpenCodeImport({ db, overwriteState: false })
+      if (result.configImported) {
         logger.info(`Imported OpenCode config from ${importConfigPath} to workspace`)
         return
       }
@@ -249,28 +157,19 @@ async function ensureDefaultConfigExists(): Promise<void> {
 
 async function ensureHomeStateImported(): Promise<void> {
   try {
-    const workspaceStateRoot = path.join(getWorkspacePath(), '.opencode', 'state')
-    const workspaceStatePath = path.join(workspaceStateRoot, 'opencode')
-    const workspaceStateDbPath = path.join(workspaceStatePath, 'opencode.db')
-
-    if (await fileExists(workspaceStateDbPath)) {
+    const status = await getOpenCodeImportStatus()
+    if (status.workspaceStateExists) {
       return
     }
 
-    const importStatePath = await getFirstExistingPath(
-      getImportPathCandidates(
-        'OPENCODE_IMPORT_STATE_PATH',
-        path.join(os.homedir(), '.local', 'share', 'opencode')
-      )
-    )
-
-    if (!importStatePath) {
+    if (!status.stateSourcePath) {
       return
     }
 
-    await ensureDirectoryExists(workspaceStateRoot)
-    await importOpenCodeStateDirectory(importStatePath, workspaceStatePath)
-    logger.info(`Imported OpenCode state from ${importStatePath}`)
+    const result = await syncOpenCodeImport({ db, overwriteState: false })
+    if (result.stateImported) {
+      logger.info(`Imported OpenCode state from ${status.stateSourcePath}`)
+    }
   } catch (error) {
     logger.warn('Failed to import OpenCode state, continuing without imported state', error)
   }
@@ -359,7 +258,7 @@ const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService))
-protectedApi.route('/settings', createSettingsRoutes(db))
+protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService))
 protectedApi.route('/files', createFileRoutes())
 protectedApi.route('/providers', createProvidersRoutes())
 protectedApi.route('/oauth', createOAuthRoutes())

@@ -230,6 +230,16 @@ async function safeGetCurrentBranch(repoPath: string, env: Record<string, string
   }
 }
 
+async function findGitRepoRoot(targetPath: string, env: Record<string, string>): Promise<string | null> {
+  try {
+    const resolvedPath = normalizeAbsolutePath(targetPath)
+    const repoRoot = await executeCommand(['git', '-C', resolvedPath, 'rev-parse', '--show-toplevel'], { env, silent: true })
+    return normalizeAbsolutePath(repoRoot.trim())
+  } catch {
+    return null
+  }
+}
+
 async function registerExistingLocalRepo(
   database: Database,
   gitAuthService: GitAuthService,
@@ -371,6 +381,65 @@ export async function discoverLocalRepos(
     repos,
     discoveredCount,
     existingCount,
+    errors,
+  }
+}
+
+export async function relinkReposFromSessionDirectories(
+  database: Database,
+  gitAuthService: GitAuthService,
+  directories: string[]
+): Promise<{
+  repos: Repo[]
+  relinkedCount: number
+  existingCount: number
+  skippedCount: number
+  errors: Array<{ path: string; error: string }>
+}> {
+  const env = gitAuthService.getGitEnvironment()
+  const errors: Array<{ path: string; error: string }> = []
+  const uniqueRepoRoots = new Set<string>()
+
+  for (const directory of directories) {
+    const normalizedDirectory = normalizeInputPath(directory)
+    if (!normalizedDirectory) {
+      continue
+    }
+
+    const repoRoot = await findGitRepoRoot(normalizedDirectory, env)
+    if (!repoRoot) {
+      continue
+    }
+
+    uniqueRepoRoots.add(repoRoot)
+  }
+
+  const repos: Repo[] = []
+  let relinkedCount = 0
+  let existingCount = 0
+
+  for (const repoRoot of Array.from(uniqueRepoRoots).sort((left, right) => left.localeCompare(right))) {
+    try {
+      const result = await registerExistingLocalRepo(database, gitAuthService, repoRoot)
+      repos.push(result.repo)
+      if (result.existed) {
+        existingCount += 1
+      } else {
+        relinkedCount += 1
+      }
+    } catch (error: unknown) {
+      errors.push({
+        path: repoRoot,
+        error: getErrorMessage(error),
+      })
+    }
+  }
+
+  return {
+    repos,
+    relinkedCount,
+    existingCount,
+    skippedCount: Math.max(0, directories.length - uniqueRepoRoots.size),
     errors,
   }
 }
