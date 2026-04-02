@@ -393,21 +393,31 @@ export async function relinkReposFromSessionDirectories(
   repos: Repo[]
   relinkedCount: number
   existingCount: number
-  skippedCount: number
+  nonRepoPathCount: number
+  duplicatePathCount: number
   errors: Array<{ path: string; error: string }>
 }> {
   const env = gitAuthService.getGitEnvironment()
   const errors: Array<{ path: string; error: string }> = []
   const uniqueRepoRoots = new Set<string>()
+  let nonRepoPathCount = 0
+  let duplicatePathCount = 0
 
   for (const directory of directories) {
     const normalizedDirectory = normalizeInputPath(directory)
     if (!normalizedDirectory) {
+      nonRepoPathCount += 1
       continue
     }
 
     const repoRoot = await findGitRepoRoot(normalizedDirectory, env)
     if (!repoRoot) {
+      nonRepoPathCount += 1
+      continue
+    }
+
+    if (uniqueRepoRoots.has(repoRoot)) {
+      duplicatePathCount += 1
       continue
     }
 
@@ -439,7 +449,8 @@ export async function relinkReposFromSessionDirectories(
     repos,
     relinkedCount,
     existingCount,
-    skippedCount: Math.max(0, directories.length - uniqueRepoRoots.size),
+    nonRepoPathCount,
+    duplicatePathCount,
     errors,
   }
 }

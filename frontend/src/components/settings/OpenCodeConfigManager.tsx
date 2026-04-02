@@ -462,77 +462,77 @@ export function OpenCodeConfigManager() {
                variant="outline"
                size="sm"
                disabled={!canImportFromHost || syncOpenCodeImportMutation.isPending || isImportStatusLoading}
-               onClick={async () => {
-                 showToast.loading('Importing existing OpenCode host data...', { id: 'opencode-import' })
-                 try {
-                 const result = await syncOpenCodeImportMutation.mutateAsync()
-                  const importedParts = [result.configImported && 'config', result.stateImported && 'state']
-                    .filter(Boolean)
-                    .join(' and ')
-                  const relinkSummary = result.relinkedRepos
-                    ? ` Linked ${result.relinkedRepos.relinkedCount} repos and matched ${result.relinkedRepos.existingCount} existing repos.`
-                    : ''
-                  showToast.success(`Imported existing OpenCode ${importedParts || 'data'} and restarted the server.${relinkSummary}`, { id: 'opencode-import' })
-                } catch (error) {
-                  showToast.error(getApiErrorMessage(error, 'Failed to import existing OpenCode host data'), { id: 'opencode-import' })
-                }
-               }}
-             >
-               {syncOpenCodeImportMutation.isPending ? (
-                 <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
-               ) : (
-                 <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-               )}
-               <span className="text-xs sm:text-sm">Import From Host</span>
-             </Button>
-           </div>
-         </CardHeader>
-         <CardContent className="space-y-3 text-sm">
-           <div className="grid gap-3 md:grid-cols-2">
-             <div className="rounded-lg border border-border p-3">
-               <p className="font-medium">Config Source</p>
-               <p className="mt-1 break-all text-muted-foreground">
-                 {isImportStatusLoading ? 'Checking...' : importStatus?.configSourcePath || 'No importable OpenCode config found'}
-               </p>
-             </div>
-             <div className="rounded-lg border border-border p-3">
-               <p className="font-medium">State Source</p>
-               <p className="mt-1 break-all text-muted-foreground">
-                 {isImportStatusLoading ? 'Checking...' : importStatus?.stateSourcePath || 'No importable OpenCode state found'}
-               </p>
-             </div>
-           </div>
-           <div className="rounded-lg border border-border p-3">
-             <p className="font-medium">Workspace State</p>
-             <p className="mt-1 break-all text-muted-foreground">
-               {importStatus?.workspaceStatePath || 'Unavailable'}
-             </p>
-             <p className="mt-2 text-xs text-muted-foreground">
-               {importStatus?.workspaceStateExists
-                 ? 'A workspace session database already exists. Import will replace it with the detected host state.'
-                 : 'No workspace session database exists yet. Import will seed it from the detected host state.'}
-             </p>
-           </div>
-           {syncOpenCodeImportMutation.data?.relinkedRepos && (
-             <div className="rounded-lg border border-border p-3">
-               <p className="font-medium">Last Relink Result</p>
-               <p className="mt-1 text-muted-foreground">
-                 Linked {syncOpenCodeImportMutation.data.relinkedRepos.relinkedCount} repos, matched {syncOpenCodeImportMutation.data.relinkedRepos.existingCount} existing repos, skipped {syncOpenCodeImportMutation.data.relinkedRepos.skippedCount} non-repo session paths.
-               </p>
-               {syncOpenCodeImportMutation.data.relinkedRepos.errors.length > 0 && (
-                 <p className="mt-2 text-xs text-destructive">
-                   {syncOpenCodeImportMutation.data.relinkedRepos.errors.length} repo paths could not be linked.
-                 </p>
-               )}
-             </div>
-           )}
-           {!canImportFromHost && !isImportStatusLoading && (
-             <p className="text-xs text-muted-foreground">
-               No host OpenCode config or state was detected. For Docker installs, bind your host OpenCode config and state into the container before using this action.
-             </p>
-           )}
-         </CardContent>
-       </Card>
+                onClick={async () => {
+                  showToast.loading('Importing existing OpenCode host data...', { id: 'opencode-import' })
+                  try {
+                    const result = await syncOpenCodeImportMutation.mutateAsync()
+                    const importedParts = [result.configImported && 'config', result.stateImported && 'state']
+                      .filter(Boolean)
+                      .join(' and ')
+                    const relinkSummary = result.relinkedRepos
+                      ? ` Linked ${result.relinkedRepos.relinkedCount} repos, matched ${result.relinkedRepos.existingCount} existing repos, skipped ${result.relinkedRepos.nonRepoPathCount} non-repo paths, and ignored ${result.relinkedRepos.duplicatePathCount} duplicate session paths.`
+                      : ''
+                    showToast.success(`Imported existing OpenCode ${importedParts || 'data'} and restarted the server.${relinkSummary}`, { id: 'opencode-import' })
+                  } catch (error) {
+                    showToast.error(getApiErrorMessage(error, 'Failed to import existing OpenCode host data'), { id: 'opencode-import' })
+                  }
+                }}
+              >
+                {syncOpenCodeImportMutation.isPending ? (
+                  <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                ) : (
+                  <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                )}
+                <span className="text-xs sm:text-sm">Import From Host</span>
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">Config Source</p>
+                <p className="mt-1 break-all text-muted-foreground">
+                  {isImportStatusLoading ? 'Checking...' : importStatus?.configSourcePath || 'No importable OpenCode config found'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">State Source</p>
+                <p className="mt-1 break-all text-muted-foreground">
+                  {isImportStatusLoading ? 'Checking...' : importStatus?.stateSourcePath || 'No importable OpenCode state found'}
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <p className="font-medium">Workspace State</p>
+              <p className="mt-1 break-all text-muted-foreground">
+                {importStatus?.workspaceStatePath || 'Unavailable'}
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                {importStatus?.workspaceStateExists
+                  ? 'A workspace session database already exists. Import will replace it with the detected host state.'
+                  : 'No workspace session database exists yet. Import will seed it from the detected host state.'}
+              </p>
+            </div>
+            {syncOpenCodeImportMutation.data?.relinkedRepos && (
+              <div className="rounded-lg border border-border p-3">
+                <p className="font-medium">Last Relink Result</p>
+                <p className="mt-1 text-muted-foreground">
+                  Linked {syncOpenCodeImportMutation.data.relinkedRepos.relinkedCount} repos, matched {syncOpenCodeImportMutation.data.relinkedRepos.existingCount} existing repos, skipped {syncOpenCodeImportMutation.data.relinkedRepos.nonRepoPathCount} non-repo session paths, and ignored {syncOpenCodeImportMutation.data.relinkedRepos.duplicatePathCount} duplicate session paths.
+                </p>
+                {syncOpenCodeImportMutation.data.relinkedRepos.errors.length > 0 && (
+                  <p className="mt-2 text-xs text-destructive">
+                    {syncOpenCodeImportMutation.data.relinkedRepos.errors.length} repo paths could not be linked.
+                  </p>
+                )}
+              </div>
+            )}
+            {!canImportFromHost && !isImportStatusLoading && (
+              <p className="text-xs text-muted-foreground">
+                No host OpenCode config or state was detected. For Docker installs, bind your host OpenCode config and state into the container before using this action.
+              </p>
+            )}
+          </CardContent>
+        </Card>
 
         <MemoryPluginConfig 
            memoryPluginEnabled={configs.find(c => c.isDefault)?.content?.plugin?.includes('@opencode-manager/memory') ?? false}

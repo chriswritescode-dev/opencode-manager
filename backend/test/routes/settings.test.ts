@@ -153,7 +153,8 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       repos: [],
       relinkedCount: 0,
       existingCount: 0,
-      skippedCount: 0,
+      nonRepoPathCount: 0,
+      duplicatePathCount: 0,
       errors: [],
     })
   })

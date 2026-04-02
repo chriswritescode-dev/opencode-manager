@@ -81,19 +81,19 @@ function snapshotOpenCodeDatabase(sourcePath: string, targetPath: string): void 
   }
 }
 
-export async function importOpenCodeStateDirectory(sourcePath: string, targetPath: string): Promise<void> {
-  await ensureDirectoryExists(targetPath)
-  await copyOpenCodeStateFiles(sourcePath, targetPath)
-
+export async function importOpenCodeStateDirectory(sourcePath: string, targetPath: string): Promise<boolean> {
   const sourceDbPath = path.join(sourcePath, 'opencode.db')
   if (!await fileExists(sourceDbPath)) {
-    return
+    return false
   }
 
+  await ensureDirectoryExists(targetPath)
+  await copyOpenCodeStateFiles(sourcePath, targetPath)
   await rm(path.join(targetPath, 'opencode.db'), { force: true })
   await rm(path.join(targetPath, 'opencode.db-shm'), { force: true })
   await rm(path.join(targetPath, 'opencode.db-wal'), { force: true })
   snapshotOpenCodeDatabase(sourceDbPath, path.join(targetPath, 'opencode.db'))
+  return true
 }
 
 export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
@@ -147,22 +147,23 @@ async function importOpenCodeConfigFromSource(db: Database, userId: string, sour
 }
 
 export async function syncOpenCodeImport(options: SyncOpenCodeImportOptions): Promise<SyncOpenCodeImportResult> {
-  const status = await getOpenCodeImportStatus()
+  const initialStatus = await getOpenCodeImportStatus()
   const userId = options.userId || 'default'
   let configImported = false
   let stateImported = false
 
-  if (status.configSourcePath) {
-    configImported = await importOpenCodeConfigFromSource(options.db, userId, status.configSourcePath, status.workspaceConfigPath)
+  if (initialStatus.configSourcePath) {
+    configImported = await importOpenCodeConfigFromSource(options.db, userId, initialStatus.configSourcePath, initialStatus.workspaceConfigPath)
   }
 
-  if (status.stateSourcePath && ((options.overwriteState ?? true) || !status.workspaceStateExists)) {
-    await importOpenCodeStateDirectory(status.stateSourcePath, status.workspaceStatePath)
-    stateImported = true
+  if (initialStatus.stateSourcePath && ((options.overwriteState ?? true) || !initialStatus.workspaceStateExists)) {
+    stateImported = await importOpenCodeStateDirectory(initialStatus.stateSourcePath, initialStatus.workspaceStatePath)
   }
+
+  const finalStatus = await getOpenCodeImportStatus()
 
   return {
-    ...status,
+    ...finalStatus,
     configImported,
     stateImported,
   }

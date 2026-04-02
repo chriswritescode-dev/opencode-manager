@@ -412,7 +412,8 @@ describe('repo service', () => {
 
     expect(result.relinkedCount).toBe(1)
     expect(result.existingCount).toBe(0)
-    expect(result.skippedCount).toBe(2)
+    expect(result.nonRepoPathCount).toBe(1)
+    expect(result.duplicatePathCount).toBe(1)
     expect(result.errors).toEqual([])
     expect(result.repos).toHaveLength(1)
     expect(result.repos[0]?.fullPath).toBe(repoRoot)

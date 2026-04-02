@@ -117,7 +117,8 @@ export interface SyncOpenCodeImportResponse extends OpenCodeImportStatus {
     repos: Array<Record<string, unknown>>
     relinkedCount: number
     existingCount: number
-    skippedCount: number
+    nonRepoPathCount: number
+    duplicatePathCount: number
     errors: Array<{ path: string; error: string }>
   }
 }
