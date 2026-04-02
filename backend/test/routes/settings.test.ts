@@ -65,6 +65,16 @@ vi.mock('../../src/services/opencode-single-server', () => ({
   },
 }))
 
+vi.mock('../../src/services/opencode-import', () => ({
+  getOpenCodeImportStatus: vi.fn(),
+  syncOpenCodeImport: vi.fn(),
+  getImportedSessionDirectories: vi.fn(),
+}))
+
+vi.mock('../../src/services/repo', () => ({
+  relinkReposFromSessionDirectories: vi.fn(),
+}))
+
 vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/test-workspace'),
   getReposPath: vi.fn(() => '/tmp/test-repos'),
@@ -90,6 +100,8 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
 }))
 
 import { createSettingsRoutes } from '../../src/routes/settings'
+import { getImportedSessionDirectories, getOpenCodeImportStatus, syncOpenCodeImport } from '../../src/services/opencode-import'
+import { relinkReposFromSessionDirectories } from '../../src/services/repo'
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
 
 const mockExecSync = execSync as ReturnType<typeof vi.fn>
@@ -99,6 +111,10 @@ const mockFetchVersion = opencodeServerManager.fetchVersion as ReturnType<typeof
 const mockReloadConfig = opencodeServerManager.reloadConfig as ReturnType<typeof vi.fn>
 const mockRestart = opencodeServerManager.restart as ReturnType<typeof vi.fn>
 const mockClearStartupError = opencodeServerManager.clearStartupError as ReturnType<typeof vi.fn>
+const mockGetOpenCodeImportStatus = getOpenCodeImportStatus as ReturnType<typeof vi.fn>
+const mockSyncOpenCodeImport = syncOpenCodeImport as ReturnType<typeof vi.fn>
+const mockGetImportedSessionDirectories = getImportedSessionDirectories as ReturnType<typeof vi.fn>
+const mockRelinkReposFromSessionDirectories = relinkReposFromSessionDirectories as ReturnType<typeof vi.fn>
 
 describe('Settings Routes - OpenCode Upgrade', () => {
   let settingsApp: ReturnType<typeof createSettingsRoutes>
@@ -112,13 +128,113 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockReloadConfig.mockReset()
     mockRestart.mockReset()
     mockClearStartupError.mockReset()
+    mockGetOpenCodeImportStatus.mockReset()
+    mockSyncOpenCodeImport.mockReset()
+    mockGetImportedSessionDirectories.mockReset()
+    mockRelinkReposFromSessionDirectories.mockReset()
     
     testDb = {} as any
-    settingsApp = createSettingsRoutes(testDb)
+    settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any)
 
     mockReloadConfig.mockResolvedValue(undefined)
     mockRestart.mockResolvedValue(undefined)
     mockClearStartupError.mockReturnValue(undefined)
+    mockGetOpenCodeImportStatus.mockResolvedValue({
+      configSourcePath: null,
+      stateSourcePath: null,
+      workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
+      workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
+      workspaceStateExists: false,
+    })
+    mockGetImportedSessionDirectories.mockResolvedValue({
+      directories: ['/Users/test/project-a', '/Users/test/project-b/apps/web'],
+    })
+    mockRelinkReposFromSessionDirectories.mockResolvedValue({
+      repos: [],
+      relinkedCount: 0,
+      existingCount: 0,
+      nonRepoPathCount: 0,
+      duplicatePathCount: 0,
+      errors: [],
+    })
+  })
+
+  describe('OpenCode import routes', () => {
+    it('should return import status', async () => {
+      mockGetOpenCodeImportStatus.mockResolvedValueOnce({
+        configSourcePath: '/import/opencode-config/opencode.json',
+        stateSourcePath: '/import/opencode-state',
+        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
+        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
+        workspaceStateExists: true,
+      })
+
+      const req = new Request('http://localhost/opencode-import/status')
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.configSourcePath).toBe('/import/opencode-config/opencode.json')
+      expect(json.stateSourcePath).toBe('/import/opencode-state')
+      expect(mockGetOpenCodeImportStatus).toHaveBeenCalled()
+    })
+
+    it('should import host OpenCode data and restart the server', async () => {
+      mockSyncOpenCodeImport.mockResolvedValueOnce({
+        configSourcePath: '/import/opencode-config/opencode.json',
+        stateSourcePath: '/import/opencode-state',
+        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
+        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
+        workspaceStateExists: true,
+        configImported: true,
+        stateImported: true,
+      })
+
+      const req = new Request('http://localhost/opencode-import?userId=default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overwriteState: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.success).toBe(true)
+      expect(json.serverRestarted).toBe(true)
+      expect(mockSyncOpenCodeImport).toHaveBeenCalledWith({
+        db: testDb,
+        userId: 'default',
+        overwriteState: true,
+      })
+      expect(mockGetImportedSessionDirectories).toHaveBeenCalledWith('/tmp/test-workspace/.opencode/state/opencode')
+      expect(mockRelinkReposFromSessionDirectories).toHaveBeenCalled()
+      expect(mockClearStartupError).toHaveBeenCalled()
+      expect(mockRestart).toHaveBeenCalled()
+    })
+
+    it('should return 404 when no importable host data exists', async () => {
+      mockSyncOpenCodeImport.mockResolvedValueOnce({
+        configSourcePath: null,
+        stateSourcePath: null,
+        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
+        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
+        workspaceStateExists: true,
+        configImported: false,
+        stateImported: false,
+      })
+
+      const req = new Request('http://localhost/opencode-import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overwriteState: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(404)
+      expect(json.error).toBe('No importable OpenCode host data found')
+      expect(mockRestart).not.toHaveBeenCalled()
+    })
   })
 
   describe('POST /opencode-upgrade', () => {

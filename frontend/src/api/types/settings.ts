@@ -98,3 +98,27 @@ export interface OpenCodeConfigResponse {
   configs: OpenCodeConfig[]
   defaultConfig: OpenCodeConfig | null
 }
+
+export interface OpenCodeImportStatus {
+  configSourcePath: string | null
+  stateSourcePath: string | null
+  workspaceConfigPath: string
+  workspaceStatePath: string
+  workspaceStateExists: boolean
+}
+
+export interface SyncOpenCodeImportResponse extends OpenCodeImportStatus {
+  success: boolean
+  message: string
+  serverRestarted: boolean
+  configImported: boolean
+  stateImported: boolean
+  relinkedRepos?: {
+    repos: Array<Record<string, unknown>>
+    relinkedCount: number
+    existingCount: number
+    nonRepoPathCount: number
+    duplicatePathCount: number
+    errors: Array<{ path: string; error: string }>
+  }
+}

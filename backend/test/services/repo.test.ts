@@ -347,4 +347,76 @@ describe('repo service', () => {
       },
     ])
   })
+
+  it('relinks imported session directories to nearest git repo roots', async () => {
+    const { relinkReposFromSessionDirectories } = await import('../../src/services/repo')
+    const database = {} as never
+    const repoRoot = '/Users/test/projects/app-one'
+    const aliasPath = path.join(getReposPath(), 'app-one')
+
+    getRepoByLocalPath.mockReturnValue(null)
+    getRepoBySourcePath.mockReturnValue(null)
+    createRepo.mockImplementation((_, input) => ({
+      id: 5,
+      localPath: input.localPath,
+      sourcePath: input.sourcePath,
+      fullPath: input.sourcePath ?? path.join(getReposPath(), input.localPath),
+      branch: input.branch,
+      defaultBranch: input.defaultBranch,
+      cloneStatus: input.cloneStatus,
+      clonedAt: input.clonedAt,
+      isLocal: true,
+      isWorktree: input.isWorktree,
+    }))
+
+    lstat.mockImplementation(async (targetPath: string) => {
+      if (targetPath === repoRoot || targetPath === path.join(repoRoot, '.git')) {
+        return createDirectoryStat()
+      }
+
+      if (targetPath === aliasPath) {
+        throw createEnoentError(targetPath)
+      }
+
+      throw createEnoentError(targetPath)
+    })
+
+    executeCommand.mockImplementation(async (args: string[]) => {
+      if (args.includes('--show-toplevel')) {
+        if (args[2] === '/Users/test/projects/not-a-repo') {
+          throw new Error('not a git repository')
+        }
+        return `${repoRoot}\n`
+      }
+
+      if (args.includes('--git-dir')) {
+        return '.git'
+      }
+
+      if (args.includes('HEAD') && !args.includes('--abbrev-ref')) {
+        return 'abc123'
+      }
+
+      if (args.includes('--abbrev-ref')) {
+        return 'main'
+      }
+
+      return ''
+    })
+
+    const result = await relinkReposFromSessionDirectories(database, mockGitAuthService, [
+      '/Users/test/projects/app-one/apps/web',
+      '/Users/test/projects/app-one/packages/api',
+      '/Users/test/projects/not-a-repo',
+    ])
+
+    expect(result.relinkedCount).toBe(1)
+    expect(result.existingCount).toBe(0)
+    expect(result.nonRepoPathCount).toBe(1)
+    expect(result.duplicatePathCount).toBe(1)
+    expect(result.errors).toEqual([])
+    expect(result.repos).toHaveLength(1)
+    expect(result.repos[0]?.fullPath).toBe(repoRoot)
+    expect(createRepo).toHaveBeenCalledTimes(1)
+  })
 })
