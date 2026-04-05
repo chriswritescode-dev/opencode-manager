@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useEffect, useCallback, useState } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { API_BASE_URL } from "../config";
-import { fetchWrapper } from "../api/fetchWrapper";
+import { fetchWrapper, FetchError } from "../api/fetchWrapper";
 import { cancelLoop } from "../api/memory";
 import type {
   Message,
@@ -99,7 +99,11 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
   });
 };
 
-export const useCreateSession = (opcodeUrl: string | null | undefined, directory?: string) => {
+export const useCreateSession = (
+  opcodeUrl: string | null | undefined,
+  directory?: string,
+  onSuccess?: (session: { id: string }) => void,
+) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
 
@@ -112,8 +116,16 @@ export const useCreateSession = (opcodeUrl: string | null | undefined, directory
       if (!client) throw new Error("No client available");
       return client.createSession(data);
     },
-    onSuccess: () => {
+    onSuccess: (session) => {
       queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, directory] });
+      onSuccess?.(session);
+    },
+    onError: (error) => {
+      const parsed = parseNetworkError(error);
+      showToast.error(parsed.title, {
+        description: parsed.message,
+        duration: 5000,
+      });
     },
   });
 };
@@ -355,11 +367,9 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       const { sessionID } = variables;
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
       
-      const axiosError = error as { code?: string; response?: unknown };
-      const isNetworkError = axiosError.code === 'ECONNABORTED' || 
-                            axiosError.code === 'ERR_NETWORK' ||
-                            !axiosError.response;
-      
+      const isNetworkError = error instanceof TypeError ||
+        (error instanceof FetchError && error.code === 'TIMEOUT');
+
       if (isNetworkError) {
         return;
       }

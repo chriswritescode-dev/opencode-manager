@@ -96,7 +96,7 @@ export function createHealthRoutes(db: Database) {
         response.error = startupError
       }
 
-      return c.json(response)
+      return c.json(response, status === 'unhealthy' ? 503 : 200)
     } catch (error) {
       const opencodeManagerVersion = await opencodeManagerVersionPromise
       return c.json({

@@ -65,16 +65,17 @@ export function RepoDetail() {
 
   useSSE(opcodeUrl, repoDirectory);
 
-  const createSessionMutation = useCreateSession(opcodeUrl, repoDirectory);
+  const createSessionMutation = useCreateSession(opcodeUrl, repoDirectory, (session) => {
+    navigate(`/repos/${repoId}/sessions/${session.id}`);
+  });
 
   const handleCreateSession = async (options?: {
     agentSlug?: string;
     promptSlug?: string;
   }) => {
-    const session = await createSessionMutation.mutateAsync({
+    await createSessionMutation.mutateAsync({
       agent: options?.agentSlug,
     });
-    navigate(`/repos/${repoId}/sessions/${session.id}`);
   };
 
   const handleSelectSession = (sessionId: string) => {
