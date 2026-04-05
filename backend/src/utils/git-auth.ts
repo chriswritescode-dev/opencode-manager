@@ -131,35 +131,37 @@ export function getSSHCredentialsForHost(credentials: GitCredential[], host: str
   return credentials.filter(cred => {
     if (cred.type !== 'ssh') return false
     
-    const credHost = cred.host.toLowerCase()
+    const rawCredHost = cred.host.toLowerCase()
     const targetHost = host.toLowerCase()
     
-    if (credHost === targetHost) {
-      return true
-    }
-    
+    // First, try to parse as URL (for ssh:// or https:// formats)
     try {
-      const parsedCredHost = new URL(credHost)
+      const urlToParse = rawCredHost.includes('://') ? rawCredHost : `ssh://dummy@${rawCredHost}`
+      const parsedCredHost = new URL(urlToParse)
       const credHostname = parsedCredHost.hostname.toLowerCase()
-      const credPort = parsedCredHost.port || (parsedCredHost.protocol.includes('ssh') ? '22' : '')
-      const normalizedCredHost = credPort ? `${credHostname}:${credPort}` : credHostname
+      const credPort = parsedCredHost.port || '22'
+      const normalizedCredHost = `${credHostname}:${credPort}`
 
       const parsedTargetHost = new URL(`ssh://dummy@${targetHost}`)
       const targetHostname = parsedTargetHost.hostname.toLowerCase()
       const targetPort = parsedTargetHost.port || '22'
-      const normalizedTargetHost = targetPort ? `${targetHostname}:${targetPort}` : targetHostname
+      const normalizedTargetHost = `${targetHostname}:${targetPort}`
       
       return normalizedCredHost === normalizedTargetHost
     } catch {
+      const credHost = rawCredHost.replace(/^[^@]+@/, '')
+      
       if (credHost.includes(':')) {
         const [credHostname, credPort] = credHost.split(':')
-        if (targetHost.includes(':')) {
-          const [targetHostname, targetPort] = targetHost.split(':')
-          return credHostname === targetHostname && credPort === targetPort
-        }
-        return credHostname === targetHost
+        const targetPort = targetHost.includes(':') ? targetHost.split(':')[1] : '22'
+        const targetHostname = targetHost.includes(':') ? targetHost.split(':')[0] : targetHost
+        return credHostname === targetHostname && credPort === targetPort
       }
-      return credHost === targetHost
+      
+      const targetPort = targetHost.includes(':') ? targetHost.split(':')[1] : '22'
+      const targetHostname = targetHost.split(':')[0]
+      
+      return credHost === targetHostname && targetPort === '22'
     }
   })
 }

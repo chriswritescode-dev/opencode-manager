@@ -1294,7 +1294,7 @@ Do NOT output text without also making this tool call.
             const maxInfo = state.maxIterations && state.maxIterations > 0 ? `${state.iteration} / ${state.maxIterations}` : `${state.iteration} (unlimited)`
             const promptPreview = state.prompt && state.prompt.length > 100 ? `${state.prompt.substring(0, 97)}...` : (state.prompt ?? '')
 
-            let sessionStatus = 'unknown'
+            let sessionStatus = 'unavailable'
             try {
               const statusResult = await v2.session.status({ directory: state.worktreeDir })
               const statuses = statusResult.data as Record<string, { type: string; attempt?: number; message?: string; next?: number }> | undefined
@@ -1305,7 +1305,7 @@ Do NOT output text without also making this tool call.
                   : status.type
               }
             } catch {
-              sessionStatus = 'unavailable'
+              // sessionStatus remains 'unavailable'
             }
 
             const elapsed = state.startedAt ? Math.round((Date.now() - new Date(state.startedAt).getTime()) / 1000) : 0
