@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { fetchGitHubUserInfo, findGitHubCredential, resolveGitIdentity, createGitIdentityEnv } from '../../src/utils/git-auth'
+import { fetchGitHubUserInfo, findGitHubCredential, resolveGitIdentity, createGitIdentityEnv, getSSHCredentialsForHost } from '../../src/utils/git-auth'
 import type { GitCredential } from '@opencode-manager/shared'
 
 describe('fetchGitHubUserInfo', () => {
@@ -437,5 +437,74 @@ describe('createGitIdentityEnv', () => {
       GIT_COMMITTER_NAME: '',
       GIT_COMMITTER_EMAIL: 'email@example.com'
     })
+  })
+})
+
+describe('getSSHCredentialsForHost', () => {
+  const makeSSHCred = (host: string, name = 'test'): GitCredential => ({
+    name,
+    host,
+    type: 'ssh',
+    sshPrivateKey: 'key',
+  })
+
+  it('matches bare hostname when credential host is bare', () => {
+    const creds = [makeSSHCred('github.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches when credential host has git@ prefix', () => {
+    const creds = [makeSSHCred('git@bitbucket.org')]
+    expect(getSSHCredentialsForHost(creds, 'bitbucket.org')).toHaveLength(1)
+  })
+
+  it('matches when credential host has git@ prefix for github', () => {
+    const creds = [makeSSHCred('git@github.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('does not match a different hostname', () => {
+    const creds = [makeSSHCred('git@gitlab.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(0)
+  })
+
+  it('filters out non-ssh credentials', () => {
+    const patCred: GitCredential = { ...makeSSHCred('github.com'), type: 'pat' }
+    expect(getSSHCredentialsForHost([patCred], 'github.com')).toHaveLength(0)
+  })
+
+  it('matches with custom user@ prefix stripped', () => {
+    const creds = [makeSSHCred('deploy@example.com')]
+    expect(getSSHCredentialsForHost(creds, 'example.com')).toHaveLength(1)
+  })
+
+  it('matches ssh://git@... URL format', () => {
+    const creds = [makeSSHCred('ssh://git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches ssh://git@... URL format with port', () => {
+    const creds = [makeSSHCred('ssh://git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(1)
+  })
+
+  it('matches https://git@... URL format', () => {
+    const creds = [makeSSHCred('https://git@github.com')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches git@host:port format with default port target', () => {
+    const creds = [makeSSHCred('git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com')).toHaveLength(1)
+  })
+
+  it('matches git@host:port format with explicit port target', () => {
+    const creds = [makeSSHCred('git@github.com:22')]
+    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(1)
+  })
+
+  it('does not match git@host:port with different port', () => {
+    const creds = [makeSSHCred('git@github.com:2222')]
+    expect(getSSHCredentialsForHost(creds, 'github.com:22')).toHaveLength(0)
   })
 })

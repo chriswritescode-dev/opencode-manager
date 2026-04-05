@@ -177,7 +177,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
                   onClick={() => setFormData({
                     ...formData,
                     type: 'ssh',
-                    host: formData.type === 'ssh' ? formData.host : 'git@github.com',
+                    host: formData.type === 'ssh' ? formData.host : 'github.com',
                     token: ''
                   })}
                   disabled={isSaving}
@@ -193,7 +193,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, is
               <Label htmlFor="cred-host">Host *</Label>
               <Input
                 id="cred-host"
-                placeholder="github.com or git@github.com"
+                placeholder="github.com"
                 value={formData.host}
                 onChange={(e) => setFormData({ ...formData, host: e.target.value })}
                 disabled={isSaving}

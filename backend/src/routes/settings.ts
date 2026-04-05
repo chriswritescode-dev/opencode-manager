@@ -1055,6 +1055,7 @@ export function createSettingsRoutes(db: Database) {
 
         const sshArgs = [
           '-T',
+          '-v',
           '-i', keyPath,
           '-o', 'IdentitiesOnly=yes',
           '-o', 'PasswordAuthentication=no',
@@ -1111,7 +1112,8 @@ export function createSettingsRoutes(db: Database) {
 
         const authenticated = outputStr.includes('successfully authenticated') ||
                               outputStr.includes('You\'ve successfully authenticated') ||
-                              outputStr.includes('Welcome to')
+                              outputStr.includes('Welcome to') ||
+                              outputStr.includes('Authenticated to')
 
         if (authenticated) {
           logger.info(`SSH connection test to ${host} succeeded`)
