@@ -87,8 +87,8 @@ export function useCommandHandler({
                 navigate(`/session/${newSession.id}`)
               }
             }
-          } catch {
-            showToast.error('Failed to create new session')
+          } catch (error) {
+            showToast.error(`Failed to create new session: ${error instanceof Error ? error.message : 'Unknown error'}`)
           }
           break
         }
