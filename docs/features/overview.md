@@ -63,14 +63,12 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 ### Memory Plugin (Optional)
 
-- **Semantic Search** - Store and retrieve project knowledge using vector embeddings (requires plugin installation)
-- **Memory Scopes** - Categorize as convention, decision, or context
-- **Automatic Extraction** - Durable knowledge extracted after session compaction
-- **Compaction Awareness** - Injects project memories into compaction context
-- **Architect → Code** - Plan with a smart model, execute with a fast model for cost-optimized workflows
-- **Loops** - Iterative development with automatic auditing in isolated worktrees
+- Semantic Search — Store and retrieve project knowledge using vector embeddings
+- Memory Scopes — Categorize as convention, decision, or context
+- Iterative Development Loops — Autonomous coding/auditing with worktree isolation
+- Bundled Agents — Code, Architect, Librarian, and Auditor agents
 
-[Learn more →](memory.md)
+[Learn more →](memory.md) | [Full documentation →](https://github.com/chriswritescode-dev/opencode-memory)
 
 ### Text-to-Speech
 

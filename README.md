@@ -60,7 +60,7 @@ For local development setup, see the [Development Guide](https://chriswritescode
 - **Audio** — Text-to-speech (browser + OpenAI-compatible), speech-to-text (browser + OpenAI-compatible)
 - **AI** — Model selection, provider config, OAuth for Anthropic/GitHub Copilot, custom agents with system prompts
 - **MCP** — Local and remote MCP server support with pre-built templates
-- **Memory** — Persistent project knowledge with semantic search and compaction awareness
+- **Memory** — Persistent project knowledge with semantic search ([plugin repo](https://github.com/chriswritescode-dev/opencode-memory)) and compaction awareness
 - **Mobile** — Responsive UI, PWA installable, iOS-optimized with proper keyboard handling and swipe navigation
 
 ## Configuration

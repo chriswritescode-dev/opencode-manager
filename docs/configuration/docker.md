@@ -126,7 +126,7 @@ The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 2. **Verifies OpenCode** is installed (installed at build time, fallback install if missing)
 3. **Upgrades OpenCode** if below minimum version (1.0.137)
 4. **Validates AUTH_SECRET** is set (required for startup)
-5. **Validates memory plugin** installation
+5. **Validates memory plugin** installation (installed from npm during Docker build)
 
 ## Port Configuration
 
