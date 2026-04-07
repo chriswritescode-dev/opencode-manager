@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
@@ -12,6 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { OAuthAuthorizeDialog } from './OAuthAuthorizeDialog'
 import { OAuthCallbackDialog } from './OAuthCallbackDialog'
 import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
+import { invalidateProviderCaches } from '@/lib/queryInvalidation'
 
 export function ProviderSettings() {
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
@@ -48,9 +49,7 @@ export function ProviderSettings() {
   const deleteCredentialMutation = useMutation({
     mutationFn: (providerId: string) => providerCredentialsApi.delete(providerId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
-      queryClient.invalidateQueries({ queryKey: ['providers'] })
-      queryClient.invalidateQueries({ queryKey: ['providers-with-models'] })
+      invalidateProviderCaches(queryClient)
     },
   })
 
@@ -81,7 +80,7 @@ export function ProviderSettings() {
   }
 
   const handleOAuthSuccess = () => {
-    queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
+    invalidateProviderCaches(queryClient)
     setOauthCallbackDialogOpen(false)
     setOauthResponse(null)
     setSelectedProvider(null)
@@ -138,9 +137,7 @@ export function ProviderSettings() {
   const handleApiKeySuccess = useCallback(() => {
     setApiKeyDialogOpen(false)
     setApiKeyProvider(null)
-    queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
-    queryClient.invalidateQueries({ queryKey: ['providers'] })
-    queryClient.invalidateQueries({ queryKey: ['providers-with-models'] })
+    invalidateProviderCaches(queryClient)
   }, [queryClient])
 
   const handleApiKeyDialogClose = useCallback((open: boolean) => {
