@@ -75,7 +75,7 @@ export function EditSessionTitleDialog({ isOpen, currentTitle, onClose, onSave }
                   setEditTitle("");
                   inputRef.current?.focus();
                 }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full hover:bg-red-500/10 text-red-500 transition-colors"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1.5 text-destructive transition-colors hover:bg-destructive/10"
               >
                 <X className="w-5 h-5" />
               </button>

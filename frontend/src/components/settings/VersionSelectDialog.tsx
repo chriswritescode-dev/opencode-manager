@@ -95,7 +95,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
         )}
 
         {error && (
-          <div className="text-center py-8 text-red-500">
+          <div className="py-8 text-center text-destructive">
             Failed to fetch versions
           </div>
         )}
@@ -113,20 +113,20 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
                       key={release.version}
                       onClick={() => setSelectedVersion(isCurrent ? null : release.version)}
                       disabled={isCurrent || installMutation.isPending}
-                      className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                        isSelected
-                          ? 'border-primary bg-primary/10'
-                          : isCurrent
-                            ? 'border-green-500/50 bg-green-500/10 cursor-default'
+                        className={`w-full text-left p-3 rounded-lg border transition-colors ${
+                          isSelected
+                            ? 'border-primary bg-primary/10'
+                            : isCurrent
+                            ? 'cursor-default border-success/30 bg-success/10'
                             : 'border-border hover:border-primary/50 hover:bg-muted/50'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-center justify-between">
                         <div>
                           <div className="font-medium flex items-center gap-2">
                             v{release.version}
                             {isCurrent && (
-                              <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">
+                              <span className="rounded bg-success/12 px-1.5 py-0.5 text-xs text-success">
                                 Current
                               </span>
                             )}

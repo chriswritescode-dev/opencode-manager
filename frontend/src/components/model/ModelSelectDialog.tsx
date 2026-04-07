@@ -87,9 +87,9 @@ const ModelCard = memo(function ModelCard({
   }, [model.reasoning, model.tool_call, model.attachment]);
 
   const statusBadge = useMemo(() => {
-    if (model.experimental) return <Badge variant="secondary">Experimental</Badge>;
+    if (model.experimental) return <Badge variant="info">Experimental</Badge>;
     if (model.status === "alpha") return <Badge variant="destructive">Alpha</Badge>;
-    if (model.status === "beta") return <Badge variant="secondary">Beta</Badge>;
+    if (model.status === "beta") return <Badge variant="warning">Beta</Badge>;
     return null;
   }, [model.experimental, model.status]);
 
@@ -97,8 +97,8 @@ const ModelCard = memo(function ModelCard({
     <div
       className={`p-3 sm:p-4 rounded-lg border cursor-pointer transition-colors ${
         isSelected
-          ? "bg-blue-600/20 border-blue-500"
-          : "bg-card border-border hover:bg-accent"
+          ? "border-primary/45 bg-primary/10 shadow-sm"
+          : "surface-panel-muted border-border/70 hover:border-primary/20 hover:bg-card-hover/75"
       }`}
       onClick={() => onSelect(provider.id, model.id)}
     >
@@ -114,7 +114,7 @@ const ModelCard = memo(function ModelCard({
           </p>
         </div>
         {isSelected && (
-          <Check className="h-4 w-4 text-blue-500 flex-shrink-0 ml-2" />
+          <Check className="h-4 w-4 text-primary flex-shrink-0 ml-2" />
         )}
       </div>
 
@@ -182,14 +182,14 @@ const ModelGrid = memo(function ModelGrid({
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-zinc-500" />
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     );
   }
 
   if (models.length === 0 && recentModels.length === 0) {
     return (
-      <div className="text-center py-12 text-zinc-500">
+      <div className="text-center py-12 text-muted-foreground">
         No models found
       </div>
     );
@@ -255,7 +255,7 @@ const ProviderSidebar = memo(function ProviderSidebar({
   onSelect,
 }: ProviderSidebarProps) {
   return (
-    <div className="hidden sm:block w-48 lg:w-64 border-r border-border bg-muted/20 p-4 overflow-y-auto flex-shrink-0">
+    <div className="scrollbar-thin hidden sm:block w-48 lg:w-64 border-r border-border bg-panel/70 p-4 overflow-y-auto flex-shrink-0">
       <div className="space-y-4">
         <Button
           variant={!selectedProvider ? "secondary" : "ghost"}
@@ -413,7 +413,7 @@ export function ModelSelectDialog({
               onSearch={handleSearch} 
             />
 
-            <div className="flex-1 overflow-y-auto p-3 sm:p-4">
+            <div className="scrollbar-thin flex-1 overflow-y-auto p-3 sm:p-4">
               <ModelGrid
                 key={selectedProvider || "all"}
                 models={filteredModels}
@@ -426,7 +426,7 @@ export function ModelSelectDialog({
             </div>
 
             {currentModel && (
-              <div className="p-3 sm:p-4 border-t border-border bg-muted/20 flex-shrink-0">
+              <div className="p-3 sm:p-4 border-t border-border bg-panel/55 flex-shrink-0">
                 <p className="text-xs sm:text-sm text-muted-foreground">
                   Current: <span className="font-medium text-foreground break-all">{currentModel}</span>
                 </p>

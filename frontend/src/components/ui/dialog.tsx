@@ -16,12 +16,13 @@ const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn(
-      "fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
-      className
-    )}
+    <DialogPrimitive.Overlay
+      ref={ref}
+      data-slot="dialog-overlay"
+      className={cn(
+        "fixed inset-0 z-50 bg-black/72 backdrop-blur-[3px] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+        className
+      )}
     {...props}
   />
 ))
@@ -46,15 +47,16 @@ const DialogContent = React.forwardRef<
       {!fullscreen && <DialogOverlay className={overlayClassName} />}
       <DialogPrimitive.Content
         ref={ref}
+        data-slot="dialog-content"
         autoFocus={false}
         aria-describedby={undefined}
         className={cn(
-          "fixed z-50 grid gap-4 border-0 sm:border bg-background shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+          "scrollbar-thin fixed z-50 grid gap-4 border-0 sm:border border-border/70 bg-popover text-popover-foreground shadow-[0_24px_90px_-36px_color-mix(in_oklab,var(--foreground)_38%,transparent)] duration-200 supports-[backdrop-filter]:bg-popover/92 supports-[backdrop-filter]:backdrop-blur-xl data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
           fullscreen
             ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none"
             : mobileFullscreen
-              ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none sm:inset-auto sm:left-[50%] sm:bottom-auto sm:w-[90%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-0 sm:p-6 sm:rounded-lg sm:top-[8%]"
-              : "left-[50%] top-[50%] w-[90%] max-w-lg translate-x-[-50%] translate-y-[-50%] p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
+              ? "inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none sm:inset-auto sm:left-[50%] sm:bottom-auto sm:w-[90%] sm:max-w-lg sm:translate-x-[-50%] sm:translate-y-0 sm:p-6 sm:rounded-xl sm:top-[8%]"
+              : "left-[50%] top-[50%] w-[90%] max-w-lg translate-x-[-50%] translate-y-[-50%] p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-xl",
           className
         )}
         style={isMobileFullscreenMode ? {
@@ -65,7 +67,7 @@ const DialogContent = React.forwardRef<
         {children}
         {!hideCloseButton && !fullscreen && (
           <DialogPrimitive.Close 
-            className="absolute right-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
+            className="absolute right-4 inline-flex min-h-10 min-w-10 items-center justify-center rounded-md border border-border/70 bg-background/70 text-muted-foreground opacity-90 ring-offset-background transition-[color,background-color,opacity] hover:bg-accent hover:text-foreground hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-foreground"
             style={mobileFullscreen ? {
               top: 'calc(env(safe-area-inset-top, 0px) + 1rem)',
             } : { top: '1rem' }}

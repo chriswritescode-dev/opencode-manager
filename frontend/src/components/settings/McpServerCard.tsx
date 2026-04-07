@@ -24,7 +24,7 @@ interface McpServerCardProps {
 function getStatusBadge(status: McpStatus) {
   switch (status.status) {
     case 'connected':
-      return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+      return <Badge variant="success" className="text-xs">Connected</Badge>
     case 'disabled':
       return <Badge variant="secondary" className="text-xs">Disabled</Badge>
     case 'failed':
@@ -36,14 +36,14 @@ function getStatusBadge(status: McpStatus) {
       )
     case 'needs_auth':
       return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
+        <Badge variant="warning" className="text-xs flex items-center gap-1">
           <Key className="h-3 w-3" />
           Auth Required
         </Badge>
       )
     case 'needs_client_registration':
       return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-orange-500 text-orange-600">
+        <Badge variant="info" className="text-xs flex items-center gap-1">
           <AlertCircle className="h-3 w-3" />
           Registration Required
         </Badge>
@@ -102,7 +102,7 @@ export function McpServerCard({
   const displayName = getServerDisplayName(serverId)
 
   return (
-    <div className={`flex items-center justify-between gap-3 p-3 rounded-lg border bg-card ${errorMessage ? 'border-red-500/50' : 'border-border'}`}>
+    <div className={`flex items-center justify-between gap-3 rounded-lg border bg-card p-3 ${errorMessage ? 'border-destructive/40' : 'border-border'}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
           <p className="text-sm font-medium truncate">{displayName}</p>
@@ -119,7 +119,7 @@ export function McpServerCard({
           {getServerDescription(serverConfig)}
         </p>
         {errorMessage && (
-          <div className="flex items-start gap-1.5 mt-1.5 text-xs text-red-500">
+          <div className="mt-1.5 flex items-start gap-1.5 text-xs text-destructive">
             <XCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
             <span className="break-words line-clamp-2">{errorMessage}</span>
           </div>
@@ -177,7 +177,7 @@ export function McpServerCard({
               onSelect={() => {
                 setTimeout(() => onDeleteServer(serverId, displayName), 0)
               }}
-              className="text-red-600"
+              className="text-destructive"
             >
               <Trash2 className="h-4 w-4 mr-2" />
               Delete Server

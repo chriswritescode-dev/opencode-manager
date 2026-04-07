@@ -83,7 +83,7 @@ function TTSButton({ content, className = "" }: TTSButtonProps) {
   return (
     <button
       onClick={handleClick}
-      className={`p-1.5 rounded ${isThisPlaying ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'} ${className}`}
+      className={`p-1.5 rounded ${isThisPlaying ? 'bg-destructive/12 text-destructive hover:bg-destructive/18' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'} ${className}`}
       title={isThisPlaying ? "Stop playback" : "Read aloud"}
       disabled={isLoading && originalText !== content}
     >
@@ -135,7 +135,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
     case 'agent':
       return (
         <div className="border border-border rounded-lg p-4 my-2 bg-card">
-          <div className="text-sm font-medium text-blue-600 dark:text-blue-400">Agent: {part.name}</div>
+          <div className="text-sm font-medium text-info">Agent: {part.name}</div>
         </div>
       )
     case 'step-finish': {
@@ -153,7 +153,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
     case 'file':
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground">
-          <span className="text-blue-600 dark:text-blue-400">@</span>
+          <span className="text-info">@</span>
           <span className="font-medium">{part.filename || 'File'}</span>
         </span>
       )

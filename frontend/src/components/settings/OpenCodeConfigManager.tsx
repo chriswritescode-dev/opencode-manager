@@ -345,7 +345,7 @@ export function OpenCodeConfigManager() {
           <CardContent className="p-3">
             <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">
               <div className="flex items-center gap-2 flex-wrap justify-center ">
-                <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
+                <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-success'}`} />
                 <p className="font-medium text-sm sm:text-base">
                   Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
                 </p>
@@ -483,13 +483,13 @@ export function OpenCodeConfigManager() {
               return 0
             })
             .map((config) => (
-              <Card key={config.id} className={cn('border-transparent', config.isDefault && 'border-green-500')}>
+              <Card key={config.id} className={cn('border-transparent', config.isDefault && 'border-success/40')}>
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 flex-wrap">
                       <CardTitle className="text-sm sm:text-base">{config.name}</CardTitle>
                       {config.isDefault && (
-                        <Badge variant="default" className="text-green-500 bg-green-500/10">
+                        <Badge variant="success">
                           Current
                         </Badge>
                       )}
@@ -521,7 +521,7 @@ export function OpenCodeConfigManager() {
                         variant="ghost"
                         size="sm"
                         onClick={() => setDeleteConfirmConfig(config)}
-                        className="text-red-500 hover:text-red-600"
+                        className="text-destructive hover:text-destructive"
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -579,7 +579,7 @@ export function OpenCodeConfigManager() {
               }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <FileText className="h-4 w-4 text-blue-500" />
+                <FileText className="h-4 w-4 text-info" />
                 <h4 className="text-sm font-medium truncate">Global Agent Instructions (AGENTS.md)</h4>
               </div>
               <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
