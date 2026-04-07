@@ -10,17 +10,7 @@ import {
   generateDiscoveryCacheKey,
   fetchAvailableModels,
 } from '../utils/discovery-cache'
-
-type STTConfigExtended = {
-  enabled: boolean
-  provider: 'external' | 'builtin'
-  endpoint: string
-  apiKey: string
-  model: string
-  language: string
-  availableModels?: string[]
-  lastModelsFetch?: number
-}
+import { type STTConfig } from '@opencode-manager/shared'
 
 export function createSTTRoutes(db: Database) {
   const app = new Hono()
@@ -38,7 +28,7 @@ export function createSTTRoutes(db: Database) {
 
       const settingsService = new SettingsService(db)
       const settings = settingsService.getSettings(userId)
-      const sttConfig = settings.preferences.stt as STTConfigExtended | undefined
+      const sttConfig = settings.preferences.stt as STTConfig | undefined
 
       if (!sttConfig?.enabled) {
         return c.json({ error: 'STT is not enabled' }, 400)
@@ -146,7 +136,7 @@ export function createSTTRoutes(db: Database) {
 
       const settingsService = new SettingsService(db)
       const settings = settingsService.getSettings(userId)
-      const sttConfig = settings.preferences.stt as STTConfigExtended | undefined
+      const sttConfig = settings.preferences.stt as STTConfig | undefined
 
       if (!sttConfig?.endpoint) {
         return c.json({ error: 'STT not configured' }, 400)
@@ -178,7 +168,7 @@ export function createSTTRoutes(db: Database) {
           ...sttConfig,
           availableModels: models,
           lastModelsFetch: Date.now()
-        } as STTConfigExtended
+        } as STTConfig
       }, userId)
 
       logger.info(`Fetched ${models.length} STT models`)
@@ -193,7 +183,7 @@ export function createSTTRoutes(db: Database) {
     const userId = c.req.query('userId') || 'default'
     const settingsService = new SettingsService(db)
     const settings = settingsService.getSettings(userId)
-    const sttConfig = settings.preferences.stt as STTConfigExtended | undefined
+    const sttConfig = settings.preferences.stt as STTConfig | undefined
 
     return c.json({
       enabled: sttConfig?.enabled || false,

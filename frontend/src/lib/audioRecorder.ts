@@ -78,8 +78,9 @@ export class AudioRecorder {
   private mediaStream: MediaStream | null = null
   private source: MediaStreamAudioSourceNode | null = null
   private processor: ScriptProcessorNode | null = null
-  private audioBuffer: Float32Array | null = null
-  private recordingLength: number = 0
+  private workletNode: AudioWorkletNode | null = null
+  private chunks: Float32Array[] = []
+  private totalSamples: number = 0
   private state: AudioRecorderState = 'idle'
   private options: AudioRecorderOptions
   private isAborted: boolean = false
@@ -100,26 +101,6 @@ export class AudioRecorder {
       typeof window !== 'undefined' &&
       typeof window.AudioContext !== 'undefined'
     )
-  }
-
-  async warmup(): Promise<boolean> {
-    if (!AudioRecorder.isSupported()) {
-      return false
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
-      stream.getTracks().forEach(track => track.stop())
-      return true
-    } catch {
-      return false
-    }
   }
 
   getState(): AudioRecorderState {
@@ -152,7 +133,8 @@ export class AudioRecorder {
 
     try {
       this.isAborted = false
-      this.recordingLength = 0
+      this.chunks = []
+      this.totalSamples = 0
 
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -168,25 +150,32 @@ export class AudioRecorder {
 
       this.source = this.audioContext.createMediaStreamSource(this.mediaStream)
 
-      const bufferSize = 4096
-      this.processor = this.audioContext.createScriptProcessor(bufferSize, 1, 1)
-
-      this.audioBuffer = new Float32Array(0)
-
-      this.processor.onaudioprocess = (e) => {
-        if (this.audioBuffer) {
-          const inputData = e.inputBuffer.getChannelData(0)
-          const newLength = this.recordingLength + inputData.length
-          const newBuffer = new Float32Array(newLength)
-          newBuffer.set(this.audioBuffer, 0)
-          newBuffer.set(inputData, this.recordingLength)
-          this.audioBuffer = newBuffer
-          this.recordingLength = newLength
+      if (this.audioContext.audioWorklet) {
+        try {
+          await this.audioContext.audioWorklet.addModule('/audio-worklet-processor.js')
+          this.workletNode = new AudioWorkletNode(this.audioContext, 'recorder-processor')
+          this.workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+            this.chunks.push(e.data)
+            this.totalSamples += e.data.length
+          }
+          this.source.connect(this.workletNode)
+          this.workletNode.connect(this.audioContext.destination)
+        } catch {
+          this.audioContext.close()
+          this.audioContext = null
+          throw new Error('Failed to load audio worklet processor')
         }
+      } else if (this.audioContext) {
+        const bufferSize = 4096
+        this.processor = this.audioContext.createScriptProcessor(bufferSize, 1, 1)
+        this.processor.onaudioprocess = (e) => {
+          const inputData = new Float32Array(e.inputBuffer.getChannelData(0))
+          this.chunks.push(inputData)
+          this.totalSamples += inputData.length
+        }
+        this.source.connect(this.processor)
+        this.processor.connect(this.audioContext.destination)
       }
-
-      this.source.connect(this.processor)
-      this.processor.connect(this.audioContext.destination)
 
       this.setState('recording')
     } catch (error) {
@@ -210,37 +199,41 @@ export class AudioRecorder {
   }
 
   stop(): void {
-    if (this.processor) {
+    if (this.processor || this.workletNode) {
       this.processRecording()
     }
+    this.resetRecordingState()
     this.cleanup()
     this.setState('stopped')
   }
 
   abort(): void {
     this.isAborted = true
-    this.audioBuffer = null
-    this.recordingLength = 0
+    this.resetRecordingState()
     this.cleanup()
     this.setState('idle')
   }
 
   private processRecording(): void {
-    if (this.isAborted || !this.audioBuffer || this.recordingLength === 0) {
+    if (this.isAborted || this.chunks.length === 0 || this.totalSamples === 0) {
       return
     }
 
     try {
+      const merged = new Float32Array(this.totalSamples)
+      let offset = 0
+      for (const chunk of this.chunks) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+      }
+
       const audioBuffer = this.audioContext!.createBuffer(
         1,
-        this.recordingLength,
+        this.totalSamples,
         this.audioContext!.sampleRate
       )
 
-      const channelData = new Float32Array(this.recordingLength)
-      channelData.set(this.audioBuffer!.subarray(0, this.recordingLength))
-      audioBuffer.copyToChannel(channelData, 0)
-
+      audioBuffer.copyToChannel(merged, 0)
       const wavBlob = encodeWAV(audioBuffer)
       this.onDataAvailable?.(wavBlob)
     } catch {
@@ -250,7 +243,15 @@ export class AudioRecorder {
   }
 
   private cleanup(): void {
+    if (this.workletNode) {
+      this.workletNode.port.onmessage = null
+      this.workletNode.port.postMessage('stop')
+      this.workletNode.disconnect()
+      this.workletNode = null
+    }
+
     if (this.processor) {
+      this.processor.onaudioprocess = null
       this.processor.disconnect()
       this.processor = null
     }
@@ -271,42 +272,34 @@ export class AudioRecorder {
     }
   }
 
+  private resetRecordingState(): void {
+    this.chunks = []
+    this.totalSamples = 0
+  }
+
   getRecordingBlob(): Blob | null {
-    if (!this.audioContext || !this.audioBuffer || this.recordingLength === 0) {
+    if (!this.audioContext || this.chunks.length === 0 || this.totalSamples === 0) {
       return null
     }
 
     try {
+      const merged = new Float32Array(this.totalSamples)
+      let offset = 0
+      for (const chunk of this.chunks) {
+        merged.set(chunk, offset)
+        offset += chunk.length
+      }
+
       const audioBuffer = this.audioContext.createBuffer(
         1,
-        this.recordingLength,
+        this.totalSamples,
         this.audioContext.sampleRate
       )
 
-      const channelData = new Float32Array(this.recordingLength)
-      channelData.set(this.audioBuffer.subarray(0, this.recordingLength))
-      audioBuffer.copyToChannel(channelData, 0)
+      audioBuffer.copyToChannel(merged, 0)
       return encodeWAV(audioBuffer)
     } catch {
       return null
     }
   }
-}
-
-let recorderInstance: AudioRecorder | null = null
-
-export function getAudioRecorder(): AudioRecorder {
-  if (!recorderInstance) {
-    recorderInstance = new AudioRecorder()
-  }
-  return recorderInstance
-}
-
-export function isAudioRecordingSupported(): boolean {
-  return AudioRecorder.isSupported()
-}
-
-export async function warmupAudioRecorder(): Promise<boolean> {
-  const recorder = getAudioRecorder()
-  return recorder.warmup()
 }

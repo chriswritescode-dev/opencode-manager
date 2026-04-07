@@ -754,7 +754,14 @@ const { model, modelString } = useModelSelection(opcodeUrl, directory)
   }, [prompt, onPromptChange])
 
   useEffect(() => {
+    if (isRecording) {
+      abortRecording()
+    }
+    clearSTT()
+    lastAddedTranscriptRef.current = ''
+    setIsTogglingRecording(false)
     setLocalMode(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- Intentionally only run on sessionID change to avoid clearing transcript when recording state changes
   }, [sessionID])
 
   

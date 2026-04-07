@@ -17,9 +17,10 @@ export function useSTT(userId = 'default') {
 
   const recognizer = useRef(getWebSpeechRecognizer())
   const audioRecorder = useRef<AudioRecorder | null>(null)
-  const hasShownPermissionError = useRef(false)
   const abortControllerRef = useRef<AbortController | null>(null)
   const userIdRef = useRef(userId)
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastProcessedBlobRef = useRef<Blob | null>(null)
   
   useEffect(() => {
     userIdRef.current = userId
@@ -60,13 +61,11 @@ export function useSTT(userId = 'default') {
       setIsError(true)
       setError(errorMessage)
 
-      if (!hasShownPermissionError.current && errorMessage.includes('denied')) {
-        hasShownPermissionError.current = true
-      }
-
-      setTimeout(() => {
+      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
+      errorTimeoutRef.current = setTimeout(() => {
         setIsError(false)
         setError(null)
+        errorTimeoutRef.current = null
       }, 3000)
     })
 
@@ -112,13 +111,20 @@ export function useSTT(userId = 'default') {
       setIsError(true)
       setError(errorMessage)
 
-      setTimeout(() => {
+      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
+      errorTimeoutRef.current = setTimeout(() => {
         setIsError(false)
         setError(null)
+        errorTimeoutRef.current = null
       }, 3000)
     })
 
     recorder.setOnDataAvailable(async (blob) => {
+      if (lastProcessedBlobRef.current === blob) {
+        return
+      }
+      lastProcessedBlobRef.current = blob
+      
       setInterimTranscript('Processing...')
       setIsProcessing(true)
       
@@ -145,9 +151,11 @@ export function useSTT(userId = 'default') {
         const errorMessage = err instanceof Error ? err.message : 'Transcription failed'
         setError(errorMessage)
         
-        setTimeout(() => {
+        if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
+        errorTimeoutRef.current = setTimeout(() => {
           setIsError(false)
           setError(null)
+          errorTimeoutRef.current = null
         }, 3000)
       } finally {
         setIsProcessing(false)
@@ -165,8 +173,6 @@ export function useSTT(userId = 'default') {
     if (!audioRecorder.current) {
       audioRecorder.current = new AudioRecorder()
     }
-
-    audioRecorder.current.warmup()
 
     setupAudioRecorder(audioRecorder.current)
 
@@ -194,7 +200,7 @@ export function useSTT(userId = 'default') {
     setInterimTranscript('')
     setIsError(false)
     setError(null)
-    hasShownPermissionError.current = false
+    lastProcessedBlobRef.current = null
 
     if (isExternalProvider) {
       if (!audioRecorder.current) {
@@ -271,6 +277,12 @@ export function useSTT(userId = 'default') {
   const clear = useCallback(() => {
     setTranscript('')
     setInterimTranscript('')
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
+    }
   }, [])
 
   return {
