@@ -74,10 +74,13 @@ export function createOAuthRoutes() {
       }
 
       const data = await response.json()
-      
-      logger.info(`OAuth callback successful for ${providerId}, reloading OpenCode configuration`)
-      await opencodeServerManager.reloadConfig()
-      
+
+      try {
+        await opencodeServerManager.reloadConfig()
+      } catch (reloadError) {
+        logger.warn(`Failed to reload OpenCode config after OAuth callback for ${providerId}:`, reloadError)
+      }
+
       return c.json(data)
     } catch (error) {
       logger.error('OAuth callback error:', error)

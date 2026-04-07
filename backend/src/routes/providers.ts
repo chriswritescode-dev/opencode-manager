@@ -4,6 +4,7 @@ import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
 import { setOpenCodeAuth, deleteOpenCodeAuth } from '../services/proxy'
+import { opencodeServerManager } from '../services/opencode-single-server'
 
 export function createProvidersRoutes() {
   const app = new Hono()
@@ -42,6 +43,13 @@ export function createProvidersRoutes() {
       }
       
       await authService.set(providerId, validated.apiKey)
+      
+      try {
+        await opencodeServerManager.reloadConfig()
+      } catch (reloadError) {
+        logger.warn(`Failed to reload OpenCode config after saving credentials for ${providerId}:`, reloadError)
+      }
+      
       return c.json({ success: true })
     } catch (error) {
       logger.error('Failed to set provider credentials:', error)
@@ -62,6 +70,13 @@ export function createProvidersRoutes() {
       }
       
       await authService.delete(providerId)
+      
+      try {
+        await opencodeServerManager.reloadConfig()
+      } catch (reloadError) {
+        logger.warn(`Failed to reload OpenCode config after deleting credentials for ${providerId}:`, reloadError)
+      }
+      
       return c.json({ success: true })
     } catch (error) {
       logger.error('Failed to delete provider credentials:', error)
