@@ -930,10 +930,10 @@ return (
             <button
               onClick={handleVoiceToggle}
               disabled={disabled || isProcessing}
-              className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[52px] ${
+              className={`px-4 py-2 rounded-lg transition-all duration-200 active:scale-95 flex items-center justify-center min-w-[52px] border ${
                 isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                  ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-2 border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
-                  : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border border-border'
+                  ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
+                  : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
               }`}
               title={isRecording ? 'Stop recording' : 'Voice input'}
             >
