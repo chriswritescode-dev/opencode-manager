@@ -45,6 +45,8 @@ import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { migrateGlobalSkills } from './services/skills'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
+import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { parse as parseJsonc } from 'jsonc-parser'
 
 import { logger } from './utils/logger'
 import { 
