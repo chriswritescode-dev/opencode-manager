@@ -469,8 +469,20 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         }, 404)
       }
 
-      const importedSessions = await getImportedSessionDirectories(result.workspaceStatePath)
-      const relinkedRepos = await relinkReposFromSessionDirectories(db, gitAuthService, importedSessions.directories)
+      let relinkedRepos
+      if (result.stateImported) {
+        const importedSessions = await getImportedSessionDirectories(result.workspaceStatePath)
+        relinkedRepos = await relinkReposFromSessionDirectories(db, gitAuthService, importedSessions.directories)
+      } else {
+        relinkedRepos = {
+          repos: [],
+          relinkedCount: 0,
+          existingCount: 0,
+          nonRepoPathCount: 0,
+          duplicatePathCount: 0,
+          errors: [],
+        }
+      }
 
       opencodeServerManager.clearStartupError()
       await opencodeServerManager.restart()

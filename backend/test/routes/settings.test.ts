@@ -235,6 +235,44 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json.error).toBe('No importable OpenCode host data found')
       expect(mockRestart).not.toHaveBeenCalled()
     })
+
+    it('should not call relink functions when only config is imported (stateImported: false)', async () => {
+      mockSyncOpenCodeImport.mockResolvedValueOnce({
+        configSourcePath: '/import/opencode-config/opencode.json',
+        stateSourcePath: '/import/opencode-state',
+        workspaceConfigPath: '/tmp/test-workspace/.config/opencode/opencode.json',
+        workspaceStatePath: '/tmp/test-workspace/.opencode/state/opencode',
+        workspaceStateExists: false,
+        configImported: true,
+        stateImported: false,
+      })
+
+      const req = new Request('http://localhost/opencode-import?userId=default', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overwriteState: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.success).toBe(true)
+      expect(json.serverRestarted).toBe(true)
+      expect(json.configImported).toBe(true)
+      expect(json.stateImported).toBe(false)
+      expect(mockGetImportedSessionDirectories).not.toHaveBeenCalled()
+      expect(mockRelinkReposFromSessionDirectories).not.toHaveBeenCalled()
+      expect(mockClearStartupError).toHaveBeenCalled()
+      expect(mockRestart).toHaveBeenCalled()
+      expect(json.relinkedRepos).toEqual({
+        repos: [],
+        relinkedCount: 0,
+        existingCount: 0,
+        nonRepoPathCount: 0,
+        duplicatePathCount: 0,
+        errors: [],
+      })
+    })
   })
 
   describe('POST /opencode-upgrade', () => {

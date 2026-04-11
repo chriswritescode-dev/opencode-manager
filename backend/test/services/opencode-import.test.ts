@@ -59,14 +59,24 @@ describe('opencode-import service', () => {
     mockReaddir.mockResolvedValue([])
   })
 
-  it('detects importable host config and state paths', async () => {
+  it('detects importable host config and state paths with opencode.db', async () => {
     process.env.OPENCODE_IMPORT_CONFIG_PATH = '/import/opencode-config/opencode.json'
     process.env.OPENCODE_IMPORT_STATE_PATH = '/import/opencode-state'
 
     mockFileExists.mockImplementation(async (candidate: string) => {
-      return candidate === '/import/opencode-config/opencode.json'
-        || candidate === '/import/opencode-state'
-        || candidate === '/tmp/workspace/.opencode/state/opencode/opencode.db'
+      if (candidate === '/import/opencode-config/opencode.json') {
+        return true
+      }
+      if (candidate === '/import/opencode-state') {
+        return true
+      }
+      if (candidate === '/import/opencode-state/opencode.db') {
+        return true
+      }
+      if (candidate === '/tmp/workspace/.opencode/state/opencode/opencode.db') {
+        return true
+      }
+      return false
     })
 
     const status = await getOpenCodeImportStatus()
@@ -157,5 +167,32 @@ describe('opencode-import service', () => {
       '/Users/test/project-b/apps/web',
     ])
     expect(readonlyDatabase.close).toHaveBeenCalled()
+  })
+
+  it('reports stateSourcePath as null when candidate directory exists but lacks opencode.db', async () => {
+    process.env.OPENCODE_IMPORT_CONFIG_PATH = '/import/opencode-config/opencode.json'
+    process.env.OPENCODE_IMPORT_STATE_PATH = '/import/opencode-state'
+
+    mockFileExists.mockImplementation(async (candidate: string) => {
+      if (candidate === '/import/opencode-config/opencode.json') {
+        return true
+      }
+      if (candidate === '/import/opencode-state') {
+        return true
+      }
+      if (candidate === '/import/opencode-state/opencode.db') {
+        return false
+      }
+      if (candidate === '/tmp/workspace/.opencode/state/opencode/opencode.db') {
+        return false
+      }
+      return false
+    })
+
+    const status = await getOpenCodeImportStatus()
+
+    expect(status.configSourcePath).toBe('/import/opencode-config/opencode.json')
+    expect(status.stateSourcePath).toBeNull()
+    expect(status.workspaceStateExists).toBe(false)
   })
 })

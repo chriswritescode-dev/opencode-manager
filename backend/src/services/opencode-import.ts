@@ -51,6 +51,16 @@ export async function getFirstExistingPath(paths: string[]): Promise<string | nu
   return null
 }
 
+async function getFirstExistingPathWithDatabase(paths: string[]): Promise<string | null> {
+  for (const candidate of paths) {
+    if (await fileExists(candidate) && await fileExists(path.join(candidate, 'opencode.db'))) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
 function escapeSqliteValue(value: string): string {
   return value.replace(/'/g, "''")
 }
@@ -104,7 +114,7 @@ export async function getOpenCodeImportStatus(): Promise<OpenCodeImportStatus> {
   const configSourcePath = await getFirstExistingPath(
     getImportPathCandidates('OPENCODE_IMPORT_CONFIG_PATH', path.join(os.homedir(), '.config', 'opencode', 'opencode.json'))
   )
-  const stateSourcePath = await getFirstExistingPath(
+  const stateSourcePath = await getFirstExistingPathWithDatabase(
     getImportPathCandidates('OPENCODE_IMPORT_STATE_PATH', path.join(os.homedir(), '.local', 'share', 'opencode'))
   )
 
