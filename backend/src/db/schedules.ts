@@ -204,11 +204,6 @@ export function deleteScheduleJob(db: Database, repoId: number, jobId: number): 
   return result.changes > 0
 }
 
-export function reserveScheduleJobNextRun(db: Database, repoId: number, jobId: number, nextRunAt: number): void {
-  const stmt = db.prepare('UPDATE schedule_jobs SET next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
-  stmt.run(nextRunAt, Date.now(), repoId, jobId)
-}
-
 export function updateScheduleJobRunState(db: Database, repoId: number, jobId: number, values: { lastRunAt: number; nextRunAt?: number | null }): void {
   const stmt = db.prepare('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
   stmt.run(values.lastRunAt, values.nextRunAt ?? null, Date.now(), repoId, jobId)

@@ -354,19 +354,6 @@ describe('schedule database queries', () => {
     expect(result).toBe(false)
   })
 
-  it('reserves the next run time for a schedule job', () => {
-    const nextRunAt = Date.now() + 3600000
-    const stmt = {
-      run: vi.fn(),
-    }
-    mockDb.prepare.mockReturnValue(stmt)
-
-    schedulesDb.reserveScheduleJobNextRun(mockDb, 42, 7, nextRunAt)
-
-    expect(mockDb.prepare).toHaveBeenCalledWith('UPDATE schedule_jobs SET next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
-    expect(stmt.run).toHaveBeenCalledWith(nextRunAt, expect.any(Number), 42, 7)
-  })
-
   it('updates the run state of a schedule job', () => {
     const lastRunAt = Date.now()
     const nextRunAt = Date.now() + 3600000
