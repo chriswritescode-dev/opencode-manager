@@ -30,7 +30,8 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
   getWorkspacePath: vi.fn(() => '/tmp/workspace'),
 }))
 
-import { readdir } from 'fs/promises'
+import path from 'path'
+import { readdir, rm, cp } from 'fs/promises'
 import { Database as SQLiteDatabase } from 'bun:sqlite'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent } from '../../src/services/file-operations'
 import { SettingsService } from '../../src/services/settings'
@@ -194,5 +195,76 @@ describe('opencode-import service', () => {
     expect(status.configSourcePath).toBe('/import/opencode-config/opencode.json')
     expect(status.stateSourcePath).toBeNull()
     expect(status.workspaceStateExists).toBe(false)
+  })
+
+  it('prevents destructive self-import when source and target resolve to same directory', async () => {
+    const { importOpenCodeStateDirectory } = await import('../../src/services/opencode-import')
+
+    const samePath = '/shared/opencode-state'
+    mockFileExists.mockResolvedValue(true)
+    mockEnsureDirectoryExists.mockResolvedValue(undefined)
+    mockReaddir.mockResolvedValue([])
+
+    const mockRm = vi.mocked(rm)
+    mockRm.mockResolvedValue(undefined)
+
+    const result = await importOpenCodeStateDirectory(samePath, samePath)
+
+    expect(result).toBe(false)
+    expect(mockRm).not.toHaveBeenCalled()
+    expect(MockSQLiteDatabase).not.toHaveBeenCalled()
+  })
+
+  it('removes stale non-DB artifacts before copying new state during overwrite import', async () => {
+    const { importOpenCodeStateDirectory } = await import('../../src/services/opencode-import')
+
+    const sourcePath = '/import/opencode-state'
+    const targetPath = '/workspace/.opencode/state/opencode'
+
+    mockFileExists.mockImplementation(async (candidate: string) => {
+      if (candidate === path.join(sourcePath, 'opencode.db')) {
+        return true
+      }
+      if (candidate === path.join(targetPath, 'opencode.db')) {
+        return true
+      }
+      return false
+    })
+
+    mockReaddir.mockResolvedValue([
+      { name: 'stale-file.txt', isDirectory: () => false },
+      { name: 'stale-folder', isDirectory: () => true },
+      { name: 'opencode.db', isDirectory: () => false },
+      { name: 'opencode.db-shm', isDirectory: () => false },
+      { name: 'opencode.db-wal', isDirectory: () => false },
+    ] as any)
+
+    mockEnsureDirectoryExists.mockResolvedValue(undefined)
+    const mockRm = vi.mocked(rm)
+    mockRm.mockResolvedValue(undefined)
+
+    const mockCp = vi.mocked(cp)
+    mockCp.mockResolvedValue(undefined)
+
+    const mockExec = vi.fn()
+    const mockClose = vi.fn()
+    MockSQLiteDatabase.mockImplementationOnce(() => ({
+      exec: mockExec,
+      close: mockClose,
+    }))
+
+    const result = await importOpenCodeStateDirectory(sourcePath, targetPath)
+
+    expect(result).toBe(true)
+    expect(mockRm).toHaveBeenCalledWith(
+      path.join(targetPath, 'stale-file.txt'),
+      { recursive: true, force: true }
+    )
+    expect(mockRm).toHaveBeenCalledWith(
+      path.join(targetPath, 'stale-folder'),
+      { recursive: true, force: true }
+    )
+    expect(mockCp).toHaveBeenCalled()
+    expect(mockExec).toHaveBeenCalled()
   })
 })

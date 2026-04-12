@@ -92,17 +92,33 @@ function snapshotOpenCodeDatabase(sourcePath: string, targetPath: string): void 
 }
 
 export async function importOpenCodeStateDirectory(sourcePath: string, targetPath: string): Promise<boolean> {
-  const sourceDbPath = path.join(sourcePath, 'opencode.db')
+  const resolvedSourcePath = path.resolve(sourcePath)
+  const resolvedTargetPath = path.resolve(targetPath)
+  const sourceDbPath = path.join(resolvedSourcePath, 'opencode.db')
+
   if (!await fileExists(sourceDbPath)) {
     return false
   }
 
-  await ensureDirectoryExists(targetPath)
-  await copyOpenCodeStateFiles(sourcePath, targetPath)
-  await rm(path.join(targetPath, 'opencode.db'), { force: true })
-  await rm(path.join(targetPath, 'opencode.db-shm'), { force: true })
-  await rm(path.join(targetPath, 'opencode.db-wal'), { force: true })
-  snapshotOpenCodeDatabase(sourceDbPath, path.join(targetPath, 'opencode.db'))
+  if (resolvedSourcePath === resolvedTargetPath) {
+    return false
+  }
+
+  await ensureDirectoryExists(resolvedTargetPath)
+
+  const existingEntries = await readdir(resolvedTargetPath, { withFileTypes: true })
+  for (const entry of existingEntries) {
+    if (!OPENCODE_STATE_DB_FILENAMES.has(entry.name)) {
+      await rm(path.join(resolvedTargetPath, entry.name), { recursive: true, force: true })
+    }
+  }
+
+  await rm(path.join(resolvedTargetPath, 'opencode.db'), { force: true })
+  await rm(path.join(resolvedTargetPath, 'opencode.db-shm'), { force: true })
+  await rm(path.join(resolvedTargetPath, 'opencode.db-wal'), { force: true })
+
+  await copyOpenCodeStateFiles(resolvedSourcePath, resolvedTargetPath)
+  snapshotOpenCodeDatabase(sourceDbPath, path.join(resolvedTargetPath, 'opencode.db'))
   return true
 }
 

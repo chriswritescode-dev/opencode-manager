@@ -34,10 +34,6 @@ function markApplied(db: Database, migration: Migration): void {
     .run(migration.version, migration.name, Date.now())
 }
 
-function markReverted(db: Database, version: number): void {
-  db.prepare('DELETE FROM schema_migrations WHERE version = ?').run(version)
-}
-
 export function migrate(db: Database, migrations: Migration[]): void {
   ensureMigrationsTable(db)
 
@@ -70,49 +66,4 @@ export function migrate(db: Database, migrations: Migration[]): void {
   logger.info('All migrations applied successfully')
 }
 
-export function rollback(db: Database, migrations: Migration[], targetVersion?: number): void {
-  ensureMigrationsTable(db)
 
-  const applied = getAppliedVersions(db)
-  const sorted = [...migrations]
-    .filter(m => applied.has(m.version))
-    .sort((a, b) => b.version - a.version)
-
-  if (sorted.length === 0) {
-    logger.info('No migrations to rollback')
-    return
-  }
-
-  const latest = sorted[0]
-  if (!latest) {
-    logger.info('No migrations to rollback')
-    return
-  }
-  const target = targetVersion ?? latest.version - 1
-
-  const toRevert = sorted.filter(m => m.version > target)
-
-  if (toRevert.length === 0) {
-    logger.info('No migrations to rollback')
-    return
-  }
-
-  logger.info(`Rolling back ${toRevert.length} migration(s) to version ${target}`)
-
-  for (const migration of toRevert) {
-    logger.info(`Reverting migration ${migration.version}: ${migration.name}`)
-    db.run('BEGIN TRANSACTION')
-    try {
-      migration.down(db)
-      markReverted(db, migration.version)
-      db.run('COMMIT')
-      logger.info(`Migration ${migration.version} reverted successfully`)
-    } catch (error) {
-      db.run('ROLLBACK')
-      logger.error(`Rollback of migration ${migration.version} failed:`, error)
-      throw error
-    }
-  }
-
-  logger.info('Rollback completed successfully')
-}
