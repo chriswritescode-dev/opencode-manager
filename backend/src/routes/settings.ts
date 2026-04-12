@@ -188,7 +188,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const userId = c.req.query('userId') || 'default'
       const configs = settingsService.getOpenCodeConfigs(userId)
       const defaultConfig = configs.configs.find((cfg: { isDefault: boolean }) => cfg.isDefault)
-      const isEnabled = defaultConfig?.content?.plugin?.includes('@opencode-manager/memory') ?? false
+      const isEnabled = ((defaultConfig?.content?.plugin as string[] | undefined) ?? []).includes('@opencode-manager/memory')
       return c.json({ memoryPluginEnabled: isEnabled })
     } catch (error) {
       logger.error('Failed to get memory plugin status:', error)

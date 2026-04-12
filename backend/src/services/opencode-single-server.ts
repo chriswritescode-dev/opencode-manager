@@ -25,6 +25,48 @@ const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 
+type StartupValidationIssue = {
+  path: string
+  message: string
+}
+
+function parseStartupValidationIssues(stderrOutput: string): StartupValidationIssue[] {
+  const match = stderrOutput.match(/ZodError:\s*(\[[\s\S]*?\])(?:\n\s+at |$)/)
+  if (!match?.[1]) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(match[1]) as Array<{ path?: unknown; message?: unknown }>
+    return parsed
+      .map((issue) => ({
+        path: Array.isArray(issue.path) && issue.path.length > 0 ? issue.path.join('.') : 'root',
+        message: typeof issue.message === 'string' ? issue.message : 'Invalid value',
+      }))
+      .filter((issue) => issue.message)
+  } catch {
+    return []
+  }
+}
+
+function formatStartupError(stderrOutput: string, fallback: string): string {
+  const validationIssues = parseStartupValidationIssues(stderrOutput)
+  if (validationIssues.length === 0) {
+    return fallback
+  }
+
+  const summary = validationIssues
+    .slice(0, 8)
+    .map((issue) => `${issue.path}: ${issue.message}`)
+    .join('; ')
+
+  const remainder = validationIssues.length > 8
+    ? ` (${validationIssues.length - 8} more issue${validationIssues.length - 8 === 1 ? '' : 's'})`
+    : ''
+
+  return `OpenCode config validation failed: ${summary}${remainder}`
+}
+
 // Helper getters to ensure values are computed at runtime (not module load time)
 // This allows proper mocking in tests
 const getOpenCodeServerDirectory = () => getWorkspacePath()
@@ -208,7 +250,8 @@ class OpenCodeServerManager {
 
     this.serverProcess.on('exit', (code, signal) => {
       if (code !== null && code !== 0) {
-        this.lastStartupError = `Server exited with code ${code}${stderrOutput ? `: ${stderrOutput.slice(-500)}` : ''}`
+        const fallback = `Server exited with code ${code}${stderrOutput ? `: ${stderrOutput.slice(-500)}` : ''}`
+        this.lastStartupError = formatStartupError(stderrOutput, fallback)
         logger.error('OpenCode server process exited:', this.lastStartupError)
       } else if (signal) {
         this.lastStartupError = `Server terminated by signal ${signal}`
@@ -222,7 +265,8 @@ class OpenCodeServerManager {
 
     const healthy = await this.waitForHealth(30000)
     if (!healthy) {
-      this.lastStartupError = `Server failed to become healthy after 30s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
+      const fallback = `Server failed to become healthy after 30s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
+      this.lastStartupError = formatStartupError(stderrOutput, fallback)
       throw new Error('OpenCode server failed to become healthy')
     }
 

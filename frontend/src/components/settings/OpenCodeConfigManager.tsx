@@ -469,7 +469,7 @@ export function OpenCodeConfigManager() {
          <CardHeader className="pb-3">
            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <CardTitle className="text-sm sm:text-base">Existing OpenCode Host Import</CardTitle>
+                      <CardTitle className="text-sm sm:text-base">Existing OpenCode Host Import</CardTitle>
                 <p className="text-sm text-muted-foreground mt-1">
                   Import your standalone OpenCode config and session state into this workspace, then restart the server so existing chats can reconnect.
                 </p>
@@ -562,12 +562,12 @@ export function OpenCodeConfigManager() {
         </Card>
 
         <MemoryPluginConfig 
-           memoryPluginEnabled={configs.find(c => c.isDefault)?.content?.plugin?.includes('@opencode-manager/memory') ?? false}
+           memoryPluginEnabled={((configs.find(c => c.isDefault)?.content?.plugin as string[] | undefined) ?? []).includes('@opencode-manager/memory')}
            onToggle={async (enabled) => {
-             const defaultConfig = configs.find(c => c.isDefault)
-             if (!defaultConfig) return
-             
-             const currentPlugins = defaultConfig.content?.plugin ?? []
+              const defaultConfig = configs.find(c => c.isDefault)
+              if (!defaultConfig) return
+              
+              const currentPlugins = (defaultConfig.content?.plugin as string[] | undefined) ?? []
              const memoryPlugin = '@opencode-manager/memory'
              const newPlugins = enabled
                ? currentPlugins.includes(memoryPlugin)
@@ -616,6 +616,11 @@ export function OpenCodeConfigManager() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 flex-wrap">
                       <CardTitle className="text-sm sm:text-base">{config.name}</CardTitle>
+                      {!config.isValid && (
+                        <Badge variant="destructive">
+                          Invalid Config
+                        </Badge>
+                      )}
                       {config.isDefault && (
                         <Badge variant="default" className="text-green-500 bg-green-500/10">
                           Current
@@ -741,7 +746,7 @@ export function OpenCodeConfigManager() {
                   <SelectContent>
                     {configs.map(config => (
                       <SelectItem key={config.id} value={config.name}>
-                        {config.name} {config.isDefault && '(Default)'}
+                        {config.name} {config.isDefault && '(Default)'} {!config.isValid && '(Invalid)'}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -751,6 +756,26 @@ export function OpenCodeConfigManager() {
               <div className="flex flex-col gap-4 pb-20 min-w-0">
                 {selectedConfig ? (
                   <>
+                    {!selectedConfig.isValid && selectedConfig.validationIssues && selectedConfig.validationIssues.length > 0 && (
+                      <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+                        <p className="font-medium text-destructive">This configuration has validation issues</p>
+                        <p className="mt-1 text-sm text-destructive/90">
+                          OpenCode may fail to start until these fields are corrected. Open the config editor to fix the file directly.
+                        </p>
+                        <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-destructive/90">
+                          {selectedConfig.validationIssues.slice(0, 8).map((issue) => (
+                            <li key={`${issue.path}-${issue.message}`}>
+                              <span className="font-mono text-xs">{issue.path}</span>: {issue.message}
+                            </li>
+                          ))}
+                        </ul>
+                        {selectedConfig.validationIssues.length > 8 && (
+                          <p className="mt-2 text-xs text-destructive/80">
+                            Showing 8 of {selectedConfig.validationIssues.length} issues. Open the config editor to review and fix the file.
+                          </p>
+                        )}
+                      </div>
+                    )}
                     <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0">
                       <button
                         ref={commandsRef}
@@ -840,7 +865,7 @@ export function OpenCodeConfigManager() {
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Skills</h4>
                           <span className="text-xs text-muted-foreground">
-                            {managedSkills.length + (selectedConfig.content?.skills?.paths?.length ?? 0) + (selectedConfig.content?.skills?.urls?.length ?? 0)} configured
+                            {managedSkills.length + (((selectedConfig.content?.skills as { paths?: string[]; urls?: string[] } | undefined)?.paths?.length) ?? 0) + (((selectedConfig.content?.skills as { paths?: string[]; urls?: string[] } | undefined)?.urls?.length) ?? 0)} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.skills ? 'rotate-90' : ''}`} />
@@ -848,7 +873,7 @@ export function OpenCodeConfigManager() {
                         <div className={`${expandedSections.skills ? 'block' : 'hidden'} border-t border-border`}>
                           <div className="p-4 max-h-[50vh] overflow-y-auto">
                             <SkillsEditor
-                              skills={selectedConfig.content?.skills}
+                              skills={selectedConfig.content?.skills as { paths?: string[]; urls?: string[] } | undefined}
                               managedSkills={managedSkills}
                               onChange={(skills) => {
                                 const paths = skills?.paths?.filter(Boolean)

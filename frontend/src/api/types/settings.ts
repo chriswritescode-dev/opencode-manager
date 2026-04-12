@@ -76,8 +76,13 @@ export interface UpdateSettingsRequest {
 export interface OpenCodeConfig {
   id: number
   name: string
-  content: OpenCodeConfigContent
+  content: Record<string, unknown>
   rawContent?: string
+  validationIssues?: Array<{
+    path: string
+    message: string
+  }>
+  isValid: boolean
   isDefault: boolean
   createdAt: number
   updatedAt: number
