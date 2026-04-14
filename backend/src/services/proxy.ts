@@ -197,8 +197,9 @@ export async function patchOpenCodeConfig(config: Record<string, unknown>): Prom
     }
 
     const responseText = await response.text()
+    logger.warn(`OpenCode PATCH response (${response.status}): ${responseText.slice(0, 500)}`)
     const { details, errorMessage: initialError } = parseErrorResponse(responseText)
-    
+
     if (details.length === 0) {
       logger.error(`Failed to patch OpenCode config: ${initialError}`)
       return { success: false, error: initialError, details }

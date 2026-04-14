@@ -237,9 +237,9 @@ export function OpenCodeModelsEditor({ providers, onChange }: OpenCodeModelsEdit
       <OpenCodeModelDialog
         open={!!editingModel}
         onOpenChange={() => setEditingModel(null)}
-        onSubmit={(providerId: string, modelId: string, model: ConfigModel) => {
+        onSubmit={(providerId: string, modelId: string, model: ConfigModel, newProvider?: NewProviderConfig) => {
           if (editingModel) {
-            handleModelSubmit(providerId, modelId, model, undefined, editingModel.providerId, editingModel.modelId)
+            handleModelSubmit(providerId, modelId, model, newProvider, editingModel.providerId, editingModel.modelId)
           }
         }}
         availableProviders={availableProviderIds}

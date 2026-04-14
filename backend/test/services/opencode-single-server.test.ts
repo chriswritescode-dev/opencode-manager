@@ -246,32 +246,22 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     vi.clearAllMocks()
   })
 
-  it('should call fetch to get current config before patching', async () => {
-    const mockFetch = vi.fn().mockImplementation((url: string) => {
-      if (url.includes('/config')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({ command: { review: 'test' } })
-        })
-      }
-      if (url.includes('/doc')) {
-        return Promise.resolve({ ok: true })
-      }
-      return Promise.resolve({ ok: false })
-    })
-    global.fetch = mockFetch as unknown as typeof fetch
+  it('should read config from file before patching', async () => {
+    const mockReadFile = vi.fn().mockResolvedValue(JSON.stringify({ command: { review: 'test' } }))
+    fs.readFile = mockReadFile
 
-    vi.mock('../../src/services/proxy', () => ({
-      patchOpenCodeConfig: vi.fn().mockResolvedValue({ success: true }),
-    }))
+    const { patchOpenCodeConfig } = await import('../../src/services/proxy')
+    const mockPatchResult = { success: true }
+    vi.mocked(patchOpenCodeConfig).mockResolvedValue(mockPatchResult)
 
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
 
     await opencodeServerManager.reloadConfig()
 
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/config'),
-      expect.objectContaining({ method: 'GET' })
+    expect(mockReadFile).toHaveBeenCalledWith(
+      expect.stringContaining('.config/opencode.json'),
+      'utf-8'
     )
+    expect(patchOpenCodeConfig).toHaveBeenCalled()
   })
 })

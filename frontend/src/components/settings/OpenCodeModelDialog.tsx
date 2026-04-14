@@ -86,7 +86,7 @@ function jsonObjectField(label: string) {
 }
 
 const modelFormSchema = z.object({
-  providerId: z.string().min(1, 'Provider is required'),
+  providerId: z.string(),
   modelId: z.string().min(1, 'Model ID is required').regex(/^[a-zA-Z0-9._-]+$/, 'Must use only letters, numbers, dots, hyphens, and underscores'),
   backingModelId: z.string(),
   providerModelProviderId: z.string(),
@@ -123,6 +123,10 @@ const modelFormSchema = z.object({
     }
     if (data.newProviderType === 'npm' && !data.newProviderNpm?.trim()) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NPM package is required for npm providers', path: ['newProviderNpm'] })
+    }
+  } else {
+    if (!data.providerId?.trim()) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provider is required', path: ['providerId'] })
     }
   }
 

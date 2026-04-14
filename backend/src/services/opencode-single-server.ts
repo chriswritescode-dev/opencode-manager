@@ -384,18 +384,12 @@ class OpenCodeServerManager {
   async reloadConfig(): Promise<void> {
     logger.info('Reloading OpenCode configuration (via API)')
     try {
-      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/config`, {
-        method: 'GET'
-      })
+      const configPath = getOpenCodeConfigFilePath()
+      const fileContent = await fs.readFile(configPath, 'utf-8')
+      const fileConfig = JSON.parse(fileContent) as Record<string, unknown>
+      logger.info(`Read config from file for reload: ${configPath}`)
 
-      if (!response.ok) {
-        throw new Error(`Failed to get current config: ${response.status}`)
-      }
-
-      const currentConfig = await response.json() as Record<string, unknown>
-      logger.info('Triggering OpenCode config reload via PATCH')
-      
-      const patchResult = await patchOpenCodeConfig(currentConfig)
+      const patchResult = await patchOpenCodeConfig(fileConfig)
       if (!patchResult.success) {
         const errorMessage = patchResult.error || 'Failed to reload config'
         const validationIssues = patchResult.details || []
