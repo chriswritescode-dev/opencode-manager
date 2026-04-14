@@ -54,7 +54,6 @@ export function RepoListControls({
   const [showMenu, setShowMenu] = useState(false)
 
   const currentSortLabel = SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? 'Recent'
-  const currentFilterLabel = FILTER_OPTIONS.find((f) => f.value === filterMode)?.label ?? 'All'
 
   return (
     <div className="px-2 md:px-0 space-y-2">
@@ -86,9 +85,8 @@ export function RepoListControls({
         {isMobile ? (
           <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="gap-1.5">
+              <Button variant="outline" size="sm">
                 <SlidersHorizontal className="w-4 h-4" />
-                <span>{currentFilterLabel}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">

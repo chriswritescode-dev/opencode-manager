@@ -85,7 +85,12 @@ export function RepoRowActions({
               <MoreVertical className="w-4 h-4" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
+          <DropdownMenuContent
+            align="end"
+            className="z-[200]"
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
             <DropdownMenuItem
               onClick={() => handleSourceControlOpen(true)}
               disabled={!isReady}
