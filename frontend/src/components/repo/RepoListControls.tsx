@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, SlidersHorizontal, Pencil, Check } from 'lucide-react'
+import { Search, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -18,10 +18,15 @@ interface RepoListControlsProps {
   onFilterModeChange: (mode: RepoFilterMode) => void
   sortMode: RepoSortMode
   onSortModeChange: (mode: RepoSortMode) => void
-  manageMode: boolean
-  onManageModeChange: (enabled: boolean) => void
   filteredCount: number
   attentionCount: number
+  selectedCount: number
+  allVisibleSelected: boolean
+  onSelectAll: () => void
+  onClearSelection: () => void
+  onDelete: () => void
+  hasLocalRepos: boolean
+  hasClonedRepos: boolean
 }
 
 const FILTER_OPTIONS: { value: RepoFilterMode; label: string }[] = [
@@ -45,15 +50,65 @@ export function RepoListControls({
   onFilterModeChange,
   sortMode,
   onSortModeChange,
-  manageMode,
-  onManageModeChange,
   filteredCount,
   attentionCount,
+  selectedCount,
+  allVisibleSelected,
+  onSelectAll,
+  onClearSelection,
+  onDelete,
+  hasLocalRepos,
+  hasClonedRepos,
 }: RepoListControlsProps) {
   const isMobile = useMobile()
   const [showMenu, setShowMenu] = useState(false)
 
   const currentSortLabel = SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? 'Recent'
+  const inSelectionMode = selectedCount > 0
+
+  const getDeleteLabel = () => {
+    if (hasLocalRepos && !hasClonedRepos) {
+      return 'Unlink'
+    }
+    return 'Delete'
+  }
+
+  if (inSelectionMode) {
+    return (
+      <div className="px-2 md:px-0">
+        <div className="flex items-center gap-2 bg-accent/50 rounded-md p-2">
+          <span className="text-sm font-medium text-foreground shrink-0 min-w-[80px]">
+            {selectedCount} selected
+          </span>
+          <Button
+            variant="ghost"
+            onClick={onSelectAll}
+            className="shrink-0 h-9 text-xs"
+            size="sm"
+          >
+            {allVisibleSelected ? 'Unselect All' : 'Select All'}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={onDelete}
+            className="shrink-0 h-9 text-xs text-destructive hover:text-destructive"
+            size="sm"
+          >
+            <Trash2 className="w-3 h-3 mr-1" />
+            {getDeleteLabel()}
+          </Button>
+          <Button
+            variant="ghost"
+            onClick={onClearSelection}
+            className="shrink-0 h-9 text-xs ml-auto"
+            size="sm"
+          >
+            Cancel
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="px-2 md:px-0 space-y-2">
@@ -67,20 +122,6 @@ export function RepoListControls({
             className="pl-9 h-9"
           />
         </div>
-
-        {isMobile && (
-          <Button
-            variant={manageMode ? 'default' : 'outline'}
-            size="sm"
-            onClick={() => onManageModeChange(!manageMode)}
-          >
-            {manageMode ? (
-              <Check className="w-4 h-4" />
-            ) : (
-              <Pencil className="w-4 h-4" />
-            )}
-          </Button>
-        )}
 
         {isMobile ? (
           <DropdownMenu open={showMenu} onOpenChange={setShowMenu}>

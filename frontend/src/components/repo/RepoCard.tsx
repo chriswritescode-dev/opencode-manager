@@ -28,6 +28,7 @@ interface RepoCardProps {
   manageMode?: boolean;
   isMobile?: boolean;
   activityLabel?: string;
+  hasSelectedRepos?: boolean;
 }
 
 export function RepoCard({
@@ -40,6 +41,7 @@ export function RepoCard({
   manageMode = false,
   isMobile = false,
   activityLabel,
+  hasSelectedRepos = false,
 }: RepoCardProps) {
   const navigate = useNavigate();
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -80,9 +82,10 @@ export function RepoCard({
       <div className="p-2">
         <div>
           <div className="flex items-start gap-3 mb-1">
-            {manageMode && onSelect && (
+            {onSelect && (
               <div
                 onClick={(e) => handleActionClick(e, () => onSelect(repo.id, !isSelected))}
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center"
               >
                 <Checkbox
                   checked={isSelected}
@@ -101,7 +104,7 @@ export function RepoCard({
               )}
             </div>
 
-            {!manageMode && (
+            {!manageMode && !isSelected && !hasSelectedRepos && (
               <RepoRowActions
                 repo={repo}
                 gitStatus={gitStatus}

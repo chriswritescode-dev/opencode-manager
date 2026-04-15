@@ -55,6 +55,7 @@ interface RepoCardWrapperProps {
   manageMode: boolean
   isMobile: boolean
   activityLabel?: string
+  hasSelectedRepos?: boolean
 }
 
 function SortableRepoCard({
@@ -67,6 +68,7 @@ function SortableRepoCard({
   manageMode,
   isMobile,
   activityLabel,
+  hasSelectedRepos,
   isManualSort,
 }: RepoCardWrapperProps & { isManualSort: boolean }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id })
@@ -101,6 +103,7 @@ function SortableRepoCard({
             manageMode={manageMode}
             isMobile={isMobile}
             activityLabel={activityLabel}
+            hasSelectedRepos={hasSelectedRepos}
           />
         </div>
       </div>
@@ -118,6 +121,7 @@ function StaticRepoCard({
   manageMode,
   isMobile,
   activityLabel,
+  hasSelectedRepos,
 }: RepoCardWrapperProps) {
   return (
     <RepoCard
@@ -130,6 +134,7 @@ function StaticRepoCard({
       manageMode={manageMode}
       isMobile={isMobile}
       activityLabel={activityLabel}
+      hasSelectedRepos={hasSelectedRepos}
     />
   )
 }
@@ -143,7 +148,7 @@ export function RepoList() {
   const [selectedRepos, setSelectedRepos] = useState<Set<number>>(new Set())
   const [searchQuery, setSearchQuery] = useState("")
   const [filterMode, setFilterMode] = useState<RepoFilterMode>('recent')
-  const [manageMode, setManageMode] = useState(false)
+  const manageMode = selectedRepos.size > 0
 
   const sortMode = (preferences?.repoSortMode as RepoSortMode) || 'recent'
   const repoOrder = preferences?.repoOrder
@@ -153,7 +158,7 @@ export function RepoList() {
   }
 
   const isManualSort = sortMode === 'manual'
-  const isDragEnabled = !isMobile || (manageMode && isManualSort)
+  const isDragEnabled = !isMobile || (isManualSort && selectedRepos.size === 0)
 
   const {
     data: repos,
@@ -342,6 +347,23 @@ export function RepoList() {
     setSelectedRepos(newSelected)
   }
 
+  const handleSelectAll = () => {
+    const visibleIds = sortedViewModels.map(r => r.id)
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedRepos.has(id))
+    
+    if (allVisibleSelected) {
+      // Unselect only the visible repos, keep hidden ones
+      const newSelected = new Set(selectedRepos)
+      visibleIds.forEach(id => newSelected.delete(id))
+      setSelectedRepos(newSelected)
+    } else {
+      // Add all visible repos to existing selection (preserves hidden selections)
+      const newSelected = new Set(selectedRepos)
+      visibleIds.forEach(id => newSelected.add(id))
+      setSelectedRepos(newSelected)
+    }
+  }
+
   return (
     <>
       <div className="px-0 md:p-4 h-full flex flex-col">
@@ -352,10 +374,18 @@ export function RepoList() {
           onFilterModeChange={setFilterMode}
           sortMode={sortMode}
           onSortModeChange={handleSortModeChange}
-          manageMode={manageMode}
-          onManageModeChange={setManageMode}
           filteredCount={sortedViewModels.length}
           attentionCount={attentionCount}
+          selectedCount={selectedRepos.size}
+          allVisibleSelected={sortedViewModels.length > 0 && sortedViewModels.every(r => selectedRepos.has(r.id))}
+          onSelectAll={handleSelectAll}
+          onClearSelection={() => setSelectedRepos(new Set())}
+          onDelete={() => {
+            setRepoToDelete(null)
+            setDeleteDialogOpen(true)
+          }}
+          hasLocalRepos={hasLocalRepos}
+          hasClonedRepos={hasClonedRepos}
         />
 
         <div className="mx-2 md:mx-0 flex-1 min-h-0">
@@ -393,6 +423,7 @@ export function RepoList() {
                         isMobile={isMobile}
                         isManualSort={isManualSort}
                         activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                        hasSelectedRepos={selectedRepos.size > 0}
                       />
                     ))}
                   </div>
@@ -417,6 +448,7 @@ export function RepoList() {
                     manageMode={manageMode}
                     isMobile={isMobile}
                     activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                    hasSelectedRepos={selectedRepos.size > 0}
                   />
                 ))}
               </div>
@@ -429,16 +461,15 @@ export function RepoList() {
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         onConfirm={() => {
-          if (repoToDelete) {
-            deleteMutation.mutate(repoToDelete)
-          } else if (selectedRepos.size > 0) {
+          if (selectedRepos.size > 0) {
             batchDeleteMutation.mutate(Array.from(selectedRepos))
+          } else if (repoToDelete) {
+            deleteMutation.mutate(repoToDelete)
           }
         }}
         onCancel={() => {
           setDeleteDialogOpen(false)
           setRepoToDelete(null)
-          setSelectedRepos(new Set())
         }}
         title={
           selectedRepos.size > 0
