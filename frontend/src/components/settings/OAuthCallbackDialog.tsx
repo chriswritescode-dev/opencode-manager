@@ -4,6 +4,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Loader2, ExternalLink, CheckCircle } from 'lucide-react'
+import { CopyButton } from '@/components/ui/copy-button'
+import { showToast } from '@/lib/toast'
 import { oauthApi, type OAuthAuthorizeResponse } from '@/api/oauth'
 import { mapOAuthError } from '@/lib/oauthErrors'
 
@@ -66,6 +68,10 @@ export function OAuthCallbackDialog({
 
   const isAutoMethod = authResponse.method === 'auto'
 
+  // Extract device/user code from instructions (e.g., "Enter code: 596A-E304")
+  const codeMatch = authResponse.instructions.match(/(?:Enter code|User code|Device code)[:\s]+([A-Z0-9-]+)/i)
+  const deviceCode = codeMatch ? codeMatch[1] : ''
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-card border-border max-w-lg">
@@ -89,20 +95,57 @@ export function OAuthCallbackDialog({
           <div className="space-y-3">
             <div className="bg-muted p-3 rounded-md">
               <p className="text-sm mb-2">{authResponse.instructions}</p>
-              <Button
-                onClick={handleOpenAuthUrl}
-                variant="outline"
-                size="sm"
-                className="w-full"
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Open Authorization Page
-              </Button>
+              
+              {deviceCode && (
+                <div className="flex items-center gap-2 mb-3">
+                  <code className="flex-1 bg-background px-3 py-2 rounded text-sm font-mono">
+                    {deviceCode}
+                  </code>
+                  <CopyButton
+                    content={deviceCode}
+                    title="Copy device code"
+                    variant="ghost"
+                    iconSize="sm"
+                    className="flex-shrink-0"
+                    onCopy={() => showToast.success('Code copied to clipboard')}
+                  />
+                </div>
+              )}
+              
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleOpenAuthUrl}
+                  variant="outline"
+                  size="sm"
+                  className="flex-1"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Open Authorization Page
+                </Button>
+                <CopyButton
+                  content={authResponse.url}
+                  title="Copy authorization URL"
+                  variant="ghost"
+                  iconSize="sm"
+                  className="flex-shrink-0"
+                  onCopy={() => showToast.success('URL copied to clipboard')}
+                />
+              </div>
             </div>
 
             {!isAutoMethod && (
               <div className="space-y-2">
-                <Label htmlFor="authCode">Authorization Code</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="authCode">Authorization Code</Label>
+                  <CopyButton
+                    content={authCode}
+                    title="Copy authorization code"
+                    variant="ghost"
+                    iconSize="sm"
+                    className="flex-shrink-0"
+                    onCopy={() => showToast.success('Code copied to clipboard')}
+                  />
+                </div>
                 <Input
                   id="authCode"
                   value={authCode}
