@@ -81,16 +81,25 @@ export const useModelStore = create<ModelStore>()(
 
         const state = get()
 
-        if (!providers || !state.model) {
+        if (!providers) {
           get().syncFromConfig(configModel)
           return
         }
 
-        const modelExists = providers.some(
-          (p) => p.id === state.model!.providerID && p.models && state.model!.modelID in p.models
-        )
+        const modelExists = (model: ModelSelection) =>
+          providers.some(
+            (p) => p.id === model.providerID && p.models && model.modelID in p.models
+          )
 
-        if (!modelExists) {
+        const currentModelExists = state.model ? modelExists(state.model) : false
+
+        const cleanedRecentModels = state.recentModels.filter(modelExists)
+
+        if (cleanedRecentModels.length !== state.recentModels.length) {
+          set({ recentModels: cleanedRecentModels })
+        }
+
+        if (!currentModelExists) {
           get().syncFromConfig(configModel, true)
         }
       },
