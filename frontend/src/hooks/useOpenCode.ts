@@ -278,11 +278,11 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       };
 
       if (model) {
-        const [providerID, modelID] = model.split("/");
-        if (providerID && modelID) {
+        const [providerID, ...rest] = model.split("/");
+        if (providerID && rest.length > 0) {
           requestData.model = {
             providerID,
-            modelID,
+            modelID: rest.join("/"),
           };
         }
       }
