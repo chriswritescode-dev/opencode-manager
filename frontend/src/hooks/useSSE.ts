@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
-import type { SSEEvent, MessageWithParts } from '@/api/types'
+import type { SSEEvent, MessageWithParts, Session } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
@@ -71,12 +71,27 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const handleSSEEvent = useCallback((event: SSEEvent) => {
     switch (event.type) {
       case 'session.updated':
-        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, directory] })
         if ('info' in event.properties) {
-          queryClient.invalidateQueries({ 
-            queryKey: ['opencode', 'session', opcodeUrl, event.properties.info.id, directory] 
-          })
+          const session = event.properties.info
+          const sessionQueryKey = ['opencode', 'session', opcodeUrl, session.id, directory]
+          const sessionsQueryKey = ['opencode', 'sessions', opcodeUrl, directory]
+
+          queryClient.setQueryData(sessionQueryKey, session)
+
+          const sessions = queryClient.getQueryData<Session[]>(sessionsQueryKey)
+          if (sessions) {
+            const exists = sessions.some((item) => item.id === session.id)
+            const updated = exists
+              ? sessions.map((item) => (item.id === session.id ? session : item))
+              : [session, ...sessions]
+            queryClient.setQueryData(sessionsQueryKey, updated)
+            break
+          }
+
+          queryClient.invalidateQueries({ queryKey: sessionsQueryKey })
+          break
         }
+        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, directory] })
         break
 
       case 'session.deleted':

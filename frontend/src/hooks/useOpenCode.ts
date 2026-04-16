@@ -352,13 +352,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       );
 
       setSessionStatus(sessionID, { type: "idle" });
-
-      queryClient.invalidateQueries({
-        queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["opencode", "sessions", opcodeUrl, directory],
-      });
     },
   });
 };
