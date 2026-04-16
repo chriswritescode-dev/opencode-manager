@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { ContextUsageIndicator } from "@/components/session/ContextUsageIndicator";
-import { useSession, useAbortSession, useUpdateSession, useMessages, useTitleGenerating, useCreateSession } from "@/hooks/useOpenCode";
+import { useSession, useAbortSession, useUpdateSession, useMessages, useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { useSSE } from "@/hooks/useSSE";
@@ -142,7 +142,6 @@ export function SessionDetail() {
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
-  const isTitleGenerating = useTitleGenerating(sessionId);
   const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isEnabled: ttsEnabled } = useTTS();
@@ -380,12 +379,11 @@ export function SessionDetail() {
           ) : (
             <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
           )}
-          <Header.EditableTitle
-            value={session?.title || "Untitled Session"}
-            onChange={handleSessionTitleUpdate}
-            subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>}
-            generating={isTitleGenerating}
-          />
+            <Header.EditableTitle
+              value={session?.title || "Untitled Session"}
+              onChange={handleSessionTitleUpdate}
+              subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>}
+            />
         </div>
         <Header.Actions className="gap-2 sm:gap-4">
           <div className="hidden sm:flex items-center gap-1">

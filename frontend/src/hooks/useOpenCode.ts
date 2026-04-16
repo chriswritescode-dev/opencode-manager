@@ -1,8 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useEffect, useCallback, useState } from "react";
+import { useMemo, useRef, useEffect, useCallback } from "react";
 import { OpenCodeClient } from "../api/opencode";
-import { API_BASE_URL } from "../config";
-import { fetchWrapper, FetchError } from "../api/fetchWrapper";
+import { FetchError } from "../api/fetchWrapper";
 import { cancelLoop } from "../api/memory";
 import type {
   Message,
@@ -15,33 +14,6 @@ import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { ensureSSEConnected, reconnectSSE } from "../lib/sseManager";
-
-const titleGeneratingSessionsState = new Set<string>();
-const titleGeneratingListeners = new Set<() => void>();
-
-function notifyTitleGeneratingListeners() {
-  titleGeneratingListeners.forEach(listener => listener());
-}
-
-export function useTitleGenerating(sessionID: string | undefined) {
-  const [isGenerating, setIsGenerating] = useState(
-    sessionID ? titleGeneratingSessionsState.has(sessionID) : false
-  );
-
-  useEffect(() => {
-    setIsGenerating(sessionID ? titleGeneratingSessionsState.has(sessionID) : false);
-
-    const listener = () => {
-      setIsGenerating(sessionID ? titleGeneratingSessionsState.has(sessionID) : false);
-    };
-    titleGeneratingListeners.add(listener);
-    return () => {
-      titleGeneratingListeners.delete(listener);
-    };
-  }, [sessionID]);
-
-  return isGenerating;
-}
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -233,43 +205,7 @@ const createOptimisticUserMessageInfo = (
 export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: string) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
-  const hasInitializedRef = useRef<Set<string>>(new Set());
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
-
-  const generateSessionTitle = async (sessionID: string, userPromptText: string) => {
-    if (!client || hasInitializedRef.current.has(sessionID)) return;
-
-    try {
-      const session = await client.getSession(sessionID);
-      const isDefaultTitle = session.title.match(/^New session - \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-
-      if (isDefaultTitle && userPromptText) {
-        titleGeneratingSessionsState.add(sessionID);
-        notifyTitleGeneratingListeners();
-
-        try {
-          await fetchWrapper(`${API_BASE_URL}/api/generate-title`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", directory: directory || "" },
-            body: JSON.stringify({ text: userPromptText, sessionID }),
-          });
-
-          hasInitializedRef.current.add(sessionID);
-          queryClient.invalidateQueries({
-            queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],
-          });
-          queryClient.invalidateQueries({
-            queryKey: ["opencode", "sessions", opcodeUrl, directory],
-          });
-        } finally {
-          titleGeneratingSessionsState.delete(sessionID);
-          notifyTitleGeneratingListeners();
-        }
-      }
-    } catch {
-      // Silently fail - title generation is a background task
-    }
-  };
 
   return useMutation({
     mutationFn: async ({
@@ -300,8 +236,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
 
       const contentParts = parts || [{ type: "text" as const, content: prompt || "", name: "" }];
-      const userPromptText = prompt || (contentParts[0] as ContentPart & { type: "text" })?.content || "";
-
       const userMessageParts = createOptimisticUserMessageParts(
         sessionID,
         contentParts,
@@ -363,7 +297,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
 
       const response = await client.sendPrompt(sessionID, requestData);
 
-      return { optimisticUserID, userPromptText, response };
+      return { optimisticUserID, response };
     },
     onError: (error, variables) => {
       const { sessionID } = variables;
@@ -397,7 +331,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     },
     onSuccess: async (data, variables) => {
       const { sessionID } = variables;
-      const { optimisticUserID, userPromptText, response } = data;
+      const { optimisticUserID, response } = data;
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
 
       queryClient.setQueryData<MessageWithParts[]>(
@@ -422,8 +356,9 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       queryClient.invalidateQueries({
         queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],
       });
-
-      await generateSessionTitle(sessionID, userPromptText);
+      queryClient.invalidateQueries({
+        queryKey: ["opencode", "sessions", opcodeUrl, directory],
+      });
     },
   });
 };

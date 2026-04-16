@@ -26,7 +26,6 @@ async function getAppVersion(): Promise<string> {
 }
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
-import { createTitleRoutes } from './routes/title'
 import { createSSERoutes } from './routes/sse'
 import { createSSHRoutes } from './routes/ssh'
 import { createNotificationRoutes } from './routes/notifications'
@@ -266,7 +265,6 @@ protectedApi.route('/providers', createProvidersRoutes())
 protectedApi.route('/oauth', createOAuthRoutes())
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))
-protectedApi.route('/generate-title', createTitleRoutes())
 protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
