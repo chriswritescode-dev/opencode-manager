@@ -191,26 +191,24 @@ export function RepoMcpServerList({
                   )}
                 </div>
 
-                <div className="flex items-center gap-1">
-                  {showAuthButton ? (
+                <div className="flex items-center gap-2">
+                  <Switch
+                    checked={isConnected}
+                    disabled={toggleMutation.isPending || removeAuthMutation.isPending || showAuthButton}
+                    onCheckedChange={(enabled) => {
+                      toggleMutation.mutate({ serverId, enable: enabled })
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                  {showAuthButton && (
                     <Button
                       onClick={() => onAuthClick(serverId)}
                       disabled={toggleMutation.isPending}
                       variant="default"
                       size="sm"
                     >
-                      <Key className="h-3 w-3 mr-1" />
-                      Auth
+                      <Key className="h-3 w-3" />
                     </Button>
-                  ) : (
-                    <Switch
-                      checked={isConnected}
-                      disabled={toggleMutation.isPending || removeAuthMutation.isPending}
-                      onCheckedChange={(enabled) => {
-                        toggleMutation.mutate({ serverId, enable: enabled })
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                    />
                   )}
                 </div>
               </div>
