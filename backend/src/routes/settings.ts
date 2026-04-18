@@ -444,6 +444,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const userId = c.req.query('userId') || 'default'
       const configName = c.req.param('name')
 
+      const previousDefault = settingsService.getDefaultOpenCodeConfig(userId)
+      const previousContent = previousDefault?.content ?? null
+
       settingsService.saveLastKnownGoodConfig(userId)
 
       const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
@@ -483,12 +486,43 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       await writeFileContent(configPath, contentToWrite)
       logger.info(`Wrote default config '${configName}' to: ${configPath}`)
 
+      const newContent = existingConfig.content as Record<string, unknown>
+      const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
+      const pluginsChanged = JSON.stringify(previousContent?.plugin) !== JSON.stringify(newContent.plugin)
+      const skillsChanged = JSON.stringify(previousContent?.skills) !== JSON.stringify(newContent.skills)
+      const providersChanged = JSON.stringify(previousContent?.provider) !== JSON.stringify(newContent.provider)
+
+      let reloaded = false
+      let restarted = false
+      let reloadError: string | undefined
+
+      if (agentsChanged) {
+        try {
+          logger.info('Agent configuration changed on set-default, restarting OpenCode server')
+          await opencodeServerManager.restart()
+          restarted = true
+        } catch (error) {
+          logger.warn('Failed to restart OpenCode after set-default:', error)
+          reloadError = error instanceof Error ? error.message : 'Unknown error'
+        }
+      } else if (pluginsChanged || skillsChanged || providersChanged) {
+        try {
+          logger.info('Runtime config sections changed on set-default, reloading OpenCode server')
+          await opencodeServerManager.reloadConfig()
+          reloaded = true
+        } catch (error) {
+          logger.warn('Failed to reload OpenCode after set-default:', error)
+          reloadError = error instanceof Error ? error.message : 'Unknown error'
+        }
+      }
+
+      const base = { ...config, reloaded, restarted, reloadError }
       if (patchResult.removedFields && patchResult.removedFields.length > 0) {
         logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)
-        return c.json({ ...config, removedFields: patchResult.removedFields })
+        return c.json({ ...base, removedFields: patchResult.removedFields })
       }
       
-      return c.json(config)
+      return c.json(base)
     } catch (error) {
       logger.error('Failed to set default OpenCode config:', error)
       return c.json({ error: 'Failed to set default OpenCode config' }, 500)

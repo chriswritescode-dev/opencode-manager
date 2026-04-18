@@ -363,10 +363,23 @@ export function OpenCodeConfigManager() {
       setIsUpdating(true)
       const result = await settingsApi.setDefaultOpenCodeConfig(config.name)
       await fetchConfigs()
-      if (result.removedFields && result.removedFields.length > 0) {
-        showToast.info(`Default config updated after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'set-default' })
+      invalidateConfigCaches(queryClient)
+
+      if (result.reloadError) {
+        showToast.error(`Default set but server reload failed: ${result.reloadError}`, { id: 'set-default' })
+        return
+      }
+
+      const removedSuffix = result.removedFields && result.removedFields.length > 0
+        ? ` (removed invalid fields: ${result.removedFields.join(', ')})`
+        : ''
+
+      if (result.restarted) {
+        showToast.success(`Default config updated and server restarted${removedSuffix}`, { id: 'set-default' })
+      } else if (result.reloaded) {
+        showToast.success(`Default config updated and server reloaded${removedSuffix}`, { id: 'set-default' })
       } else {
-        showToast.success('Default config updated and applied', { id: 'set-default' })
+        showToast.success(`Default config updated${removedSuffix}`, { id: 'set-default' })
       }
     } catch (error) {
       console.error('Failed to set default config:', error)

@@ -9,6 +9,7 @@ const mockUpdateOpenCodeConfig = vi.fn()
 const mockDeleteOpenCodeConfig = vi.fn()
 const mockGetOpenCodeConfigByName = vi.fn()
 const mockSetDefaultOpenCodeConfig = vi.fn()
+const mockGetDefaultOpenCodeConfig = vi.fn()
 
 vi.mock('fs', () => ({
   existsSync: vi.fn(() => false),
@@ -53,6 +54,7 @@ vi.mock('../../src/services/settings', () => ({
     deleteOpenCodeConfig: mockDeleteOpenCodeConfig,
     getOpenCodeConfigByName: mockGetOpenCodeConfigByName,
     setDefaultOpenCodeConfig: mockSetDefaultOpenCodeConfig,
+    getDefaultOpenCodeConfig: mockGetDefaultOpenCodeConfig,
   })),
 }))
 
@@ -188,6 +190,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockRelinkReposFromSessionDirectories.mockReset()
     mockWriteFileContent.mockReset()
     mockPatchOpenCodeConfig.mockReset()
+    mockGetDefaultOpenCodeConfig.mockReset()
     
     testDb = {} as any
     settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any)
@@ -215,6 +218,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       duplicatePathCount: 0,
       errors: [],
     })
+    mockGetDefaultOpenCodeConfig.mockReturnValue(null)
   })
 
   describe('OpenCode config routes', () => {
@@ -408,6 +412,306 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         '/tmp/test-workspace/.config/opencode.json',
         '{\n  "theme": "dark"\n}'
       )
+      expect(json.removedFields).toEqual(['command.review'])
+    })
+
+    it('should restart when agents changed on set-default', async () => {
+      mockGetDefaultOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'old-default',
+        content: { agent: { primary: { model: 'a' } } },
+        rawContent: '{"agent":{"primary":{"model":"a"}}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { agent: { primary: { model: 'b' } } },
+        rawContent: '{"agent":{"primary":{"model":"b"}}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 2,
+      })
+      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { agent: { primary: { model: 'b' } } },
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { agent: { primary: { model: 'b' } } },
+        rawContent: '{"agent":{"primary":{"model":"b"}}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 3,
+      })
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { agent: { primary: { model: 'b' } } },
+        rawContent: '{"agent":{"primary":{"model":"b"}}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 2,
+        updatedAt: 4,
+      })
+
+      const req = new Request('http://localhost/opencode-configs/new-config/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockRestart).toHaveBeenCalledTimes(1)
+      expect(mockReloadConfig).not.toHaveBeenCalled()
+      expect(json.restarted).toBe(true)
+      expect(json.reloaded).toBe(false)
+      expect(json.reloadError).toBeUndefined()
+    })
+
+    it('should reload when plugins/skills/providers changed on set-default', async () => {
+      mockGetDefaultOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'old-default',
+        content: { plugin: ['old'] },
+        rawContent: '{"plugin":["old"]}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { plugin: ['old', 'new'] },
+        rawContent: '{"plugin":["old","new"]}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 2,
+      })
+      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { plugin: ['old', 'new'] },
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { plugin: ['old', 'new'] },
+        rawContent: '{"plugin":["old","new"]}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 3,
+      })
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { plugin: ['old', 'new'] },
+        rawContent: '{"plugin":["old","new"]}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 2,
+        updatedAt: 4,
+      })
+
+      const req = new Request('http://localhost/opencode-configs/new-config/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockReloadConfig).toHaveBeenCalledTimes(1)
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(json.reloaded).toBe(true)
+      expect(json.restarted).toBe(false)
+    })
+
+    it('should not reload or restart when no runtime fields changed', async () => {
+      mockGetDefaultOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'old-default',
+        content: { theme: 'dark', agent: {} },
+        rawContent: '{"theme":"dark","agent":{}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { theme: 'light', agent: {} },
+        rawContent: '{"theme":"light","agent":{}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 2,
+      })
+      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { theme: 'light', agent: {} },
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { theme: 'light', agent: {} },
+        rawContent: '{"theme":"light","agent":{}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 3,
+      })
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { theme: 'light', agent: {} },
+        rawContent: '{"theme":"light","agent":{}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 2,
+        updatedAt: 4,
+      })
+
+      const req = new Request('http://localhost/opencode-configs/new-config/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(mockReloadConfig).not.toHaveBeenCalled()
+      expect(json.restarted).toBe(false)
+      expect(json.reloaded).toBe(false)
+    })
+
+    it('should return reloadError in response when restart fails', async () => {
+      mockGetDefaultOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'old-default',
+        content: { agent: { primary: { model: 'a' } } },
+        rawContent: '{"agent":{"primary":{"model":"a"}}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { agent: { primary: { model: 'b' } } },
+        rawContent: '{"agent":{"primary":{"model":"b"}}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 2,
+      })
+      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { agent: { primary: { model: 'b' } } },
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { agent: { primary: { model: 'b' } } },
+        rawContent: '{"agent":{"primary":{"model":"b"}}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 3,
+      })
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { agent: { primary: { model: 'b' } } },
+        rawContent: '{"agent":{"primary":{"model":"b"}}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 2,
+        updatedAt: 4,
+      })
+      mockRestart.mockRejectedValueOnce(new Error('boom'))
+
+      const req = new Request('http://localhost/opencode-configs/new-config/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockRestart).toHaveBeenCalledTimes(1)
+      expect(json.reloadError).toBe('boom')
+      expect(json.restarted).toBe(false)
+      expect(json.id).toBeDefined()
+      expect(json.name).toBe('new-config')
+      expect(json.isDefault).toBe(true)
+    })
+
+    it('should preserve removedFields alongside new flags', async () => {
+      mockGetDefaultOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'old-default',
+        content: { plugin: ['old'] },
+        rawContent: '{"plugin":["old"]}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { plugin: ['old', 'new'], command: { review: true } },
+        rawContent: '{"plugin":["old","new"],"command":{"review":true}}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 2,
+      })
+      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { plugin: ['old', 'new'] },
+        removedFields: ['command.review'],
+        details: [{ path: 'command.review', message: 'Invalid field' }],
+      })
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { plugin: ['old', 'new'] },
+        rawContent: '{"plugin":["old","new"]}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 2,
+        updatedAt: 3,
+      })
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'new-config',
+        content: { plugin: ['old', 'new'] },
+        rawContent: '{"plugin":["old","new"]}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 2,
+        updatedAt: 4,
+      })
+
+      const req = new Request('http://localhost/opencode-configs/new-config/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockReloadConfig).toHaveBeenCalledTimes(1)
+      expect(json.reloaded).toBe(true)
       expect(json.removedFields).toEqual(['command.review'])
     })
   })

@@ -94,7 +94,7 @@ export const settingsApi = {
   setDefaultOpenCodeConfig: async (
     configName: string,
     userId = DEFAULT_USER_ID
-  ): Promise<OpenCodeConfig> => {
+  ): Promise<OpenCodeConfig & { reloaded?: boolean; restarted?: boolean; reloadError?: string; removedFields?: string[] }> => {
     return fetchWrapper(
       `${API_BASE_URL}/api/settings/opencode-configs/${encodeURIComponent(configName)}/set-default`,
       {
