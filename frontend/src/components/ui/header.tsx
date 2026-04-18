@@ -163,7 +163,13 @@ function HeaderActions({ children, className }: { children: ReactNode; className
   return <div className={cn("flex items-center gap-2", className)}>{children}</div>;
 }
 
-function HeaderMobileDropdown({ children, className }: { children: ReactNode; className?: string }) {
+interface HeaderMobileDropdownProps {
+  children?: ReactNode
+  className?: string
+  hideSettings?: boolean
+}
+
+function HeaderMobileDropdown({ children, className, hideSettings = false }: HeaderMobileDropdownProps) {
   const isMobile = useMobile();
   const { pendingCount: permissionCount, setShowDialog, navigateToCurrent: navigateToPermission } = usePermissions();
   const { pendingCount: questionCount, navigateToCurrent } = useQuestions();
@@ -208,10 +214,12 @@ function HeaderMobileDropdown({ children, className }: { children: ReactNode; cl
         {totalPending > 0 && children && <DropdownMenuSeparator />}
         {children}
         {children && <DropdownMenuSeparator />}
-        <DropdownMenuItem onClick={open} className="gap-2 bg-muted">
-          <Settings className="w-4 h-4" />
-          <span>Settings</span>
-        </DropdownMenuItem>
+        {!hideSettings && (
+          <DropdownMenuItem onClick={open} className="gap-2 bg-muted">
+            <Settings className="w-4 h-4" />
+            <span>Settings</span>
+          </DropdownMenuItem>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

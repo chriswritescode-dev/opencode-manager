@@ -24,6 +24,11 @@ import { patchOpenCodeConfig } from './proxy'
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
 const OPENCODE_SERVER_PUBLIC_URL = ENV.OPENCODE.PUBLIC_URL
+const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
+const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
+const OPENCODE_BASIC_AUTH = OPENCODE_SERVER_PASSWORD
+  ? `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${OPENCODE_SERVER_PASSWORD}`).toString('base64')}`
+  : ''
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 
@@ -234,6 +239,13 @@ class OpenCodeServerManager {
 
     let stderrOutput = ''
 
+    const cleanEnv = { ...process.env }
+    delete cleanEnv.OPENCODE_SERVER_PASSWORD
+    delete cleanEnv.OPENCODE_RUN_ID
+    delete cleanEnv.OPENCODE_PROCESS_ROLE
+    delete cleanEnv.OPENCODE_PID
+    delete cleanEnv.OPENCODE
+
     this.serverProcess = spawn(
       'opencode',
       ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', OPENCODE_SERVER_HOST],
@@ -242,13 +254,19 @@ class OpenCodeServerManager {
         detached: !isDevelopment,
         stdio: isDevelopment ? 'inherit' : ['ignore', 'pipe', 'pipe'],
         env: {
-          ...process.env,
+          ...cleanEnv,
           ...gitEnv,
           ...gitIdentityEnv,
           GIT_SSH_COMMAND: gitSshCommand,
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
           ...(OPENCODE_SERVER_PUBLIC_URL ? { OPENCODE_PUBLIC_URL: OPENCODE_SERVER_PUBLIC_URL } : {}),
+          ...(OPENCODE_SERVER_PASSWORD
+            ? {
+                OPENCODE_SERVER_PASSWORD,
+                OPENCODE_SERVER_USERNAME,
+              }
+            : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
         }
       }
@@ -450,8 +468,13 @@ class OpenCodeServerManager {
 
   async checkHealth(): Promise<boolean> {
     try {
+      const headers: Record<string, string> = {}
+      if (OPENCODE_BASIC_AUTH) {
+        headers.Authorization = OPENCODE_BASIC_AUTH
+      }
       const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
-        signal: AbortSignal.timeout(3000)
+        signal: AbortSignal.timeout(3000),
+        headers
       })
       return response.ok
     } catch {

@@ -3,12 +3,25 @@ import { ENV } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 
 export const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
+const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
+const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
+
+const OPENCODE_BASIC_AUTH = OPENCODE_SERVER_PASSWORD
+  ? `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${OPENCODE_SERVER_PASSWORD}`).toString('base64')}`
+  : ''
+
+export function withOpenCodeAuth(headers: Record<string, string> = {}): Record<string, string> {
+  if (OPENCODE_BASIC_AUTH) {
+    return { ...headers, Authorization: OPENCODE_BASIC_AUTH }
+  }
+  return headers
+}
 
 export async function setOpenCodeAuth(providerId: string, apiKey: string): Promise<boolean> {
   try {
     const response = await fetch(`${OPENCODE_SERVER_URL}/auth/${providerId}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withOpenCodeAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ type: 'api', key: apiKey }),
     })
     
@@ -29,6 +42,7 @@ export async function deleteOpenCodeAuth(providerId: string): Promise<boolean> {
   try {
     const response = await fetch(`${OPENCODE_SERVER_URL}/auth/${providerId}`, {
       method: 'DELETE',
+      headers: withOpenCodeAuth(),
     })
     
     if (response.ok) {
@@ -196,7 +210,7 @@ export async function patchOpenCodeConfig(config: Record<string, unknown>): Prom
   try {
     const response = await fetch(`${OPENCODE_SERVER_URL}/config`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withOpenCodeAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(config),
     })
 
@@ -242,7 +256,7 @@ export async function patchOpenCodeConfig(config: Record<string, unknown>): Prom
     logger.info(`Retrying config patch after removing ${removedFields.length} problematic field(s): ${removedFields.join(', ')}`)
     const retryResponse = await fetch(`${OPENCODE_SERVER_URL}/config`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withOpenCodeAuth({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(cleanedConfig),
     })
 
@@ -287,14 +301,14 @@ export async function proxyRequest(request: Request) {
   try {
     const headers: Record<string, string> = {}
     request.headers.forEach((value, key) => {
-      if (!['host', 'connection'].includes(key.toLowerCase())) {
+      if (!['host', 'connection', 'authorization'].includes(key.toLowerCase())) {
         headers[key] = value
       }
     })
 
     const response = await fetch(targetUrl, {
       method: request.method,
-      headers,
+      headers: withOpenCodeAuth(headers),
       body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined,
     })
 
@@ -337,7 +351,7 @@ export async function proxyToOpenCodeWithDirectory(
   try {
     const response = await fetch(url.toString(), {
       method,
-      headers: headers || { 'Content-Type': 'application/json' },
+      headers: withOpenCodeAuth(headers || { 'Content-Type': 'application/json' }),
       body,
     })
     
@@ -378,7 +392,7 @@ export async function proxyMcpAuthStart(
   try {
     const response = await fetch(url.toString(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withOpenCodeAuth({ 'Content-Type': 'application/json' }),
     })
     
     const responseBody = await response.text()
@@ -409,7 +423,7 @@ export async function proxyMcpAuthAuthenticate(
   try {
     const response = await fetch(url.toString(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: withOpenCodeAuth({ 'Content-Type': 'application/json' }),
     })
     
     const responseBody = await response.text()

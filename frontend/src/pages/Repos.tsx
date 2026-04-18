@@ -29,17 +29,9 @@ export function Repos() {
             variant="ghost"
             size="icon"
             onClick={() => setFileBrowserOpen(true)}
-            className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
+            className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
           >
             <FolderOpen className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            onClick={() => navigate('/schedules')}
-            size="icon"
-            className="sm:hidden text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
-          >
-            <CalendarClock className="w-4 h-4" />
           </Button>
           <Button
             variant="outline"
@@ -54,10 +46,13 @@ export function Repos() {
             <Plus className="w-4 h-4 mr-1" />
             Repo
           </Button>
-          <Header.Settings />
+          <span className="hidden sm:block">
+            <Header.Settings />
+          </span>
+          <Header.MobileDropdown hideSettings />
         </Header.Actions>
       </Header>
-      <div className="container mx-auto flex-1 pt-2 px-2 min-h-0 overflow-auto">
+      <div className="container mx-auto flex-1 pt-2 px-2 min-h-0 overflow-auto pb-[calc(env(safe-area-inset-bottom)+64px)] sm:pb-0">
 
         <RepoList />
       </div>

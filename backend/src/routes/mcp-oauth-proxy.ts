@@ -6,7 +6,7 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { storeMcpOAuthFlow, consumeMcpOAuthFlow, deleteMcpOAuthFlow, markMcpOAuthFlowCompleted, markMcpOAuthFlowFailed, getMcpOAuthFlowResult } from '../services/mcp-oauth-state'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { OPENCODE_SERVER_URL } from '../services/proxy'
+import { OPENCODE_SERVER_URL, withOpenCodeAuth } from '../services/proxy'
 
 const StartSchema = z.object({
   serverName: z.string(),
@@ -300,11 +300,13 @@ export function createMcpOauthProxyRoutes(requireAuth?: any) {
         }
         await fetch(reconnectUrl, {
           method: 'POST',
+          headers: withOpenCodeAuth(),
         })
         if (flow.directory) {
           const globalReconnectUrl = `${OPENCODE_SERVER_URL}/mcp/${encodeURIComponent(flow.serverName)}/connect`
           await fetch(globalReconnectUrl, {
             method: 'POST',
+            headers: withOpenCodeAuth(),
           })
         }
       } catch {

@@ -317,7 +317,7 @@ export function GlobalSchedules() {
   const hasJobs = jobs.length > 0
 
   return (
-    <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col">
+    <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+64px)] sm:pb-0">
       <Header>
         <Header.BackButton to="/" />
         <Header.Title>Schedules</Header.Title>

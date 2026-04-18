@@ -15,6 +15,7 @@ import { Setup } from './pages/Setup'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
+import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { useTheme } from './hooks/useTheme'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
@@ -90,6 +91,7 @@ function AppShell() {
         <PageTransition>
           <Outlet />
         </PageTransition>
+        <MobileTabBar />
         <PermissionDialogWrapper />
         <SSHHostKeyDialogWrapper />
         <SettingsDialog />

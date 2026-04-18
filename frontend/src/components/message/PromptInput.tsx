@@ -979,7 +979,7 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
     onPromptChange?.(prompt.trim().length > 0)
   }, [prompt, onPromptChange])
 
-  useEffect(() => {
+    useEffect(() => {
     if (isRecording) {
       abortRecording()
     }
