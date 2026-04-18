@@ -59,24 +59,25 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
 }
 
 interface TTSButtonProps {
+  messageId: string
   content: string
   className?: string
 }
 
-function TTSButton({ content, className = "" }: TTSButtonProps) {
-  const { speak, stop, isEnabled, isPlaying, isLoading, originalText } = useTTS()
+function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
+  const { speakMessage, stop, isEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   
   if (!isEnabled || !content.trim()) {
     return null
   }
   
-  const isThisPlaying = (isPlaying || isLoading) && originalText === content
+  const isThisPlaying = (isPlaying || isLoading) && activeMessageId === messageId
   
   const handleClick = () => {
     if (isThisPlaying) {
       stop()
     } else {
-      speak(content)
+      speakMessage(messageId, content)
     }
   }
 
@@ -85,7 +86,7 @@ function TTSButton({ content, className = "" }: TTSButtonProps) {
       onClick={handleClick}
       className={`p-1.5 rounded ${isThisPlaying ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'} ${className}`}
       title={isThisPlaying ? "Stop playback" : "Read aloud"}
-      disabled={isLoading && originalText !== content}
+      disabled={isLoading && !isThisPlaying}
     >
       {isLoading && isThisPlaying ? (
         <Loader2 className="w-4 h-4 animate-spin" />
@@ -146,7 +147,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
         <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
           {costText}
           <CopyButton content={copyableContent} title="Copy step complete" />
-          {messageTextContent && <TTSButton content={messageTextContent} />}
+          {messageTextContent && part.messageID && <TTSButton messageId={part.messageID} content={messageTextContent} />}
         </div>
       )
     }

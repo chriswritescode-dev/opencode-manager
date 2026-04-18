@@ -10,6 +10,7 @@ export const CustomCommandSchema = z.object({
 export const TTSConfigSchema = z.object({
   enabled: z.boolean(),
   provider: z.enum(['external', 'builtin']).default('external'),
+  autoPlay: z.boolean().default(false),
   endpoint: z.string(),
   apiKey: z.string(),
   voice: z.string(),
@@ -35,6 +36,7 @@ export const STTConfigSchema = z.object({
 export type TTSConfig = {
   enabled: boolean;
   provider: 'external' | 'builtin';
+  autoPlay: boolean;
   endpoint: string;
   apiKey: string;
   voice: string;
@@ -132,6 +134,7 @@ export const UserPreferencesSchema = z.object({
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
   enabled: false,
   provider: 'external',
+  autoPlay: false,
   endpoint: "https://api.openai.com",
   apiKey: "",
   voice: "alloy",

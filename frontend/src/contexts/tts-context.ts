@@ -15,11 +15,13 @@ export interface TTSConfig {
 export interface TTSContextValue {
   speak: (text: string) => Promise<boolean>
   speakWithConfig: (text: string, config: TTSConfig) => Promise<boolean>
+  speakMessage: (messageId: string, text: string) => Promise<boolean>
   stop: () => void
   state: TTSState
   error: string | null
   currentText: string | null
   originalText: string | null
+  activeMessageId: string | null
   isEnabled: boolean
   isPlaying: boolean
   isLoading: boolean
