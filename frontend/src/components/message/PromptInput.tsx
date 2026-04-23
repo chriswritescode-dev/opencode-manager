@@ -1065,7 +1065,7 @@ return (
           />
           {hasActiveStream ? (
               <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
-                <SessionStatusIndicator sessionID={sessionID} />
+                <SessionStatusIndicator sessionID={sessionID} showLabel />
               </div>
             ) : (
                !hideSecondaryButtons && (

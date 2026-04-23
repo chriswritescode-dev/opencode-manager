@@ -1,7 +1,7 @@
 import { useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MiniScanner } from "@/components/ui/mini-scanner";
+import { SessionStatusIndicator } from "@/components/ui/session-status-indicator";
 import { Trash2, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
@@ -82,17 +82,17 @@ export const SessionCard = ({
             {manageMode ? (
               <div className="flex items-start gap-2 flex-1 min-w-0">
                 <div className="flex flex-col items-center gap-2 flex-shrink-0">
-                  <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={(checked) => {
-                      onToggleSelection(checked === true);
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                    }}
-                    className="w-5 h-5 flex-shrink-0"
-                  />
-                  <MiniScanner sessionID={session.id} />
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={(checked) => {
+                        onToggleSelection(checked === true);
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                      }}
+                      className="w-5 h-5 flex-shrink-0"
+                    />
+                    <SessionStatusIndicator sessionID={session.id} size="sm" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
@@ -122,7 +122,7 @@ export const SessionCard = ({
                       addSuffix: true,
                     })}
                   </span>
-                  <MiniScanner sessionID={session.id} />
+                  <SessionStatusIndicator sessionID={session.id} size="sm" />
                 </div>
               </div>
             )}

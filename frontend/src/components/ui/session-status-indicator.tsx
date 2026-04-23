@@ -4,6 +4,8 @@ import { useSessionStatusForSession, type SessionStatusType } from '@/stores/ses
 interface SessionStatusIndicatorProps {
   sessionID: string
   className?: string
+  size?: 'sm' | 'md'
+  showLabel?: boolean
 }
 
 const SCANNER_WIDTH = 6
@@ -11,7 +13,9 @@ const SCANNER_SEGMENTS = 12
 
 export const SessionStatusIndicator = memo(function SessionStatusIndicator({ 
   sessionID, 
-  className = '' 
+  className = '',
+  size = 'md',
+  showLabel = false
 }: SessionStatusIndicatorProps) {
   const status = useSessionStatusForSession(sessionID)
   const [position, setPosition] = useState(0)
@@ -42,7 +46,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
   }, [status.type, direction])
   
   useEffect(() => {
-    if (status.type !== 'retry') {
+    if (!showLabel || status.type !== 'retry') {
       setRetryCountdown(0)
       return
     }
@@ -56,7 +60,7 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     }, 1000)
     
     return () => clearInterval(interval)
-  }, [status])
+  }, [status, showLabel])
   
   if (status.type === 'idle') {
     return null
@@ -92,63 +96,25 @@ export const SessionStatusIndicator = memo(function SessionStatusIndicator({
     return 'bg-blue-500/20'
   }
   
+  const segmentClass = size === 'sm' ? 'w-0.5 h-2' : 'w-1 h-4'
+  const containerGap = showLabel ? 'gap-2' : ''
+  
   return (
-    <div className={`flex items-center gap-2 ${className}`}>
+    <div className={`flex items-center ${containerGap} ${className}`}>
       <div className="flex gap-0.5">
         {Array.from({ length: SCANNER_SEGMENTS }).map((_, i) => (
           <div
             key={i}
-            className={`w-1 h-4 rounded-sm transition-colors duration-75 ${getSegmentColor(i, status.type)}`}
+            className={`${segmentClass} rounded-sm transition-colors duration-75 ${getSegmentColor(i, status.type)}`}
           />
         ))}
       </div>
-      <span className="text-xs text-muted-foreground">
-        {status.type === 'retry'  && (
-          <>
-            Retry #{status.attempt}
-            {retryCountdown > 0 && <span className="text-amber-500 ml-1">({retryCountdown}s)</span>}
-          </>
-        )}
-      </span>
+      {showLabel && status.type === 'retry' && (
+        <span className="text-xs text-muted-foreground">
+          Retry #{status.attempt}
+          {retryCountdown > 0 && <span className="text-amber-500 ml-1">({retryCountdown}s)</span>}
+        </span>
+      )}
     </div>
-  )
-})
-
-interface CompactStatusIndicatorProps {
-  sessionID: string
-  className?: string
-}
-
-export const CompactStatusIndicator = memo(function CompactStatusIndicator({
-  sessionID,
-  className = ''
-}: CompactStatusIndicatorProps) {
-  const status = useSessionStatusForSession(sessionID)
-  const [frame, setFrame] = useState(0)
-  
-  useEffect(() => {
-    if (status.type !== 'busy' && status.type !== 'retry' && status.type !== 'compact') return
-    
-    const interval = setInterval(() => {
-      setFrame(prev => (prev + 1) % 8)
-    }, 120)
-    
-    return () => clearInterval(interval)
-  }, [status.type])
-  
-  if (status.type === 'idle') {
-    return null
-  }
-  
-  const pulseFrames = ['●', '◐', '○', '◑', '●', '◐', '○', '◑']
-  const color = status.type === 'retry' ? 'text-amber-500' : status.type === 'compact' ? 'text-purple-500' : 'text-blue-500'
-  
-  return (
-    <span className={`inline-flex items-center gap-1.5 ${className}`}>
-      <span className={`${color} text-sm font-mono`}>{pulseFrames[frame]}</span>
-      <span className={`text-xs ${color}`}>
-        {status.type === 'retry' ? `Retry #${status.attempt}` : status.type === 'compact' ? 'Compacting' : 'Working'}
-      </span>
-    </span>
   )
 })

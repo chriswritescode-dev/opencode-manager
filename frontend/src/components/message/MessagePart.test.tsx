@@ -304,6 +304,22 @@ describe('MessagePart', () => {
       sessionID: 'test-session',
     })
 
+    const createStepFinishPart = (): MessagePartType => ({
+      type: 'step-finish',
+      messageID: 'test-message',
+      sessionID: 'test-session',
+      cost: 0.01,
+      tokens: {
+        input: 100,
+        output: 50,
+        cache: { read: 0, write: 0 },
+      },
+      time: {
+        start: Date.now(),
+        end: Date.now() + 100,
+      },
+    })
+
     const createTextPart = (): MessagePartType => ({
       type: 'text',
       text: 'Hello, this is a text message',
@@ -475,6 +491,40 @@ describe('MessagePart', () => {
       })
       
       const part = createAgentPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).not.toBeNull()
+    })
+
+    it('renders null for step-finish part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createStepFinishPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders step-finish part when simpleChatMode is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createStepFinishPart()
       const { container } = render(<MessagePart part={part} />)
       
       expect(container.firstChild).not.toBeNull()

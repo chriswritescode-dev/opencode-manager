@@ -148,18 +148,20 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
           <div className="text-sm font-medium text-blue-600 dark:text-blue-400">Agent: {part.name}</div>
         </div>
       )
-    case 'step-finish': {
-      const isFree = part.cost === 0
-      const totalTokens = part.tokens.input + part.tokens.output + (part.tokens.cache?.read || 0)
-      const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} tokens</span>
-      return (
-        <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
-          {costText}
-          <CopyButton content={copyableContent} title="Copy step complete" />
-          {messageTextContent && part.messageID && <TTSButton messageId={part.messageID} content={messageTextContent} />}
-        </div>
-      )
-    }
+    case 'step-finish':
+      if (simpleChatMode) return null
+      {
+        const isFree = part.cost === 0
+        const totalTokens = part.tokens.input + part.tokens.output + (part.tokens.cache?.read || 0)
+        const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} tokens</span>
+        return (
+          <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
+            {costText}
+            <CopyButton content={copyableContent} title="Copy step complete" />
+            {messageTextContent && part.messageID && <TTSButton messageId={part.messageID} content={messageTextContent} />}
+          </div>
+        )
+      }
     case 'file':
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground">
