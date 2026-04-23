@@ -17,6 +17,7 @@ import {
 import { decryptSecret } from '../utils/crypto'
 import { SettingsService } from './settings'
 import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
+import { parseJsonc } from '@opencode-manager/shared/utils'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
 import { patchOpenCodeConfig } from './proxy'
@@ -121,7 +122,7 @@ class OpenCodeServerManager {
     OpenCodeServerManager.instance = null as unknown as OpenCodeServerManager
   }
 
-  async start(): Promise<void> {
+  async start(retryAfterPluginInstall = true): Promise<void> {
     if (this.isHealthy) {
       logger.info('OpenCode server already running and healthy')
       return
@@ -236,6 +237,7 @@ class OpenCodeServerManager {
     logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
     await this.initializeOpencodeBinDirectory()
+    const configuredPluginCount = await this.getConfiguredPluginCount(openCodeConfigPath)
 
     let stderrOutput = ''
 
@@ -296,10 +298,18 @@ class OpenCodeServerManager {
 
     logger.info(`OpenCode server started with PID ${this.serverPid}`)
 
-    const healthy = await this.waitForHealth(30000)
+    const healthTimeoutMs = configuredPluginCount > 0 ? 120000 : 30000
+    const healthy = await this.waitForHealth(healthTimeoutMs)
     if (!healthy) {
-      const fallback = `Server failed to become healthy after 30s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
+      const fallback = `Server failed to become healthy after ${Math.round(healthTimeoutMs / 1000)}s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
       this.lastStartupError = formatStartupError(stderrOutput, fallback)
+      if (configuredPluginCount > 0 && retryAfterPluginInstall) {
+        logger.warn(`OpenCode server did not become healthy after installing ${configuredPluginCount} configured plugin(s); restarting once`)
+        await this.stop()
+        await new Promise(r => setTimeout(r, 1000))
+        await this.start(false)
+        return
+      }
       throw new Error('OpenCode server failed to become healthy')
     }
 
@@ -391,6 +401,16 @@ class OpenCodeServerManager {
 
     } catch (error) {
       logger.error('Failed to initialize OpenCode bin directory:', error)
+    }
+  }
+
+  private async getConfiguredPluginCount(configPath: string): Promise<number> {
+    try {
+      const content = await fs.readFile(configPath, 'utf-8')
+      const config = parseJsonc(content) as { plugin?: unknown }
+      return Array.isArray(config.plugin) ? config.plugin.length : 0
+    } catch {
+      return 0
     }
   }
 

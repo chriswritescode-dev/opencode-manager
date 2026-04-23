@@ -80,6 +80,7 @@ ENV PORT=5003
 ENV OPENCODE_SERVER_PORT=5551
 ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
+ENV XDG_CACHE_HOME=/home/node/.cache
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder /app/shared ./shared
@@ -103,4 +104,3 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["bun", "backend/src/index.ts"]
-
