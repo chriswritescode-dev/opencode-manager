@@ -62,7 +62,8 @@ interface PromptInputProps {
   repoId?: number
   disabled?: boolean
   showScrollButton?: boolean
-  hasActiveStream?: boolean
+  isSessionActive?: boolean
+  isStreamingResponse?: boolean
   onScrollToBottom?: () => void
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
@@ -79,7 +80,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   repoId,
   disabled,
   showScrollButton,
-  hasActiveStream = false,
+  isSessionActive = false,
+  isStreamingResponse = false,
   onScrollToBottom,
   onShowSessionsDialog,
   onShowModelsDialog,
@@ -222,7 +224,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     pendingVoiceAutoSubmitRef.current = false
     setIsVoiceAutoSendPending(false)
 
-    if (hasActiveStream) {
+    if (isStreamingResponse) {
       const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
       const agentUsed = selectedAgent || currentMode
       sendPrompt.mutate({
@@ -925,8 +927,8 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(opcodeUrl, directory)
-  const showStopButton = hasActiveStream
-  const hideSecondaryButtons = isMobile && hasActiveStream
+  const showStopButton = isSessionActive
+  const hideSecondaryButtons = isMobile && isSessionActive
   const showVoiceFeedback = isVoiceHoldActive || isRecording || isTogglingRecording || isProcessing || isVoiceAutoSendPending
   const voiceFeedbackLabel = isProcessing
     ? isVoiceAutoSendPending
@@ -1063,7 +1065,7 @@ return (
             isBashMode={isBashMode}
             disabled={disabled}
           />
-          {hasActiveStream ? (
+          {isSessionActive ? (
               <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
                 <SessionStatusIndicator sessionID={sessionID} showLabel />
               </div>
@@ -1198,9 +1200,9 @@ return (
                   ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
                   : 'bg-primary hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed text-primary-foreground border-white/30'
               }`}
-              title={hasPendingPermissionForSession ? 'View pending permission' : (hasActiveStream ? 'Queue message' : 'Send')}
+              title={hasPendingPermissionForSession ? 'View pending permission' : (isStreamingResponse ? 'Queue message' : 'Send')}
             >
-              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (hasActiveStream ? 'Queue' : 'Send')}</span>
+              <span className="whitespace-nowrap">{hasPendingPermissionForSession ? 'View' : (isStreamingResponse ? 'Queue' : 'Send')}</span>
             </button>
         </div>
       </div>

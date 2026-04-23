@@ -158,13 +158,13 @@ export function SessionDetail() {
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
   const lastAssistantText = (lastAssistantMessage?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
-  const hasActiveStream = hasIncompleteMessages && isSessionActive;
+  const isStreamingResponse = hasIncompleteMessages && isSessionActive;
 
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',
     lastAssistantMessage,
     lastAssistantText,
-    hasActiveStream,
+    isStreamingResponse,
   });
 
   const handleShowModelsDialog = useCallback(() => setModelDialogOpen(true), []);
@@ -511,7 +511,7 @@ export function SessionDetail() {
           >
             <div className="relative w-[94%] md:max-w-4xl">
               <div className="absolute -top-5 right-0 md:right-4 z-50 flex flex-col items-end gap-2">
-                {ttsEnabled && !hasPromptContent && !hasActiveStream && lastAssistantMessage && lastAssistantText && (
+                {ttsEnabled && !hasPromptContent && !isStreamingResponse && lastAssistantMessage && lastAssistantText && (
                   <FloatingTTSButton
                     messageId={lastAssistantMessage.info.id}
                     content={lastAssistantText}
@@ -562,7 +562,8 @@ export function SessionDetail() {
                 repoId={repoId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton}
-                hasActiveStream={hasActiveStream}
+                isSessionActive={isSessionActive}
+                isStreamingResponse={isStreamingResponse}
                 onScrollToBottom={scrollToBottom}
                 onShowModelsDialog={handleShowModelsDialog}
                 onShowSessionsDialog={handleShowSessionsDialog}

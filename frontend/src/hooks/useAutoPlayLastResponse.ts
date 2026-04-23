@@ -7,7 +7,7 @@ interface UseAutoPlayLastResponseParams {
   sessionId: string
   lastAssistantMessage: MessageWithParts | undefined
   lastAssistantText: string
-  hasActiveStream: boolean
+  isStreamingResponse: boolean
 }
 
 function isMessageCompleted(message: MessageWithParts['info']): boolean {
@@ -18,7 +18,7 @@ export function useAutoPlayLastResponse({
   sessionId,
   lastAssistantMessage,
   lastAssistantText,
-  hasActiveStream,
+  isStreamingResponse,
 }: UseAutoPlayLastResponseParams): void {
   const { speakMessage, isEnabled: ttsEnabled } = useTTS()
   const { preferences } = useSettings()
@@ -52,7 +52,7 @@ export function useAutoPlayLastResponse({
       return
     }
     
-    if (hasActiveStream || !lastAssistantMessage) {
+    if (isStreamingResponse || !lastAssistantMessage) {
       return
     }
     
@@ -94,7 +94,7 @@ export function useAutoPlayLastResponse({
   }, [
     ttsEnabled,
     autoPlayEnabled,
-    hasActiveStream,
+    isStreamingResponse,
     lastAssistantMessage,
     lastAssistantText,
     speakMessage,

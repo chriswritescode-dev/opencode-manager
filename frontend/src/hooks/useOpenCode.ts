@@ -436,13 +436,13 @@ export const useAbortSession = (
     const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
     const messages = queryClient.getQueryData<MessageWithParts[]>(queryKey);
     
-    const hasActiveStream = messages?.some(msgWithParts => {
+    const hasIncompleteMessages = messages?.some(msgWithParts => {
       if (msgWithParts.info.role !== "assistant") return false;
       const assistantInfo = msgWithParts.info as AssistantMessage;
       return !assistantInfo.time.completed;
     });
 
-    return !hasActiveStream;
+    return !hasIncompleteMessages;
   }, [queryClient, opcodeUrl, directory]);
 
   useEffect(() => {

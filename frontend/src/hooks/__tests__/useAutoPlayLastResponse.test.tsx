@@ -126,7 +126,7 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        hasActiveStream: false,
+        isStreamingResponse: false,
       })
     )
 
@@ -142,7 +142,7 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        hasActiveStream: false,
+        isStreamingResponse: false,
       })
     )
 
@@ -158,7 +158,7 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        hasActiveStream: false,
+        isStreamingResponse: false,
       })
     )
 
@@ -176,7 +176,7 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: incompleteMessage,
           lastAssistantText: 'Test text',
-          hasActiveStream: false,
+          isStreamingResponse: false,
         },
       }
     )
@@ -188,7 +188,7 @@ describe('useAutoPlayLastResponse', () => {
       sessionId: 'test-session',
       lastAssistantMessage: completedMessage,
       lastAssistantText: 'Test text',
-      hasActiveStream: false,
+      isStreamingResponse: false,
     })
 
     expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
@@ -206,7 +206,7 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: message,
           lastAssistantText: 'Test text',
-          hasActiveStream: false,
+          isStreamingResponse: false,
         },
       }
     )
@@ -217,7 +217,7 @@ describe('useAutoPlayLastResponse', () => {
       sessionId: 'test-session',
       lastAssistantMessage: message,
       lastAssistantText: 'Test text',
-      hasActiveStream: false,
+      isStreamingResponse: false,
     })
 
     expect(mockSpeakMessage).not.toHaveBeenCalled()
@@ -235,7 +235,7 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'test-session',
           lastAssistantMessage: firstMessage,
           lastAssistantText: 'First text',
-          hasActiveStream: false,
+          isStreamingResponse: false,
         },
       }
     )
@@ -247,7 +247,7 @@ describe('useAutoPlayLastResponse', () => {
       sessionId: 'test-session',
       lastAssistantMessage: secondMessage,
       lastAssistantText: 'Second text',
-      hasActiveStream: false,
+      isStreamingResponse: false,
     })
 
     expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
@@ -266,7 +266,7 @@ describe('useAutoPlayLastResponse', () => {
           sessionId: 'session-1',
           lastAssistantMessage: message1,
           lastAssistantText: 'Session 1 text',
-          hasActiveStream: false,
+          isStreamingResponse: false,
         },
       }
     )
@@ -278,14 +278,14 @@ describe('useAutoPlayLastResponse', () => {
       sessionId: 'session-2',
       lastAssistantMessage: message2,
       lastAssistantText: 'Session 2 text',
-      hasActiveStream: false,
+      isStreamingResponse: false,
     })
 
     expect(mockSpeakMessage).toHaveBeenCalledTimes(1)
     expect(mockSpeakMessage).toHaveBeenCalledWith('1', 'Session 2 text')
   })
 
-  it('does NOT call speakMessage when hasActiveStream is true', () => {
+  it('does NOT call speakMessage when isStreamingResponse is true', () => {
     setup()
 
     const message = createMessage('1', Date.now())
@@ -294,7 +294,7 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: 'Test text',
-        hasActiveStream: true,
+        isStreamingResponse: true,
       })
     )
 
@@ -310,7 +310,7 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: '',
-        hasActiveStream: false,
+        isStreamingResponse: false,
       })
     )
 
@@ -326,7 +326,7 @@ describe('useAutoPlayLastResponse', () => {
         sessionId: 'test-session',
         lastAssistantMessage: message,
         lastAssistantText: '   ',
-        hasActiveStream: false,
+        isStreamingResponse: false,
       })
     )
 
