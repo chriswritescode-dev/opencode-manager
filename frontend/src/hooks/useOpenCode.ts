@@ -331,23 +331,22 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     },
     onSuccess: async (data, variables) => {
       const { sessionID } = variables;
-      const { optimisticUserID, response } = data;
+      const { response } = data;
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
 
       queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey,
         (old) => {
           if (!old) return old;
-          const withoutOptimistic = old.filter((msgWithParts) => msgWithParts.info.id !== optimisticUserID);
-          
-          const existingIdx = withoutOptimistic.findIndex(m => m.info.id === response.info.id);
+
+          const existingIdx = old.findIndex(m => m.info.id === response.info.id);
           if (existingIdx >= 0) {
-            const updated = [...withoutOptimistic];
+            const updated = [...old];
             updated[existingIdx] = { info: response.info, parts: response.parts };
             return updated;
           }
-          
-          return [...withoutOptimistic, { info: response.info, parts: response.parts }];
+
+          return [...old, { info: response.info, parts: response.parts }];
         },
       );
 

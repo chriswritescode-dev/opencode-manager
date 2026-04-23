@@ -7,6 +7,7 @@ import { MessageError } from './MessageError'
 import type { Message, Part, MessageWithParts } from '@/api/types'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
+import { useSettings } from '@/hooks/useSettings'
 import type { components } from '@/api/opencode-types'
 import type { Todo } from '@/components/message/SessionTodoDisplay'
 import type { OpenCodeError } from '@/lib/opencode-errors'
@@ -78,6 +79,7 @@ interface MessageRowProps {
   handleStartEditUserMessage: (userMessageId: string, assistantMessageId: string) => void
   handleCancelEdit: () => void
   model?: string
+  simpleChatMode: boolean
 }
 
 const MessageRow = memo(function MessageRow({
@@ -98,6 +100,7 @@ const MessageRow = memo(function MessageRow({
   handleStartEditUserMessage,
   handleCancelEdit,
   model,
+  simpleChatMode,
 }: MessageRowProps) {
   const msg = msgWithParts.info
   const parts = msgWithParts.parts
@@ -185,6 +188,12 @@ const MessageRow = memo(function MessageRow({
               onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMsg.id)}
               isEditable={false}
             />
+          ) : msg.role === 'user' && simpleChatMode ? (
+            <ClickableUserMessage
+              content={messageTextContent}
+              onClick={() => {}}
+              isEditable={false}
+            />
           ) : parts.length > 0 ? (
             parts.map((part: Part, partIndex: number) => (
               <div key={`${msg.id}-${part.id}-${partIndex}`}>
@@ -222,6 +231,8 @@ export const MessageThread = memo(function MessageThread({
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null)
   const [editingForAssistantId, setEditingForAssistantId] = useState<string | null>(null)
   const sessionStatus = useSessionStatusForSession(sessionID)
+  const { preferences } = useSettings()
+  const simpleChatMode = preferences?.simpleChatMode ?? false
   
   const pendingAssistantId = useMemo(() => {
     if (!messages) return undefined
@@ -316,6 +327,7 @@ export const MessageThread = memo(function MessageThread({
           handleStartEditUserMessage={handleStartEditUserMessage}
           handleCancelEdit={handleCancelEdit}
           model={model}
+          simpleChatMode={simpleChatMode}
         />
       ))}
     </div>
