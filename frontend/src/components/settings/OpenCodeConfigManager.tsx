@@ -102,15 +102,6 @@ export function OpenCodeConfigManager() {
     }
   }
 
-  const reloadConfigMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.reloadOpenCodeConfig()
-    },
-    onSuccess: () => {
-      invalidateConfigCaches(queryClient)
-    },
-  })
-
   const restartServerMutation = useMutation({
     mutationFn: async () => {
       return await settingsApi.restartOpenCodeServer()
@@ -238,7 +229,8 @@ export function OpenCodeConfigManager() {
   const updateConfigContent = async (configName: string, newContent: Record<string, unknown>, restartServer = false) => {
     try {
       setIsUpdating(true)
-      const previousContent = configs.find(c => c.name === configName)?.content
+      const previousConfig = configs.find(c => c.name === configName)
+      const previousContent = previousConfig?.content
 
       const result = await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
 
@@ -256,15 +248,21 @@ export function OpenCodeConfigManager() {
       const pluginsChanged = JSON.stringify(previousContent?.plugin) !== JSON.stringify(newContent.plugin)
       const skillsChanged = JSON.stringify(previousContent?.skills) !== JSON.stringify(newContent.skills)
       const providersChanged = JSON.stringify(previousContent?.provider) !== JSON.stringify(newContent.provider)
-      if (restartServer || agentsChanged || pluginsChanged || skillsChanged || providersChanged) {
-        showToast.loading('Reloading server...', { id: 'update-restart' })
+      const defaultConfigChanged = Boolean(previousConfig?.isDefault && (agentsChanged || pluginsChanged || skillsChanged || providersChanged))
+      if (restartServer || defaultConfigChanged) {
+        showToast.loading(restartServer ? 'Restarting server...' : 'Applying server configuration...', { id: 'update-restart' })
         try {
-          await reloadConfigMutation.mutateAsync()
+          if (restartServer && !defaultConfigChanged) {
+            await restartServerMutation.mutateAsync()
+          }
           if (result.removedFields && result.removedFields.length > 0) {
             showToast.info(`Configuration updated after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'update-restart' })
+          } else if (pluginsChanged || restartServer) {
+            showToast.success('Configuration updated and server restarted', { id: 'update-restart' })
           } else {
-            showToast.success('Configuration updated and server reloaded', { id: 'update-restart' })
+            showToast.success('Configuration updated and server applied', { id: 'update-restart' })
           }
+          invalidateConfigCaches(queryClient)
         } catch (error) {
           showToast.error(getRestartErrorMessage(error), { id: 'update-restart' })
           throw error
