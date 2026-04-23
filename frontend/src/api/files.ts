@@ -3,12 +3,34 @@ import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
 
-function getFileApiUrl(path: string): string {
-  if (path.includes('..')) {
-    return `${API_BASE_URL}/api/files/?path=${encodeURIComponent(path)}`
+interface FileApiUrlOptions {
+  route?: string
+  params?: Record<string, string | number | boolean | undefined>
+}
+
+function pathRequiresQuery(path: string): boolean {
+  return path.split('/').some(segment => segment === '.' || segment === '..')
+}
+
+export function getFileApiUrl(path: string, options: FileApiUrlOptions = {}): string {
+  const searchParams = new URLSearchParams()
+  Object.entries(options.params ?? {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      searchParams.append(key, String(value))
+    }
+  })
+
+  const routePath = options.route ? `/${options.route}` : ''
+
+  if (pathRequiresQuery(path)) {
+    searchParams.set('path', path)
+    const query = searchParams.toString()
+    return `${API_BASE_URL}/api/files${routePath}${query ? `?${query}` : ''}`
   }
 
-  return `${API_BASE_URL}/api/files/${path.split('/').map(encodeURIComponent).join('/')}`
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  const query = searchParams.toString()
+  return `${API_BASE_URL}/api/files/${encodedPath}${routePath}${query ? `?${query}` : ''}`
 }
 
 async function fetchFile(path: string): Promise<FileInfo> {
@@ -38,7 +60,7 @@ export async function applyFilePatches(path: string, patches: PatchOperation[]):
 }
 
 export async function getIgnoredPaths(path: string): Promise<{ ignoredPaths: string[] }> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}/ignored-paths`)
+  return fetchWrapper(getFileApiUrl(path, { route: 'ignored-paths' }))
 }
 
 export interface DownloadOptions {
@@ -47,11 +69,13 @@ export interface DownloadOptions {
 }
 
 export async function downloadDirectoryAsZip(path: string, options?: DownloadOptions): Promise<void> {
-  const params = new URLSearchParams()
-  if (options?.includeGit) params.append('includeGit', 'true')
-  if (options?.includePaths?.length) params.append('includePaths', options.includePaths.join(','))
-
-  const url = `${API_BASE_URL}/api/files/${path}/download-zip${params.toString() ? '?' + params.toString() : ''}`
+  const url = getFileApiUrl(path, {
+    route: 'download-zip',
+    params: {
+      includeGit: options?.includeGit || undefined,
+      includePaths: options?.includePaths?.length ? options.includePaths.join(',') : undefined,
+    },
+  })
   
   const blob = await fetchWrapperBlob(url)
   const urlObj = window.URL.createObjectURL(blob)
