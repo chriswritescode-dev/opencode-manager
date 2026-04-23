@@ -13,6 +13,16 @@ function getFilePathFromRequest(c: Context, fallbackPath: string): string {
   return c.req.query('path') ?? decodeFilePath(fallbackPath)
 }
 
+function getSpecialRoutePathFromRequest(c: Context, routeName: string): string | undefined {
+  const queryPath = c.req.query('path')
+  if (queryPath !== undefined) {
+    return queryPath
+  }
+
+  const match = c.req.path.match(new RegExp(`/api/files/(.+?)/${routeName}$`))
+  return match?.[1] ? decodeFilePath(match[1]) : undefined
+}
+
 export function createFileRoutes() {
   const app = new Hono()
 
@@ -20,8 +30,7 @@ export function createFileRoutes() {
     const path = c.req.path
 
     if (path.endsWith('/download-zip')) {
-      const match = path.match(/\/api\/files\/(.+?)\/download-zip$/)
-      const userPath = match?.[1] ? decodeFilePath(match[1]) : undefined
+      const userPath = getSpecialRoutePathFromRequest(c, 'download-zip')
 
       if (!userPath) {
         return c.json({ error: 'No path provided' }, 400)
@@ -69,7 +78,7 @@ export function createFileRoutes() {
     }
 
     if (path.endsWith('/ignored-paths')) {
-      const userPath = decodeFilePath(path.replace(/\/api\/files\/(.+?)\/ignored-paths$/, '$1'))
+      const userPath = getSpecialRoutePathFromRequest(c, 'ignored-paths')
 
       if (!userPath || userPath === '/ignored-paths') {
         return c.json({ error: 'No path provided' }, 400)

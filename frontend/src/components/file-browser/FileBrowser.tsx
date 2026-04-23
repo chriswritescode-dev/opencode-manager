@@ -10,9 +10,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Progress } from '@/components/ui/progress'
 import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
-import { API_BASE_URL } from '@/config'
 import { useMobile } from '@/hooks/useMobile'
-import { useFile } from '@/api/files'
+import { getFileApiUrl, useFile } from '@/api/files'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -156,19 +155,6 @@ useEffect(() => {
   }
 }, [initialFileError])
 
-  const getFileApiUrl = useCallback((path: string) => {
-    if (path.includes('..')) {
-      return `${API_BASE_URL}/api/files/?path=${encodeURIComponent(path)}`
-    }
-
-    const encodedPath = path
-      .split('/')
-      .map(segment => encodeURIComponent(segment))
-      .join('/')
-
-    return `${API_BASE_URL}/api/files/${encodedPath}`
-  }, [])
-
   const loadFiles = useCallback(async (path: string) => {
     setLoading(true)
     setError(null)
@@ -188,7 +174,7 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [getFileApiUrl, onDirectoryLoad])
+  }, [onDirectoryLoad])
 
   const normalizePath = useCallback((path: string) => {
     const normalized = path
@@ -276,7 +262,7 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [getFileApiUrl, onFileSelect, isMobile, onPreviewStateChange])
+  }, [onFileSelect, isMobile, onPreviewStateChange])
 
   const handleCloseModal = useCallback(() => {
     setIsPreviewModalOpen(false)
@@ -312,7 +298,7 @@ useEffect(() => {
     } catch (err) {
       return err instanceof Error ? err.message : 'Upload failed'
     }
-  }, [currentPath, getFileApiUrl])
+  }, [currentPath])
 
   const handleUploadItems = useCallback(async (items: UploadItem[]) => {
     if (items.length === 0) return
@@ -382,7 +368,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed')
     }
-  }, [currentPath, getFileApiUrl, loadFiles])
+  }, [currentPath, loadFiles])
 
   const handleDelete = useCallback(async (path: string) => {
     try {
@@ -399,7 +385,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed')
     }
-  }, [currentPath, getFileApiUrl, loadFiles])
+  }, [currentPath, loadFiles])
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
@@ -417,7 +403,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Rename failed')
     }
-  }, [currentPath, getFileApiUrl, loadFiles])
+  }, [currentPath, loadFiles])
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
