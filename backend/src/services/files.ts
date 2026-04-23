@@ -13,11 +13,12 @@ import {
   getFileStats, 
   listDirectory 
 } from './file-operations'
-import { getReposPath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
+import { getReposPath, getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
 import { ALLOWED_MIME_TYPES, type AllowedMimeType } from '@opencode-manager/shared'
 import type { ChunkedFileInfo, PatchOperation } from '@opencode-manager/shared'
 
 const SHARED_WORKSPACE_BASE = getReposPath()
+const WORKSPACE_BASE = getWorkspacePath()
 
 interface FileInfo {
   name: string
@@ -234,12 +235,12 @@ export async function renameOrMoveFile(userPath: string, body: { newPath: string
 
 function validatePath(userPath: string): string {
   const trimmed = userPath.trim()
-  const normalized = path.normalize(trimmed).replace(/^(\.\.(\/|\\|$))+/, '')
+  const normalized = path.normalize(trimmed || '.')
   const fullPath = path.join(SHARED_WORKSPACE_BASE, normalized)
   const resolved = path.resolve(fullPath)
   
-  const basePath = path.resolve(SHARED_WORKSPACE_BASE)
-  if (!resolved.startsWith(basePath)) {
+  const basePath = path.resolve(WORKSPACE_BASE)
+  if (resolved !== basePath && !resolved.startsWith(`${basePath}${path.sep}`)) {
     throw { message: 'Path traversal detected', statusCode: 403 }
   }
   

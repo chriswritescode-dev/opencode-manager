@@ -20,6 +20,7 @@ export function MobileSheetHost() {
           onClose={close}
           basePath=""
           repoName="Workspace Root"
+          allowNavigateAboveBase={true}
         />
       )}
       {openSheet === 'notifications' && <NotificationsSheet isOpen onClose={close} />}

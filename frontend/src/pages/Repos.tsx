@@ -67,6 +67,7 @@ export function Repos() {
         onClose={handleCloseFileBrowser}
         basePath=""
         repoName="Workspace Root"
+        allowNavigateAboveBase={true}
       />
     </div>
   );

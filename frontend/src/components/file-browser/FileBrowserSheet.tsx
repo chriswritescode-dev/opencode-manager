@@ -23,9 +23,10 @@ interface FileBrowserSheetProps {
   repoName?: string
   repoId?: number
   initialSelectedFile?: string
+  allowNavigateAboveBase?: boolean
 }
 
-export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, repoId, initialSelectedFile }: FileBrowserSheetProps) {
+export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, repoId, initialSelectedFile, allowNavigateAboveBase = false }: FileBrowserSheetProps) {
   const normalizedBasePath = basePath || '.'
   const [isEditing, setIsEditing] = useState(false)
   const [displayPath, setDisplayPath] = useState<string>('/')
@@ -57,9 +58,20 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
   }, [isOpen])
 
   const handleDirectoryLoad = useCallback((info: { workspaceRoot?: string; currentPath: string }) => {
+    if (allowNavigateAboveBase) {
+      const pathParts = info.currentPath.split('/').filter(Boolean)
+      const displayParts = pathParts[0] === '..'
+        ? ['workspace', ...pathParts.slice(1)]
+        : ['workspace', 'repos', ...pathParts]
+
+      setDisplayPath('/' + displayParts.join('/'))
+      setCurrentPath(info.currentPath || '.')
+      return
+    }
+
     if (!info.currentPath || info.currentPath === '.' || info.currentPath === '') {
       setDisplayPath('/')
-      setCurrentPath(basePath || '.')
+      setCurrentPath(info.currentPath || '.')
       return
     }
 
@@ -78,7 +90,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
     } else {
       setDisplayPath('/' + pathParts.join('/'))
     }
-  }, [repoName, basePath])
+  }, [allowNavigateAboveBase, repoName])
 
   const handleDownloadDirectory = useCallback(async (options: { includeGit?: boolean, includePaths?: string[] }) => {
     if (!currentPath) return
@@ -139,7 +151,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
                   {repoName}
                 </h1>
               )}
-              <PathDisplay path={displayPath} maxSegments={2} className="truncate" />
+              <PathDisplay path={displayPath} maxSegments={4} className="truncate" />
             </div>
             <div className="flex items-center gap-2">
               {repoId && !isEditing && (
@@ -187,6 +199,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
             initialSelectedFile={initialSelectedFile}
             onDirectoryLoad={handleDirectoryLoad}
             onPreviewStateChange={setIsPreviewOpen}
+            allowNavigateAboveBase={allowNavigateAboveBase}
           />
         </FullscreenSheetContent>
       </FullscreenSheet>
