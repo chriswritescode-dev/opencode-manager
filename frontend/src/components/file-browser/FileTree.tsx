@@ -33,6 +33,7 @@ interface FileTreeProps {
   currentPath?: string
   basePath?: string
   onNavigateUp?: () => void
+  canNavigateUp?: boolean
 }
 
 interface TreeNodeProps {
@@ -93,8 +94,10 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
 
   const handleDownload = () => {
     if (file.isDirectory) return
-    
-    const downloadUrl = `${API_BASE_URL}/api/files/${file.path}?download=true`
+
+    const downloadUrl = file.path.includes('..')
+      ? `${API_BASE_URL}/api/files/?path=${encodeURIComponent(file.path)}&download=true`
+      : `${API_BASE_URL}/api/files/${file.path.split('/').map(encodeURIComponent).join('/')}?download=true`
     const link = document.createElement('a')
     link.href = downloadUrl
     link.download = file.name
@@ -239,12 +242,12 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
   )
 }
 
-export const FileTree = memo(function FileTree({ files, onFileSelect, onDirectoryClick, selectedFile, onDelete, onRename, currentPath = '', basePath = '', onNavigateUp }: FileTreeProps) {
+export const FileTree = memo(function FileTree({ files, onFileSelect, onDirectoryClick, selectedFile, onDelete, onRename, currentPath = '', basePath = '', onNavigateUp, canNavigateUp }: FileTreeProps) {
   const handleGoUp = () => {
     onNavigateUp?.()
   }
 
-  const showGoUp = currentPath && currentPath !== basePath
+  const showGoUp = canNavigateUp ?? Boolean(currentPath && currentPath !== basePath)
 
   return (
     <div className="overflow-y-auto">

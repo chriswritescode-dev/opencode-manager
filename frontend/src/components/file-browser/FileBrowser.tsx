@@ -27,6 +27,7 @@ interface FileBrowserProps {
   initialSelectedFile?: string
   onDirectoryLoad?: (info: { workspaceRoot?: string; currentPath: string }) => void
   onPreviewStateChange?: (isOpen: boolean) => void
+  allowNavigateAboveBase?: boolean
 }
 
 interface UploadItem {
@@ -122,7 +123,7 @@ function getUploadItemsFromFileList(fileList: FileList): UploadItem[] {
   return items
 }
 
-export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange }, ref) {
+export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(function FileBrowser({ basePath = '', onFileSelect, embedded = false, initialSelectedFile, onDirectoryLoad, onPreviewStateChange, allowNavigateAboveBase = false }, ref) {
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
@@ -137,7 +138,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const uploadCancelledRef = useRef(false)
   const isMobile = useMobile()
 
-   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
+  const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
 
 useEffect(() => {
   if (initialFileData) {
@@ -155,12 +156,25 @@ useEffect(() => {
   }
 }, [initialFileError])
 
+  const getFileApiUrl = useCallback((path: string) => {
+    if (path.includes('..')) {
+      return `${API_BASE_URL}/api/files/?path=${encodeURIComponent(path)}`
+    }
+
+    const encodedPath = path
+      .split('/')
+      .map(segment => encodeURIComponent(segment))
+      .join('/')
+
+    return `${API_BASE_URL}/api/files/${encodedPath}`
+  }, [])
+
   const loadFiles = useCallback(async (path: string) => {
     setLoading(true)
     setError(null)
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${path}`)
+      const response = await fetch(getFileApiUrl(path))
       if (!response.ok) {
         throw new Error(`Failed to load files: ${response.statusText}`)
       }
@@ -174,28 +188,64 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onDirectoryLoad])
+  }, [getFileApiUrl, onDirectoryLoad])
 
-  const getPathParts = useCallback((path: string) => path.split('/').filter(Boolean), [])
+  const normalizePath = useCallback((path: string) => {
+    const normalized = path
+      .trim()
+      .replace(/\\/g, '/')
+      .replace(/\/+/g, '/')
+      .replace(/\/+$/, '')
+
+    if (normalized === '.' || normalized === './') {
+      return ''
+    }
+
+    if (normalized.startsWith('./')) {
+      return normalized.slice(2)
+    }
+
+    return normalized
+  }, [])
+
+  const getPathParts = useCallback((path: string) => normalizePath(path).split('/').filter(Boolean), [normalizePath])
+
+  const canNavigateUp = useCallback(() => {
+    if (allowNavigateAboveBase && normalizePath(currentPath) === '') {
+      return true
+    }
+
+    if (normalizePath(currentPath) === '..') {
+      return false
+    }
+
+    const pathParts = getPathParts(currentPath)
+    if (allowNavigateAboveBase) {
+      return pathParts.length > 0
+    }
+
+    return pathParts.length > 0 && normalizePath(currentPath) !== normalizePath(basePath)
+  }, [allowNavigateAboveBase, basePath, currentPath, getPathParts, normalizePath])
 
   const goToParentDirectory = useCallback(() => {
+    if (allowNavigateAboveBase && normalizePath(currentPath) === '') {
+      loadFiles('..')
+      return
+    }
+
     const pathParts = getPathParts(currentPath)
     if (pathParts.length > 0) {
       pathParts.pop()
       const parentPath = pathParts.join('/')
-      loadFiles(parentPath || basePath)
+      loadFiles(allowNavigateAboveBase ? parentPath : parentPath || basePath)
     }
-  }, [currentPath, basePath, loadFiles, getPathParts])
+  }, [allowNavigateAboveBase, currentPath, basePath, loadFiles, getPathParts, normalizePath])
 
   useImperativeHandle(ref, () => ({
     goBack: goToParentDirectory,
-    canGoBack: () => {
-      const pathParts = getPathParts(currentPath)
-      const joinedPath = pathParts.join('/')
-      return pathParts.length > 0 && joinedPath !== basePath
-    },
+    canGoBack: canNavigateUp,
     getCurrentPath: () => currentPath,
-  }), [currentPath, basePath, goToParentDirectory, getPathParts])
+  }), [currentPath, goToParentDirectory, canNavigateUp])
 
   const handleFileSelect = useCallback(async (file: FileInfo) => {
     if (file.isDirectory) {
@@ -206,7 +256,7 @@ useEffect(() => {
     // Fetch the full file content when selecting a file
     setLoading(true)
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${file.path}`)
+      const response = await fetch(getFileApiUrl(file.path))
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`)
       }
@@ -226,7 +276,7 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onFileSelect, isMobile, onPreviewStateChange])
+  }, [getFileApiUrl, onFileSelect, isMobile, onPreviewStateChange])
 
   const handleCloseModal = useCallback(() => {
     setIsPreviewModalOpen(false)
@@ -248,7 +298,7 @@ useEffect(() => {
     formData.append('relativePath', item.relativePath)
     
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${currentPath}`, {
+      const response = await fetch(getFileApiUrl(currentPath), {
         method: 'POST',
         body: formData,
       })
@@ -262,7 +312,7 @@ useEffect(() => {
     } catch (err) {
       return err instanceof Error ? err.message : 'Upload failed'
     }
-  }, [currentPath])
+  }, [currentPath, getFileApiUrl])
 
   const handleUploadItems = useCallback(async (items: UploadItem[]) => {
     if (items.length === 0) return
@@ -318,7 +368,7 @@ useEffect(() => {
 
   const handleCreateFile = useCallback(async (name: string, type: 'file' | 'folder') => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${currentPath}/${name}`, {
+      const response = await fetch(getFileApiUrl([currentPath, name].filter(Boolean).join('/')), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, content: type === 'file' ? '' : undefined }),
@@ -332,11 +382,11 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Create failed')
     }
-  }, [currentPath, loadFiles])
+  }, [currentPath, getFileApiUrl, loadFiles])
 
   const handleDelete = useCallback(async (path: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${path}`, {
+      const response = await fetch(getFileApiUrl(path), {
         method: 'DELETE',
       })
       
@@ -349,11 +399,11 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Delete failed')
     }
-  }, [currentPath, loadFiles])
+  }, [currentPath, getFileApiUrl, loadFiles])
 
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/files/${oldPath}`, {
+      const response = await fetch(getFileApiUrl(oldPath), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPath }),
@@ -367,7 +417,7 @@ useEffect(() => {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Rename failed')
     }
-  }, [currentPath, loadFiles])
+  }, [currentPath, getFileApiUrl, loadFiles])
 
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault()
@@ -426,6 +476,10 @@ useEffect(() => {
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
   }, [isPreviewModalOpen, handleCloseModal])
+
+  const showNavigateUp = allowNavigateAboveBase && normalizePath(currentPath) !== '..'
+    ? true
+    : canNavigateUp()
 
   const filteredFiles = files?.children?.filter(file =>
     file.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -557,6 +611,7 @@ useEffect(() => {
                   currentPath={currentPath}
                   basePath={basePath}
                   onNavigateUp={goToParentDirectory}
+                  canNavigateUp={showNavigateUp}
                 />
               )}
             </div>
@@ -657,6 +712,7 @@ useEffect(() => {
                   currentPath={currentPath}
                   basePath={basePath}
                   onNavigateUp={goToParentDirectory}
+                  canNavigateUp={showNavigateUp}
                 />
               </div>
             )}

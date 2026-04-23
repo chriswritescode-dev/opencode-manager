@@ -1,9 +1,17 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import * as fileService from '../services/files'
 import * as archiveService from '../services/archive'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
+
+function decodeFilePath(path: string): string {
+  return decodeURIComponent(path)
+}
+
+function getFilePathFromRequest(c: Context, fallbackPath: string): string {
+  return c.req.query('path') ?? decodeFilePath(fallbackPath)
+}
 
 export function createFileRoutes() {
   const app = new Hono()
@@ -13,7 +21,7 @@ export function createFileRoutes() {
 
     if (path.endsWith('/download-zip')) {
       const match = path.match(/\/api\/files\/(.+?)\/download-zip$/)
-      const userPath = match?.[1]
+      const userPath = match?.[1] ? decodeFilePath(match[1]) : undefined
 
       if (!userPath) {
         return c.json({ error: 'No path provided' }, 400)
@@ -61,7 +69,7 @@ export function createFileRoutes() {
     }
 
     if (path.endsWith('/ignored-paths')) {
-      const userPath = path.replace(/\/api\/files\/(.+?)\/ignored-paths$/, '$1')
+      const userPath = decodeFilePath(path.replace(/\/api\/files\/(.+?)\/ignored-paths$/, '$1'))
 
       if (!userPath || userPath === '/ignored-paths') {
         return c.json({ error: 'No path provided' }, 400)
@@ -77,7 +85,7 @@ export function createFileRoutes() {
     }
 
     try {
-      const userPath = path.replace(/^\/api\/files\//, '') || ''
+      const userPath = getFilePathFromRequest(c, path.replace(/^\/api\/files\//, '') || '')
       const download = c.req.query('download') === 'true'
       const raw = c.req.query('raw') === 'true'
       const startLineParam = c.req.query('startLine')
@@ -127,7 +135,7 @@ export function createFileRoutes() {
 
   app.post('/*', async (c) => {
     try {
-      const path = c.req.path.replace(/^\/api\/files\//, '') || ''
+      const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       const body = await c.req.parseBody()
       
       const file = body.file as File
@@ -146,7 +154,7 @@ export function createFileRoutes() {
 
   app.put('/*', async (c) => {
     try {
-      const path = c.req.path.replace(/^\/api\/files\//, '') || ''
+      const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       const body = await c.req.json()
       
       const result = await fileService.createFileOrFolder(path, body)
@@ -159,7 +167,7 @@ export function createFileRoutes() {
 
   app.delete('/*', async (c) => {
     try {
-      const path = c.req.path.replace(/^\/api\/files\//, '') || ''
+      const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       
       await fileService.deleteFileOrFolder(path)
       return c.json({ success: true })
@@ -171,7 +179,7 @@ export function createFileRoutes() {
 
   app.patch('/*', async (c) => {
     try {
-      const path = c.req.path.replace(/^\/api\/files\//, '') || ''
+      const path = getFilePathFromRequest(c, c.req.path.replace(/^\/api\/files\//, '') || '')
       const body = await c.req.json()
       
       if (body.patches && Array.isArray(body.patches)) {
