@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { MemoryRouter } from 'react-router-dom'
 import { MessagePart } from './MessagePart'
 import type { MessagePart as MessagePartType } from '@/api/types'
 
 const mocks = vi.hoisted(() => ({
   useTTS: vi.fn(),
   useSettings: vi.fn(),
+  usePermissions: vi.fn(),
+  useQuestions: vi.fn(),
 }))
 
 vi.mock('@/hooks/useTTS', () => ({
@@ -14,6 +18,11 @@ vi.mock('@/hooks/useTTS', () => ({
 
 vi.mock('@/hooks/useSettings', () => ({
   useSettings: mocks.useSettings,
+}))
+
+vi.mock('@/contexts/EventContext', () => ({
+  usePermissions: () => mocks.usePermissions(),
+  useQuestions: () => mocks.useQuestions(),
 }))
 
 interface MockTTSReturn {
@@ -60,6 +69,12 @@ describe('MessagePart', () => {
       isLoading: false,
       updateSettings: vi.fn(),
       isUpdating: false,
+    })
+    mocks.usePermissions.mockReturnValue({
+      getForCallID: vi.fn(() => null),
+    })
+    mocks.useQuestions.mockReturnValue({
+      getForCallID: vi.fn(() => null),
     })
   })
 
@@ -440,7 +455,14 @@ describe('MessagePart', () => {
       })
       
       const part = createToolPart()
-      const { container } = render(<MessagePart part={part} />)
+      const queryClient = new QueryClient()
+      const { container } = render(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <MessagePart part={part} />
+          </MemoryRouter>
+        </QueryClientProvider>
+      )
       
       expect(container.firstChild).not.toBeNull()
     })

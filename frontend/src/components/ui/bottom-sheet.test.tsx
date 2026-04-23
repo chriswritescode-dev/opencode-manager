@@ -68,7 +68,19 @@ describe('BottomSheet', () => {
       </BottomSheet>,
     )
     const dialog = document.querySelector('[role="dialog"]')
-    expect(dialog).toHaveClass('pb-safe')
+    expect(dialog).toBeInTheDocument()
+  })
+
+  it('applies pb-safe class to BottomSheetContent', () => {
+    render(
+      <BottomSheet isOpen onClose={() => {}} ariaLabel="Test sheet">
+        <BottomSheetContent>
+          <div>Test content</div>
+        </BottomSheetContent>
+      </BottomSheet>,
+    )
+    const content = screen.getByText('Test content').parentElement
+    expect(content).toHaveClass('pb-safe')
   })
 
   it('applies custom heightClass', () => {
