@@ -12,6 +12,17 @@ const API_BASE = API_BASE_URL
 const VIRTUALIZATION_THRESHOLD_BYTES = 50_000
 const MARKDOWN_PREVIEW_SIZE_LIMIT = 1_000_000
 
+function getFileApiUrl(path: string, query?: string): string {
+  const separator = query ? (path.includes('..') ? '&' : '?') : ''
+  const suffix = query ? `${separator}${query}` : ''
+
+  if (path.includes('..')) {
+    return `${API_BASE}/api/files/?path=${encodeURIComponent(path)}${suffix}`
+  }
+
+  return `${API_BASE}/api/files/${path.split('/').map(encodeURIComponent).join('/')}${suffix}`
+}
+
 interface FilePreviewProps {
   file: FileInfo
   hideHeader?: boolean
@@ -95,7 +106,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
 
   const handleDownload = () => {
     const link = document.createElement('a')
-    link.href = `${API_BASE}/api/files/${file.path}?download=true`
+    link.href = getFileApiUrl(file.path, 'download=true')
     link.download = file.name
     document.body.appendChild(link)
     link.click()
@@ -137,7 +148,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      const response = await fetch(`${API_BASE}/api/files/${file.path}`, {
+      const response = await fetch(getFileApiUrl(file.path), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'file', content: editContent }),
@@ -189,7 +200,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       return (
         <div className="flex justify-center p-4">
           <img 
-            src={`${API_BASE}/api/files/${file.path}?raw=true`}
+            src={getFileApiUrl(file.path, 'raw=true')}
             alt={file.name}
             className="max-w-full h-auto object-contain rounded"
           />

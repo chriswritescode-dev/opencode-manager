@@ -3,8 +3,16 @@ import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
 
+function getFileApiUrl(path: string): string {
+  if (path.includes('..')) {
+    return `${API_BASE_URL}/api/files/?path=${encodeURIComponent(path)}`
+  }
+
+  return `${API_BASE_URL}/api/files/${path.split('/').map(encodeURIComponent).join('/')}`
+}
+
 async function fetchFile(path: string): Promise<FileInfo> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}`)
+  return fetchWrapper(getFileApiUrl(path))
 }
 
 export function useFile(path: string | undefined) {
@@ -16,13 +24,13 @@ export function useFile(path: string | undefined) {
 }
 
 export async function fetchFileRange(path: string, startLine: number, endLine: number): Promise<ChunkedFileInfo> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}`, {
+  return fetchWrapper(getFileApiUrl(path), {
     params: { startLine, endLine },
   })
 }
 
 export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
-  return fetchWrapper(`${API_BASE_URL}/api/files/${path}`, {
+  return fetchWrapper(getFileApiUrl(path), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ patches }),

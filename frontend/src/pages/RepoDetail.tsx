@@ -224,6 +224,7 @@ export function RepoDetail() {
         basePath={repo.localPath}
         repoName={displayName}
         repoId={repoId}
+        allowNavigateAboveBase={true}
       />
 
       <RepoMcpDialog
