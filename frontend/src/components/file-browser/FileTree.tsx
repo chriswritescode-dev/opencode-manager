@@ -3,7 +3,7 @@ import { useMobile } from '@/hooks/useMobile'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { API_BASE_URL } from '@/config'
+import { getFileApiUrl } from '@/api/files'
 import { 
   File, 
   Folder, 
@@ -95,9 +95,7 @@ function TreeNode({ file, level, onFileSelect, onDirectoryClick, selectedFile, o
   const handleDownload = () => {
     if (file.isDirectory) return
 
-    const downloadUrl = file.path.includes('..')
-      ? `${API_BASE_URL}/api/files/?path=${encodeURIComponent(file.path)}&download=true`
-      : `${API_BASE_URL}/api/files/${file.path.split('/').map(encodeURIComponent).join('/')}?download=true`
+    const downloadUrl = getFileApiUrl(file.path, { params: { download: true } })
     const link = document.createElement('a')
     link.href = downloadUrl
     link.download = file.name
