@@ -5,10 +5,15 @@ import type { MessagePart as MessagePartType } from '@/api/types'
 
 const mocks = vi.hoisted(() => ({
   useTTS: vi.fn(),
+  useSettings: vi.fn(),
 }))
 
 vi.mock('@/hooks/useTTS', () => ({
   useTTS: mocks.useTTS,
+}))
+
+vi.mock('@/hooks/useSettings', () => ({
+  useSettings: mocks.useSettings,
 }))
 
 interface MockTTSReturn {
@@ -20,6 +25,21 @@ interface MockTTSReturn {
   isEnabled: boolean
 }
 
+interface MockSettingsReturn {
+  preferences: {
+    simpleChatMode: boolean
+    showReasoning: boolean
+    expandToolCalls: boolean
+    expandDiffs: boolean
+    autoScroll: boolean
+    theme: 'dark' | 'light' | 'system'
+    mode: 'plan' | 'build'
+  } | undefined
+  isLoading: boolean
+  updateSettings: ReturnType<typeof vi.fn>
+  isUpdating: boolean
+}
+
 describe('MessagePart', () => {
   const mockSpeakMessage = vi.fn()
   const mockStop = vi.fn()
@@ -27,6 +47,20 @@ describe('MessagePart', () => {
   beforeEach(() => {
     mockSpeakMessage.mockClear()
     mockStop.mockClear()
+    mocks.useSettings.mockReturnValue({
+      preferences: {
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark' as const,
+        mode: 'build' as const,
+      },
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
   })
 
   const setup = (options: {
@@ -45,6 +79,15 @@ describe('MessagePart', () => {
       isEnabled: options.ttsEnabled ?? true,
     }
     mocks.useTTS.mockReturnValue(mockTTS)
+  }
+
+  const setupSettings = (preferences: MockSettingsReturn['preferences']) => {
+    mocks.useSettings.mockReturnValue({
+      preferences,
+      isLoading: false,
+      updateSettings: vi.fn(),
+      isUpdating: false,
+    })
   }
 
   const createStepFinishPart = (messageID: string): MessagePartType => ({
@@ -222,5 +265,262 @@ describe('MessagePart', () => {
     )
     
     expect(screen.getByRole('button')).not.toHaveClass('bg-red-500/20')
+  })
+
+  describe('simpleChatMode', () => {
+    const createToolPart = (): MessagePartType => ({
+      type: 'tool',
+      tool: 'edit',
+      sessionID: 'test-session',
+      state: {
+        status: 'completed',
+        input: { filePath: '/test/file.txt' },
+        time: { start: Date.now(), end: Date.now() + 100 },
+      },
+    })
+
+    const createPatchPart = (): MessagePartType => ({
+      type: 'patch',
+      hash: 'abc123',
+      files: ['/test/file.txt'],
+      sessionID: 'test-session',
+    })
+
+    const createReasoningPart = (): MessagePartType => ({
+      type: 'reasoning',
+      text: 'This is the reasoning text',
+      sessionID: 'test-session',
+    })
+
+    const createSnapshotPart = (): MessagePartType => ({
+      type: 'snapshot',
+      snapshot: 'snapshot-data',
+      sessionID: 'test-session',
+    })
+
+    const createAgentPart = (): MessagePartType => ({
+      type: 'agent',
+      name: 'test-agent',
+      sessionID: 'test-session',
+    })
+
+    const createTextPart = (): MessagePartType => ({
+      type: 'text',
+      text: 'Hello, this is a text message',
+      sessionID: 'test-session',
+    })
+
+    it('renders null for tool part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createToolPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders null for patch part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createPatchPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders null for reasoning part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: true,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createReasoningPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders null for snapshot part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createSnapshotPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders null for agent part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createAgentPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders text part when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createTextPart()
+      render(<MessagePart part={part} />)
+      
+      expect(screen.getByText('Hello, this is a text message')).toBeInTheDocument()
+    })
+
+    it('renders tool part when simpleChatMode is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createToolPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).not.toBeNull()
+    })
+
+    it('renders patch part when simpleChatMode is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createPatchPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).not.toBeNull()
+    })
+
+    it('renders snapshot part when simpleChatMode is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createSnapshotPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).not.toBeNull()
+    })
+
+    it('renders agent part when simpleChatMode is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createAgentPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).not.toBeNull()
+    })
+  })
+
+  describe('showReasoning', () => {
+    const createReasoningPart = (): MessagePartType => ({
+      type: 'reasoning',
+      text: 'This is the reasoning text',
+      sessionID: 'test-session',
+    })
+
+    it('renders null for reasoning part when showReasoning is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createReasoningPart()
+      const { container } = render(<MessagePart part={part} />)
+      
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders reasoning part when showReasoning is true', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: true,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+      
+      const part = createReasoningPart()
+      render(<MessagePart part={part} />)
+      
+      expect(screen.getByText('This is the reasoning text')).toBeInTheDocument()
+      expect(screen.getByText('Reasoning')).toBeInTheDocument()
+    })
   })
 })

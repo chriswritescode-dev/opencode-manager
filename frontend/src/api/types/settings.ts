@@ -48,9 +48,10 @@ export interface UserPreferences {
   defaultModel?: string
   defaultAgent?: string
   autoScroll: boolean
-  showReasoning: boolean
-  expandToolCalls: boolean
   expandDiffs: boolean
+  expandToolCalls: boolean
+  showReasoning: boolean
+  simpleChatMode: boolean
   leaderKey?: string
   directShortcuts?: string[]
   keyboardShortcuts: Record<string, string>

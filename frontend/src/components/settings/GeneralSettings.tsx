@@ -69,6 +69,20 @@ export function GeneralSettings() {
 
         <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
           <div className="space-y-0.5">
+            <Label htmlFor="simpleChatMode" className="text-base">Simple chat mode</Label>
+            <p className="text-sm text-muted-foreground">
+              Show only your messages and the assistant's replies. Hides tool calls, reasoning, diffs, and agent details.
+            </p>
+          </div>
+          <Switch
+            id="simpleChatMode"
+            checked={preferences?.simpleChatMode ?? false}
+            onCheckedChange={(checked) => updateSettings({ simpleChatMode: checked })}
+          />
+        </div>
+
+        <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+          <div className="space-y-0.5">
             <Label htmlFor="autoScroll" className="text-base">Auto-scroll</Label>
             <p className="text-sm text-muted-foreground">
               Automatically scroll to bottom when new messages arrive
@@ -81,47 +95,51 @@ export function GeneralSettings() {
           />
         </div>
 
-        <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
-          <div className="space-y-0.5">
-            <Label htmlFor="showReasoning" className="text-base">Show reasoning</Label>
-            <p className="text-sm text-muted-foreground">
-              Display model reasoning and thought process
-            </p>
-          </div>
-          <Switch
-            id="showReasoning"
-            checked={preferences?.showReasoning ?? false}
-            onCheckedChange={(checked) => updateSettings({ showReasoning: checked })}
-          />
-        </div>
+        {!preferences?.simpleChatMode && (
+          <>
+            <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="showReasoning" className="text-base">Show reasoning</Label>
+                <p className="text-sm text-muted-foreground">
+                  Display model reasoning and thought process
+                </p>
+              </div>
+              <Switch
+                id="showReasoning"
+                checked={preferences?.showReasoning ?? false}
+                onCheckedChange={(checked) => updateSettings({ showReasoning: checked })}
+              />
+            </div>
 
-        <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
-          <div className="space-y-0.5">
-            <Label htmlFor="expandToolCalls" className="text-base">Expand tool calls</Label>
-            <p className="text-sm text-muted-foreground">
-              Automatically expand tool call details by default
-            </p>
-          </div>
-          <Switch
-            id="expandToolCalls"
-            checked={preferences?.expandToolCalls ?? false}
-            onCheckedChange={(checked) => updateSettings({ expandToolCalls: checked })}
-          />
-        </div>
+            <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="expandToolCalls" className="text-base">Expand tool calls</Label>
+                <p className="text-sm text-muted-foreground">
+                  Automatically expand tool call details by default
+                </p>
+              </div>
+              <Switch
+                id="expandToolCalls"
+                checked={preferences?.expandToolCalls ?? false}
+                onCheckedChange={(checked) => updateSettings({ expandToolCalls: checked })}
+              />
+            </div>
 
-        <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
-          <div className="space-y-0.5">
-            <Label htmlFor="expandDiffs" className="text-base">Expand diffs</Label>
-            <p className="text-sm text-muted-foreground">
-              Show file diffs expanded by default for edit operations
-            </p>
-          </div>
-          <Switch
-            id="expandDiffs"
-            checked={preferences?.expandDiffs ?? true}
-            onCheckedChange={(checked) => updateSettings({ expandDiffs: checked })}
-          />
-        </div>
+            <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
+              <div className="space-y-0.5">
+                <Label htmlFor="expandDiffs" className="text-base">Expand diffs</Label>
+                <p className="text-sm text-muted-foreground">
+                  Show file diffs expanded by default for edit operations
+                </p>
+              </div>
+              <Switch
+                id="expandDiffs"
+                checked={preferences?.expandDiffs ?? true}
+                onCheckedChange={(checked) => updateSettings({ expandDiffs: checked })}
+              />
+            </div>
+          </>
+        )}
 
 
 
