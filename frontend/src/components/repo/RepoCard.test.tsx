@@ -65,25 +65,39 @@ describe('RepoCard', () => {
     expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
-  it('should show checkbox when manageMode is true', () => {
+  it('should not show checkbox in any mode', () => {
     const props = {
       ...defaultProps,
       onSelect: vi.fn(),
     }
-    renderWithRouter(<RepoCard {...props} manageMode={true} />)
-    expect(screen.getByRole('checkbox')).toBeInTheDocument()
+    renderWithRouter(<RepoCard {...props} manageMode={true} selectionMode={true} />)
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument()
   })
 
-  it('should call onSelect when checkbox is clicked', () => {
+  it('should call onSelect when card is clicked in selection mode', () => {
     const onSelect = vi.fn()
     const props = {
       ...defaultProps,
       onSelect,
-      manageMode: true,
+      selectionMode: true,
     }
     renderWithRouter(<RepoCard {...props} />)
 
-    fireEvent.click(screen.getByRole('checkbox'))
+    fireEvent.click(screen.getByText('test-repo'))
+    expect(onSelect).toHaveBeenCalledWith(1, true)
+  })
+
+  it('should not navigate when card is clicked in selection mode', () => {
+    const onSelect = vi.fn()
+    const props = {
+      ...defaultProps,
+      onSelect,
+      selectionMode: true,
+    }
+    renderWithRouter(<RepoCard {...props} />)
+
+    fireEvent.click(screen.getByText('test-repo'))
+    expect(mockNavigate).not.toHaveBeenCalled()
     expect(onSelect).toHaveBeenCalledWith(1, true)
   })
 
