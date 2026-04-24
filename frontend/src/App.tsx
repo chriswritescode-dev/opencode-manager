@@ -190,6 +190,11 @@ const router = createBrowserRouter([
         loader: protectedLoader,
       },
       {
+        path: '/assistant',
+        element: <AssistantRedirect />,
+        loader: protectedLoader,
+      },
+      {
         path: '/repos/:id',
         element: <RepoDetail />,
         loader: protectedLoader,

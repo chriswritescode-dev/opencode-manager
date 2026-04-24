@@ -28,6 +28,13 @@ vi.mock('../../src/services/assistant-mode', () => ({
   buildAssistantOpenCodeConfig: vi.fn(),
 }))
 
+vi.mock('../../src/services/opencode-single-server', () => ({
+  opencodeServerManager: {
+    clearStartupError: vi.fn(),
+    restart: vi.fn().mockResolvedValue(undefined),
+  },
+}))
+
 import * as db from '../../src/db/queries'
 import { createRepoRoutes } from '../../src/routes/repos'
 import type { GitAuthService } from '../../src/services/git-auth'

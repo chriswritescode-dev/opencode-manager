@@ -1,24 +1,54 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { getRepo } from "@/api/repos"
+import { useCallback, useEffect, useState } from "react"
+import { useParams, useNavigate, useLocation } from "react-router-dom"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { getRepo, initializeAssistantMode, listRepos } from "@/api/repos"
 import { useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
+import { useCreateSession } from "@/hooks/useOpenCode"
+import { useDialogParam } from "@/hooks/useDialogParam"
+import { useMemoryPluginStatus } from "@/hooks/useMemoryPluginStatus"
+import { useSSE } from "@/hooks/useSSE"
 import { OPENCODE_API_ENDPOINT } from "@/config"
 import { Button } from "@/components/ui/button"
-import { Loader2 } from "lucide-react"
+import { Header } from "@/components/ui/header"
+import { SessionList } from "@/components/session/SessionList"
+import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet"
+import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog"
+import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog"
+import { SourceControlPanel } from "@/components/source-control"
+import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
+import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
+import { invalidateConfigCaches } from "@/lib/queryInvalidation"
+import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
+import { Brain, CalendarClock, FolderOpen, GitCommitHorizontal, Loader2, Plug, Plus, ShieldOff, Sparkles } from "lucide-react"
 
 export function AssistantRedirect() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
+  const queryClient = useQueryClient()
   const repoId = Number(id) || 0
-  const hasStartedRef = useRef(false)
+  const showSessionList = new URLSearchParams(location.search).get('view') === 'sessions'
+  const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files')
+  const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
+  const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills')
+  const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl')
+  const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions')
+  const [switchConfigOpen, setSwitchConfigOpen] = useState(false)
   const [status, setStatus] = useState<"preparing" | "opening" | "creating" | "error">("preparing")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const opcodeUrl = OPENCODE_API_ENDPOINT
+  const { memoryPluginEnabled } = useMemoryPluginStatus()
+
+  const { data: repo } = useQuery({
+    queryKey: ["repo", repoId],
+    queryFn: () => getRepo(repoId),
+    enabled: showSessionList && !!repoId,
+  })
 
   const handleNavigate = useCallback((sessionId: string) => {
     setStatus("opening")
-    navigate(`/repos/${repoId}/sessions/${sessionId}`)
+    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)
   }, [navigate, repoId])
 
   const { openAssistant } = useAssistantSessionLauncher({
@@ -27,14 +57,40 @@ export function AssistantRedirect() {
     onNavigate: handleNavigate,
   })
 
+  const { data: assistantMode, isLoading: assistantModeLoading, error: assistantModeError } = useQuery({
+    queryKey: ["repo", repoId, "assistant-mode"],
+    queryFn: () => initializeAssistantMode(repoId),
+    enabled: showSessionList && !!repoId,
+  })
+
+  const assistantDirectory = assistantMode?.directory
+  const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
+
+  useSSE(opcodeUrl, assistantDirectory)
+
+  const createSessionMutation = useCreateSession(opcodeUrl, assistantDirectory, (session) => {
+    navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`)
+  })
+
+  const handleCreateSession = async () => {
+    await createSessionMutation.mutateAsync({ agent: undefined })
+  }
+
   useEffect(() => {
     let cancelled = false
 
     async function loadAndOpen() {
       try {
-        if (hasStartedRef.current) return
-        hasStartedRef.current = true
+        if (showSessionList) return
         setStatus("preparing")
+        if (!repoId) {
+          const repos = await listRepos()
+          const fallbackRepo = repos.sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))[0]
+          if (!fallbackRepo) throw new Error("No repository available to open Assistant")
+          navigate(`/repos/${fallbackRepo.id}/assistant`, { replace: true })
+          return
+        }
+
         await getRepo(repoId)
         if (cancelled) return
         setStatus("creating")
@@ -42,7 +98,6 @@ export function AssistantRedirect() {
       } catch (error) {
         if (cancelled) return
         setStatus("error")
-        hasStartedRef.current = false
         setErrorMessage(error instanceof Error ? error.message : "Failed to open Assistant")
       }
     }
@@ -52,7 +107,94 @@ export function AssistantRedirect() {
     return () => {
       cancelled = true
     }
-  }, [repoId, openAssistant])
+  }, [repoId, openAssistant, navigate, showSessionList])
+
+  if (showSessionList) {
+    return (
+      <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
+        <Header>
+          <Header.BackButton to={`/repos/${repoId}`} />
+          <Header.Title>Assistant</Header.Title>
+          <Header.Actions>
+            <div className="flex items-center gap-1">
+              <PendingActionsGroup />
+            </div>
+            <Button variant="outline" onClick={() => setMcpDialogOpen(true)} size="sm" className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+              <Plug className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">MCP</span>
+            </Button>
+            <Button variant="outline" onClick={() => setSkillsDialogOpen(true)} size="sm" className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+              <Sparkles className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Skills</span>
+            </Button>
+            <Button variant="outline" onClick={() => setSourceControlOpen(true)} size="sm" className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+              <GitCommitHorizontal className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Source</span>
+            </Button>
+            <Button variant="outline" onClick={() => setFileBrowserOpen(true)} size="sm" className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+              <FolderOpen className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Files</span>
+            </Button>
+            <Button variant="outline" onClick={() => setResetPermissionsOpen(true)} size="sm" className="hidden lg:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+              <ShieldOff className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Reset Permissions</span>
+            </Button>
+            {memoryPluginEnabled && (
+              <Button variant="outline" onClick={() => navigate(`/repos/${repoId}/memories`)} size="sm" className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+                <Brain className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Memory</span>
+              </Button>
+            )}
+            <Button variant="outline" onClick={() => navigate(`/repos/${repoId}/schedules`)} size="sm" className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105">
+              <CalendarClock className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Schedules</span>
+            </Button>
+            <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} size="sm" className="hidden sm:inline-flex bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
+              <Plus className="w-4 h-4 mr-2" />
+              <span>New Session</span>
+            </Button>
+            <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} size="sm" className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
+              <Plus className="w-5 h-5" />
+            </Button>
+          </Header.Actions>
+        </Header>
+        <div className="flex-1 flex flex-col min-h-0">
+          {assistantModeError ? (
+            <div className="p-4 text-sm text-muted-foreground">Failed to load Assistant sessions</div>
+          ) : assistantModeLoading || !assistantMode ? (
+            <div className="p-4 text-sm text-muted-foreground">Loading Assistant sessions...</div>
+          ) : (
+            <SessionList
+              opcodeUrl={opcodeUrl}
+              directory={assistantDirectory}
+              onSelectSession={(sessionId) => navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)}
+            />
+          )}
+        </div>
+        {assistantDirectory && (
+          <>
+            <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={assistantFileBasePath} repoName="Assistant" repoId={repoId} />
+            <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
+            <RepoSkillsDialog open={skillsDialogOpen} onOpenChange={setSkillsDialogOpen} repoId={repoId} />
+            <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
+            <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} repoDirectory={assistantDirectory} />
+          </>
+        )}
+        {repo && (
+          <SwitchConfigDialog
+            open={switchConfigOpen}
+            onOpenChange={setSwitchConfigOpen}
+            repoId={repoId}
+            currentConfigName={repo.openCodeConfigName}
+            onConfigSwitched={(configName) => {
+              queryClient.setQueryData(["repo", repoId], { ...repo, openCodeConfigName: configName })
+              invalidateConfigCaches(queryClient)
+            }}
+          />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-background">
@@ -78,8 +220,8 @@ export function AssistantRedirect() {
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mx-auto mb-4" />
             <p className="text-muted-foreground">
               {status === "preparing" && "Preparing Assistant workspace..."}
-              {status === "creating" && "Starting a new Assistant session..."}
-              {status === "opening" && "Opening your last Assistant session..."}
+              {status === "creating" && "Opening your last session chat..."}
+              {status === "opening" && "Opening your last session chat..."}
             </p>
           </>
         )}

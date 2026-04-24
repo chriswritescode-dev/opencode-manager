@@ -27,17 +27,33 @@ const mockRepo: Repo = {
   isLocal: false,
 }
 
-const writeFile = vi.fn()
-const mkdir = vi.fn()
-const access = vi.fn()
-const stat = vi.fn()
+const fsMocks = vi.hoisted(() => ({
+  writeFile: vi.fn(),
+  mkdir: vi.fn(),
+  access: vi.fn(),
+  stat: vi.fn(),
+  readFile: vi.fn(),
+}))
+
+const { writeFile, mkdir, access, readFile } = fsMocks
 
 vi.mock('fs/promises', () => ({
   default: {
-    writeFile,
-    mkdir,
-    access,
-    stat,
+    writeFile: fsMocks.writeFile,
+    readFile: fsMocks.readFile,
+    mkdir: fsMocks.mkdir,
+    access: fsMocks.access,
+    stat: fsMocks.stat,
+  },
+}))
+
+vi.mock('fs', () => ({
+  promises: {
+    writeFile: fsMocks.writeFile,
+    readFile: fsMocks.readFile,
+    mkdir: fsMocks.mkdir,
+    access: fsMocks.access,
+    stat: fsMocks.stat,
   },
 }))
 
@@ -67,13 +83,22 @@ describe('buildAssistantOpenCodeConfig', () => {
 
   it('has permission rules for the assistant workspace', () => {
     const config = buildAssistantOpenCodeConfig()
-    expect(config.permission).toBeDefined()
+    expect(config.permission).toEqual({
+      read: 'allow',
+      edit: 'allow',
+      glob: 'allow',
+      grep: 'allow',
+      list: 'allow',
+      bash: 'allow',
+      external_directory: 'ask',
+    })
   })
 })
 
 describe('ensureAssistantMode', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    readFile.mockResolvedValue(JSON.stringify(buildAssistantOpenCodeConfig()))
   })
 
   it('creates the shared assistant workspace and files when missing', async () => {
@@ -112,6 +137,24 @@ describe('ensureAssistantMode', () => {
 
     expect(result.files.agentsMd.created).toBe(true)
     expect(result.files.opencodeJson.created).toBe(true)
+  })
+
+  it('overwrites legacy invalid assistant opencode config', async () => {
+    access.mockResolvedValue(undefined)
+    readFile.mockResolvedValue(JSON.stringify({
+      instructions: ['AGENTS.md'],
+      permission: {
+        allow: ['**/*'],
+        ask: ['../**/*'],
+      },
+    }))
+
+    const result = await ensureAssistantMode(mockRepo)
+
+    expect(result.files.opencodeJson.created).toBe(true)
+    const content = writeFile.mock.calls[0]?.[1]
+    expect(Buffer.isBuffer(content)).toBe(true)
+    expect((content as Buffer).toString('utf8')).toContain('external_directory')
   })
 
   it('returns a directory under the repos root', async () => {

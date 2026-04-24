@@ -5,11 +5,17 @@ vi.mock('@/hooks/useMobile', () => ({
 }))
 
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, it, expect, beforeEach } from 'vitest'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MobileTabBar } from './MobileTabBar'
 import { useMobile } from '@/hooks/useMobile'
+
+function LocationSpy() {
+  const { pathname, search } = useLocation()
+  return <div data-testid="location">{`${pathname}${search}`}</div>
+}
 
 describe('MobileTabBar', () => {
   beforeEach(() => {
@@ -54,6 +60,65 @@ describe('MobileTabBar', () => {
     )
     expect(screen.getByText('Repos')).toBeInTheDocument()
     expect(screen.getByText('Schedules')).toBeInTheDocument()
+  })
+
+  it('renders global tabs on assistant session list path', () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/repos/123/assistant?view=sessions']}>
+          <MobileTabBar />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText('Repos')).toBeInTheDocument()
+    expect(screen.getByText('Assistant')).toBeInTheDocument()
+    expect(screen.getByText('Schedules')).toBeInTheDocument()
+  })
+
+  it('navigates to assistant route when repo id is present', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/repos/123']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/123/assistant')
+  })
+
+  it('navigates to assistant route when assistant is clicked without repo id', async () => {
+    vi.mocked(useMobile).mockReturnValue(true)
+    const queryClient = new QueryClient()
+    const user = userEvent.setup()
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/schedules']}>
+          <Routes>
+            <Route path="*" element={<>
+              <MobileTabBar />
+              <LocationSpy />
+            </>} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Assistant' }))
+    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
   })
 
   it('renders schedule tabs on /repos/:id/schedules path', () => {

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useParams, useNavigate, Navigate } from "react-router-dom";
+import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getRepo } from "@/api/repos";
+import { getRepo, initializeAssistantMode } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
@@ -62,7 +62,9 @@ const compareMessageIds = (id1: string, id2: string): number => {
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const repoId = Number(id) || 0;
+  const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
   const { open: openSettings } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
@@ -109,13 +111,20 @@ export function SessionDetail() {
     enabled: !!repoId,
   });
 
+  const { data: assistantMode, isLoading: assistantModeLoading } = useQuery({
+    queryKey: ["repo", repoId, "assistant-mode"],
+    queryFn: () => initializeAssistantMode(repoId),
+    enabled: isAssistantSession && !!repoId,
+  });
+
   useRepoActivity(repoId, Boolean(repo));
 
   const { memoryPluginEnabled } = useMemoryPluginStatus();
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = repo?.fullPath;
+  const repoDirectory = isAssistantSession ? assistantMode?.directory : repo?.fullPath;
+  const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
   const { data: session, isLoading: sessionLoading } = useSession(
@@ -189,12 +198,12 @@ export function SessionDetail() {
     try {
       const newSession = await createSession.mutateAsync({ agent: undefined });
       if (newSession?.id) {
-        navigate(`/repos/${repoId}/sessions/${newSession.id}`);
+        navigate(`/repos/${repoId}/sessions/${newSession.id}${sessionRouteSuffix}`);
       }
     } catch {
       showToast.error('Failed to create new session');
     }
-  }, [createSession, navigate, repoId]);
+  }, [createSession, navigate, repoId, sessionRouteSuffix]);
 
   const handleCompact = useCallback(async () => {
     if (!opcodeUrl || !sessionId) return;
@@ -241,17 +250,17 @@ export function SessionDetail() {
       const client = createOpenCodeClient(opcodeUrl, repoDirectory);
       const forkedSession = await client.forkSession(sessionId);
       if (forkedSession?.id) {
-        navigate(`/repos/${repoId}/sessions/${forkedSession.id}`);
+        navigate(`/repos/${repoId}/sessions/${forkedSession.id}${sessionRouteSuffix}`);
         showToast.success('Session forked');
       }
     } catch (error) {
       showToast.error(`Fork failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId]);
+  }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId, sessionRouteSuffix]);
 
   const handleCloseSession = useCallback(() => {
-    navigate(`/repos/${repoId}`);
-  }, [navigate, repoId]);
+    navigate(isAssistantSession ? `/repos/${repoId}/assistant?view=sessions` : `/repos/${repoId}`);
+  }, [navigate, repoId, isAssistantSession]);
 
   const { leaderActive } = useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
@@ -312,14 +321,14 @@ export function SessionDetail() {
   }, [setFileBrowserOpen]);
 
   const handleChildSessionClick = useCallback((childSessionId: string) => {
-    navigate(`/repos/${repoId}/sessions/${childSessionId}`)
-  }, [navigate, repoId]);
+    navigate(`/repos/${repoId}/sessions/${childSessionId}${sessionRouteSuffix}`)
+  }, [navigate, repoId, sessionRouteSuffix]);
 
   const handleParentSessionClick = useCallback(() => {
     if (session?.parentID) {
-      navigate(`/repos/${repoId}/sessions/${session.parentID}`)
+      navigate(`/repos/${repoId}/sessions/${session.parentID}${sessionRouteSuffix}`)
     }
-  }, [navigate, repoId, session?.parentID]);
+  }, [navigate, repoId, session?.parentID, sessionRouteSuffix]);
 
   const handleToggleDetails = useCallback(() => {
     const newValue = !preferences?.expandToolCalls
@@ -366,6 +375,11 @@ export function SessionDetail() {
     );
   }
 
+  const workspaceDisplayName = isAssistantSession ? 'Assistant' : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
+  const assistantFileBasePath = assistantMode?.directory.split('/').filter(Boolean).at(-1);
+  const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo.localPath) ?? repo.localPath;
+  const sessionBackPath = isAssistantSession ? `/repos/${repoId}/assistant?view=sessions` : `/repos/${repoId}`;
+
   return (
     <div
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
@@ -385,16 +399,16 @@ export function SessionDetail() {
                 <span className="hidden sm:inline text-xs">Parent</span>
               </Button>
               <div className="hidden sm:block">
-                <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
+                <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
               </div>
             </>
           ) : (
-            <Header.BackButton to={`/repos/${repoId}`} className="text-xs sm:text-sm" />
+            <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
           )}
             <Header.EditableTitle
               value={session?.title || "Untitled Session"}
               onChange={handleSessionTitleUpdate}
-              subtitle={<span className="text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>}
+              subtitle={<span className="text-orange-600 dark:text-orange-400">{workspaceDisplayName}</span>}
             />
         </div>
         <Header.Actions className="gap-2 sm:gap-4">
@@ -488,7 +502,7 @@ export function SessionDetail() {
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
-          {repoLoading || sessionLoading || messagesLoading ? (
+          {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
             <MessageThread 
@@ -595,7 +609,7 @@ export function SessionDetail() {
                 directory={repoDirectory}
                 activeSessionID={sessionId || undefined}
                 onSelectSession={(sessionID) => {
-                  navigate(`/repos/${repoId}/sessions/${sessionID}`)
+                  navigate(`/repos/${repoId}/sessions/${sessionID}${sessionRouteSuffix}`)
                   setSessionsDialogOpen(false)
                 }}
               />
@@ -607,8 +621,8 @@ export function SessionDetail() {
       <FileBrowserSheet
         isOpen={fileBrowserOpen}
         onClose={handleFileBrowserClose}
-        basePath={repo.localPath}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
+        basePath={workspaceBasePath}
+        repoName={workspaceDisplayName}
         repoId={repoId}
         initialSelectedFile={selectedFilePath}
       />
@@ -637,7 +651,7 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoName={getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
+        repoName={workspaceDisplayName}
       />
 
       <ResetPermissionsDialog

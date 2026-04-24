@@ -6,6 +6,7 @@ import type {
   OpenCodeConfigInput,
 } from '@opencode-manager/shared/types'
 import {
+  readFileContent,
   writeFileContent,
   fileExists,
   ensureDirectoryExists,
@@ -71,12 +72,13 @@ export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
       'AGENTS.md',
     ],
     permission: {
-      allow: [
-        '**/*',
-      ],
-      ask: [
-        '../**/*',
-      ],
+      read: 'allow',
+      edit: 'allow',
+      glob: 'allow',
+      grep: 'allow',
+      list: 'allow',
+      bash: 'allow',
+      external_directory: 'ask',
     },
   }
 
@@ -110,7 +112,9 @@ export async function ensureAssistantMode(
     await writeFileContent(agentsMdPath, content)
   }
 
-  if (!opencodeJsonExists || overwriteOpenCodeConfig) {
+  const hasLegacyOpenCodeConfig = opencodeJsonExists && await isLegacyAssistantOpenCodeConfig(opencodeJsonPath)
+
+  if (!opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig) {
     const config = buildAssistantOpenCodeConfig()
     await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
   }
@@ -128,9 +132,19 @@ export async function ensureAssistantMode(
       opencodeJson: {
         path: opencodeJsonPath,
         exists: true,
-        created: !opencodeJsonExists || overwriteOpenCodeConfig,
+        created: !opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig,
       },
     },
+  }
+}
+
+async function isLegacyAssistantOpenCodeConfig(opencodeJsonPath: string): Promise<boolean> {
+  try {
+    const content = await readFileContent(opencodeJsonPath)
+    const config = JSON.parse(content) as { permission?: { allow?: unknown; ask?: unknown } }
+    return Array.isArray(config.permission?.allow) || Array.isArray(config.permission?.ask)
+  } catch {
+    return false
   }
 }
 
