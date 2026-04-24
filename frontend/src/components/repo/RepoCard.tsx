@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
 import { getRepoDisplayName } from "@/lib/utils";
 import type { GitStatusResponse } from "@/types/git"
 import { RepoRowActions } from "./RepoRowActions"
@@ -29,6 +28,7 @@ interface RepoCardProps {
   isMobile?: boolean;
   activityLabel?: string;
   hasSelectedRepos?: boolean;
+  selectionMode?: boolean;
 }
 
 export function RepoCard({
@@ -42,6 +42,7 @@ export function RepoCard({
   isMobile = false,
   activityLabel,
   hasSelectedRepos = false,
+  selectionMode = false,
 }: RepoCardProps) {
   const navigate = useNavigate();
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -58,14 +59,13 @@ export function RepoCard({
   const unstagedCount = gitStatus?.files?.filter((f) => !f.staged).length || 0;
 
   const handleCardClick = () => {
+    if (selectionMode && onSelect) {
+      onSelect(repo.id, !isSelected);
+      return;
+    }
     if (isReady && !actionsOpen) {
       navigate(`/repos/${repo.id}`);
     }
-  };
-
-  const handleActionClick = (e: React.MouseEvent, action: () => void) => {
-    e.stopPropagation();
-    action();
   };
 
   return (
@@ -79,22 +79,9 @@ export function RepoCard({
           : "border-border bg-card"
       }`}
     >
-      <div className="p-2">
+      <div className="p-1.5">
         <div>
-          <div className="flex items-start gap-3 mb-1">
-            {onSelect && (
-              <div
-                onClick={(e) => handleActionClick(e, () => onSelect(repo.id, !isSelected))}
-                className="min-w-[44px] min-h-[44px] flex items-center justify-center"
-              >
-                <Checkbox
-                  checked={isSelected}
-                  onCheckedChange={(checked) => onSelect(repo.id, checked === true)}
-                  className="w-5 h-5"
-                />
-              </div>
-            )}
-
+          <div className="flex items-start gap-2 mb-1">
             <div className="flex items-center gap-2 min-w-0 flex-1">
               <h3 className="font-semibold text-base text-foreground truncate">
                 {repoName}

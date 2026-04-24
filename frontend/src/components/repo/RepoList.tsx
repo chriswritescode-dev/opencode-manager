@@ -56,6 +56,7 @@ interface RepoCardWrapperProps {
   isMobile: boolean
   activityLabel?: string
   hasSelectedRepos?: boolean
+  selectionMode?: boolean
 }
 
 function SortableRepoCard({
@@ -69,6 +70,7 @@ function SortableRepoCard({
   isMobile,
   activityLabel,
   hasSelectedRepos,
+  selectionMode,
   isManualSort,
 }: RepoCardWrapperProps & { isManualSort: boolean }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: repo.id })
@@ -104,6 +106,7 @@ function SortableRepoCard({
             isMobile={isMobile}
             activityLabel={activityLabel}
             hasSelectedRepos={hasSelectedRepos}
+            selectionMode={selectionMode}
           />
         </div>
       </div>
@@ -122,6 +125,7 @@ function StaticRepoCard({
   isMobile,
   activityLabel,
   hasSelectedRepos,
+  selectionMode,
 }: RepoCardWrapperProps) {
   return (
     <RepoCard
@@ -135,6 +139,7 @@ function StaticRepoCard({
       isMobile={isMobile}
       activityLabel={activityLabel}
       hasSelectedRepos={hasSelectedRepos}
+      selectionMode={selectionMode}
     />
   )
 }
@@ -146,9 +151,10 @@ export function RepoList() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [repoToDelete, setRepoToDelete] = useState<number | null>(null)
   const [selectedRepos, setSelectedRepos] = useState<Set<number>>(new Set())
+  const [selectionMode, setSelectionMode] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [filterMode, setFilterMode] = useState<RepoFilterMode>('recent')
-  const manageMode = selectedRepos.size > 0
+  const isSelectionActive = selectionMode || selectedRepos.size > 0
 
   const sortMode = (preferences?.repoSortMode as RepoSortMode) || 'recent'
   const repoOrder = preferences?.repoOrder
@@ -233,6 +239,7 @@ export function RepoList() {
       queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
       setDeleteDialogOpen(false)
       setSelectedRepos(new Set())
+      setSelectionMode(false)
     },
   })
 
@@ -364,6 +371,13 @@ export function RepoList() {
     }
   }
 
+  const handleSelectionModeChange = (enabled: boolean) => {
+    setSelectionMode(enabled)
+    if (!enabled) {
+      setSelectedRepos(new Set())
+    }
+  }
+
   return (
     <>
       <div className="px-0 md:p-4 h-full flex flex-col">
@@ -379,13 +393,18 @@ export function RepoList() {
           selectedCount={selectedRepos.size}
           allVisibleSelected={sortedViewModels.length > 0 && sortedViewModels.every(r => selectedRepos.has(r.id))}
           onSelectAll={handleSelectAll}
-          onClearSelection={() => setSelectedRepos(new Set())}
+          onClearSelection={() => {
+            setSelectedRepos(new Set())
+            setSelectionMode(false)
+          }}
           onDelete={() => {
             setRepoToDelete(null)
             setDeleteDialogOpen(true)
           }}
           hasLocalRepos={hasLocalRepos}
           hasClonedRepos={hasClonedRepos}
+          selectionMode={selectionMode}
+          onSelectionModeChange={handleSelectionModeChange}
         />
 
         <div className="mx-2 md:mx-0 flex-1 min-h-0">
@@ -419,11 +438,12 @@ export function RepoList() {
                         isSelected={selectedRepos.has(repo.id)}
                         onSelect={handleSelectRepo}
                         gitStatus={gitStatuses?.get(repo.id)}
-                        manageMode={manageMode}
+                        manageMode={isSelectionActive}
                         isMobile={isMobile}
                         isManualSort={isManualSort}
                         activityLabel={formatActivityLabel(repo.activityTimestamp)}
                         hasSelectedRepos={selectedRepos.size > 0}
+                        selectionMode={selectionMode}
                       />
                     ))}
                   </div>
@@ -445,10 +465,11 @@ export function RepoList() {
                     isSelected={selectedRepos.has(repo.id)}
                     onSelect={handleSelectRepo}
                     gitStatus={gitStatuses?.get(repo.id)}
-                    manageMode={manageMode}
+                    manageMode={isSelectionActive}
                     isMobile={isMobile}
                     activityLabel={formatActivityLabel(repo.activityTimestamp)}
                     hasSelectedRepos={selectedRepos.size > 0}
+                    selectionMode={selectionMode}
                   />
                 ))}
               </div>
@@ -470,6 +491,10 @@ export function RepoList() {
         onCancel={() => {
           setDeleteDialogOpen(false)
           setRepoToDelete(null)
+          if (selectedRepos.size > 0) {
+            setSelectedRepos(new Set())
+            setSelectionMode(false)
+          }
         }}
         title={
           selectedRepos.size > 0

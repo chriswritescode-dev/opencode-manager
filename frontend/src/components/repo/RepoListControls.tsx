@@ -7,6 +7,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
+  DropdownMenuCheckboxItem,
+  DropdownMenuSeparator,
 } from '@/components/ui/dropdown-menu'
 import { useMobile } from '@/hooks/useMobile'
 import type { RepoFilterMode, RepoSortMode } from './repo-list-state'
@@ -27,6 +29,8 @@ interface RepoListControlsProps {
   onDelete: () => void
   hasLocalRepos: boolean
   hasClonedRepos: boolean
+  selectionMode: boolean
+  onSelectionModeChange: (enabled: boolean) => void
 }
 
 const FILTER_OPTIONS: { value: RepoFilterMode; label: string }[] = [
@@ -59,6 +63,8 @@ export function RepoListControls({
   onDelete,
   hasLocalRepos,
   hasClonedRepos,
+  selectionMode,
+  onSelectionModeChange,
 }: RepoListControlsProps) {
   const isMobile = useMobile()
   const [showMenu, setShowMenu] = useState(false)
@@ -131,6 +137,13 @@ export function RepoListControls({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuCheckboxItem
+                checked={selectionMode}
+                onCheckedChange={(checked) => onSelectionModeChange(checked === true)}
+              >
+                Select repositories
+              </DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
               {FILTER_OPTIONS.map((option) => {
                 const count =
                   option.value === 'attention'
