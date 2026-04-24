@@ -16,6 +16,8 @@ import {
   DiscoverReposRequestSchema,
   DiscoverReposResponseSchema,
   RepoStatusSchema,
+  AssistantModeStatusSchema,
+  AssistantModeInitRequestSchema,
 } from '../schemas/repo'
 import {
   FileInfoSchema,
@@ -53,6 +55,8 @@ export type CreateRepoRequest = z.infer<typeof CreateRepoRequestSchema>
 export type DiscoverReposRequest = z.infer<typeof DiscoverReposRequestSchema>
 export type DiscoverReposResponse = z.infer<typeof DiscoverReposResponseSchema>
 export type RepoStatus = z.infer<typeof RepoStatusSchema>
+export type AssistantModeStatus = z.infer<typeof AssistantModeStatusSchema>
+export type AssistantModeInitRequest = z.infer<typeof AssistantModeInitRequestSchema>
 
 export type FileInfo = z.infer<typeof FileInfoSchema>
 export type CreateFileRequest = z.infer<typeof CreateFileRequestSchema>

@@ -1,7 +1,7 @@
 import type { Repo } from './types'
 import { FetchError, fetchWrapper, fetchWrapperVoid, fetchWrapperBlob } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
-import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
+import type { DiscoverReposResponse, AssistantModeStatus, AssistantModeInitRequest } from '@opencode-manager/shared/types'
 
 export async function createRepo(
   repoUrl?: string,
@@ -161,5 +161,22 @@ export async function resetRepoPermissions(id: number): Promise<void> {
 export async function touchRepoActivity(id: number): Promise<void> {
   return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${id}/access`, {
     method: 'POST',
+  })
+}
+
+export async function getAssistantModeStatus(id: number): Promise<AssistantModeStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/assistant-mode`, {
+    method: 'GET',
+  })
+}
+
+export async function initializeAssistantMode(
+  id: number,
+  options?: AssistantModeInitRequest
+): Promise<AssistantModeStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/assistant-mode`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(options ?? {}),
   })
 }

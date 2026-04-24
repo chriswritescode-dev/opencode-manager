@@ -398,7 +398,7 @@ export function SessionDetail() {
             />
         </div>
         <Header.Actions className="gap-2 sm:gap-4">
-          <div className="hidden sm:flex items-center gap-1">
+          <div className="flex items-center gap-1">
             <PendingActionsGroup />
           </div>
           <ContextUsageIndicator

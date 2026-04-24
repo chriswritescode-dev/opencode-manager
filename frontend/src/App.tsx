@@ -12,6 +12,7 @@ import { GlobalSchedules } from './pages/GlobalSchedules'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 import { Setup } from './pages/Setup'
+import { AssistantRedirect } from './pages/AssistantRedirect'
 import { SettingsDialog } from './components/settings/SettingsDialog'
 import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
@@ -191,6 +192,11 @@ const router = createBrowserRouter([
       {
         path: '/repos/:id',
         element: <RepoDetail />,
+        loader: protectedLoader,
+      },
+      {
+        path: '/repos/:id/assistant',
+        element: <AssistantRedirect />,
         loader: protectedLoader,
       },
       {

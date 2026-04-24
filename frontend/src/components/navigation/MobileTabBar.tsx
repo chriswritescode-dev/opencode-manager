@@ -1,10 +1,9 @@
 import { memo, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { FolderGit2, FolderOpen, Bell, CalendarClock, Menu, Info, History } from 'lucide-react'
+import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar, useScheduleTab, type ScheduleTabKey } from '@/hooks/useMobileTabBar'
-import { usePendingAlerts } from '@/contexts/EventContext'
 
 interface TabDef {
   key: string
@@ -19,19 +18,28 @@ interface GlobalTabsArgs {
   pathname: string
   openSheet: ReturnType<typeof useMobileTabBar>['openSheet']
   open: ReturnType<typeof useMobileTabBar>['open']
+  close: ReturnType<typeof useMobileTabBar>['close']
   navigate: ReturnType<typeof useNavigate>
-  hasPending: boolean
   isInsideRepo: boolean
   repoId: string | null
 }
 
-function buildGlobalTabs({ pathname, openSheet, open, navigate, hasPending, isInsideRepo, repoId }: GlobalTabsArgs): TabDef[] {
+function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId }: GlobalTabsArgs): TabDef[] {
   const handleFilesClick = () => {
     if (isInsideRepo && repoId) {
       const newParams = new URLSearchParams({ dialog: 'files' })
       navigate(`${pathname}?${newParams.toString()}`, { replace: true })
     } else {
       open('files')
+    }
+  }
+
+  const handleAssistantClick = () => {
+    close()
+    if (repoId) {
+      navigate(`/repos/${repoId}/assistant`)
+    } else {
+      navigate('/')
     }
   }
 
@@ -51,12 +59,11 @@ function buildGlobalTabs({ pathname, openSheet, open, navigate, hasPending, isIn
       active: openSheet === 'files',
     },
     {
-      key: 'notifications',
-      label: 'Alerts',
-      icon: Bell,
-      onClick: () => open('notifications'),
-      badge: hasPending,
-      active: openSheet === 'notifications',
+      key: 'assistant',
+      label: 'Assistant',
+      icon: Bot,
+      onClick: handleAssistantClick,
+      active: false,
     },
     {
       key: 'schedules',
@@ -139,9 +146,8 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
 export const MobileTabBar = memo(function MobileTabBar() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { openSheet, open } = useMobileTabBar()
+  const { openSheet, open, close } = useMobileTabBar()
   const { scheduleTab, setScheduleTab } = useScheduleTab()
-  const hasPending = usePendingAlerts()
 
   const isOnRepoSchedules = /^\/repos\/\d+\/schedules$/.test(pathname)
   const isRepoMemories = /^\/repos\/\d+\/memories$/.test(pathname)
@@ -160,15 +166,15 @@ export const MobileTabBar = memo(function MobileTabBar() {
     () => (isOnRepoSchedules
       ? buildScheduleTabs(scheduleTab, setScheduleTab)
       : buildGlobalTabs({
-          pathname,
-          openSheet,
-          open,
-          navigate,
-          hasPending,
-          isInsideRepo,
-          repoId,
-        })),
-    [isOnRepoSchedules, scheduleTab, setScheduleTab, pathname, openSheet, open, navigate, hasPending, isInsideRepo, repoId],
+        pathname,
+        openSheet,
+        open,
+        close,
+        navigate,
+        isInsideRepo,
+        repoId,
+      })),
+    [isOnRepoSchedules, scheduleTab, setScheduleTab, pathname, openSheet, open, close, navigate, isInsideRepo, repoId],
   )
 
   if (!isMobile) return null
