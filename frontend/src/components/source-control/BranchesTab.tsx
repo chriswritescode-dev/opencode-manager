@@ -1,15 +1,15 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listBranches, switchBranch, createRepo, GitAuthError } from '@/api/repos'
+import { listBranches, switchBranch, GitAuthError } from '@/api/repos'
 import { useGitStatus } from '@/api/git'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Checkbox } from '@/components/ui/checkbox'
-import { Loader2, GitBranch, Check, Plus, AlertCircle, ArrowUp, ArrowDown, Globe } from 'lucide-react'
+import { Loader2, GitBranch, GitBranchPlus, Check, Plus, AlertCircle, ArrowUp, ArrowDown, Globe } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
+import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
 
 interface BranchesTabProps {
   repoId: number
@@ -22,7 +22,7 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
   const queryClient = useQueryClient()
   const [newBranchName, setNewBranchName] = useState('')
   const [isCreating, setIsCreating] = useState(false)
-  const [useWorktree, setUseWorktree] = useState(false)
+  const [worktreeDialogOpen, setWorktreeDialogOpen] = useState(false)
   const git = useGit(repoId)
 
   const { data: status } = useGitStatus(repoId)
@@ -52,34 +52,14 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
     },
   })
 
-  const worktreeMutation = useMutation({
-    mutationFn: (branch: string) => createRepo(repoUrl || undefined, undefined, branch, undefined, true),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
-      setNewBranchName('')
-      setIsCreating(false)
-      setUseWorktree(false)
-      showToast.success('Branch workspace created')
-    },
-    onError: (error) => {
-      showToast.error(error instanceof Error ? error.message : 'Failed to create branch workspace')
-    },
-  })
-
   const handleCreateBranch = async () => {
     if (!newBranchName.trim()) return
 
     try {
-      if (useWorktree && repoUrl) {
-        await worktreeMutation.mutateAsync(newBranchName.trim())
-      } else {
-        await git.createBranch.mutateAsync(newBranchName.trim())
-        setNewBranchName('')
-        setIsCreating(false)
-        setUseWorktree(false)
-        refetch()
-      }
+      await git.createBranch.mutateAsync(newBranchName.trim())
+      setNewBranchName('')
+      setIsCreating(false)
+      refetch()
     } catch {
       // Error handled by mutation
     }
@@ -128,68 +108,69 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
         </div>
 
         {isCreating ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Input
-                placeholder="New branch name..."
-                value={newBranchName}
-                onChange={(e) => setNewBranchName(e.target.value)}
-                className="h-8 md:text-sm"
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleCreateBranch()
-                  if (e.key === 'Escape') {
-                    setIsCreating(false)
-                    setNewBranchName('')
-                    setUseWorktree(false)
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                className="h-8"
-                onClick={handleCreateBranch}
-                disabled={!newBranchName.trim() || git.createBranch.isPending || worktreeMutation.isPending}
-              >
-                {(git.createBranch.isPending || worktreeMutation.isPending) ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  'Create'
-                )}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8"
-                onClick={() => {
+          <div className="flex items-center gap-2">
+            <Input
+              placeholder="New branch name..."
+              value={newBranchName}
+              onChange={(e) => setNewBranchName(e.target.value)}
+              className="h-8 md:text-sm"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCreateBranch()
+                if (e.key === 'Escape') {
                   setIsCreating(false)
                   setNewBranchName('')
-                  setUseWorktree(false)
-                }}
-              >
-                Cancel
-              </Button>
-            </div>
-            {repoUrl && (
-              <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                <Checkbox
-                  checked={useWorktree}
-                  onCheckedChange={(checked) => setUseWorktree(checked === true)}
-                />
-                <span>Create as separate workspace</span>
-              </label>
-            )}
+                }
+              }}
+            />
+            <Button
+              size="sm"
+              className="h-8"
+              onClick={handleCreateBranch}
+              disabled={!newBranchName.trim() || git.createBranch.isPending}
+            >
+              {git.createBranch.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                'Create'
+              )}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-8"
+              onClick={() => {
+                setIsCreating(false)
+                setNewBranchName('')
+              }}
+            >
+              Cancel
+            </Button>
           </div>
         ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            className="w-full h-8"
-            onClick={() => setIsCreating(true)}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Create New Branch
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 h-8"
+              onClick={() => setIsCreating(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Create Branch
+            </Button>
+            {repoUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 h-8"
+                onClick={() => setWorktreeDialogOpen(true)}
+                title="Create as a separate worktree workspace"
+              >
+                <GitBranchPlus className="w-4 h-4 mr-2" />
+                Create Worktree
+              </Button>
+            )}
+          </div>
         )}
       </div>
 
@@ -249,6 +230,14 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
           </div>
         )}
       </div>
+
+      <CreateWorktreeDialog
+        open={worktreeDialogOpen}
+        onOpenChange={setWorktreeDialogOpen}
+        repoId={repoId}
+        repoUrl={repoUrl}
+        defaultBaseBranch={activeBranch}
+      />
     </div>
   )
 }

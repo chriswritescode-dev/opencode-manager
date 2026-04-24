@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, GitBranch, Download, Trash2, MoreVertical } from 'lucide-react'
+import { Loader2, GitBranch, GitBranchPlus, Download, Trash2, MoreVertical } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { SourceControlPanel } from '@/components/source-control/SourceControlPanel'
 import { DownloadDialog } from '@/components/ui/download-dialog'
+import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
 import { downloadRepo } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 import { getRepoDisplayName } from '@/lib/utils'
@@ -47,6 +48,7 @@ export function RepoRowActions({
 }: RepoRowActionsProps) {
   const [showDownloadDialog, setShowDownloadDialog] = useState(false)
   const [showSourceControl, setShowSourceControl] = useState(false)
+  const [showWorktreeDialog, setShowWorktreeDialog] = useState(false)
 
   const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch
@@ -61,6 +63,13 @@ export function RepoRowActions({
     setShowDownloadDialog(open)
     onActionsOpenChange?.(open)
   }
+
+  const handleWorktreeDialogOpen = (open: boolean) => {
+    setShowWorktreeDialog(open)
+    onActionsOpenChange?.(open)
+  }
+
+  const canCreateWorktree = isReady && !repo.isWorktree && Boolean(repo.repoUrl)
 
   const handleDownload = async (options: { includeGit?: boolean; includePaths?: string[] }) => {
     try {
@@ -162,6 +171,18 @@ export function RepoRowActions({
           <GitBranch className="w-4 h-4" />
         </Button>
 
+        {canCreateWorktree && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => handleWorktreeDialogOpen(true)}
+            className="h-8 w-8 p-0"
+            title="Create Worktree"
+          >
+            <GitBranchPlus className="w-4 h-4" />
+          </Button>
+        )}
+
         <Button
           size="sm"
           variant="ghost"
@@ -204,6 +225,13 @@ export function RepoRowActions({
         description="This will create a ZIP archive of the entire repository."
         itemName={repoName}
         targetPath={repo.fullPath}
+      />
+      <CreateWorktreeDialog
+        open={showWorktreeDialog}
+        onOpenChange={handleWorktreeDialogOpen}
+        repoId={repo.id}
+        repoUrl={repo.repoUrl}
+        defaultBaseBranch={branchToDisplay}
       />
     </>
   )

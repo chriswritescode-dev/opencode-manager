@@ -576,14 +576,20 @@ export async function initLocalRepo(
   }
 }
 
+export interface CloneRepoOptions {
+  branch?: string
+  useWorktree?: boolean
+  skipSSHVerification?: boolean
+  baseBranch?: string
+}
+
 export async function cloneRepo(
   database: Database,
   gitAuthService: GitAuthService,
   repoUrl: string,
-  branch?: string,
-  useWorktree: boolean = false,
-  skipSSHVerification: boolean = false
+  options: CloneRepoOptions = {}
 ): Promise<Repo> {
+  const { branch, useWorktree = false, skipSSHVerification = false, baseBranch } = options
   const effectiveUrl = normalizeSSHUrl(repoUrl)
   const isSSH = isSSHUrl(effectiveUrl)
   const preserveSSH = isSSH
@@ -639,7 +645,7 @@ export async function cloneRepo(
        await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], { cwd: getReposPath(), env })
 
       
-       await createWorktreeSafely(baseRepoPath, worktreePath, branch, env)
+       await createWorktreeSafely(baseRepoPath, worktreePath, branch, env, baseBranch)
       
       const worktreeVerified = existsSync(worktreePath)
       
@@ -986,7 +992,7 @@ function normalizeRepoUrl(url: string, preserveSSH: boolean = false): { url: str
   }
 }
 
-async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>): Promise<void> {
+async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>, baseBranch?: string): Promise<void> {
   const currentBranch = await safeGetCurrentBranch(baseRepoPath, env)
   if (currentBranch === branch) {
     const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'], { env })
@@ -1015,6 +1021,10 @@ async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, 
   if (branchExists) {
     await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', worktreePath, branch], { env })
   } else {
-    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'add', '-b', branch, worktreePath], { env })
+    const addArgs = ['git', '-C', baseRepoPath, 'worktree', 'add', '-b', branch, worktreePath]
+    if (baseBranch) {
+      addArgs.push(baseBranch)
+    }
+    await executeCommand(addArgs, { env })
   }
 }
