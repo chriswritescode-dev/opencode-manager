@@ -42,11 +42,7 @@ export function parseOpenCodeError(error: OpenCodeError | undefined | null): Par
       }
 
     case 'MessageAbortedError':
-      return {
-        title: 'Message Aborted',
-        message: error.data.message || 'The message was aborted',
-        isRetryable: false,
-      }
+      return null 
 
     case 'APIError':
       return {
