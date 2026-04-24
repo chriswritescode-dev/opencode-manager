@@ -511,7 +511,7 @@ export function SessionDetail() {
           >
             <div className="relative w-[94%] md:max-w-4xl">
               <div className="absolute -top-5 right-0 md:right-4 z-50 flex flex-col items-end gap-2">
-                {ttsEnabled && !hasPromptContent && !isStreamingResponse && lastAssistantMessage && lastAssistantText && (
+                {ttsEnabled && !hasPromptContent && !isSessionActive && lastAssistantMessage && lastAssistantText && (
                   <FloatingTTSButton
                     messageId={lastAssistantMessage.info.id}
                     content={lastAssistantText}
