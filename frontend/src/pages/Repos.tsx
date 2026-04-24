@@ -24,7 +24,7 @@ export function Repos() {
           <Header.Title logo>OpenCode</Header.Title>
         </div>
         <Header.Actions>
-          <div className="hidden sm:flex items-center gap-1">
+          <div className="flex items-center gap-1">
             <PendingActionsGroup />
           </div>
           <Button

@@ -50,3 +50,24 @@ export const DiscoverReposResponseSchema = z.object({
     })
   ),
 })
+
+export const AssistantModeFileSchema = z.object({
+  path: z.string(),
+  exists: z.boolean(),
+  created: z.boolean(),
+})
+
+export const AssistantModeStatusSchema = z.object({
+  repoId: z.number(),
+  directory: z.string(),
+  relativePath: z.literal('repos/assistant'),
+  files: z.object({
+    agentsMd: AssistantModeFileSchema,
+    opencodeJson: AssistantModeFileSchema,
+  }),
+})
+
+export const AssistantModeInitRequestSchema = z.object({
+  overwriteAgentsMd: z.boolean().optional(),
+  overwriteOpenCodeConfig: z.boolean().optional(),
+})

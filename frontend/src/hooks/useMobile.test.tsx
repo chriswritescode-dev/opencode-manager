@@ -25,10 +25,10 @@ describe('useSwipeBack', () => {
 
   it('calls onClose when swipe completes and canBack is false', () => {
     mockCanBack.mockReturnValue(false)
-    
+
     const element = document.createElement('div')
     document.body.appendChild(element)
-    
+
     const { result } = renderHook(() =>
       useSwipeBack(mockOnClose, {
         enabled: true,
@@ -39,7 +39,7 @@ describe('useSwipeBack', () => {
     )
 
     const cleanup = result.current.bind(element)
-    
+
     const touchStart = new TouchEvent('touchstart', {
       touches: [{ clientX: 10, clientY: 100 }] as any,
     })

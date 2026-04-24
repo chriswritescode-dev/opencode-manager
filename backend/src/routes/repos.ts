@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
-import { DiscoverReposRequestSchema } from '@opencode-manager/shared/schemas'
+import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema } from '@opencode-manager/shared/schemas'
 import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName } from '../db/queries'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
@@ -16,6 +16,7 @@ import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
+import { ensureAssistantMode, getAssistantModeStatus } from '../services/assistant-mode'
 import path from 'path'
 
 export function createRepoRoutes(database: Database, gitAuthService: GitAuthService, scheduleService: ScheduleService) {
@@ -373,6 +374,47 @@ app.get('/', async (c) => {
       return c.json({ success: true })
     } catch (error: unknown) {
       logger.error('Failed to reset permissions:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.get('/:id/assistant-mode', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const status = await getAssistantModeStatus(repo)
+      return c.json(status)
+    } catch (error: unknown) {
+      logger.error('Failed to get assistant mode status:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.post('/:id/assistant-mode', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const body = await c.req.json().catch(() => ({}))
+      const options = AssistantModeInitRequestSchema.parse(body)
+
+      const status = await ensureAssistantMode(repo, options)
+      if (status.files.opencodeJson.created) {
+        opencodeServerManager.clearStartupError()
+        await opencodeServerManager.restart()
+      }
+      return c.json(status)
+    } catch (error: unknown) {
+      logger.error('Failed to initialize assistant mode:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })

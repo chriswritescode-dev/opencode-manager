@@ -1,10 +1,9 @@
 import { memo, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { FolderGit2, FolderOpen, Bell, CalendarClock, Menu, Info, History } from 'lucide-react'
+import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar, useScheduleTab, type ScheduleTabKey } from '@/hooks/useMobileTabBar'
-import { usePendingAlerts } from '@/contexts/EventContext'
 
 interface TabDef {
   key: string
@@ -17,22 +16,73 @@ interface TabDef {
 
 interface GlobalTabsArgs {
   pathname: string
+  search: string
   openSheet: ReturnType<typeof useMobileTabBar>['openSheet']
   open: ReturnType<typeof useMobileTabBar>['open']
+  close: ReturnType<typeof useMobileTabBar>['close']
   navigate: ReturnType<typeof useNavigate>
-  hasPending: boolean
   isInsideRepo: boolean
   repoId: string | null
 }
 
-function buildGlobalTabs({ pathname, openSheet, open, navigate, hasPending, isInsideRepo, repoId }: GlobalTabsArgs): TabDef[] {
+type TabBarMode = 'hidden' | 'global' | 'schedule'
+
+interface MobileTabRouteState {
+  mode: TabBarMode
+  isInsideRepo: boolean
+  repoId: string | null
+}
+
+function getMobileTabRouteState(pathname: string): MobileTabRouteState {
+  const repoMatch = pathname.match(/^\/repos\/(\d+)(?:\/([^/]+))?/)
+  const repoId = repoMatch?.[1] ?? null
+  const repoSection = repoMatch?.[2]
+
+  if (pathname === '/' || pathname === '/schedules') {
+    return { mode: 'global', isInsideRepo: false, repoId: null }
+  }
+
+  if (!repoId) {
+    return { mode: 'hidden', isInsideRepo: false, repoId: null }
+  }
+
+  switch (repoSection) {
+    case undefined:
+    case 'memories':
+    case 'assistant':
+      return { mode: 'global', isInsideRepo: true, repoId }
+    case 'schedules':
+      return { mode: 'schedule', isInsideRepo: true, repoId }
+    default:
+      return { mode: 'hidden', isInsideRepo: false, repoId }
+  }
+}
+
+function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, isInsideRepo, repoId }: GlobalTabsArgs): TabDef[] {
+  const navigateWithSearch = (params: URLSearchParams) => {
+    const nextSearch = params.toString()
+    navigate(nextSearch ? `${pathname}?${nextSearch}` : pathname, { replace: true })
+  }
+
   const handleFilesClick = () => {
     if (isInsideRepo && repoId) {
-      const newParams = new URLSearchParams({ dialog: 'files' })
-      navigate(`${pathname}?${newParams.toString()}`, { replace: true })
+      const newParams = new URLSearchParams(search)
+      newParams.set('dialog', 'files')
+      navigateWithSearch(newParams)
     } else {
       open('files')
     }
+  }
+
+  const handleAssistantClick = () => {
+    if (repoId) {
+      close()
+      navigate(`/repos/${repoId}/assistant`)
+      return
+    }
+
+    close()
+    navigate('/assistant')
   }
 
   return [
@@ -51,12 +101,11 @@ function buildGlobalTabs({ pathname, openSheet, open, navigate, hasPending, isIn
       active: openSheet === 'files',
     },
     {
-      key: 'notifications',
-      label: 'Alerts',
-      icon: Bell,
-      onClick: () => open('notifications'),
-      badge: hasPending,
-      active: openSheet === 'notifications',
+      key: 'assistant',
+      label: 'Assistant',
+      icon: Bot,
+      onClick: handleAssistantClick,
+      active: false,
     },
     {
       key: 'schedules',
@@ -137,42 +186,41 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
 })
 
 export const MobileTabBar = memo(function MobileTabBar() {
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   const navigate = useNavigate()
-  const { openSheet, open } = useMobileTabBar()
+  const { openSheet, open, close } = useMobileTabBar()
   const { scheduleTab, setScheduleTab } = useScheduleTab()
-  const hasPending = usePendingAlerts()
-
-  const isOnRepoSchedules = /^\/repos\/\d+\/schedules$/.test(pathname)
-  const isRepoMemories = /^\/repos\/\d+\/memories$/.test(pathname)
   const isMobile = useMobile()
-  const isRoot = pathname === '/'
-  const isGlobalSchedules = pathname === '/schedules'
-  const isRepoDetail = /^\/repos\/\d+$/.test(pathname)
-  const isInsideRepo = isRepoDetail || isOnRepoSchedules || isRepoMemories
-  const isRepoSession = /^\/repos\/\d+\/sessions\/\w+/.test(pathname)
-  const allow = isRoot || isGlobalSchedules || (isInsideRepo && !isRepoSession)
-
-  const repoIdMatch = pathname.match(/^\/repos\/(\d+)/)
-  const repoId = repoIdMatch ? repoIdMatch[1] : null
+  const routeState = useMemo(() => getMobileTabRouteState(pathname), [pathname])
 
   const tabs = useMemo<TabDef[]>(
-    () => (isOnRepoSchedules
+    () => (routeState.mode === 'schedule'
       ? buildScheduleTabs(scheduleTab, setScheduleTab)
       : buildGlobalTabs({
-          pathname,
-          openSheet,
-          open,
-          navigate,
-          hasPending,
-          isInsideRepo,
-          repoId,
-        })),
-    [isOnRepoSchedules, scheduleTab, setScheduleTab, pathname, openSheet, open, navigate, hasPending, isInsideRepo, repoId],
+        pathname,
+        search,
+        openSheet,
+        open,
+        close,
+        navigate,
+        isInsideRepo: routeState.isInsideRepo,
+        repoId: routeState.repoId,
+      })),
+    [
+      routeState,
+      scheduleTab,
+      setScheduleTab,
+      pathname,
+      search,
+      openSheet,
+      open,
+      close,
+      navigate,
+    ],
   )
 
   if (!isMobile) return null
-  if (!allow) return null
+  if (routeState.mode === 'hidden') return null
 
   return <TabBarRow tabs={tabs} />
 })
