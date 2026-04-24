@@ -37,7 +37,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   const mutation = useMutation({
     mutationFn: async (): Promise<AddRepoResult> => {
       if (repoType === 'local') {
-        const repo = await createRepo(undefined, localPath, branch || undefined, undefined, false)
+        const repo = await createRepo({ localPath, branch: branch || undefined, useWorktree: false })
         return { mode: 'single', repo }
       }
 
@@ -46,7 +46,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
         return { mode: 'discover', ...result }
       }
 
-      const repo = await createRepo(repoUrl, undefined, branch || undefined, undefined, false, skipSSHVerification)
+      const repo = await createRepo({ repoUrl, branch: branch || undefined, useWorktree: false, skipSSHVerification })
       return { mode: 'single', repo }
     },
     onSuccess: (result) => {
