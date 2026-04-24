@@ -341,7 +341,16 @@ describe('MessagePart', () => {
       sessionID: 'test-session',
     })
 
-    it('renders null for tool part when simpleChatMode is true', () => {
+    const createSubtaskPart = (): MessagePartType => ({
+      type: 'subtask',
+      prompt: 'Please review this change',
+      description: 'Review changes',
+      agent: 'auditor',
+      command: 'review',
+      sessionID: 'test-session',
+    })
+
+    it('renders null for non-task tool part when simpleChatMode is true', () => {
       setupSettings({
         simpleChatMode: true,
         showReasoning: false,
@@ -356,6 +365,78 @@ describe('MessagePart', () => {
       const { container } = render(<MessagePart part={part} />)
       
       expect(container.firstChild).toBeNull()
+    })
+
+    it('renders a compact clickable task row when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+
+      const part = {
+        ...createToolPart(),
+        tool: 'task',
+        callID: 'call-1',
+        metadata: { sessionId: 'child-session' },
+        state: {
+          status: 'completed',
+          input: { description: 'Review changes' },
+          output: 'done',
+          time: { start: Date.now(), end: Date.now() + 100 },
+        },
+      } as MessagePartType
+      const onChildSessionClick = vi.fn()
+
+      render(<MessagePart part={part} onChildSessionClick={onChildSessionClick} />)
+
+      expect(screen.getByText('Review changes')).toBeInTheDocument()
+      expect(screen.getByText('sub-agent')).toBeInTheDocument()
+      expect(screen.queryByText('View details')).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button'))
+      expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
+    })
+
+    it('renders a compact subtask row when simpleChatMode is true', () => {
+      setupSettings({
+        simpleChatMode: true,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+
+      render(<MessagePart part={createSubtaskPart()} />)
+
+      expect(screen.getByText('Review changes')).toBeInTheDocument()
+      expect(screen.getByText('sub-agent')).toBeInTheDocument()
+      expect(screen.queryByText('auditor')).not.toBeInTheDocument()
+      expect(screen.queryByText('Please review this change')).not.toBeInTheDocument()
+    })
+
+    it('renders the same compact subtask row when simpleChatMode is false', () => {
+      setupSettings({
+        simpleChatMode: false,
+        showReasoning: false,
+        expandToolCalls: false,
+        expandDiffs: true,
+        autoScroll: true,
+        theme: 'dark',
+        mode: 'build',
+      })
+
+      render(<MessagePart part={createSubtaskPart()} />)
+
+      expect(screen.getByText('Review changes')).toBeInTheDocument()
+      expect(screen.getByText('sub-agent')).toBeInTheDocument()
+      expect(screen.queryByText('Sub-agent: auditor')).not.toBeInTheDocument()
+      expect(screen.queryByText('Please review this change')).not.toBeInTheDocument()
     })
 
     it('renders null for patch part when simpleChatMode is true', () => {

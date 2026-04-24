@@ -47,6 +47,78 @@ const compareMessageIds = (id1: string, id2: string): number => {
   return id1.localeCompare(id2)
 }
 
+const hasRenderableContent = (role: Message['role'], parts: Part[], simpleChatMode: boolean, showReasoning: boolean): boolean => {
+  if (!parts || parts.length === 0) return false
+   
+  return parts.some(part => {
+    switch (part.type) {
+      case 'text':
+        return !!(part.text && part.text.trim())
+      case 'reasoning':
+        return !simpleChatMode && showReasoning && !!(part.text && part.text.trim())
+      case 'file':
+        return role === 'user'
+      case 'patch':
+      case 'snapshot':
+      case 'agent':
+        return !simpleChatMode
+      case 'tool':
+        return !simpleChatMode || part.tool === 'task'
+      case 'retry':
+        return true
+      case 'step-finish':
+      case 'step-start':
+      case 'compaction':
+        return false
+      case 'subtask':
+        return true
+      default:
+        return false
+    }
+  })
+}
+
+function isTaskToolPart(part: Part): part is components['schemas']['ToolPart'] {
+  return part.type === 'tool' && part.tool === 'task'
+}
+
+function isSubAgentActivityPart(part: Part): boolean {
+  return part.type === 'subtask' || isTaskToolPart(part)
+}
+
+function hasTextContent(parts: Part[]): boolean {
+  return parts.some(p => p.type === 'text' && !!(p.text && p.text.trim()))
+}
+
+function isIgnorableSubAgentMessagePart(part: Part): boolean {
+  if (part.type === 'step-start' || part.type === 'step-finish' || part.type === 'compaction') {
+    return true
+  }
+  if (part.type === 'text') {
+    return !part.text?.trim()
+  }
+  if (part.type === 'reasoning') {
+    return true
+  }
+  return false
+}
+
+function isStandaloneSubAgentMessage(role: Message['role'], parts: Part[]): boolean {
+  if (role !== 'assistant') return false
+  if (parts.length === 0) return false
+  if (hasTextContent(parts)) return false
+  
+  const hasSubAgentActivity = parts.some(isSubAgentActivityPart)
+  const allPartsAreSubAgentOrStructural = parts.every(part => {
+    if (isIgnorableSubAgentMessagePart(part)) {
+      return true
+    }
+    return isSubAgentActivityPart(part)
+  })
+  
+  return hasSubAgentActivity && allPartsAreSubAgentOrStructural
+}
+
 const findLastMessageByRole = (
   messages: MessageWithParts[],
   role: 'user' | 'assistant',
@@ -80,6 +152,7 @@ interface MessageRowProps {
   handleCancelEdit: () => void
   model?: string
   simpleChatMode: boolean
+  showReasoning: boolean
 }
 
 const MessageRow = memo(function MessageRow({
@@ -101,6 +174,7 @@ const MessageRow = memo(function MessageRow({
   handleCancelEdit,
   model,
   simpleChatMode,
+  showReasoning,
 }: MessageRowProps) {
   const msg = msgWithParts.info
   const parts = msgWithParts.parts
@@ -116,6 +190,39 @@ const MessageRow = memo(function MessageRow({
   const canUndoUserMessage = isLastUserMessage && nextAssistantMessage && !isSessionBusy && onUndoMessage
 
   const isEditingThisMessage = editingUserMessageId === msg.id
+
+  const hasContent = hasRenderableContent(msg.role, parts, simpleChatMode, showReasoning)
+  const hasError = msg.role === 'assistant' && 'error' in msg && msg.error
+  const standaloneSubAgentMessage = isStandaloneSubAgentMessage(msg.role, parts)
+
+  if (!hasContent && !hasError) {
+    return null
+  }
+
+  if (standaloneSubAgentMessage) {
+    return (
+      <div
+        key={msg.id}
+        className="flex flex-col group"
+      >
+        <div className="space-y-1">
+          {parts.filter(isSubAgentActivityPart).map((part, partIndex) => (
+            <div key={`${msg.id}-${part.id}-${partIndex}`}>
+              <MessagePart
+                part={part}
+                role={msg.role}
+                allParts={parts}
+                partIndex={partIndex}
+                onFileClick={onFileClick}
+                onChildSessionClick={onChildSessionClick}
+                messageTextContent={messageTextContent}
+              />
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
@@ -209,7 +316,7 @@ const MessageRow = memo(function MessageRow({
               </div>
             ))
           ) : null}
-          {msg.role === 'assistant' && 'error' in msg && msg.error && (
+          {hasError && (
             <MessageError error={msg.error as OpenCodeError} />
           )}
         </div>
@@ -233,6 +340,7 @@ export const MessageThread = memo(function MessageThread({
   const sessionStatus = useSessionStatusForSession(sessionID)
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
+  const showReasoning = preferences?.showReasoning ?? false
   
   const pendingAssistantId = useMemo(() => {
     if (!messages) return undefined
@@ -328,6 +436,7 @@ export const MessageThread = memo(function MessageThread({
           handleCancelEdit={handleCancelEdit}
           model={model}
           simpleChatMode={simpleChatMode}
+          showReasoning={showReasoning}
         />
       ))}
     </div>

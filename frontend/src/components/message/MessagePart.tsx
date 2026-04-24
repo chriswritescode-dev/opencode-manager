@@ -43,6 +43,8 @@ function getCopyableContent(part: Part, allParts?: Part[]): string {
       return part.snapshot || ''
     case 'agent':
       return `Agent: ${part.name}`
+    case 'subtask':
+      return `${part.agent}: ${part.description}\n\n${part.prompt}`.trim()
     case 'step-finish':
       if (allParts) {
         return allParts
@@ -120,7 +122,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       if (simpleChatMode) return null
       return <PatchPart part={part} onFileClick={onFileClick} />
     case 'tool':
-      if (simpleChatMode) return null
+      if (simpleChatMode && part.tool !== 'task') return null
       return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} />
     case 'reasoning':
       if (simpleChatMode || !showReasoning) return null
@@ -171,7 +173,21 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       )
     case 'retry':
       return <RetryPart part={part as RetryPartType} />
+    case 'subtask': {
+      const label = part.description || part.prompt || 'Sub-agent task'
+      return (
+        <div className="my-1 w-full rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-left text-xs text-muted-foreground">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="truncate">{label}</span>
+            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">sub-agent</span>
+          </div>
+        </div>
+      )
+    }
+    case 'step-start':
+    case 'compaction':
+      return null
     default:
-      return 
+      return null
   }
 })

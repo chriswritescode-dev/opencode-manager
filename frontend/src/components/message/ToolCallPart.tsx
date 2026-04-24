@@ -14,6 +14,15 @@ interface ToolCallPartProps {
   part: ToolPart
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  simpleChatMode?: boolean
+}
+
+function getTaskSessionId(part: ToolPart): string | undefined {
+  let sessionId = part.metadata?.sessionId as string | undefined
+  if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
+    sessionId = part.state.metadata?.sessionId as string | undefined
+  }
+  return sessionId
 }
 
 function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
@@ -142,6 +151,40 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const previewText = getPreviewText()
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
 
+  if (part.tool === 'task') {
+    const sessionId = getTaskSessionId(part)
+    const description = previewText || 'Sub-agent task'
+    const isRunning = part.state.status === 'running' || part.state.status === 'pending'
+    const content = (
+      <div className="flex items-center gap-2 min-w-0">
+        {isRunning ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+        ) : null}
+        <span className="font-medium text-foreground truncate">{description}</span>
+        <span className="text-[11px] text-muted-foreground ml-auto shrink-0">sub-agent</span>
+        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-purple-600 dark:text-purple-400" />}
+      </div>
+    )
+
+    if (sessionId) {
+      return (
+        <button
+          onClick={() => onChildSessionClick?.(sessionId)}
+          className="my-1 w-full rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-purple-500/10 transition-colors"
+          title="View subagent session"
+        >
+          {content}
+        </button>
+      )
+    }
+
+    return (
+      <div className="my-1 rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-xs text-muted-foreground">
+        {content}
+      </div>
+    )
+  }
+
   if (isTodoTool) {
     if (part.state.status === 'pending') {
       return (
@@ -254,10 +297,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         ) : null}
 
         {part.tool === 'task' && (() => {
-          let sessionId: string | undefined = part.metadata?.sessionId as string | undefined
-          if (!sessionId && part.state.status !== 'pending' && 'metadata' in part.state) {
-            sessionId = part.state.metadata?.sessionId as string | undefined
-          }
+          const sessionId = getTaskSessionId(part)
           return sessionId ? (
             <span
               onClick={(e) => {
