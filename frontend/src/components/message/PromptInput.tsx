@@ -45,6 +45,7 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 const VOICE_SEND_SWIPE_THRESHOLD = 48
+const VOICE_HOLD_ACTIVATION_MS = 200
 
 
 type CommandType = components['schemas']['Command']
@@ -115,6 +116,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const voicePendingReleaseRef = useRef(false)
   const pendingVoiceAutoSubmitRef = useRef(false)
   const ignoreVoiceClickUntilRef = useRef(0)
+  const voiceHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const voiceHoldActivatedRef = useRef(false)
   const handleSubmitRef = useRef<() => void>(() => {})
 
   const {
@@ -132,7 +135,16 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const clearVoiceHoldTimer = useCallback(() => {
+    if (voiceHoldTimerRef.current) {
+      clearTimeout(voiceHoldTimerRef.current)
+      voiceHoldTimerRef.current = null
+    }
+  }, [])
+
   const resetVoiceGestureState = useCallback(() => {
+    clearVoiceHoldTimer()
+    voiceHoldActivatedRef.current = false
     voiceHoldStartYRef.current = null
     voiceSwipeArmedRef.current = false
     voicePendingReleaseRef.current = false
@@ -141,7 +153,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setIsVoiceHoldActive(false)
     setIsVoiceSwipeArmed(false)
     setIsVoiceAutoSendPending(false)
-  }, [])
+  }, [clearVoiceHoldTimer])
   
   useImperativeHandle(ref, () => ({
     setPromptValue: (value: string) => {
@@ -418,13 +430,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       stopRecording()
     } else {
       setIsTogglingRecording(true)
-      try {
-        await startRecording()
-        if (textareaRef.current) {
-          textareaRef.current?.blur()
-        }
-      } catch {
+      const started = await startRecording()
+      if (!started) {
         setIsTogglingRecording(false)
+      } else if (textareaRef.current) {
+        textareaRef.current.blur()
       }
     }
   }
@@ -441,17 +451,18 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (!isRecording && !isProcessing) {
       pendingVoiceAutoSubmitRef.current = false
       setIsVoiceAutoSendPending(false)
+      voiceHoldActivatedRef.current = true
       setIsTogglingRecording(true)
-      try {
+      const started = await startRecording()
+      if (!started) {
+        setIsTogglingRecording(false)
+      } else {
         if (typeof navigator !== 'undefined' && navigator.vibrate) {
           navigator.vibrate(10)
         }
-        await startRecording()
         if (textareaRef.current) {
-          textareaRef.current?.blur()
+          textareaRef.current.blur()
         }
-      } catch {
-        setIsTogglingRecording(false)
       }
     }
   }
@@ -459,6 +470,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const handleVoiceHoldEnd = (shouldAutoSend: boolean) => {
     setIsVoiceHoldActive(false)
     setIsVoiceSwipeArmed(false)
+    voiceHoldActivatedRef.current = false
     voiceHoldStartYRef.current = null
     voiceSwipeArmedRef.current = false
     pendingVoiceAutoSubmitRef.current = shouldAutoSend
@@ -479,7 +491,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       return
     }
 
-    ignoreVoiceClickUntilRef.current = Date.now() + 400
     voiceHoldStartYRef.current = event.clientY
     voiceSwipeArmedRef.current = false
     voicePendingReleaseRef.current = false
@@ -492,7 +503,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       event.currentTarget.setPointerCapture(event.pointerId)
     }
 
-    await handleVoiceHoldStart()
+    voiceHoldTimerRef.current = setTimeout(() => {
+      if (isVoiceHoldActive && !voiceHoldActivatedRef.current) {
+        handleVoiceHoldStart()
+      }
+    }, VOICE_HOLD_ACTIVATION_MS)
   }
 
   const handleVoicePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
@@ -500,7 +515,19 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       return
     }
 
-    const nextIsSwipeArmed = voiceHoldStartYRef.current - event.clientY >= VOICE_SEND_SWIPE_THRESHOLD
+    const deltaY = voiceHoldStartYRef.current - event.clientY
+    const nextIsSwipeArmed = deltaY >= VOICE_SEND_SWIPE_THRESHOLD
+
+    if (nextIsSwipeArmed && !voiceSwipeArmedRef.current) {
+      clearVoiceHoldTimer()
+      voiceHoldActivatedRef.current = true
+      voiceSwipeArmedRef.current = true
+      setIsVoiceSwipeArmed(true)
+      setIsVoiceHoldActive(true)
+      ignoreVoiceClickUntilRef.current = Date.now() + 400
+      handleVoiceHoldStart()
+      return
+    }
 
     if (nextIsSwipeArmed !== voiceSwipeArmedRef.current) {
       voiceSwipeArmedRef.current = nextIsSwipeArmed
@@ -517,10 +544,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
 
-    if (!isVoiceHoldActive && !isTogglingRecording && !isRecording) {
+    if (!voiceHoldActivatedRef.current) {
+      clearVoiceHoldTimer()
+      setIsVoiceHoldActive(false)
+      voiceHoldStartYRef.current = null
       return
     }
 
+    ignoreVoiceClickUntilRef.current = Date.now() + 400
     handleVoiceHoldEnd(canceled ? false : voiceSwipeArmedRef.current)
   }
 
@@ -951,7 +982,7 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
       ? isVoiceSwipeArmed
         ? 'Release to send'
         : 'Release to transcribe'
-      : 'Hold to speak'
+      : 'Tap or hold to speak'
 
   const renderVoiceStatusOverlay = () => {
     if (!showVoiceFeedback || !voiceFeedbackLabel) {
@@ -981,7 +1012,13 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
     onPromptChange?.(prompt.trim().length > 0)
   }, [prompt, onPromptChange])
 
-    useEffect(() => {
+  useEffect(() => {
+    return () => {
+      clearVoiceHoldTimer()
+    }
+  }, [clearVoiceHoldTimer])
+
+  useEffect(() => {
     if (isRecording) {
       abortRecording()
     }

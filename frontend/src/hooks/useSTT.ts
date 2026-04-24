@@ -183,17 +183,17 @@ export function useSTT(userId = 'default') {
     }
   }, [isEnabled, isExternalProvider, setupAudioRecorder])
 
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (): Promise<boolean> => {
     if (!isSupported) {
       setError('Speech recognition is not supported in this browser')
       setIsError(true)
-      return
+      return false
     }
 
     if (!isEnabled) {
       setError('Speech recognition is not enabled')
       setIsError(true)
-      return
+      return false
     }
 
     setTranscript('')
@@ -212,10 +212,12 @@ export function useSTT(userId = 'default') {
         setIsProcessing(true)
         await audioRecorder.current.start()
         setIsProcessing(false)
+        return true
       } catch (err) {
         setIsProcessing(false)
         setIsError(true)
         setError(err instanceof Error ? err.message : 'Failed to start recording')
+        return false
       }
     } else {
       const options: SpeechRecognitionOptions = {
@@ -227,10 +229,12 @@ export function useSTT(userId = 'default') {
       try {
         setIsProcessing(true)
         await recognizer.current.start(options)
+        return true
       } catch (err) {
         setIsProcessing(false)
         setIsError(true)
         setError(err instanceof Error ? err.message : 'Failed to start recording')
+        return false
       }
     }
   }, [isSupported, isEnabled, isExternalProvider, config.language, setupAudioRecorder])
