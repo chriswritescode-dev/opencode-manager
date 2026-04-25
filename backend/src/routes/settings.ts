@@ -20,6 +20,7 @@ import {
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -66,6 +67,25 @@ function getOpenCodeConfigContentToWrite(
   }
 
   return JSON.stringify(appliedConfig, null, 2)
+}
+
+async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
+  if (openCodeSupervisor) {
+    await openCodeSupervisor.reloadConfig('settings_reload')
+    return
+  }
+
+  await opencodeServerManager.reloadConfig()
+}
+
+async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
+  if (openCodeSupervisor) {
+    await openCodeSupervisor.restart('settings_restart')
+    return
+  }
+
+  opencodeServerManager.clearStartupError()
+  await opencodeServerManager.restart()
 }
 
 function didConfigFieldChange(
@@ -199,7 +219,7 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
     : defaultError
 }
 
-export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService) {
+export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
 
@@ -273,7 +293,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         const changeType = [credentialsChanged && 'credentials', identityChanged && 'identity'].filter(Boolean).join(' and ')
         logger.info(`Git ${changeType} changed, reloading OpenCode configuration`)
         try {
-          await opencodeServerManager.reloadConfig()
+          await reloadOpenCodeConfig(openCodeSupervisor)
           serverRestarted = true
         } catch (error) {
           logger.warn('Failed to reload OpenCode config after git settings change:', error)
@@ -346,7 +366,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           await writeFileContent(configPath, provisionalConfig.rawContent)
           logger.info(`Wrote default config to: ${configPath}`)
           opencodeServerManager.clearStartupError()
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
 
           return c.json(config)
         }
@@ -426,7 +446,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           logger.info(`Wrote default config to: ${configPath}`)
           logger.info('OpenCode configuration requires process restart')
           opencodeServerManager.clearStartupError()
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
         } else {
           const patchResult = await patchOpenCodeConfig(config.content)
           if (!patchResult.success) {
@@ -501,7 +521,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         await writeFileContent(configPath, existingConfig.rawContent)
         logger.info(`Wrote default config '${configName}' to: ${configPath}`)
         opencodeServerManager.clearStartupError()
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
 
         return c.json(config)
       }
@@ -570,7 +590,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      await opencodeServerManager.restart()
+      await restartOpenCode(openCodeSupervisor)
       return c.json({ success: true, message: 'OpenCode server restarted successfully' })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
@@ -629,7 +649,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       opencodeServerManager.clearStartupError()
-      await opencodeServerManager.restart()
+      await restartOpenCode(openCodeSupervisor)
 
       return c.json({
         success: true,
@@ -660,7 +680,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.post('/opencode-reload', async (c) => {
     try {
       logger.info('OpenCode configuration reload requested')
-      await opencodeServerManager.reloadConfig()
+      await reloadOpenCodeConfig(openCodeSupervisor)
       return c.json({ success: true, message: 'OpenCode configuration reloaded successfully' })
     } catch (error) {
       logger.error('Failed to reload OpenCode config:', error)
@@ -703,7 +723,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.reloadConfig()
+        await reloadOpenCodeConfig(openCodeSupervisor)
       } catch (reloadError) {
         logger.error('Rollback config reload failed, attempting restart:', reloadError)
 
@@ -713,7 +733,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           await new Promise(r => setTimeout(r, 1000))
 
           opencodeServerManager.clearStartupError()
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
 
           return c.json({
             success: true,
@@ -764,11 +784,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         logger.info(`OpenCode upgraded from v${oldVersion} to v${newVersion}`)
         opencodeServerManager.clearStartupError()
         try {
-          await opencodeServerManager.reloadConfig()
+          await reloadOpenCodeConfig(openCodeSupervisor)
           logger.info('OpenCode server reloaded after upgrade')
         } catch (reloadError) {
           logger.warn('Config reload after upgrade failed, attempting full restart:', reloadError)
-          await opencodeServerManager.restart()
+          await restartOpenCode(openCodeSupervisor)
           logger.info('OpenCode server restarted after upgrade')
         }
 
@@ -798,7 +818,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.warn('OpenCode server restarted after upgrade failure')
         recovered = true
         recoveryMessage = 'Server recovered'
@@ -919,7 +939,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.info(`New OpenCode version: ${newVersion}`)
 
       opencodeServerManager.clearStartupError()
-      await opencodeServerManager.restart()
+      await restartOpenCode(openCodeSupervisor)
       logger.info('OpenCode server restarted after version change')
 
       return c.json({
@@ -937,7 +957,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       opencodeServerManager.clearStartupError()
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.warn('OpenCode server restarted after install failure')
         recovered = true
         recoveryMessage = 'Server recovered'
@@ -1096,7 +1116,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       await writeFileContent(agentsMdPath, content)
       logger.info(`Updated AGENTS.md at: ${agentsMdPath}`)
       
-      await opencodeServerManager.restart()
+      await restartOpenCode(openCodeSupervisor)
       logger.info('Restarted OpenCode server after AGENTS.md update')
       
       return c.json({ success: true })
@@ -1164,7 +1184,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const skill = await createSkill(db, validated)
       
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.info('Restarted OpenCode server after skill creation')
       } catch (restartError) {
         logger.warn('Failed to restart OpenCode server after skill creation:', restartError)
@@ -1202,7 +1222,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const skill = await updateSkill(db, name, scope, validated, repoId)
       
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.info('Restarted OpenCode server after skill update')
       } catch (restartError) {
         logger.warn('Failed to restart OpenCode server after skill update:', restartError)
@@ -1241,7 +1261,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       await deleteSkill(db, name, scope, repoId)
       
       try {
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
         logger.info('Restarted OpenCode server after skill deletion')
       } catch (restartError) {
         logger.warn('Failed to restart OpenCode server after skill deletion:', restartError)

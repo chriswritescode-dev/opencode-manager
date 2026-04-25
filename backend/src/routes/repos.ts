@@ -8,6 +8,7 @@ import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { proxyToOpenCodeWithDirectory } from '../services/proxy'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
@@ -19,7 +20,22 @@ import { ScheduleService } from '../services/schedules'
 import { ensureAssistantMode, getAssistantModeStatus } from '../services/assistant-mode'
 import path from 'path'
 
-export function createRepoRoutes(database: Database, gitAuthService: GitAuthService, scheduleService: ScheduleService) {
+async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
+  if (openCodeSupervisor) {
+    await openCodeSupervisor.restart('settings_restart')
+    return
+  }
+
+  opencodeServerManager.clearStartupError()
+  await opencodeServerManager.restart()
+}
+
+export function createRepoRoutes(
+  database: Database,
+  gitAuthService: GitAuthService,
+  scheduleService: ScheduleService,
+  openCodeSupervisor?: OpenCodeSupervisor,
+) {
   const app = new Hono()
 
   app.route('/', createRepoGitRoutes(database, gitAuthService))
@@ -235,8 +251,7 @@ app.get('/', async (c) => {
       logger.info(`Updated OpenCode config: ${openCodeConfigPath}`)
       
       logger.info('Restarting OpenCode server due to workspace config change')
-      await opencodeServerManager.stop()
-      await opencodeServerManager.start()
+      await restartOpenCode(openCodeSupervisor)
       
       const updatedRepo = getRepoById(database, id)
       return c.json(updatedRepo)
@@ -410,7 +425,7 @@ app.get('/', async (c) => {
       const status = await ensureAssistantMode(repo, options)
       if (status.files.opencodeJson.created) {
         opencodeServerManager.clearStartupError()
-        await opencodeServerManager.restart()
+        await restartOpenCode(openCodeSupervisor)
       }
       return c.json(status)
     } catch (error: unknown) {

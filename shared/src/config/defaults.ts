@@ -14,6 +14,9 @@ export const DEFAULTS = {
     PORT: 5551,
     HOST: '127.0.0.1',
     PUBLIC_URL: '', // Optional: public URL for OAuth callbacks (e.g., https://mydomain.com)
+    HEALTH_WATCH_ENABLED: true,
+    HEALTH_POLL_MS: 30000,
+    HEALTH_FAILURE_THRESHOLD: 2,
   },
 
   DATABASE: {

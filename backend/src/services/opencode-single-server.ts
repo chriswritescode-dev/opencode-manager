@@ -100,6 +100,7 @@ class OpenCodeServerManager {
   private db: Database | null = null
   private version: string | null = null
   private lastStartupError: string | null = null
+  private opInProgress: boolean = false
 
   private constructor() {}
 
@@ -122,11 +123,36 @@ class OpenCodeServerManager {
     OpenCodeServerManager.instance = null as unknown as OpenCodeServerManager
   }
 
-  async start(retryAfterPluginInstall = true): Promise<void> {
-    if (this.isHealthy) {
-      logger.info('OpenCode server already running and healthy')
+  private acquireOp(): boolean {
+    if (this.opInProgress) {
+      return false
+    }
+
+    this.opInProgress = true
+    return true
+  }
+
+  private releaseOp(acquired: boolean): void {
+    if (acquired) {
+      this.opInProgress = false
+    }
+  }
+
+  isOperationInProgress(): boolean {
+    return this.opInProgress
+  }
+
+  async start(retryAfterPluginInstall = true, allowNested = false): Promise<void> {
+    const acquired = this.acquireOp()
+    if (!acquired && !allowNested) {
       return
     }
+
+    try {
+      if (this.isHealthy) {
+        logger.info('OpenCode server already running and healthy')
+        return
+      }
 
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
 
@@ -137,7 +163,7 @@ class OpenCodeServerManager {
         const settingsService = new SettingsService(this.db)
         const settings = settingsService.getSettings('default')
         gitCredentials = settings.preferences.gitCredentials || []
-        
+
         const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
         if (identity) {
           gitIdentityEnv = createGitIdentityEnv(identity)
@@ -265,9 +291,9 @@ class OpenCodeServerManager {
           ...(OPENCODE_SERVER_PUBLIC_URL ? { OPENCODE_PUBLIC_URL: OPENCODE_SERVER_PUBLIC_URL } : {}),
           ...(OPENCODE_SERVER_PASSWORD
             ? {
-                OPENCODE_SERVER_PASSWORD,
-                OPENCODE_SERVER_USERNAME,
-              }
+              OPENCODE_SERVER_PASSWORD,
+              OPENCODE_SERVER_USERNAME,
+            }
             : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
         }
@@ -305,9 +331,9 @@ class OpenCodeServerManager {
       this.lastStartupError = formatStartupError(stderrOutput, fallback)
       if (configuredPluginCount > 0 && retryAfterPluginInstall) {
         logger.warn(`OpenCode server did not become healthy after installing ${configuredPluginCount} configured plugin(s); restarting once`)
-        await this.stop()
+        await this.stop(true)
         await new Promise(r => setTimeout(r, 1000))
-        await this.start(false)
+        await this.start(false, true)
         return
       }
       throw new Error('OpenCode server failed to become healthy')
@@ -324,43 +350,55 @@ class OpenCodeServerManager {
         logger.warn('Some features like MCP management may not work correctly')
       }
     }
+    } finally {
+      this.releaseOp(acquired)
+    }
   }
 
-  async stop(): Promise<void> {
-    if (!this.serverPid) return
-
-    logger.info('Stopping OpenCode server')
-    try {
-      process.kill(this.serverPid, 'SIGTERM')
-    } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      if (errorCode === 'ESRCH') {
-        logger.debug(`Process ${this.serverPid} already stopped`)
-      } else {
-        logger.warn(`Failed to send SIGTERM to ${this.serverPid}:`, error)
-      }
+  async stop(allowNested = false): Promise<void> {
+    const acquired = this.acquireOp()
+    if (!acquired && !allowNested) {
+      return
     }
 
-    await new Promise(r => setTimeout(r, 2000))
-
     try {
-      process.kill(this.serverPid, 'SIGKILL')
-    } catch (error) {
-      const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-      if (errorCode === 'ESRCH') {
-        logger.debug(`Process ${this.serverPid} already stopped`)
-      } else {
-        logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
+      if (!this.serverPid) return
+
+      logger.info('Stopping OpenCode server')
+      try {
+        process.kill(this.serverPid, 'SIGTERM')
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+        if (errorCode === 'ESRCH') {
+          logger.debug(`Process ${this.serverPid} already stopped`)
+        } else {
+          logger.warn(`Failed to send SIGTERM to ${this.serverPid}:`, error)
+        }
       }
-    }
 
-    this.serverPid = null
-    this.isHealthy = false
+      await new Promise(r => setTimeout(r, 2000))
 
-    try {
-      await cleanupPersistentSSHKeys()
-    } catch (error) {
-      logger.warn('Failed to cleanup persistent SSH keys:', error)
+      try {
+        process.kill(this.serverPid, 'SIGKILL')
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+        if (errorCode === 'ESRCH') {
+          logger.debug(`Process ${this.serverPid} already stopped`)
+        } else {
+          logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
+        }
+      }
+
+      this.serverPid = null
+      this.isHealthy = false
+
+      try {
+        await cleanupPersistentSSHKeys()
+      } catch (error) {
+        logger.warn('Failed to cleanup persistent SSH keys:', error)
+      }
+    } finally {
+      this.releaseOp(acquired)
     }
   }
 
@@ -415,44 +453,62 @@ class OpenCodeServerManager {
   }
 
   async restart(): Promise<void> {
-    logger.info('Restarting OpenCode server (full process restart)')
-    await this.stop()
-    await new Promise(r => setTimeout(r, 1000))
-    await this.start()
+    const acquired = this.acquireOp()
+    if (!acquired) {
+      return
+    }
+
+    try {
+      logger.info('Restarting OpenCode server (full process restart)')
+      await this.stop(true)
+      await new Promise(r => setTimeout(r, 1000))
+      await this.start(false, true)
+    } finally {
+      this.releaseOp(acquired)
+    }
   }
 
   async reloadConfig(): Promise<void> {
-    logger.info('Reloading OpenCode configuration (via API)')
+    const acquired = this.acquireOp()
+    if (!acquired) {
+      return
+    }
+
     try {
-      const configPath = getOpenCodeConfigFilePath()
-      const fileContent = await fs.readFile(configPath, 'utf-8')
-      const fileConfig = JSON.parse(fileContent) as Record<string, unknown>
-      logger.info(`Read config from file for reload: ${configPath}`)
+      logger.info('Reloading OpenCode configuration (via API)')
+      try {
+        const configPath = getOpenCodeConfigFilePath()
+        const fileContent = await fs.readFile(configPath, 'utf-8')
+        const fileConfig = JSON.parse(fileContent) as Record<string, unknown>
+        logger.info(`Read config from file for reload: ${configPath}`)
 
-      const patchResult = await patchOpenCodeConfig(fileConfig)
-      if (!patchResult.success) {
-        const errorMessage = patchResult.error || 'Failed to reload config'
-        const validationIssues = patchResult.details || []
-        const removedFields = patchResult.removedFields || []
-        if (validationIssues.length > 0) {
-          const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
-          logger.error(`Config reload validation errors: ${issueSummary}`)
+        const patchResult = await patchOpenCodeConfig(fileConfig)
+        if (!patchResult.success) {
+          const errorMessage = patchResult.error || 'Failed to reload config'
+          const validationIssues = patchResult.details || []
+          const removedFields = patchResult.removedFields || []
+          if (validationIssues.length > 0) {
+            const issueSummary = validationIssues.map((d) => `${d.path}: ${d.message}`).join('; ')
+            logger.error(`Config reload validation errors: ${issueSummary}`)
+          }
+          if (removedFields.length > 0) {
+            logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
+          }
+          throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
         }
-        if (removedFields.length > 0) {
-          logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
-        }
-        throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
-      }
 
-      logger.info('OpenCode configuration reloaded successfully')
-      await new Promise(r => setTimeout(r, 500))
-      const healthy = await this.checkHealth()
-      if (!healthy) {
-        throw new Error('Server unhealthy after config reload')
+        logger.info('OpenCode configuration reloaded successfully')
+        await new Promise(r => setTimeout(r, 500))
+        const healthy = await this.checkHealth()
+        if (!healthy) {
+          throw new Error('Server unhealthy after config reload')
+        }
+      } catch (error) {
+        logger.error('Failed to reload OpenCode config:', error)
+        throw error
       }
-    } catch (error) {
-      logger.error('Failed to reload OpenCode config:', error)
-      throw error
+    } finally {
+      this.releaseOp(acquired)
     }
   }
 

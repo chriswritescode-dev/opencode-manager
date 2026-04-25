@@ -44,6 +44,7 @@ import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { migrateGlobalSkills } from './services/skills'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
+import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parse as parseJsonc } from 'jsonc-parser'
 
@@ -84,6 +85,7 @@ import { DEFAULT_AGENTS_MD } from './constants'
 
 let ipcServer: IPCServer | undefined
 const gitAuthService = new GitAuthService()
+let openCodeSupervisor: OpenCodeSupervisor | undefined
 async function ensureDefaultConfigExists(): Promise<void> {
   const settingsService = new SettingsService(db)
   const workspaceConfigPath = getOpenCodeConfigFilePath()
@@ -208,6 +210,10 @@ try {
   const settingsService = new SettingsService(db)
   settingsService.initializeLastKnownGoodConfig()
 
+  openCodeSupervisor = new OpenCodeSupervisor(opencodeServerManager, settingsService, {
+    userId: 'default'
+  })
+
   await migrateGlobalSkills()
 
   ipcServer = await createIPCServer(process.env.STORAGE_PATH || undefined)
@@ -215,8 +221,12 @@ try {
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
   opencodeServerManager.setDatabase(db)
-  await opencodeServerManager.start()
-  logger.info(`OpenCode server running on port ${opencodeServerManager.getPort()}`)
+  const openCodeStatus = await openCodeSupervisor.start()
+  if (openCodeStatus.healthy) {
+    logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
+  } else {
+    logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
+  }
 
   await syncAdminFromEnv(auth, db)
 } catch (error) {
@@ -251,18 +261,18 @@ void scheduleRunnerInstance.start()
 
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
-app.route('/api/health', createHealthRoutes(db))
+app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(requireAuth))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
-protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService))
-protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService))
+protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeSupervisor))
+protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeSupervisor))
 protectedApi.route('/files', createFileRoutes())
-protectedApi.route('/providers', createProvidersRoutes())
-protectedApi.route('/oauth', createOAuthRoutes())
+protectedApi.route('/providers', createProvidersRoutes(openCodeSupervisor))
+protectedApi.route('/oauth', createOAuthRoutes(openCodeSupervisor))
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))
 protectedApi.route('/sse', createSSERoutes())
@@ -373,9 +383,14 @@ const shutdown = async (signal: string) => {
       await ipcServer.dispose()
       logger.info('Git IPC server stopped')
     }
+    if (openCodeSupervisor) {
+      await openCodeSupervisor.stop()
+    }
     scheduleRunnerInstance?.stop()
     logger.info('Schedule runner stopped')
-    await opencodeServerManager.stop()
+    if (!openCodeSupervisor) {
+      await opencodeServerManager.stop()
+    }
     logger.info('OpenCode server stopped')
   } catch (error) {
     logger.error('Error during shutdown:', error)

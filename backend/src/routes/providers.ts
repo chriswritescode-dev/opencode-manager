@@ -5,8 +5,18 @@ import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
 import { setOpenCodeAuth, deleteOpenCodeAuth } from '../services/proxy'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 
-export function createProvidersRoutes() {
+async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
+  if (openCodeSupervisor) {
+    await openCodeSupervisor.reloadConfig('settings_reload')
+    return
+  }
+
+  await opencodeServerManager.reloadConfig()
+}
+
+export function createProvidersRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const authService = new AuthService()
 
@@ -45,7 +55,7 @@ export function createProvidersRoutes() {
       await authService.set(providerId, validated.apiKey)
       
       try {
-        await opencodeServerManager.reloadConfig()
+        await reloadOpenCodeConfig(openCodeSupervisor)
       } catch (reloadError) {
         logger.warn(`Failed to reload OpenCode config after saving credentials for ${providerId}:`, reloadError)
       }
@@ -72,7 +82,7 @@ export function createProvidersRoutes() {
       await authService.delete(providerId)
       
       try {
-        await opencodeServerManager.reloadConfig()
+        await reloadOpenCodeConfig(openCodeSupervisor)
       } catch (reloadError) {
         logger.warn(`Failed to reload OpenCode config after deleting credentials for ${providerId}:`, reloadError)
       }

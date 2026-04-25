@@ -523,6 +523,32 @@ export class SettingsService {
     }
   }
 
+  archiveBrokenConfig(userId: string = 'default'): string | null {
+    const current = this.getDefaultOpenCodeConfig(userId)
+    if (!current) {
+      return null
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    const backupName = `${current.name}-broken-${ts}`
+    try {
+      this.createOpenCodeConfig(
+        {
+          name: backupName,
+          content: current.rawContent,
+          isDefault: false,
+        },
+        userId,
+        { suppressAutoDefault: true },
+      )
+      logger.warn(`Archived broken OpenCode config as '${backupName}'`)
+      return backupName
+    } catch (error) {
+      logger.error('Failed to archive broken config:', error)
+      return null
+    }
+  }
+
   restoreToLastKnownGoodConfig(userId: string = 'default'): { configName: string; content: string } | null {
     if (!SettingsService.lastKnownGoodConfigContent) {
       logger.warn('No last known good config available for rollback')

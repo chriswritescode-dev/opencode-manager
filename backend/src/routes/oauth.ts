@@ -8,8 +8,18 @@ import {
   OAuthCallbackRequestSchema
 } from '../../../shared/src/schemas/auth'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 
-export function createOAuthRoutes() {
+async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
+  if (openCodeSupervisor) {
+    await openCodeSupervisor.reloadConfig('settings_reload')
+    return
+  }
+
+  await opencodeServerManager.reloadConfig()
+}
+
+export function createOAuthRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
 
   app.post('/:id/oauth/authorize', async (c) => {
@@ -76,7 +86,7 @@ export function createOAuthRoutes() {
       const data = await response.json()
 
       try {
-        await opencodeServerManager.reloadConfig()
+        await reloadOpenCodeConfig(openCodeSupervisor)
       } catch (reloadError) {
         logger.warn(`Failed to reload OpenCode config after OAuth callback for ${providerId}:`, reloadError)
       }

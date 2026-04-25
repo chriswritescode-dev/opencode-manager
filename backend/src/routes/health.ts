@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { readFile } from 'fs/promises'
 import { opencodeServerManager } from '../services/opencode-single-server'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { compareVersions } from '../utils/version-utils'
 
 const GITHUB_REPO_OWNER = 'chriswritescode-dev'
@@ -66,17 +67,22 @@ const opencodeManagerVersionPromise = (async (): Promise<string | null> => {
   }
 })()
 
-export function createHealthRoutes(db: Database) {
+export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
 
   app.get('/', async (c) => {
     try {
       const opencodeManagerVersion = await opencodeManagerVersionPromise
       const dbCheck = db.prepare('SELECT 1').get()
-      const opencodeHealthy = await opencodeServerManager.checkHealth()
-      const startupError = opencodeServerManager.getLastStartupError()
+      const lifecycle = openCodeSupervisor
+        ? await openCodeSupervisor.checkNow('api_probe')
+        : null
+      const opencodeHealthy = lifecycle?.healthy ?? await opencodeServerManager.checkHealth()
+      const startupError = lifecycle?.lastError ?? opencodeServerManager.getLastStartupError()
 
-      const status = startupError && !opencodeHealthy
+      const status = lifecycle?.state === 'recovering'
+        ? 'degraded'
+        : startupError && !opencodeHealthy
         ? 'unhealthy'
         : (dbCheck && opencodeHealthy ? 'healthy' : 'degraded')
 
@@ -90,6 +96,10 @@ export function createHealthRoutes(db: Database) {
         opencodeMinVersion: opencodeServerManager.getMinVersion(),
         opencodeVersionSupported: opencodeServerManager.isVersionSupported(),
         opencodeManagerVersion,
+      }
+
+      if (lifecycle) {
+        response.opencodeLifecycle = lifecycle
       }
 
       if (startupError && !opencodeHealthy) {
@@ -110,12 +120,16 @@ export function createHealthRoutes(db: Database) {
 
   app.get('/processes', async (c) => {
     try {
-      const opencodeHealthy = await opencodeServerManager.checkHealth()
-      
+      const lifecycle = openCodeSupervisor
+        ? await openCodeSupervisor.checkNow('api_probe')
+        : null
+      const opencodeHealthy = lifecycle?.healthy ?? await opencodeServerManager.checkHealth()
+       
       return c.json({
         opencode: {
           port: opencodeServerManager.getPort(),
-          healthy: opencodeHealthy
+          healthy: opencodeHealthy,
+          lifecycle,
         },
         timestamp: new Date().toISOString()
       })

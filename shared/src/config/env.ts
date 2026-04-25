@@ -42,6 +42,10 @@ const generateDefaultSecret = (): string => {
   return randomBytes(32).toString('base64').slice(0, 32)
 }
 
+const defaultHealthWatchEnabled = getEnvString('NODE_ENV', 'development') === 'test'
+  ? false
+  : DEFAULTS.OPENCODE.HEALTH_WATCH_ENABLED
+
 export const ENV = {
   SERVER: {
     PORT: getEnvNumber('PORT', DEFAULTS.SERVER.PORT),
@@ -54,6 +58,9 @@ export const ENV = {
     PORT: getEnvNumber('OPENCODE_SERVER_PORT', DEFAULTS.OPENCODE.PORT),
     HOST: getEnvString('OPENCODE_HOST', DEFAULTS.OPENCODE.HOST),
     PUBLIC_URL: getEnvString('OPENCODE_PUBLIC_URL', ''), // Public URL for OAuth callbacks
+    HEALTH_WATCH_ENABLED: getEnvBoolean('OPENCODE_HEALTH_WATCH_ENABLED', defaultHealthWatchEnabled),
+    HEALTH_POLL_MS: getEnvNumber('OPENCODE_HEALTH_POLL_MS', DEFAULTS.OPENCODE.HEALTH_POLL_MS),
+    HEALTH_FAILURE_THRESHOLD: getEnvNumber('OPENCODE_HEALTH_FAILURE_THRESHOLD', DEFAULTS.OPENCODE.HEALTH_FAILURE_THRESHOLD),
     SERVER_PASSWORD: getEnvString('OPENCODE_SERVER_PASSWORD', ''),
     SERVER_USERNAME: getEnvString('OPENCODE_SERVER_USERNAME', 'opencode'),
   },
