@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { listBranches, switchBranch, GitAuthError } from '@/api/repos'
+import { listBranches, switchBranch, GitAuthError, getRepo } from '@/api/repos'
 import { useGitStatus } from '@/api/git'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,11 +14,9 @@ import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
 interface BranchesTabProps {
   repoId: number
   currentBranch: string
-  repoUrl?: string | null
-  isRepoWorktree?: boolean
 }
 
-export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: BranchesTabProps) {
+export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
   const queryClient = useQueryClient()
   const [newBranchName, setNewBranchName] = useState('')
   const [isCreating, setIsCreating] = useState(false)
@@ -32,6 +30,15 @@ export function BranchesTab({ repoId, currentBranch, repoUrl, isRepoWorktree }: 
     queryFn: () => listBranches(repoId),
     staleTime: 30000,
   })
+
+  const { data: repo } = useQuery({
+    queryKey: ['repo', repoId],
+    queryFn: () => getRepo(repoId),
+    staleTime: 30000,
+  })
+
+  const repoUrl = repo?.repoUrl ?? null
+  const isRepoWorktree = repo?.isWorktree ?? false
 
   const switchBranchMutation = useMutation({
     mutationFn: (branch: string) => switchBranch(repoId, branch),

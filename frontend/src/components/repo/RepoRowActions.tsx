@@ -137,8 +137,6 @@ export function RepoRowActions({
             onActionsOpenChange?.(false)
           }}
           currentBranch={branchToDisplay || ''}
-          repoUrl={repo.repoUrl}
-          isRepoWorktree={repo.isWorktree}
           repoName={repoName}
         />
         <DownloadDialog
@@ -213,8 +211,6 @@ export function RepoRowActions({
         isOpen={showSourceControl}
         onClose={() => { setShowSourceControl(false); onActionsOpenChange?.(false); }}
         currentBranch={branchToDisplay || ''}
-        repoUrl={repo.repoUrl}
-        isRepoWorktree={repo.isWorktree}
         repoName={repoName}
       />
       <DownloadDialog

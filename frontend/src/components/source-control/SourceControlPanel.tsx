@@ -32,8 +32,6 @@ interface SourceControlPanelProps {
   isOpen: boolean
   onClose: () => void
   currentBranch: string
-  repoUrl?: string | null
-  isRepoWorktree?: boolean
   repoName?: string
 }
 
@@ -45,8 +43,6 @@ export function SourceControlPanel({
   isOpen,
   onClose,
   currentBranch,
-  repoUrl,
-  isRepoWorktree,
   repoName,
 }: SourceControlPanelProps) {
   const [activeTab, setActiveTab] = useState<Tab>('changes')
@@ -224,7 +220,7 @@ export function SourceControlPanel({
             <CommitsTab repoId={repoId} onSelectCommit={handleSelectCommit} />
           )}
           {activeTab === 'branches' && currentView === 'default' && (
-            <BranchesTab repoId={repoId} currentBranch={currentBranch} repoUrl={repoUrl} isRepoWorktree={isRepoWorktree} />
+            <BranchesTab repoId={repoId} currentBranch={currentBranch} />
           )}
 
           {currentView === 'commit-detail' && selectedCommit && (

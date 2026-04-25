@@ -303,46 +303,53 @@ export function RepoList() {
 
   }
 
-  if (isLoading && !repos) {
-    return (
-      <div className="px-0 md:p-4 h-full flex flex-col">
-        <div className="px-2 md:px-0">
-          <div className="h-10 bg-muted/50 animate-pulse rounded w-full" />
-        </div>
-        <div className="mx-2 md:mx-0 flex-1 min-h-0">
-          <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div key={i} className="md:pl-8">
-                  <RepoCardSkeleton />
+  const renderContent = () => {
+    switch (true) {
+      case isLoading && !repos:
+        return (
+          <div className="px-0 md:p-4 h-full flex flex-col">
+            <div className="px-2 md:px-0">
+              <div className="h-10 bg-muted/50 animate-pulse rounded w-full" />
+            </div>
+            <div className="mx-2 md:mx-0 flex-1 min-h-0">
+              <div className="h-full overflow-y-auto pt-4 pb-2 md:pb-0">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="md:pl-8">
+                      <RepoCardSkeleton />
+                    </div>
+                  ))}
                 </div>
-              ))}
+              </div>
             </div>
           </div>
-        </div>
-      </div>
-    )
+        )
+
+      case !!error:
+        return (
+          <div className="text-center p-8 text-destructive">
+            Failed to load repositories:{" "}
+            {error instanceof Error ? error.message : "Unknown error"}
+          </div>
+        )
+
+      case !repos || repos.length === 0:
+        return (
+          <div className="text-center p-12">
+            <GitBranch className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
+            <p className="text-zinc-500">
+              No repositories yet. Add one to get started.
+            </p>
+          </div>
+        )
+
+      default:
+        return null
+    }
   }
 
-  if (error) {
-    return (
-      <div className="text-center p-8 text-destructive">
-        Failed to load repositories:{" "}
-        {error instanceof Error ? error.message : "Unknown error"}
-      </div>
-    )
-  }
-
-  if (!repos || repos.length === 0) {
-    return (
-      <div className="text-center p-12">
-        <GitBranch className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
-        <p className="text-zinc-500">
-          No repositories yet. Add one to get started.
-        </p>
-      </div>
-    )
-  }
+  const content = renderContent()
+  if (content) return content
 
   const handleSelectRepo = (id: number, selected: boolean) => {
     const newSelected = new Set(selectedRepos)
@@ -409,71 +416,82 @@ export function RepoList() {
 
         <div className="mx-2 md:mx-0 flex-1 min-h-0">
           <div className="h-full overflow-y-auto pt-4 md:pb-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
-            {sortedViewModels.length === 0 ? (
-              <div className="text-center p-12">
-                <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
-                <p className="text-zinc-500">
-                  {sections[0]?.emptyMessage || `No repositories found${searchQuery ? ` matching "${searchQuery}"` : ''}`}
-                </p>
-              </div>
-            ) : isDragEnabled ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext items={sortedViewModels.map((r) => r.id)} strategy={verticalListSortingStrategy}>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
-                    {sortedViewModels.map((repo) => (
-                      <SortableRepoCard
-                        key={repo.id}
-                        repo={repo}
-                        onDelete={(id) => {
-                          setRepoToDelete(id)
-                          setDeleteDialogOpen(true)
-                        }}
-                        isDeleting={
-                          deleteMutation.isPending && repoToDelete === repo.id
-                        }
-                        isSelected={selectedRepos.has(repo.id)}
-                        onSelect={handleSelectRepo}
-                        gitStatus={gitStatuses?.get(repo.id)}
-                        manageMode={isSelectionActive}
-                        isMobile={isMobile}
-                        isManualSort={isManualSort}
-                        activityLabel={formatActivityLabel(repo.activityTimestamp)}
-                        hasSelectedRepos={selectedRepos.size > 0}
-                        selectionMode={selectionMode}
-                      />
-                    ))}
-                  </div>
-                </SortableContext>
-              </DndContext>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
-                {sortedViewModels.map((repo) => (
-                  <StaticRepoCard
-                    key={repo.id}
-                    repo={repo}
-                    onDelete={(id) => {
-                      setRepoToDelete(id)
-                      setDeleteDialogOpen(true)
-                    }}
-                    isDeleting={
-                      deleteMutation.isPending && repoToDelete === repo.id
-                    }
-                    isSelected={selectedRepos.has(repo.id)}
-                    onSelect={handleSelectRepo}
-                    gitStatus={gitStatuses?.get(repo.id)}
-                    manageMode={isSelectionActive}
-                    isMobile={isMobile}
-                    activityLabel={formatActivityLabel(repo.activityTimestamp)}
-                    hasSelectedRepos={selectedRepos.size > 0}
-                    selectionMode={selectionMode}
-                  />
-                ))}
-              </div>
-            )}
+            {(() => {
+              switch (true) {
+                case sortedViewModels.length === 0:
+                  return (
+                    <div className="text-center p-12">
+                      <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
+                      <p className="text-zinc-500">
+                        {sections[0]?.emptyMessage || `No repositories found${searchQuery ? ` matching "${searchQuery}"` : ''}`}
+                      </p>
+                    </div>
+                  )
+
+                case isDragEnabled:
+                  return (
+                    <DndContext
+                      sensors={sensors}
+                      collisionDetection={closestCenter}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <SortableContext items={sortedViewModels.map((r) => r.id)} strategy={verticalListSortingStrategy}>
+                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
+                          {sortedViewModels.map((repo) => (
+                            <SortableRepoCard
+                              key={repo.id}
+                              repo={repo}
+                              onDelete={(id) => {
+                                setRepoToDelete(id)
+                                setDeleteDialogOpen(true)
+                              }}
+                              isDeleting={
+                                deleteMutation.isPending && repoToDelete === repo.id
+                              }
+                              isSelected={selectedRepos.has(repo.id)}
+                              onSelect={handleSelectRepo}
+                              gitStatus={gitStatuses?.get(repo.id)}
+                              manageMode={isSelectionActive}
+                              isMobile={isMobile}
+                              isManualSort={isManualSort}
+                              activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                              hasSelectedRepos={selectedRepos.size > 0}
+                              selectionMode={selectionMode}
+                            />
+                          ))}
+                        </div>
+                      </SortableContext>
+                    </DndContext>
+                  )
+
+                default:
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-2 gap-3 md:gap-4 w-full md:pb-0">
+                      {sortedViewModels.map((repo) => (
+                        <StaticRepoCard
+                          key={repo.id}
+                          repo={repo}
+                          onDelete={(id) => {
+                            setRepoToDelete(id)
+                            setDeleteDialogOpen(true)
+                          }}
+                          isDeleting={
+                            deleteMutation.isPending && repoToDelete === repo.id
+                          }
+                          isSelected={selectedRepos.has(repo.id)}
+                          onSelect={handleSelectRepo}
+                          gitStatus={gitStatuses?.get(repo.id)}
+                          manageMode={isSelectionActive}
+                          isMobile={isMobile}
+                          activityLabel={formatActivityLabel(repo.activityTimestamp)}
+                          hasSelectedRepos={selectedRepos.size > 0}
+                          selectionMode={selectionMode}
+                        />
+                      ))}
+                    </div>
+                  )
+              }
+            })()}
           </div>
         </div>
       </div>

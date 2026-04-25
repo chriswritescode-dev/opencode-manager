@@ -5,7 +5,7 @@ import { getRepo, initializeAssistantMode } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, FolderOpen, Plug, Settings, CornerUpLeft, GitCommitHorizontal, Brain, ShieldOff, Sparkles } from "lucide-react";
+import { X, CornerUpLeft } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
@@ -36,7 +36,6 @@ import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
-import { LspStatusButton } from "@/components/repo/LspStatusButton";
 import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
@@ -50,7 +49,6 @@ import { SourceControlPanel } from "@/components/source-control";
 import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
-import { useMemoryPluginStatus } from "@/hooks/useMemoryPluginStatus";
 
 const compareMessageIds = (id1: string, id2: string): number => {
   const num1 = parseInt(id1, 10)
@@ -118,8 +116,6 @@ export function SessionDetail() {
   });
 
   useRepoActivity(repoId, Boolean(repo));
-
-  const { memoryPluginEnabled } = useMemoryPluginStatus();
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
@@ -422,78 +418,6 @@ export function SessionDetail() {
             isConnected={isConnected}
             isReconnecting={isReconnecting}
           />
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setFileBrowserOpen(true)}
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <FolderOpen className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Files</span>
-          </Button>
-          <div className="hidden md:flex">
-            <LspStatusButton
-              opcodeUrl={opcodeUrl}
-              directory={repoDirectory}
-              onClick={() => setLspDialogOpen(true)}
-            />
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSkillsDialogOpen(true)}
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <Sparkles className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Skills</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setMcpDialogOpen(true)}
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <Plug className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">MCP</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setSourceControlOpen(true)}
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <GitCommitHorizontal className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Source</span>
-          </Button>
-          {memoryPluginEnabled && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => navigate(`/repos/${repoId}/memories`)}
-              className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-            >
-              <Brain className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Memory</span>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setResetPermissionsOpen(true)}
-            className="hidden lg:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <ShieldOff className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Reset Permissions</span>
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={openSettings}
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <Settings className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Settings</span>
-          </Button>
           <SessionMoreButton />
         </Header.Actions>
       </Header>
@@ -651,8 +575,6 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
-        repoUrl={repo.repoUrl}
-        isRepoWorktree={repo.isWorktree}
         repoName={workspaceDisplayName}
       />
 

@@ -18,6 +18,7 @@ import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
+import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
 import { useTheme } from './hooks/useTheme'
 import { useSwipeBack } from './hooks/useMobile'
 import { TTSProvider } from './contexts/TTSContext'
@@ -143,8 +144,11 @@ function AppShell() {
   return (
     <AuthProvider>
       <EventProvider>
-        <div ref={rootRef} className="contents">
-          <Outlet />
+        <div ref={rootRef} className="flex h-dvh w-full min-w-0">
+          <DesktopSidebar />
+          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+            <Outlet />
+          </div>
         </div>
         <MobileTabBar />
         <MobileSheetHost />

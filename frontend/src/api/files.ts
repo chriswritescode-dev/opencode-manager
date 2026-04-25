@@ -52,7 +52,7 @@ export async function fetchFileRange(path: string, startLine: number, endLine: n
 }
 
 export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
-  return fetchWrapper(getFileApiUrl(path), {
+  return fetchWrapper(getFileApiUrl(path, { route: 'patches' }), {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ patches }),

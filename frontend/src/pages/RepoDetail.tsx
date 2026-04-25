@@ -8,7 +8,6 @@ import { Header } from "@/components/ui/header";
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
-import { CreateWorktreeDialog } from "@/components/repo/CreateWorktreeDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
@@ -18,10 +17,13 @@ import { useDialogParam } from "@/hooks/useDialogParam";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plug, FolderOpen, Plus, GitBranch, GitBranchPlus, GitCommitHorizontal, ShieldOff, Brain, Loader2, CalendarClock, Sparkles, Bot } from "lucide-react";
+import { GitBranch, Plus, Loader2 } from "lucide-react";
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog";
+import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
 import { getRepoDisplayName } from "@/lib/utils";
+import { useSidebarAction } from "@/hooks/useSidebarAction";
+
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -33,7 +35,6 @@ export function RepoDetail() {
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
-  const [worktreeDialogOpen, setWorktreeDialogOpen] = useDialogParam('createWorktree');
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -43,7 +44,7 @@ export function RepoDetail() {
 
   useRepoActivity(repoId, Boolean(repo));
 
-  const { memoryPluginEnabled } = useMemoryPluginStatus();
+  useMemoryPluginStatus();
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
@@ -67,6 +68,10 @@ export function RepoDetail() {
   const handleSelectSession = (sessionId: string) => {
     navigate(`/repos/${repoId}/sessions/${sessionId}`);
   };
+
+  useSidebarAction('new-session', () => {
+    handleCreateSession();
+  });
 
   if (repoLoading) {
     return (
@@ -104,7 +109,6 @@ export function RepoDetail() {
   const displayName = branchToDisplay ? `${repoName} (${branchToDisplay})` : repoName;
   const currentBranch = repo.currentBranch || repo.branch || "main";
   const isWorktree = repo.isWorktree || false;
-  const canCreateWorktree = !isWorktree && Boolean(repo.repoUrl);
 
   return (
     <div
@@ -121,152 +125,10 @@ export function RepoDetail() {
             </Badge>
           ) : null}
         </div>
-        <Button
-          variant="outline"
-          onClick={() => setMcpDialogOpen(true)}
-          size="sm"
-          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-        >
-          <Plug className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">MCP</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setSkillsDialogOpen(true)}
-          size="sm"
-          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-        >
-          <Sparkles className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">Skills</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setSourceControlOpen(true)}
-          size="sm"
-          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-        >
-          <GitCommitHorizontal className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">Source</span>
-        </Button>
-        {canCreateWorktree && (
-          <Button
-            variant="outline"
-            onClick={() => setWorktreeDialogOpen(true)}
-            size="sm"
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-            title="Create Worktree"
-          >
-            <GitBranchPlus className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Worktree</span>
-          </Button>
-        )}
-        <Button
-          variant="outline"
-          onClick={() => setFileBrowserOpen(true)}
-          size="sm"
-          className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-        >
-          <FolderOpen className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">Files</span>
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => setResetPermissionsOpen(true)}
-          size="sm"
-          className="hidden lg:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-        >
-          <ShieldOff className="w-4 h-4 sm:mr-2" />
-          <span className="hidden sm:inline">Reset Permissions</span>
-        </Button>
         <Header.Actions>
-          {memoryPluginEnabled && (
-            <>
-              <Button
-                variant="outline"
-                onClick={() => setMcpDialogOpen(true)}
-                size="sm"
-                className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <Plug className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">MCP</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setSkillsDialogOpen(true)}
-                size="sm"
-                className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <Sparkles className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Skills</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setSourceControlOpen(true)}
-                size="sm"
-                className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <GitCommitHorizontal className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Source</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setFileBrowserOpen(true)}
-                size="sm"
-                className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <FolderOpen className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Files</span>
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setResetPermissionsOpen(true)}
-                size="sm"
-                className="hidden lg:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-              >
-                <ShieldOff className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Reset Permissions</span>
-              </Button>
-            </>
-          )}
-          {memoryPluginEnabled && (
-            <Button
-              variant="outline"
-              onClick={() => navigate(`/repos/${repoId}/memories`)}
-              size="sm"
-              className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-            >
-              <Brain className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Memory</span>
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            onClick={() => navigate(`/repos/${repoId}/schedules`)}
-            size="sm"
-            className="hidden md:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
-          >
-            <CalendarClock className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Schedules</span>
-          </Button>
-          <Button
-            onClick={() => navigate(`/repos/${repoId}/assistant`)}
-            disabled={!opcodeUrl}
-            size="sm"
-            className="hidden sm:inline-flex bg-purple-600 hover:bg-purple-700 text-white transition-all duration-200 hover:scale-105"
-            aria-label="Open Assistant"
-          >
-            <Bot className="w-4 h-4 mr-2" />
-            <span>Assistant</span>
-          </Button>
-          <Button
-            onClick={() => handleCreateSession()}
-            disabled={!opcodeUrl || createSessionMutation.isPending}
-            size="sm"
-            className="hidden sm:inline-flex bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            <span>New Session</span>
-          </Button>
+          <div className="flex items-center gap-1">
+            <PendingActionsGroup />
+          </div>
           <Button
             onClick={() => handleCreateSession()}
             disabled={!opcodeUrl || createSessionMutation.isPending}
@@ -314,8 +176,6 @@ export function RepoDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={currentBranch}
-        repoUrl={repo.repoUrl}
-        isRepoWorktree={repo.isWorktree}
         repoName={repoName}
       />
 
@@ -340,14 +200,6 @@ export function RepoDetail() {
         onOpenChange={setResetPermissionsOpen}
         repoId={repoId}
         repoDirectory={repoDirectory}
-      />
-
-      <CreateWorktreeDialog
-        open={worktreeDialogOpen}
-        onOpenChange={setWorktreeDialogOpen}
-        repoId={repoId}
-        repoUrl={repo.repoUrl}
-        defaultBaseBranch={currentBranch}
       />
     </div>
   );

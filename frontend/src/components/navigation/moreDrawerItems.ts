@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { FolderOpen, Brain, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut } from 'lucide-react'
+import { Brain, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus } from 'lucide-react'
 
 export interface MoreDrawerItem {
   key: string
@@ -10,28 +10,54 @@ export interface MoreDrawerItem {
   danger?: boolean
 }
 
+export interface NavPrimaryCta {
+  key: string
+  label: string
+  icon: LucideIcon
+  to?: string
+  onSelect?: 'new-session' | 'new-repo' | 'new-schedule'
+  variant?: 'primary' | 'secondary'
+}
+
+export interface NavModel {
+  primary: NavPrimaryCta[]
+  items: MoreDrawerItem[]
+}
+
 export interface BuildMoreItemsOptions {
   memoryPluginEnabled?: boolean
 }
 
-export function buildMoreItems(pathname: string, options: BuildMoreItemsOptions = {}): MoreDrawerItem[] {
-  const { memoryPluginEnabled = false } = options
-  const baseItems: MoreDrawerItem[] = [
+export type BuildNavOptions = BuildMoreItemsOptions
+
+function getAssistantNavItem(pathname: string, variant: NavPrimaryCta['variant'] = 'secondary'): NavPrimaryCta {
+  const repoMatch = /^\/repos\/(\d+)/.exec(pathname)
+
+  return {
+    key: 'assistant',
+    label: 'Assistant',
+    icon: Bot,
+    to: repoMatch ? `/repos/${repoMatch[1]}/assistant` : '/assistant',
+    variant,
+  }
+}
+
+function getBaseItems(): MoreDrawerItem[] {
+  return [
     { key: 'settings', label: 'Settings', icon: Settings },
     { key: 'logout', label: 'Logout', icon: LogOut },
   ]
+}
 
-  // Root path - no route-specific items
-  if (pathname === '/') {
-    return baseItems
-  }
+export function buildNavModel(pathname: string, options: BuildNavOptions = {}): NavModel {
+  const { memoryPluginEnabled = false } = options
+  const baseItems = getBaseItems()
 
-  // RepoDetail: /repos/:id
   const repoDetailMatch = /^\/repos\/(\d+)$/.exec(pathname)
   if (repoDetailMatch) {
     const id = repoDetailMatch[1]
-    return [
-      { key: 'files', label: 'Files', icon: FolderOpen, dialog: 'files' },
+    const items: MoreDrawerItem[] = [
+      { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
       ...(memoryPluginEnabled
         ? [{ key: 'memory', label: 'Memory', icon: Brain, to: `/repos/${id}/memories` }]
         : []),
@@ -42,14 +68,21 @@ export function buildMoreItems(pathname: string, options: BuildMoreItemsOptions 
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]
+
+    return {
+      primary: [
+        { key: 'new-session', label: 'New Session', icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
+        getAssistantNavItem(pathname),
+      ],
+      items,
+    }
   }
 
-  // SessionDetail: /repos/:id/sessions/:sid
   const sessionDetailMatch = /^\/repos\/(\d+)\/sessions\/[^/]+$/.exec(pathname)
   if (sessionDetailMatch) {
     const id = sessionDetailMatch[1]
-    return [
-      { key: 'files', label: 'Files', icon: FolderOpen, dialog: 'files' },
+    const items: MoreDrawerItem[] = [
+      { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
       ...(memoryPluginEnabled
         ? [{ key: 'memory', label: 'Memory', icon: Brain, to: `/repos/${id}/memories` }]
         : []),
@@ -60,18 +93,80 @@ export function buildMoreItems(pathname: string, options: BuildMoreItemsOptions 
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]
+
+    return {
+      primary: [
+        getAssistantNavItem(pathname, 'primary'),
+      ],
+      items,
+    }
   }
 
-  // Memories: /repos/:id/memories - no extra items
-  if (/^\/repos\/\d+\/memories$/.test(pathname)) {
-    return baseItems
+  const assistantMatch = /^\/repos\/(\d+)\/assistant$/.exec(pathname)
+  if (assistantMatch) {
+    const id = assistantMatch[1]
+    const items: MoreDrawerItem[] = [
+      { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+      ...(memoryPluginEnabled
+        ? [{ key: 'memory', label: 'Memory', icon: Brain, to: `/repos/${id}/memories` }]
+        : []),
+      { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
+      { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
+      { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
+      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${id}/schedules` },
+      { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+      ...baseItems,
+    ]
+
+    return {
+      primary: [
+        getAssistantNavItem(pathname, 'primary'),
+      ],
+      items,
+    }
   }
 
-  // Schedules routes - no extra items
   if (pathname === '/schedules' || /^\/repos\/\d+\/schedules$/.test(pathname)) {
-    return baseItems
+    return {
+      primary: [
+        { key: 'new-schedule', label: 'New Schedule', icon: Clock, onSelect: 'new-schedule', variant: 'primary' },
+        getAssistantNavItem(pathname),
+      ],
+      items: baseItems,
+    }
   }
 
-  // Unknown path - return base items only
-  return baseItems
+  if (pathname === '/') {
+    return {
+      primary: [
+        { key: 'new-repo', label: 'New Repo', icon: Plus, onSelect: 'new-repo', variant: 'primary' },
+        getAssistantNavItem(pathname),
+      ],
+      items: [
+        { key: 'all-schedules', label: 'All Schedules', icon: CalendarClock, to: '/schedules' },
+        { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+        ...baseItems,
+      ],
+    }
+  }
+
+  if (/^\/repos\/\d+\/memories$/.test(pathname)) {
+    return {
+      primary: [
+        getAssistantNavItem(pathname),
+      ],
+      items: baseItems,
+    }
+  }
+
+  return {
+    primary: [
+      getAssistantNavItem(pathname),
+    ],
+    items: baseItems,
+  }
+}
+
+export function buildMoreItems(pathname: string, options: BuildMoreItemsOptions = {}): MoreDrawerItem[] {
+  return buildNavModel(pathname, options).items
 }
