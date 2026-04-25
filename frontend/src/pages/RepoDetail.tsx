@@ -11,7 +11,6 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
-import { useMemoryPluginStatus } from "@/hooks/useMemoryPluginStatus";
 import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { OPENCODE_API_ENDPOINT } from "@/config";
@@ -43,8 +42,6 @@ export function RepoDetail() {
   });
 
   useRepoActivity(repoId, Boolean(repo));
-
-  useMemoryPluginStatus();
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
