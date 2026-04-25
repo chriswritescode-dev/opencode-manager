@@ -651,6 +651,8 @@ export function SessionDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={repo.currentBranch || repo.branch || "main"}
+        repoUrl={repo.repoUrl}
+        isRepoWorktree={repo.isWorktree}
         repoName={workspaceDisplayName}
       />
 

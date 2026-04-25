@@ -176,7 +176,7 @@ export function AssistantRedirect() {
             <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={assistantFileBasePath} repoName="Assistant" repoId={repoId} />
             <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
             <RepoSkillsDialog open={skillsDialogOpen} onOpenChange={setSkillsDialogOpen} repoId={repoId} />
-            <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
+            <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoUrl={repo?.repoUrl} isRepoWorktree={repo?.isWorktree} repoName="Assistant" />
             <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} repoDirectory={assistantDirectory} />
           </>
         )}

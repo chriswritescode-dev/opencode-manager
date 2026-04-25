@@ -314,6 +314,8 @@ export function RepoDetail() {
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
         currentBranch={currentBranch}
+        repoUrl={repo.repoUrl}
+        isRepoWorktree={repo.isWorktree}
         repoName={repoName}
       />
 
