@@ -274,6 +274,23 @@ describe('PromptInput STT Gesture Tests', () => {
       })
     })
 
+    it('hold starts recording without requiring a click', async () => {
+      mockStartRecording.mockResolvedValue(true)
+
+      renderComponent()
+
+      const button = getMobileVoiceButton()
+
+      await act(async () => {
+        fireEvent.pointerDown(button)
+        await new Promise(resolve => setTimeout(resolve, 250))
+      })
+
+      await waitFor(() => {
+        expect(mockStartRecording).toHaveBeenCalledTimes(1)
+      })
+    })
+
     it('second tap while recording stops', async () => {
       renderComponent({ isRecording: true })
 

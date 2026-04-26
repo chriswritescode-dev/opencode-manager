@@ -14,7 +14,7 @@ import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
-import { ArrowDown, Upload, X, Mic, MicOff } from 'lucide-react'
+import { ArrowDown, ArrowUp, Upload, X, Mic, MicOff } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
 
@@ -46,6 +46,7 @@ const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 const VOICE_SEND_SWIPE_THRESHOLD = 48
 const VOICE_HOLD_ACTIVATION_MS = 200
+type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
 type CommandType = components['schemas']['Command']
@@ -111,6 +112,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
   const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
   const lastAddedTranscriptRef = useRef('')
+  const voiceHoldActiveRef = useRef(false)
   const voiceHoldStartYRef = useRef<number | null>(null)
   const voiceSwipeArmedRef = useRef(false)
   const voicePendingReleaseRef = useRef(false)
@@ -144,6 +146,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const resetVoiceGestureState = useCallback(() => {
     clearVoiceHoldTimer()
+    voiceHoldActiveRef.current = false
     voiceHoldActivatedRef.current = false
     voiceHoldStartYRef.current = null
     voiceSwipeArmedRef.current = false
@@ -492,6 +495,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     voiceHoldStartYRef.current = event.clientY
+    voiceHoldActiveRef.current = true
     voiceSwipeArmedRef.current = false
     voicePendingReleaseRef.current = false
     pendingVoiceAutoSubmitRef.current = false
@@ -504,14 +508,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     voiceHoldTimerRef.current = setTimeout(() => {
-      if (isVoiceHoldActive && !voiceHoldActivatedRef.current) {
+      if (voiceHoldActiveRef.current && voiceHoldStartYRef.current !== null && !voiceHoldActivatedRef.current) {
         handleVoiceHoldStart()
       }
     }, VOICE_HOLD_ACTIVATION_MS)
   }
 
   const handleVoicePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!isVoiceHoldActive || voiceHoldStartYRef.current === null) {
+    if (!voiceHoldActiveRef.current || voiceHoldStartYRef.current === null) {
       return
     }
 
@@ -546,12 +550,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     if (!voiceHoldActivatedRef.current) {
       clearVoiceHoldTimer()
+      voiceHoldActiveRef.current = false
       setIsVoiceHoldActive(false)
       voiceHoldStartYRef.current = null
       return
     }
 
     ignoreVoiceClickUntilRef.current = Date.now() + 400
+    voiceHoldActiveRef.current = false
     handleVoiceHoldEnd(canceled ? false : voiceSwipeArmedRef.current)
   }
 
@@ -984,9 +990,36 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
         : 'Release to transcribe'
       : 'Tap or hold to speak'
 
-  const renderVoiceStatusOverlay = () => {
+  const renderVoiceStatusOverlay = (variant: VoiceButtonVariant) => {
     if (!showVoiceFeedback || !voiceFeedbackLabel) {
       return null
+    }
+
+    if (variant === 'mobile') {
+      return (
+        <div
+          aria-live="polite"
+          className="pointer-events-none absolute bottom-full right-0 z-10 mb-4 w-[min(78vw,320px)] overflow-hidden rounded-2xl border border-red-500/50 bg-background/95 p-3 text-foreground shadow-2xl shadow-red-500/20 backdrop-blur-xl"
+        >
+          <div className={`absolute inset-x-4 top-3 h-16 rounded-full blur-2xl ${voiceFeedbackGlowClasses}`} />
+          <div className="relative flex items-center gap-3">
+            <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl border ${voiceFeedbackToneClasses}`}>
+              <ArrowUp className="h-8 w-8" />
+            </div>
+            <div className="min-w-0 flex-1 text-left">
+              <div className="text-sm font-semibold leading-tight">
+                {isVoiceSwipeArmed || isVoiceAutoSendPending ? 'Release to auto-send' : voiceFeedbackLabel}
+              </div>
+              <div className="mt-1 text-xs leading-snug text-muted-foreground">
+                {isVoiceSwipeArmed || isVoiceAutoSendPending ? 'The message will send after transcription.' : 'Swipe up while holding the mic to send automatically.'}
+              </div>
+            </div>
+          </div>
+          <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-muted">
+            <div className={`h-full rounded-full transition-all duration-200 ${isVoiceSwipeArmed || isVoiceAutoSendPending ? 'w-full bg-blue-500' : 'w-1/2 bg-red-500'}`} />
+          </div>
+        </div>
+      )
     }
 
     return (
@@ -999,6 +1032,50 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
           {voiceFeedbackLabel}
         </div>
       </>
+    )
+  }
+
+  const renderVoiceButton = (variant: VoiceButtonVariant) => {
+    const isDesktop = variant === 'desktop'
+    const isBusy = isRecording || isTogglingRecording || (isProcessing && !isRecording)
+    const spinnerClassName = `w-5 h-5 animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-white'} border-t-transparent`
+    const buttonClassName = isDesktop
+      ? `hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
+        isBusy
+          ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
+          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
+      }`
+      : `px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
+        isBusy
+          ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
+          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
+      }`
+
+    return (
+      <div className={isDesktop ? 'relative hidden md:block' : 'relative'}>
+        {renderVoiceStatusOverlay(variant)}
+        <button
+          type="button"
+          onClick={handleVoiceClick}
+          onPointerDown={handleVoicePointerDown}
+          onPointerMove={handleVoicePointerMove}
+          onPointerUp={(event) => handleVoicePointerEnd(event)}
+          onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
+          disabled={disabled || isProcessing}
+          className={buttonClassName}
+          title={voiceButtonTitle}
+        >
+          {isTogglingRecording && !isRecording ? (
+            <div className={spinnerClassName} />
+          ) : isProcessing && !isRecording ? (
+            <div className={spinnerClassName} />
+          ) : isRecording ? (
+            <MicOff className="w-5 h-5" />
+          ) : (
+            <Mic className="w-5 h-5" />
+          )}
+        </button>
+      </div>
     )
   }
 
@@ -1170,63 +1247,10 @@ return (
             <Upload className="w-5 h-5" />
           </button>
           {sttEnabled && sttSupported && (
-            <div className="relative hidden md:block">
-              {renderVoiceStatusOverlay()}
-              <button
-                type="button"
-                onClick={handleVoiceClick}
-                onPointerDown={handleVoicePointerDown}
-                onPointerMove={handleVoicePointerMove}
-                onPointerUp={(event) => handleVoicePointerEnd(event)}
-                onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
-                disabled={disabled || isProcessing}
-                className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
-                  isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                    ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
-                    : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
-                }`}
-                title={voiceButtonTitle}
-              >
-                {isTogglingRecording && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                ) : isProcessing && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                ) : isRecording ? (
-                  <MicOff className="w-5 h-5" />
-                ) : (
-                  <Mic className="w-5 h-5" />
-                )}
-              </button>
-            </div>
+            renderVoiceButton('desktop')
           )}
           {isMobile && !showScrollButton && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
-            <div className="relative">
-              {renderVoiceStatusOverlay()}
-              <button
-                onClick={handleVoiceClick}
-                onPointerDown={handleVoicePointerDown}
-                onPointerMove={handleVoicePointerMove}
-                onPointerUp={(event) => handleVoicePointerEnd(event)}
-                onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
-                disabled={disabled || isProcessing}
-                className={`px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
-                  isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                    ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
-                    : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
-                }`}
-                title={voiceButtonTitle}
-              >
-                {isTogglingRecording && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : isProcessing && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : isRecording ? (
-                  <MicOff className="w-5 h-5" />
-                ) : (
-                  <Mic className="w-5 h-5" />
-                )}
-              </button>
-            </div>
+            renderVoiceButton('mobile')
           )}
             <button
               data-submit-prompt
