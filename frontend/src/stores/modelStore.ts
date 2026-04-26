@@ -10,10 +10,12 @@ export interface ModelSelection {
 interface ModelStore {
   model: ModelSelection | null
   recentModels: ModelSelection[]
+  favoriteModels: ModelSelection[]
   variants: Record<string, string | undefined>
   lastConfigModel: string | undefined
 
   setModel: (model: ModelSelection) => void
+  syncModelState: (state: { recent: ModelSelection[], favorite: ModelSelection[], variant: Record<string, string | undefined> }) => void
   syncFromConfig: (configModel: string | undefined, force?: boolean) => void
   validateAndSyncModel: (configModel: string | undefined, providers?: Provider[]) => void
   getModelString: () => string | null
@@ -36,6 +38,7 @@ export const useModelStore = create<ModelStore>()(
     (set, get) => ({
       model: null,
       recentModels: [],
+      favoriteModels: [],
       variants: {},
       lastConfigModel: undefined,
 
@@ -53,6 +56,17 @@ export const useModelStore = create<ModelStore>()(
             recentModels: newRecent,
           }
         })
+      },
+
+      syncModelState: (modelState) => {
+        set((state) => ({
+          recentModels: modelState.recent,
+          favoriteModels: modelState.favorite,
+          variants: {
+            ...modelState.variant,
+            ...state.variants,
+          },
+        }))
       },
 
       syncFromConfig: (configModel: string | undefined, force = false) => {
@@ -94,9 +108,14 @@ export const useModelStore = create<ModelStore>()(
         const currentModelExists = state.model ? modelExists(state.model) : false
 
         const cleanedRecentModels = state.recentModels.filter(modelExists)
+        const cleanedFavoriteModels = state.favoriteModels.filter(modelExists)
 
         if (cleanedRecentModels.length !== state.recentModels.length) {
           set({ recentModels: cleanedRecentModels })
+        }
+
+        if (cleanedFavoriteModels.length !== state.favoriteModels.length) {
+          set({ favoriteModels: cleanedFavoriteModels })
         }
 
         if (!currentModelExists) {
@@ -144,6 +163,7 @@ export const useModelStore = create<ModelStore>()(
       partialize: (state) => ({
         model: state.model,
         recentModels: state.recentModels,
+        favoriteModels: state.favoriteModels,
         variants: state.variants,
       }),
     }

@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { Check, ChevronRight, Clock, Sparkles } from 'lucide-react'
 import {
   DropdownMenu,
@@ -29,7 +29,7 @@ export function ModelQuickSelect({
   disabled,
   children,
 }: ModelQuickSelectProps) {
-  const { modelString, recentModels, setModel } = useModelSelection(opcodeUrl, directory)
+  const { modelString, recentModels, favoriteModels, setModel } = useModelSelection(opcodeUrl, directory)
   const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(opcodeUrl, directory)
   const client = useOpenCodeClient(opcodeUrl, directory)
 
@@ -40,33 +40,37 @@ export function ModelQuickSelect({
      staleTime: 30000,
    })
 
+   const getDisplayName = useCallback((providerID: string, modelID: string) => {
+     const modelData = providersData?.providers
+       .find(provider => provider.id === providerID)
+       ?.models?.[modelID]
+     return modelData ? formatModelName(modelData) : modelID
+   }, [providersData])
+
+   const favoriteModelsWithNames = useMemo(() => {
+     return favoriteModels
+       .filter(favorite => `${favorite.providerID}/${favorite.modelID}` !== modelString)
+       .slice(0, 5)
+       .map(favorite => ({
+         ...favorite,
+         displayName: getDisplayName(favorite.providerID, favorite.modelID),
+         key: `${favorite.providerID}/${favorite.modelID}`,
+       }))
+   }, [favoriteModels, getDisplayName, modelString])
+
    const recentModelsWithNames = useMemo(() => {
-     if (!providersData?.providers || providersData.providers.length === 0 || recentModels.length === 0) return []
-     
      return recentModels
        .filter(recent => {
          const key = `${recent.providerID}/${recent.modelID}`
-         return key !== modelString
+         return key !== modelString && !favoriteModels.some(favorite => favorite.providerID === recent.providerID && favorite.modelID === recent.modelID)
        })
        .slice(0, 5)
-       .map(recent => {
-         let displayName = recent.modelID
-         for (const provider of providersData.providers) {
-          if (provider.id === recent.providerID && provider.models) {
-            const modelData = provider.models[recent.modelID]
-            if (modelData) {
-              displayName = formatModelName(modelData)
-              break
-            }
-          }
-        }
-        return {
-          ...recent,
-          displayName,
-          key: `${recent.providerID}/${recent.modelID}`,
-        }
-      })
-  }, [recentModels, providersData, modelString])
+       .map(recent => ({
+         ...recent,
+         displayName: getDisplayName(recent.providerID, recent.modelID),
+         key: `${recent.providerID}/${recent.modelID}`,
+       }))
+   }, [recentModels, favoriteModels, getDisplayName, modelString])
 
   const handleVariantSelect = (variant: string | undefined) => {
     if (variant === undefined) {
@@ -80,6 +84,7 @@ export function ModelQuickSelect({
     setModel({ providerID, modelID })
   }
 
+  const hasFavorites = favoriteModelsWithNames.length > 0
   const hasRecents = recentModelsWithNames.length > 0
 
   return (
@@ -109,6 +114,26 @@ export function ModelQuickSelect({
               >
                 <span className="capitalize text-orange-500 text-center">{variant}</span>
                 {currentVariant === variant && <Check className="h-4 w-4" />}
+              </DropdownMenuItem>
+            ))}
+            {(hasFavorites || hasRecents) && <DropdownMenuSeparator />}
+          </>
+        )}
+
+        {hasFavorites && (
+          <>
+            <DropdownMenuLabel className="flex items-center gap-1.5">
+              <Sparkles className="h-3 w-3" />
+              Favorite Models
+            </DropdownMenuLabel>
+            {favoriteModelsWithNames.map((favorite) => (
+              <DropdownMenuItem
+                key={favorite.key}
+                onClick={() => handleModelSelect(favorite.providerID, favorite.modelID)}
+                className="flex items-center justify-between"
+              >
+                <span className="truncate">{favorite.displayName}</span>
+                {modelString === favorite.key && <Check className="h-4 w-4" />}
               </DropdownMenuItem>
             ))}
             {hasRecents && <DropdownMenuSeparator />}

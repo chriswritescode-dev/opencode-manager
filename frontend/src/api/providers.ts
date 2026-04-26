@@ -115,6 +115,17 @@ export interface ProviderWithModels {
   isConnected: boolean;
 }
 
+export interface ModelSelection {
+  providerID: string;
+  modelID: string;
+}
+
+export interface OpenCodeModelState {
+  recent: ModelSelection[];
+  favorite: ModelSelection[];
+  variant: Record<string, string | undefined>;
+}
+
 interface ConfigProvider {
   npm?: string;
   name?: string;
@@ -151,7 +162,13 @@ interface OpenCodeProviderResponse {
   default: Record<string, string>;
 }
 
-async function getProvidersFromOpenCodeServer(): Promise<{ providers: Provider[]; connected: string[] }> {
+export interface ProvidersResult {
+  providers: Provider[];
+  connected: string[];
+  default: Record<string, string>;
+}
+
+async function getProvidersFromOpenCodeServer(): Promise<ProvidersResult> {
   try {
     const response = await fetchWrapper<OpenCodeProviderResponse>(`${API_BASE_URL}/api/opencode/provider`);
 
@@ -205,17 +222,29 @@ async function getProvidersFromOpenCodeServer(): Promise<{ providers: Provider[]
         };
       });
 
-      return { providers, connected: response.connected || [] };
+      return { providers, connected: response.connected || [], default: response.default || {} };
     }
   } catch {
     // Silently return empty providers on failure - graceful degradation
   }
 
-  return { providers: [], connected: [] };
+  return { providers: [], connected: [], default: {} };
 }
 
-export async function getProviders(): Promise<{ providers: Provider[]; connected: string[] }> {
+export async function getProviders(): Promise<ProvidersResult> {
   return await getProvidersFromOpenCodeServer();
+}
+
+export async function getOpenCodeModelState(): Promise<OpenCodeModelState> {
+  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`);
+}
+
+export async function addOpenCodeRecentModel(model: ModelSelection): Promise<OpenCodeModelState> {
+  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recent: model }),
+  });
 }
 
 async function getConfiguredProviders(connectedIds: Set<string>): Promise<ProviderWithModels[]> {
