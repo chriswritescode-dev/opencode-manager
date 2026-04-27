@@ -9,14 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Search, Check, Star } from "lucide-react";
+import { Clock, Loader2, Search, Check, Star } from "lucide-react";
 import {
   getProvidersWithModels,
   formatModelName,
   formatProviderName,
 } from "@/api/providers";
 import { useModelSelection } from "@/hooks/useModelSelection";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { Model, ProviderWithModels } from "@/api/providers";
 
 interface ModelSelectDialogProps {
@@ -69,14 +69,18 @@ interface ModelCardProps {
   provider: ProviderWithModels;
   modelKey: string;
   isSelected: boolean;
+  isFavorite: boolean;
   onSelect: (providerId: string, modelId: string) => void;
+  onToggleFavorite: (providerId: string, modelId: string) => void;
 }
 
 const ModelCard = memo(function ModelCard({ 
   model, 
   provider, 
   isSelected, 
-  onSelect 
+  isFavorite,
+  onSelect,
+  onToggleFavorite,
 }: ModelCardProps) {
   const capabilities = useMemo(() => {
     const caps = [];
@@ -113,9 +117,21 @@ const ModelCard = memo(function ModelCard({
             {formatProviderName(provider)}
           </p>
         </div>
-        {isSelected && (
-          <Check className="h-4 w-4 text-blue-500 flex-shrink-0 ml-2" />
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFavorite(provider.id, model.key || model.id);
+            }}
+            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star className={`h-4 w-4 ${isFavorite ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`} />
+          </Button>
+          {isSelected && <Check className="h-4 w-4 text-blue-500" />}
+        </div>
       </div>
 
       <div className="text-xs text-muted-foreground mb-2 sm:mb-3 font-mono truncate">
@@ -165,8 +181,11 @@ const ModelCard = memo(function ModelCard({
 interface ModelGridProps {
   models: FlatModel[];
   currentModel: string;
+  favoriteModelKeys: Set<string>;
   onSelect: (providerId: string, modelId: string) => void;
+  onToggleFavorite: (providerId: string, modelId: string) => void;
   loading: boolean;
+  favoriteModels?: FlatModel[];
   recentModels?: FlatModel[];
   showRecent?: boolean;
 }
@@ -174,8 +193,11 @@ interface ModelGridProps {
 const ModelGrid = memo(function ModelGrid({ 
   models, 
   currentModel, 
+  favoriteModelKeys,
   onSelect, 
+  onToggleFavorite,
   loading,
+  favoriteModels = [],
   recentModels = [],
   showRecent = false,
 }: ModelGridProps) {
@@ -187,7 +209,7 @@ const ModelGrid = memo(function ModelGrid({
     );
   }
 
-  if (models.length === 0 && recentModels.length === 0) {
+  if (models.length === 0 && (!showRecent || (favoriteModels.length === 0 && recentModels.length === 0))) {
     return (
       <div className="text-center py-12 text-zinc-500">
         No models found
@@ -197,10 +219,33 @@ const ModelGrid = memo(function ModelGrid({
 
   return (
     <div className="space-y-6">
-      {showRecent && recentModels.length > 0 && (
+      {showRecent && favoriteModels.length > 0 && (
         <div>
           <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
             <Star className="h-3.5 w-3.5" />
+            Favorite Models
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
+            {favoriteModels.map(({ model, provider, modelKey }) => (
+              <ModelCard
+                key={`favorite-${modelKey}`}
+                model={model}
+                provider={provider}
+                modelKey={modelKey}
+                isSelected={currentModel === modelKey}
+                isFavorite={favoriteModelKeys.has(modelKey)}
+                onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showRecent && recentModels.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5" />
             Recent Models
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4">
@@ -211,7 +256,9 @@ const ModelGrid = memo(function ModelGrid({
                 provider={provider}
                 modelKey={modelKey}
                 isSelected={currentModel === modelKey}
+                isFavorite={favoriteModelKeys.has(modelKey)}
                 onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </div>
@@ -220,7 +267,7 @@ const ModelGrid = memo(function ModelGrid({
 
       {models.length > 0 && (
         <div>
-          {showRecent && recentModels.length > 0 && (
+          {showRecent && (favoriteModels.length > 0 || recentModels.length > 0) && (
             <h3 className="text-sm font-semibold text-muted-foreground mb-3">
               All Models
             </h3>
@@ -233,7 +280,9 @@ const ModelGrid = memo(function ModelGrid({
                 provider={provider}
                 modelKey={modelKey}
                 isSelected={currentModel === modelKey}
+                isFavorite={favoriteModelKeys.has(modelKey)}
                 onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </div>
@@ -295,20 +344,23 @@ export function ModelSelectDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProvider, setSelectedProvider] = useState<string>("");
 
-  const { modelString, setModel, recentModels } = useModelSelection(opcodeUrl, directory);
+  const { modelString, setModel, toggleFavorite, recentModels, favoriteModels } = useModelSelection(opcodeUrl, directory);
   const currentModel = modelString || "";
 
   const { data: allProviders = [], isLoading: loading } = useQuery({
-    queryKey: ["providers-with-models"],
-    queryFn: () => getProvidersWithModels(),
+    queryKey: ["providers-with-models", opcodeUrl, directory],
+    queryFn: () => getProvidersWithModels(directory),
     enabled: open,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 
   const connectedProviders = useMemo(() => {
     return allProviders.filter(p => p.isConnected);
   }, [allProviders]);
+
+  const selectableProviders = connectedProviders.length > 0 ? connectedProviders : allProviders;
 
   useEffect(() => {
     if (open) {
@@ -317,24 +369,33 @@ export function ModelSelectDialog({
   }, [open]);
 
   const flatModels = useMemo((): FlatModel[] => {
-    return connectedProviders.flatMap((provider) =>
+    return selectableProviders.flatMap((provider) =>
       provider.models.map((model) => ({
         model,
         provider,
         modelKey: `${provider.id}/${model.key || model.id}`,
       }))
     );
-  }, [connectedProviders]);
+  }, [selectableProviders]);
+
+  const favoriteFlatModels = useMemo((): FlatModel[] => {
+    return favoriteModels
+      .map((favorite) => flatModels.find((fm) => fm.modelKey === `${favorite.providerID}/${favorite.modelID}`))
+      .filter((fm): fm is FlatModel => fm !== undefined)
+      .slice(0, 6);
+  }, [favoriteModels, flatModels]);
+
+  const favoriteModelKeys = useMemo(() => {
+    return new Set(favoriteModels.map((favorite) => `${favorite.providerID}/${favorite.modelID}`));
+  }, [favoriteModels]);
 
   const recentFlatModels = useMemo((): FlatModel[] => {
     return recentModels
-      .map((recent) => {
-        const modelKey = `${recent.providerID}/${recent.modelID}`;
-        return flatModels.find((fm) => fm.modelKey === modelKey);
-      })
+      .filter((recent) => !favoriteModels.some((favorite) => favorite.providerID === recent.providerID && favorite.modelID === recent.modelID))
+      .map((recent) => flatModels.find((fm) => fm.modelKey === `${recent.providerID}/${recent.modelID}`))
       .filter((fm): fm is FlatModel => fm !== undefined)
       .slice(0, 6);
-  }, [recentModels, flatModels]);
+  }, [recentModels, favoriteModels, flatModels]);
 
   const filteredModels = useMemo(() => {
     const search = searchQuery.toLowerCase();
@@ -351,13 +412,20 @@ export function ModelSelectDialog({
         item.provider.name.toLowerCase().includes(search)
       );
     }
+
+    if (!selectedProvider && !search) {
+      filtered = filtered.filter((item) =>
+        !favoriteFlatModels.some((favorite) => favorite.modelKey === item.modelKey) &&
+        !recentFlatModels.some((recent) => recent.modelKey === item.modelKey)
+      );
+    }
     
     return filtered;
-  }, [flatModels, selectedProvider, searchQuery]);
+  }, [flatModels, favoriteFlatModels, recentFlatModels, selectedProvider, searchQuery]);
 
   const selectedProviderData = useMemo(
-    () => connectedProviders.find(p => p.id === selectedProvider),
-    [connectedProviders, selectedProvider]
+    () => selectableProviders.find(p => p.id === selectedProvider),
+    [selectableProviders, selectedProvider]
   );
 
   const handleProviderSelect = useCallback((providerId: string) => {
@@ -374,6 +442,10 @@ export function ModelSelectDialog({
     onOpenChange(false);
   }, [setModel, onOpenChange]);
 
+  const handleFavoriteToggle = useCallback((providerId: string, modelId: string) => {
+    toggleFavorite({ providerID: providerId, modelID: modelId });
+  }, [toggleFavorite]);
+
   const searchResetKey = selectedProvider;
 
   return (
@@ -387,7 +459,7 @@ export function ModelSelectDialog({
 
         <div className="flex flex-1 overflow-hidden">
           <ProviderSidebar
-            providers={connectedProviders}
+            providers={selectableProviders}
             selectedProvider={selectedProvider}
             onSelect={handleProviderSelect}
           />
@@ -399,7 +471,7 @@ export function ModelSelectDialog({
                   <SelectValue placeholder="Select a provider..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {connectedProviders.map((provider) => (
+                  {selectableProviders.map((provider) => (
                     <SelectItem key={provider.id} value={provider.id}>
                       {formatProviderName(provider)} ({provider.models.length})
                     </SelectItem>
@@ -418,8 +490,11 @@ export function ModelSelectDialog({
                 key={selectedProvider || "all"}
                 models={filteredModels}
                 currentModel={currentModel}
+                favoriteModelKeys={favoriteModelKeys}
                 onSelect={handleModelSelect}
+                onToggleFavorite={handleFavoriteToggle}
                 loading={loading}
+                favoriteModels={favoriteFlatModels}
                 recentModels={recentFlatModels}
                 showRecent={!selectedProvider && !searchQuery}
               />

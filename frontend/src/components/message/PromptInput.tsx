@@ -937,7 +937,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const client = useOpenCodeClient(opcodeUrl, directory)
   const { data: providersData } = useQuery({
     queryKey: ['opencode', 'providers', opcodeUrl, directory],
-    queryFn: () => getProviders(),
+    queryFn: () => getProviders(directory),
     enabled: !!client,
     staleTime: 30000,
   })

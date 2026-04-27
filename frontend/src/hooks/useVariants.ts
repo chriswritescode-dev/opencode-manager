@@ -24,7 +24,7 @@ export function useVariants(
 
    const { data: providersData, isLoading } = useQuery({
      queryKey: ['opencode', 'providers', opcodeUrl, directory],
-     queryFn: () => getProviders(),
+     queryFn: () => getProviders(directory),
      enabled: !!client && !!model,
      staleTime: 30000,
    })

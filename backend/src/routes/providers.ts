@@ -1,11 +1,79 @@
 import { Hono } from 'hono'
 import { z } from 'zod'
+import path from 'path'
 import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
 import { setOpenCodeAuth, deleteOpenCodeAuth } from '../services/proxy'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import { fileExists, readFileContent, writeFileContent } from '../services/file-operations'
+import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+
+const ModelSelectionSchema = z.object({
+  providerID: z.string().min(1),
+  modelID: z.string().min(1),
+})
+
+const ModelStateSchema = z.object({
+  recent: z.array(ModelSelectionSchema).default([]),
+  favorite: z.array(ModelSelectionSchema).default([]),
+  variant: z.record(z.string(), z.string().optional()).default({}),
+})
+
+const UpdateModelStateSchema = z.object({
+  recent: ModelSelectionSchema.optional(),
+  favorite: ModelSelectionSchema.optional(),
+})
+
+type ModelSelection = z.infer<typeof ModelSelectionSchema>
+type ModelState = z.infer<typeof ModelStateSchema>
+
+const MAX_RECENT_MODELS = 10
+
+function getModelStatePath(): string {
+  return path.join(getWorkspacePath(), '.opencode', 'state', 'opencode', 'model.json')
+}
+
+async function readModelState(): Promise<ModelState> {
+  const modelStatePath = getModelStatePath()
+  if (!await fileExists(modelStatePath)) {
+    return { recent: [], favorite: [], variant: {} }
+  }
+
+  return ModelStateSchema.parse(JSON.parse(await readFileContent(modelStatePath)))
+}
+
+function uniqueModels(models: ModelSelection[]): ModelSelection[] {
+  const seen = new Set<string>()
+  return models.filter((model) => {
+    const key = `${model.providerID}/${model.modelID}`
+    if (seen.has(key)) {
+      return false
+    }
+    seen.add(key)
+    return true
+  })
+}
+
+async function addRecentModel(model: ModelSelection): Promise<ModelState> {
+  const state = await readModelState()
+  const recent = uniqueModels([model, ...state.recent]).slice(0, MAX_RECENT_MODELS)
+  const nextState = { ...state, recent }
+  await writeFileContent(getModelStatePath(), JSON.stringify(nextState, null, 2))
+  return nextState
+}
+
+async function toggleFavoriteModel(model: ModelSelection): Promise<ModelState> {
+  const state = await readModelState()
+  const exists = state.favorite.some((favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID)
+  const favorite = exists
+    ? state.favorite.filter((favorite) => favorite.providerID !== model.providerID || favorite.modelID !== model.modelID)
+    : uniqueModels([model, ...state.favorite])
+  const nextState = { ...state, favorite }
+  await writeFileContent(getModelStatePath(), JSON.stringify(nextState, null, 2))
+  return nextState
+}
 
 async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
   if (openCodeSupervisor) {
@@ -19,6 +87,35 @@ async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Pr
 export function createProvidersRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const authService = new AuthService()
+
+  app.get('/model-state', async (c) => {
+    try {
+      return c.json(await readModelState())
+    } catch (error) {
+      logger.error('Failed to read OpenCode model state:', error)
+      return c.json({ recent: [], favorite: [], variant: {} })
+    }
+  })
+
+  app.post('/model-state', async (c) => {
+    try {
+      const body = await c.req.json()
+      const validated = UpdateModelStateSchema.parse(body)
+      if (validated.favorite) {
+        return c.json(await toggleFavoriteModel(validated.favorite))
+      }
+      if (!validated.recent) {
+        return c.json(await readModelState())
+      }
+      return c.json(await addRecentModel(validated.recent))
+    } catch (error) {
+      logger.error('Failed to update OpenCode model state:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to update OpenCode model state' }, 500)
+    }
+  })
 
   app.get('/credentials', async (c) => {
     try {
