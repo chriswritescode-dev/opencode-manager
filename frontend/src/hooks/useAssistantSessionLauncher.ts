@@ -40,20 +40,22 @@ export function useAssistantSessionLauncher({
         parts: [
           {
             type: 'text',
-            text: `Welcome to OpenCode Manager! I'm your assistant and I'm here to help you work with your code.
+            text: `Welcome to the OpenCode Manager Assistant workspace.
 
-To get started, let's set up your assistant:
+This chat is running from the shared Assistant directory. Use it to customize how I behave across OpenCode Manager sessions without changing any project repository.
 
-**1. Name your assistant**
-What would you like to call me? This name will help personalize our interactions.
+Start here:
 
-**2. Configure AGENTS.md**
-This file contains instructions that define my behavior, persona, and preferences. You can customize it to match your workflow. Take a moment to review and edit it - you can always adjust it later.
+**1. Review AGENTS.md**
+This file contains durable instructions, preferences, and working agreements for this Assistant workspace.
 
-**3. Set up your v file (optional)**
-The v file stores conversation state and context between sessions. This helps me maintain memory of our work together.
+**2. Review opencode.json**
+This file controls the OpenCode configuration for this workspace, including permissions and Assistant-specific settings.
 
-Take your time exploring and customizing these settings. Let me know when you're ready to start coding, or if you have any questions about getting set up!`,
+**3. Use the update-configuration skill**
+When you want me to change Assistant instructions, workspace config, or Assistant-scoped skills, ask me to use the update-configuration skill. I will make the smallest safe edit, preserve your customizations, validate config, and reload OpenCode when needed.
+
+Tell me what you want this Assistant workspace to remember or how you want it customized.`,
           },
         ],
       })

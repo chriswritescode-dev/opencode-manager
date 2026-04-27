@@ -64,6 +64,7 @@ export const AssistantModeStatusSchema = z.object({
   files: z.object({
     agentsMd: AssistantModeFileSchema,
     opencodeJson: AssistantModeFileSchema,
+    updateConfigurationSkill: AssistantModeFileSchema,
   }),
 })
 

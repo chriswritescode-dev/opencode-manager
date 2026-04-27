@@ -27,6 +27,7 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 - **View diffs** - See code changes with syntax highlighting
 - **Control from anywhere** - Mobile-first PWA with push notifications
 - **Configure AI** - Manage models, providers, and MCP servers
+- **Customize Assistant** - Use the shared Assistant workspace for durable instructions and configuration workflows
 
 ## Key Features
 
@@ -50,6 +51,7 @@ OpenCode Manager provides a web-based interface for OpenCode AI agents, allowing
 - [Installation Guide](getting-started/installation.md) - Detailed setup instructions
 - [Quick Start](getting-started/quickstart.md) - Get up and running fast
 - [Features Overview](features/overview.md) - Explore all features
+- [Assistant Workspace](features/assistant.md) - Customize Assistant behavior and configuration
 - [Schedules & Recurring Jobs](features/schedules.md) - Automate recurring repo reviews and follow-ups
 - [Memory Plugin](features/memory.md) - Persistent project knowledge with semantic search ([GitHub](https://github.com/chriswritescode-dev/opencode-memory))
 - [Configuration](configuration/environment.md) - Environment variables and setup

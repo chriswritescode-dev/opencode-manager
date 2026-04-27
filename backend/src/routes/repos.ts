@@ -423,7 +423,7 @@ app.get('/', async (c) => {
       const options = AssistantModeInitRequestSchema.parse(body)
 
       const status = await ensureAssistantMode(repo, options)
-      if (status.files.opencodeJson.created) {
+      if (status.files.opencodeJson.created || status.files.updateConfigurationSkill.created) {
         opencodeServerManager.clearStartupError()
         await restartOpenCode(openCodeSupervisor)
       }

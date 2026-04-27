@@ -33,6 +33,14 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 
 [Learn more →](chat.md)
 
+### Assistant Workspace
+
+- **Shared Assistant Directory** - Customize Assistant behavior outside project repositories
+- **Seeded Instructions** - Start with editable `AGENTS.md` and `opencode.json` files
+- **Configuration Skill** - Use the `update-configuration` skill to safely change and reload Assistant settings
+
+[Learn more →](assistant.md)
+
 ### Schedules & Recurring Jobs
 
 - **Recurring Repo Jobs** - Run reusable prompts against a repository on an interval or cron schedule

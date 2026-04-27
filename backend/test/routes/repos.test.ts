@@ -149,6 +149,7 @@ describe('Repo Routes', () => {
         files: {
           agentsMd: { path: '/tmp/workspace/repos/assistant/AGENTS.md', exists: false, created: false },
           opencodeJson: { path: '/tmp/workspace/repos/assistant/opencode.json', exists: false, created: false },
+          updateConfigurationSkill: { path: '/tmp/workspace/repos/assistant/.opencode/skills/update-configuration/SKILL.md', exists: false, created: false },
         },
       }
 
@@ -202,6 +203,7 @@ describe('Repo Routes', () => {
         files: {
           agentsMd: { path: '/tmp/workspace/repos/assistant/AGENTS.md', exists: true, created: true },
           opencodeJson: { path: '/tmp/workspace/repos/assistant/opencode.json', exists: true, created: true },
+          updateConfigurationSkill: { path: '/tmp/workspace/repos/assistant/.opencode/skills/update-configuration/SKILL.md', exists: true, created: true },
         },
       }
 
