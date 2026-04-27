@@ -47,7 +47,7 @@ export function MemoryPluginConfig({ memoryPluginEnabled, onToggle }: MemoryPlug
 
   const { data: providersData } = useQuery({
     queryKey: ['providers-for-execution-model'],
-    queryFn: getProviders,
+    queryFn: async () => getProviders(),
     staleTime: 60000,
     enabled: memoryPluginEnabled && expanded,
   })
