@@ -69,6 +69,23 @@ const createTaskToolPart = (description: string, sessionId: string | undefined, 
   },
 })
 
+const createReadToolPart = (filePath: string, messageId: string) => ({
+  type: 'tool' as const,
+  tool: 'read',
+  sessionID: 'test-session',
+  messageID: messageId,
+  id: 'part-read',
+  callID: 'call-read',
+  state: {
+    status: 'completed' as const,
+    input: { filePath },
+    output: 'const value = true',
+    title: 'Read',
+    metadata: {},
+    time: { start: Date.now(), end: Date.now() + 100 },
+  },
+})
+
 const createSubtaskPart = (description: string, messageId: string) => ({
   type: 'subtask' as const,
   prompt: 'Please review this',
@@ -173,7 +190,7 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('Review changes')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
   it('renders assistant message with only task tool part as standalone row without header', () => {
@@ -200,12 +217,36 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('Do something')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
     
     const buttons = container.querySelectorAll('button')
     expect(buttons.length).toBeGreaterThan(0)
     fireEvent.click(buttons[buttons.length - 1])
     expect(onChildSessionClick).toHaveBeenCalledWith('child-session')
+  })
+
+  it('renders assistant message with only read tool part as standalone row without header', () => {
+    setupSettings({
+      simpleChatMode: false,
+      showReasoning: false,
+    })
+
+    const messages = [
+      createUserMessage('1', 'Hello'),
+      createAssistantMessage('2', [createReadToolPart('/workspace/repos/opencode-manager/frontend/src/components/message/LongFileName.tsx', '2')]),
+    ]
+
+    render(
+      <MessageThread
+        opcodeUrl="http://localhost:5551"
+        sessionID="test-session"
+        messages={messages as any}
+      />
+    )
+
+    expect(screen.getByText('Read')).toBeInTheDocument()
+    expect(screen.getByText('LongFileName.tsx')).toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
   it('renders assistant task message with empty text and step finish as standalone row', () => {
@@ -233,7 +274,7 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
   it('renders assistant task message with hidden reasoning as standalone row', () => {
@@ -262,7 +303,7 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
     expect(screen.queryByText('I should use the explore agent')).not.toBeInTheDocument()
   })
 
@@ -292,7 +333,7 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
     expect(screen.queryByText('I should use the explore agent')).not.toBeInTheDocument()
   })
 
@@ -323,7 +364,7 @@ describe('MessageThread', () => {
     expect(screen.getByText('Explore codebase structure')).toBeInTheDocument()
     expect(screen.getByText('sub-agent')).toBeInTheDocument()
     expect(screen.queryByText('I should use the explore agent')).not.toBeInTheDocument()
-    expect(screen.queryByText('test-model')).not.toBeInTheDocument()
+    expect(screen.getByText('test-model')).toBeInTheDocument()
   })
 
   it('renders assistant message with text normally with header', () => {

@@ -53,6 +53,11 @@ export function getRelativePath(filePath: string): string {
   return filePath
 }
 
+function getFileName(filePath: string): string {
+  const normalizedPath = filePath.replace(/\/+$/, '')
+  return normalizedPath.split('/').pop() || filePath
+}
+
 interface FileToolRenderProps {
   part: ToolPart
   filediff?: FileDiffData
@@ -60,14 +65,17 @@ interface FileToolRenderProps {
   content?: string
   toolName: string
   onFileClick?: (filePath: string, lineNumber?: number) => void
+  messageMeta?: {
+    model: string
+    time?: number
+  }
 }
 
-export function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick }: FileToolRenderProps) {
+export function FileToolRender({ part, filediff, filePath, content, toolName, onFileClick, messageMeta }: FileToolRenderProps) {
   const { preferences } = useSettings()
-  const isReadTool = toolName === 'Read'
   const isEditTool = toolName === 'Edit'
   const isWriteTool = toolName === 'Write'
-  const hasExpandableContent = !isReadTool && (filediff || content)
+  const hasExpandableContent = Boolean(filediff || content)
   
   const isFileMutatingTool = isEditTool || isWriteTool
   const defaultExpanded = isFileMutatingTool
@@ -90,29 +98,38 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
   }
 
   return (
-    <div className="border border-border rounded-lg overflow-hidden my-2">
+    <div className="border border-orange-500/20 rounded-lg overflow-hidden my-2 bg-orange-500/5">
       <button
         onClick={() => hasExpandableContent && setExpanded(!expanded)}
-        className="w-full px-3 py-1.5 bg-card hover:bg-card-hover text-left flex items-center justify-between text-sm gap-2"
+        className="w-full px-3 py-2 hover:bg-orange-500/10 text-left text-sm transition-colors"
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-green-600 dark:text-green-400 flex-shrink-0">✓</span>
-          <span className="font-medium flex-shrink-0">{toolName}</span>
-          {filePath && (
-            <span 
-              onClick={handleFileClick}
-              className="text-blue-600 dark:text-blue-400 text-xs truncate hover:underline cursor-pointer"
-            >
-              {getRelativePath(filePath)}
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {filediff && <DiffStats additions={filediff.additions} deletions={filediff.deletions} />}
-          <span className="text-muted-foreground text-xs">{getDuration()}</span>
-          {hasExpandableContent && (
-            expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />
-          )}
+        {messageMeta && (
+          <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="font-medium">{messageMeta.model}</span>
+            {messageMeta.time && <span>{new Date(messageMeta.time).toLocaleTimeString()}</span>}
+          </div>
+        )}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-orange-600 dark:text-orange-400 flex-shrink-0">✓</span>
+            <span className="font-medium flex-shrink-0">{toolName}</span>
+            {filePath && (
+              <span 
+                onClick={handleFileClick}
+                className="text-orange-600 dark:text-orange-400 text-xs truncate hover:underline cursor-pointer"
+                title={getRelativePath(filePath)}
+              >
+                {getFileName(filePath)}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {filediff && <DiffStats additions={filediff.additions} deletions={filediff.deletions} />}
+            <span className="text-muted-foreground text-xs">{getDuration()}</span>
+            {hasExpandableContent && (
+              expanded ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />
+            )}
+          </div>
         </div>
       </button>
 
@@ -126,14 +143,14 @@ export function FileToolRender({ part, filediff, filePath, content, toolName, on
   )
 }
 
-export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: string) => void): React.ReactElement | null {
+export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: string) => void, messageMeta?: FileToolRenderProps['messageMeta']): React.ReactElement | null {
   if (part.state.status !== 'completed') return null
 
   if (part.tool === 'edit') {
     const filediff = part.state.metadata?.filediff
     const filePath = part.state.input?.filePath as string | undefined
     if (filediff && isFileDiff(filediff)) {
-      return <FileToolRender part={part} filediff={filediff} filePath={filePath} toolName="Edit" onFileClick={onFileClick} />
+      return <FileToolRender part={part} filediff={filediff} filePath={filePath} toolName="Edit" onFileClick={onFileClick} messageMeta={messageMeta} />
     }
   }
 
@@ -141,14 +158,14 @@ export function getToolSpecificRender(part: ToolPart, onFileClick?: (filePath: s
     const filePath = part.state.input?.filePath as string | undefined
     const content = part.state.input?.content as string | undefined
     if (filePath) {
-      return <FileToolRender part={part} filePath={filePath} content={content} toolName="Write" onFileClick={onFileClick} />
+      return <FileToolRender part={part} filePath={filePath} content={content} toolName="Write" onFileClick={onFileClick} messageMeta={messageMeta} />
     }
   }
 
   if (part.tool === 'read') {
     const filePath = part.state.input?.filePath as string | undefined
     if (filePath) {
-      return <FileToolRender part={part} filePath={filePath} toolName="Read" onFileClick={onFileClick} />
+      return <FileToolRender part={part} filePath={filePath} content={part.state.output} toolName="Read" onFileClick={onFileClick} messageMeta={messageMeta} />
     }
   }
 

@@ -15,6 +15,10 @@ interface ToolCallPartProps {
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   simpleChatMode?: boolean
+  messageMeta?: {
+    model: string
+    time?: number
+  }
 }
 
 function getTaskSessionId(part: ToolPart): string | undefined {
@@ -65,7 +69,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
-export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
+export function ToolCallPart({ part, onFileClick, onChildSessionClick, messageMeta }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const { getForCallID: getPermissionForCallID } = usePermissions()
@@ -92,7 +96,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const getStatusColor = () => {
     switch (part.state.status) {
       case 'completed':
-        return 'text-green-600 dark:text-green-400'
+        return 'text-orange-600 dark:text-orange-400'
       case 'error':
         return 'text-red-600 dark:text-red-400'
       case 'running':
@@ -158,11 +162,17 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     const content = (
       <div className="flex items-center gap-2 min-w-0">
         {isRunning ? (
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-orange-600 dark:text-orange-400" />
         ) : null}
         <span className="font-medium text-foreground truncate">{description}</span>
         <span className="text-[11px] text-muted-foreground ml-auto shrink-0">sub-agent</span>
-        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-purple-600 dark:text-purple-400" />}
+        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-orange-600 dark:text-orange-400" />}
+      </div>
+    )
+    const meta = messageMeta && (
+      <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+        <span className="font-medium">{messageMeta.model}</span>
+        {messageMeta.time && <span>{new Date(messageMeta.time).toLocaleTimeString()}</span>}
       </div>
     )
 
@@ -170,16 +180,18 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       return (
         <button
           onClick={() => onChildSessionClick?.(sessionId)}
-          className="my-1 w-full rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-purple-500/10 transition-colors"
+          className="my-1 w-full rounded border border-orange-500/20 bg-orange-500/5 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-orange-500/10 transition-colors"
           title="View subagent session"
         >
+          {meta}
           {content}
         </button>
       )
     }
 
     return (
-      <div className="my-1 rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-xs text-muted-foreground">
+      <div className="my-1 rounded border border-orange-500/20 bg-orange-500/5 px-2 py-1 text-xs text-muted-foreground">
+        {meta}
         {content}
       </div>
     )
@@ -223,7 +235,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     return null
   }
 
-  const toolSpecificRender = getToolSpecificRender(part, onFileClick)
+  const toolSpecificRender = getToolSpecificRender(part, onFileClick, messageMeta)
   if (toolSpecificRender) {
     return toolSpecificRender
   }
@@ -234,7 +246,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     return (
       <div className="my-2">
         <div className="flex items-center gap-2 text-sm mb-2">
-          <span className="text-green-600 dark:text-green-400">✓</span>
+          <span className="text-orange-600 dark:text-orange-400">✓</span>
           <span className="font-medium">$</span>
           <span className="text-foreground">{command}</span>
           {part.state.status === 'completed' && part.state.time && (
@@ -264,9 +276,9 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       case 'error':
         return 'border-red-500/30'
       case 'completed':
-        return 'border-border'
+        return 'border-orange-500/20 bg-orange-500/5'
       default:
-        return 'border-border'
+        return 'border-orange-500/20 bg-orange-500/5'
     }
   }
 
@@ -274,45 +286,53 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     <div ref={outputRef} className={`border rounded-lg overflow-hidden my-2 transition-all ${getBorderStyle()}`}>
       <button
         onClick={() => setExpanded(!expanded)}
-        className="w-full px-4 py-2 bg-card hover:bg-card-hover text-left flex items-center gap-2 text-sm min-w-0"
+        className="w-full px-3 py-2 hover:bg-orange-500/10 text-left text-sm min-w-0 transition-colors"
       >
-        <span className={getStatusColor()}>{getStatusIcon()}</span>
-        <span className="font-medium">{part.tool}</span>
+        {messageMeta && (
+          <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+            <span className="font-medium">{messageMeta.model}</span>
+            {messageMeta.time && <span>{new Date(messageMeta.time).toLocaleTimeString()}</span>}
+          </div>
+        )}
+        <div className="flex items-center gap-2 min-w-0 w-full">
+          <span className={getStatusColor()}>{getStatusIcon()}</span>
+          <span className="font-medium">{part.tool}</span>
 
-        {previewText && isFileTool ? (
-          <span
-            onClick={(e) => {
-              e.stopPropagation()
-              if (onFileClick && previewText) {
-                onFileClick(previewText)
-              }
-            }}
-            className="text-blue-600 dark:text-blue-400 text-xs truncate hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
-            title={`Click to open ${previewText}`}
-          >
-            {previewText}
-          </span>
-        ) : previewText ? (
-          <span className="text-muted-foreground text-xs truncate">{previewText}</span>
-        ) : null}
-
-        {part.tool === 'task' && (() => {
-          const sessionId = getTaskSessionId(part)
-          return sessionId ? (
+          {previewText && isFileTool ? (
             <span
               onClick={(e) => {
                 e.stopPropagation()
-                onChildSessionClick?.(sessionId)
+                if (onFileClick && previewText) {
+                  onFileClick(previewText)
+                }
               }}
-              className="text-purple-600 dark:text-purple-400 text-xs hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
-              title="View subagent session"
+              className="text-orange-600 dark:text-orange-400 text-xs truncate hover:underline cursor-pointer"
+              title={`Click to open ${previewText}`}
             >
-              <ExternalLink className="w-3 h-3" />
-              View Session
+              {previewText}
             </span>
-          ) : null
-        })()}
-         <span className="text-muted-foreground text-xs ml-auto">({isWaitingPermission ? 'awaiting permission' : isWaitingQuestion ? 'awaiting answer' : part.state.status})</span>
+          ) : previewText ? (
+            <span className="text-muted-foreground text-xs truncate">{previewText}</span>
+          ) : null}
+
+          {part.tool === 'task' && (() => {
+            const sessionId = getTaskSessionId(part)
+            return sessionId ? (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onChildSessionClick?.(sessionId)
+                }}
+                className="text-orange-600 dark:text-orange-400 text-xs hover:underline cursor-pointer flex items-center gap-1"
+                title="View subagent session"
+              >
+                <ExternalLink className="w-3 h-3" />
+                View Session
+              </span>
+            ) : null
+          })()}
+          <span className="text-muted-foreground text-xs ml-auto">({isWaitingPermission ? 'awaiting permission' : isWaitingQuestion ? 'awaiting answer' : part.state.status})</span>
+        </div>
       </button>
 
       {expanded && (

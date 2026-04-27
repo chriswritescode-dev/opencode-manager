@@ -78,19 +78,15 @@ const hasRenderableContent = (role: Message['role'], parts: Part[], simpleChatMo
   })
 }
 
-function isTaskToolPart(part: Part): part is components['schemas']['ToolPart'] {
-  return part.type === 'tool' && part.tool === 'task'
-}
-
-function isSubAgentActivityPart(part: Part): boolean {
-  return part.type === 'subtask' || isTaskToolPart(part)
+function isStandaloneActivityPart(part: Part): boolean {
+  return part.type === 'tool' || part.type === 'subtask'
 }
 
 function hasTextContent(parts: Part[]): boolean {
   return parts.some(p => p.type === 'text' && !!(p.text && p.text.trim()))
 }
 
-function isIgnorableSubAgentMessagePart(part: Part): boolean {
+function isIgnorableStandaloneMessagePart(part: Part): boolean {
   if (part.type === 'step-start' || part.type === 'step-finish' || part.type === 'compaction') {
     return true
   }
@@ -103,20 +99,20 @@ function isIgnorableSubAgentMessagePart(part: Part): boolean {
   return false
 }
 
-function isStandaloneSubAgentMessage(role: Message['role'], parts: Part[]): boolean {
+function isStandaloneActivityMessage(role: Message['role'], parts: Part[]): boolean {
   if (role !== 'assistant') return false
   if (parts.length === 0) return false
   if (hasTextContent(parts)) return false
   
-  const hasSubAgentActivity = parts.some(isSubAgentActivityPart)
-  const allPartsAreSubAgentOrStructural = parts.every(part => {
-    if (isIgnorableSubAgentMessagePart(part)) {
+  const hasStandaloneActivity = parts.some(isStandaloneActivityPart)
+  const allPartsAreActivityOrStructural = parts.every(part => {
+    if (isIgnorableStandaloneMessagePart(part)) {
       return true
     }
-    return isSubAgentActivityPart(part)
+    return isStandaloneActivityPart(part)
   })
   
-  return hasSubAgentActivity && allPartsAreSubAgentOrStructural
+  return hasStandaloneActivity && allPartsAreActivityOrStructural
 }
 
 const findLastMessageByRole = (
@@ -193,20 +189,25 @@ const MessageRow = memo(function MessageRow({
 
   const hasContent = hasRenderableContent(msg.role, parts, simpleChatMode, showReasoning)
   const hasError = msg.role === 'assistant' && 'error' in msg && msg.error
-  const standaloneSubAgentMessage = isStandaloneSubAgentMessage(msg.role, parts)
+  const standaloneActivityMessage = isStandaloneActivityMessage(msg.role, parts)
 
   if (!hasContent && !hasError) {
     return null
   }
 
-  if (standaloneSubAgentMessage) {
+  if (standaloneActivityMessage) {
+    const messageMeta = {
+      model: msg.role === 'assistant' && 'modelID' in msg ? msg.modelID : 'Assistant',
+      time: msg.time?.created,
+    }
+
     return (
       <div
         key={msg.id}
         className="flex flex-col group"
       >
         <div className="space-y-1">
-          {parts.filter(isSubAgentActivityPart).map((part, partIndex) => (
+          {parts.filter(isStandaloneActivityPart).map((part, partIndex) => (
             <div key={`${msg.id}-${part.id}-${partIndex}`}>
               <MessagePart
                 part={part}
@@ -216,6 +217,7 @@ const MessageRow = memo(function MessageRow({
                 onFileClick={onFileClick}
                 onChildSessionClick={onChildSessionClick}
                 messageTextContent={messageTextContent}
+                messageMeta={messageMeta}
               />
             </div>
           ))}

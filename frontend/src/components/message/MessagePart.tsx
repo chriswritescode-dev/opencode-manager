@@ -22,6 +22,10 @@ interface MessagePartProps {
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
   messageTextContent?: string
+  messageMeta?: {
+    model: string
+    time?: number
+  }
 }
 
 function getCopyableContent(part: Part, allParts?: Part[]): string {
@@ -102,7 +106,7 @@ function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
   )
 }
 
-export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent, messageMeta }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -123,7 +127,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       return <PatchPart part={part} onFileClick={onFileClick} />
     case 'tool':
       if (simpleChatMode && part.tool !== 'task') return null
-      return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} />
+      return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} messageMeta={messageMeta} />
     case 'reasoning':
       if (simpleChatMode || !showReasoning) return null
       return (
@@ -176,7 +180,13 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
     case 'subtask': {
       const label = part.description || part.prompt || 'Sub-agent task'
       return (
-        <div className="my-1 w-full rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-left text-xs text-muted-foreground">
+        <div className="my-1 w-full rounded border border-orange-500/20 bg-orange-500/5 px-2 py-1 text-left text-xs text-muted-foreground">
+          {messageMeta && (
+            <div className="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span className="font-medium">{messageMeta.model}</span>
+              {messageMeta.time && <span>{new Date(messageMeta.time).toLocaleTimeString()}</span>}
+            </div>
+          )}
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate">{label}</span>
             <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">sub-agent</span>
