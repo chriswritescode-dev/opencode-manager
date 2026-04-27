@@ -168,9 +168,11 @@ export interface ProvidersResult {
   default: Record<string, string>;
 }
 
-async function getProvidersFromOpenCodeServer(): Promise<ProvidersResult> {
+async function getProvidersFromOpenCodeServer(directory?: string): Promise<ProvidersResult> {
   try {
-    const response = await fetchWrapper<OpenCodeProviderResponse>(`${API_BASE_URL}/api/opencode/provider`);
+    const response = await fetchWrapper<OpenCodeProviderResponse>(`${API_BASE_URL}/api/opencode/provider`, {
+      params: { directory },
+    });
 
     if (response?.all && Array.isArray(response.all)) {
       const connectedSet = new Set(response.connected || []);
@@ -231,8 +233,8 @@ async function getProvidersFromOpenCodeServer(): Promise<ProvidersResult> {
   return { providers: [], connected: [], default: {} };
 }
 
-export async function getProviders(): Promise<ProvidersResult> {
-  return await getProvidersFromOpenCodeServer();
+export async function getProviders(directory?: string): Promise<ProvidersResult> {
+  return await getProvidersFromOpenCodeServer(directory);
 }
 
 export async function getOpenCodeModelState(): Promise<OpenCodeModelState> {
@@ -244,6 +246,14 @@ export async function addOpenCodeRecentModel(model: ModelSelection): Promise<Ope
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ recent: model }),
+  });
+}
+
+export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promise<OpenCodeModelState> {
+  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ favorite: model }),
   });
 }
 
@@ -296,8 +306,8 @@ async function getConfiguredProviders(connectedIds: Set<string>): Promise<Provid
   }
 }
 
-export async function getProvidersWithModels(): Promise<ProviderWithModels[]> {
-  const { providers: builtinProviders, connected } = await getProviders();
+export async function getProvidersWithModels(directory?: string): Promise<ProviderWithModels[]> {
+  const { providers: builtinProviders, connected } = await getProviders(directory);
   const connectedIds = new Set(connected);
 
   const configuredProviders = await getConfiguredProviders(connectedIds);
@@ -339,8 +349,9 @@ export async function getProvidersWithModels(): Promise<ProviderWithModels[]> {
 export async function getModel(
   providerId: string,
   modelId: string,
+  directory?: string,
 ): Promise<Model | null> {
-  const providers = await getProvidersWithModels();
+  const providers = await getProvidersWithModels(directory);
   const provider = providers.find((p) => p.id === providerId);
   if (!provider) return null;
 

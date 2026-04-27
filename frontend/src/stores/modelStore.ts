@@ -16,6 +16,7 @@ interface ModelStore {
 
   setModel: (model: ModelSelection) => void
   syncModelState: (state: { recent: ModelSelection[], favorite: ModelSelection[], variant: Record<string, string | undefined> }) => void
+  toggleFavorite: (model: ModelSelection) => void
   syncFromConfig: (configModel: string | undefined, force?: boolean) => void
   validateAndSyncModel: (configModel: string | undefined, providers?: Provider[]) => void
   getModelString: () => string | null
@@ -67,6 +68,20 @@ export const useModelStore = create<ModelStore>()(
             ...state.variants,
           },
         }))
+      },
+
+      toggleFavorite: (model: ModelSelection) => {
+        set((state) => {
+          const exists = state.favoriteModels.some(
+            (favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID
+          )
+
+          return {
+            favoriteModels: exists
+              ? state.favoriteModels.filter((favorite) => favorite.providerID !== model.providerID || favorite.modelID !== model.modelID)
+              : [model, ...state.favoriteModels],
+          }
+        })
       },
 
       syncFromConfig: (configModel: string | undefined, force = false) => {

@@ -1,16 +1,14 @@
 import { useCallback, useMemo } from 'react'
-import { Check, ChevronRight, Clock, Sparkles } from 'lucide-react'
+import { Check, ChevronRight, Star } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useModelSelection } from '@/hooks/useModelSelection'
 import { useVariants } from '@/hooks/useVariants'
-import { formatModelName, getProviders } from '@/api/providers'
+import { formatModelName, formatProviderName, getProviders } from '@/api/providers'
 import { useQuery } from '@tanstack/react-query'
 import { useOpenCodeClient } from '@/hooks/useOpenCode'
 
@@ -29,22 +27,27 @@ export function ModelQuickSelect({
   disabled,
   children,
 }: ModelQuickSelectProps) {
-  const { modelString, recentModels, favoriteModels, setModel } = useModelSelection(opcodeUrl, directory)
+  const { model, modelString, recentModels, favoriteModels, setModel, toggleFavorite } = useModelSelection(opcodeUrl, directory)
   const { availableVariants, currentVariant, setVariant, clearVariant, hasVariants } = useVariants(opcodeUrl, directory)
   const client = useOpenCodeClient(opcodeUrl, directory)
 
    const { data: providersData } = useQuery({
      queryKey: ['opencode', 'providers', opcodeUrl, directory],
-     queryFn: () => getProviders(),
+     queryFn: () => getProviders(directory),
      enabled: !!client,
      staleTime: 30000,
    })
 
    const getDisplayName = useCallback((providerID: string, modelID: string) => {
      const modelData = providersData?.providers
-       .find(provider => provider.id === providerID)
-       ?.models?.[modelID]
+        .find(provider => provider.id === providerID)
+        ?.models?.[modelID]
      return modelData ? formatModelName(modelData) : modelID
+   }, [providersData])
+
+   const getProviderName = useCallback((providerID: string) => {
+     const provider = providersData?.providers.find(provider => provider.id === providerID)
+     return provider ? formatProviderName(provider) : providerID
    }, [providersData])
 
    const favoriteModelsWithNames = useMemo(() => {
@@ -52,11 +55,12 @@ export function ModelQuickSelect({
        .filter(favorite => `${favorite.providerID}/${favorite.modelID}` !== modelString)
        .slice(0, 5)
        .map(favorite => ({
-         ...favorite,
-         displayName: getDisplayName(favorite.providerID, favorite.modelID),
-         key: `${favorite.providerID}/${favorite.modelID}`,
-       }))
-   }, [favoriteModels, getDisplayName, modelString])
+          ...favorite,
+          displayName: getDisplayName(favorite.providerID, favorite.modelID),
+          providerName: getProviderName(favorite.providerID),
+          key: `${favorite.providerID}/${favorite.modelID}`,
+        }))
+    }, [favoriteModels, getDisplayName, getProviderName, modelString])
 
    const recentModelsWithNames = useMemo(() => {
      return recentModels
@@ -66,11 +70,21 @@ export function ModelQuickSelect({
        })
        .slice(0, 5)
        .map(recent => ({
-         ...recent,
-         displayName: getDisplayName(recent.providerID, recent.modelID),
-         key: `${recent.providerID}/${recent.modelID}`,
-       }))
-   }, [recentModels, favoriteModels, getDisplayName, modelString])
+          ...recent,
+          displayName: getDisplayName(recent.providerID, recent.modelID),
+          providerName: getProviderName(recent.providerID),
+          key: `${recent.providerID}/${recent.modelID}`,
+        }))
+    }, [recentModels, favoriteModels, getDisplayName, getProviderName, modelString])
+
+  const duplicateDisplayNames = useMemo(() => {
+    const counts = [...favoriteModelsWithNames, ...recentModelsWithNames].reduce<Record<string, number>>((acc, item) => {
+      acc[item.displayName] = (acc[item.displayName] || 0) + 1
+      return acc
+    }, {})
+
+    return new Set(Object.entries(counts).filter(([, count]) => count > 1).map(([name]) => name))
+  }, [favoriteModelsWithNames, recentModelsWithNames])
 
   const handleVariantSelect = (variant: string | undefined) => {
     if (variant === undefined) {
@@ -84,6 +98,14 @@ export function ModelQuickSelect({
     setModel({ providerID, modelID })
   }
 
+  const handleCurrentFavoriteToggle = () => {
+    if (!model) return
+    toggleFavorite(model)
+  }
+
+  const isCurrentFavorite = model
+    ? favoriteModels.some((favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID)
+    : false
   const hasFavorites = favoriteModelsWithNames.length > 0
   const hasRecents = recentModelsWithNames.length > 0
 
@@ -93,12 +115,18 @@ export function ModelQuickSelect({
         {children}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
+        {model && (
+          <DropdownMenuItem
+            onClick={handleCurrentFavoriteToggle}
+            className="flex items-center justify-between"
+          >
+            <span>{isCurrentFavorite ? 'Remove from favorites' : 'Add to favorites'}</span>
+            <Star className={`h-4 w-4 ${isCurrentFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+          </DropdownMenuItem>
+        )}
+
         {hasVariants && (
           <>
-            <DropdownMenuLabel className="flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3" />
-              Thinking Effort
-            </DropdownMenuLabel>
             <DropdownMenuItem
               onClick={() => handleVariantSelect(undefined)}
               className="flex items-center justify-between"
@@ -116,47 +144,44 @@ export function ModelQuickSelect({
                 {currentVariant === variant && <Check className="h-4 w-4" />}
               </DropdownMenuItem>
             ))}
-            {(hasFavorites || hasRecents) && <DropdownMenuSeparator />}
           </>
         )}
 
         {hasFavorites && (
           <>
-            <DropdownMenuLabel className="flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3" />
-              Favorite Models
-            </DropdownMenuLabel>
             {favoriteModelsWithNames.map((favorite) => (
               <DropdownMenuItem
                 key={favorite.key}
                 onClick={() => handleModelSelect(favorite.providerID, favorite.modelID)}
                 className="flex items-center justify-between"
               >
-                <span className="truncate">{favorite.displayName}</span>
+                <span className="truncate">
+                  {duplicateDisplayNames.has(favorite.displayName)
+                    ? `${favorite.providerName}/${favorite.displayName}`
+                    : favorite.displayName}
+                </span>
                 {modelString === favorite.key && <Check className="h-4 w-4" />}
               </DropdownMenuItem>
             ))}
-            {hasRecents && <DropdownMenuSeparator />}
           </>
         )}
 
         {hasRecents && (
           <>
-            <DropdownMenuLabel className="flex items-center gap-1.5">
-              <Clock className="h-3 w-3" />
-              Recent Models
-            </DropdownMenuLabel>
             {recentModelsWithNames.map((recent) => (
               <DropdownMenuItem
                 key={recent.key}
                 onClick={() => handleModelSelect(recent.providerID, recent.modelID)}
                 className="flex items-center justify-between"
               >
-                <span className="truncate">{recent.displayName}</span>
+                <span className="truncate">
+                  {duplicateDisplayNames.has(recent.displayName)
+                    ? `${recent.providerName}/${recent.displayName}`
+                    : recent.displayName}
+                </span>
                 {modelString === recent.key && <Check className="h-4 w-4" />}
               </DropdownMenuItem>
             ))}
-            <DropdownMenuSeparator />
           </>
         )}
 

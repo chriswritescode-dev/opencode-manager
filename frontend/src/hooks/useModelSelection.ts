@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useConfig } from './useOpenCode'
 import { useOpenCodeClient } from './useOpenCode'
 import { useModelStore, type ModelSelection } from '@/stores/modelStore'
-import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders } from '@/api/providers'
+import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, toggleOpenCodeFavoriteModel } from '@/api/providers'
 
 interface UseModelSelectionResult {
   model: ModelSelection | null
@@ -11,6 +11,7 @@ interface UseModelSelectionResult {
   recentModels: ModelSelection[]
   favoriteModels: ModelSelection[]
   setModel: (model: ModelSelection) => void
+  toggleFavorite: (model: ModelSelection) => void
   isModelStateLoading: boolean
 }
 
@@ -26,7 +27,7 @@ export function useModelSelection(
   
   const { data: providersData } = useQuery({
     queryKey: ['opencode', 'providers', opcodeUrl, directory],
-    queryFn: () => getProviders(),
+    queryFn: () => getProviders(directory),
     enabled: !!client,
     staleTime: 30000,
   })
@@ -37,6 +38,7 @@ export function useModelSelection(
     favoriteModels,
     setModel: setStoreModel,
     syncModelState,
+    toggleFavorite: toggleStoreFavorite,
     validateAndSyncModel, 
     getModelString 
   } = useModelStore()
@@ -51,6 +53,15 @@ export function useModelSelection(
 
   const updateRecentModel = useMutation({
     mutationFn: addOpenCodeRecentModel,
+    onSuccess: (state) => {
+      syncModelState(state)
+      queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
+      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
+    },
+  })
+
+  const updateFavoriteModel = useMutation({
+    mutationFn: toggleOpenCodeFavoriteModel,
     onSuccess: (state) => {
       syncModelState(state)
       queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
@@ -80,12 +91,18 @@ export function useModelSelection(
     updateRecentModel.mutate(nextModel)
   }
 
+  const toggleFavorite = (nextModel: ModelSelection) => {
+    toggleStoreFavorite(nextModel)
+    updateFavoriteModel.mutate(nextModel)
+  }
+
   return {
     model,
     modelString: getModelString(),
     recentModels,
     favoriteModels,
     setModel,
+    toggleFavorite,
     isModelStateLoading,
   }
 }

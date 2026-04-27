@@ -7,6 +7,7 @@ import { initializeAssistantMode } from '@/api/repos'
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
   createSession: vi.fn(),
+  sendPrompt: vi.fn(),
   initializeAssistantMode: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock('@/api/opencode', () => ({
   OpenCodeClient: vi.fn(() => ({
     listSessions: mocks.listSessions,
     createSession: mocks.createSession,
+    sendPrompt: mocks.sendPrompt,
   })),
 }))
 
@@ -68,6 +70,14 @@ describe('useAssistantSessionLauncher', () => {
     })
 
     expect(mocks.createSession).toHaveBeenCalledWith({ title: 'Assistant' })
+    expect(mocks.sendPrompt).toHaveBeenCalledWith('created', {
+      parts: [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('Welcome to OpenCode Manager!'),
+        }),
+      ],
+    })
     expect(onNavigate).toHaveBeenCalledWith('created')
   })
 })

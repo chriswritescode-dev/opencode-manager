@@ -23,6 +23,7 @@ const ModelStateSchema = z.object({
 
 const UpdateModelStateSchema = z.object({
   recent: ModelSelectionSchema.optional(),
+  favorite: ModelSelectionSchema.optional(),
 })
 
 type ModelSelection = z.infer<typeof ModelSelectionSchema>
@@ -63,6 +64,17 @@ async function addRecentModel(model: ModelSelection): Promise<ModelState> {
   return nextState
 }
 
+async function toggleFavoriteModel(model: ModelSelection): Promise<ModelState> {
+  const state = await readModelState()
+  const exists = state.favorite.some((favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID)
+  const favorite = exists
+    ? state.favorite.filter((favorite) => favorite.providerID !== model.providerID || favorite.modelID !== model.modelID)
+    : uniqueModels([model, ...state.favorite])
+  const nextState = { ...state, favorite }
+  await writeFileContent(getModelStatePath(), JSON.stringify(nextState, null, 2))
+  return nextState
+}
+
 async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
   if (openCodeSupervisor) {
     await openCodeSupervisor.reloadConfig('settings_reload')
@@ -89,6 +101,9 @@ export function createProvidersRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
     try {
       const body = await c.req.json()
       const validated = UpdateModelStateSchema.parse(body)
+      if (validated.favorite) {
+        return c.json(await toggleFavoriteModel(validated.favorite))
+      }
       if (!validated.recent) {
         return c.json(await readModelState())
       }

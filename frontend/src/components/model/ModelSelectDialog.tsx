@@ -69,14 +69,18 @@ interface ModelCardProps {
   provider: ProviderWithModels;
   modelKey: string;
   isSelected: boolean;
+  isFavorite: boolean;
   onSelect: (providerId: string, modelId: string) => void;
+  onToggleFavorite: (providerId: string, modelId: string) => void;
 }
 
 const ModelCard = memo(function ModelCard({ 
   model, 
   provider, 
   isSelected, 
-  onSelect 
+  isFavorite,
+  onSelect,
+  onToggleFavorite,
 }: ModelCardProps) {
   const capabilities = useMemo(() => {
     const caps = [];
@@ -113,9 +117,21 @@ const ModelCard = memo(function ModelCard({
             {formatProviderName(provider)}
           </p>
         </div>
-        {isSelected && (
-          <Check className="h-4 w-4 text-blue-500 flex-shrink-0 ml-2" />
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleFavorite(provider.id, model.key || model.id);
+            }}
+            aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Star className={`h-4 w-4 ${isFavorite ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`} />
+          </Button>
+          {isSelected && <Check className="h-4 w-4 text-blue-500" />}
+        </div>
       </div>
 
       <div className="text-xs text-muted-foreground mb-2 sm:mb-3 font-mono truncate">
@@ -165,7 +181,9 @@ const ModelCard = memo(function ModelCard({
 interface ModelGridProps {
   models: FlatModel[];
   currentModel: string;
+  favoriteModelKeys: Set<string>;
   onSelect: (providerId: string, modelId: string) => void;
+  onToggleFavorite: (providerId: string, modelId: string) => void;
   loading: boolean;
   favoriteModels?: FlatModel[];
   recentModels?: FlatModel[];
@@ -175,7 +193,9 @@ interface ModelGridProps {
 const ModelGrid = memo(function ModelGrid({ 
   models, 
   currentModel, 
+  favoriteModelKeys,
   onSelect, 
+  onToggleFavorite,
   loading,
   favoriteModels = [],
   recentModels = [],
@@ -213,7 +233,9 @@ const ModelGrid = memo(function ModelGrid({
                 provider={provider}
                 modelKey={modelKey}
                 isSelected={currentModel === modelKey}
+                isFavorite={favoriteModelKeys.has(modelKey)}
                 onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </div>
@@ -234,7 +256,9 @@ const ModelGrid = memo(function ModelGrid({
                 provider={provider}
                 modelKey={modelKey}
                 isSelected={currentModel === modelKey}
+                isFavorite={favoriteModelKeys.has(modelKey)}
                 onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </div>
@@ -256,7 +280,9 @@ const ModelGrid = memo(function ModelGrid({
                 provider={provider}
                 modelKey={modelKey}
                 isSelected={currentModel === modelKey}
+                isFavorite={favoriteModelKeys.has(modelKey)}
                 onSelect={onSelect}
+                onToggleFavorite={onToggleFavorite}
               />
             ))}
           </div>
@@ -318,12 +344,12 @@ export function ModelSelectDialog({
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProvider, setSelectedProvider] = useState<string>("");
 
-  const { modelString, setModel, recentModels, favoriteModels } = useModelSelection(opcodeUrl, directory);
+  const { modelString, setModel, toggleFavorite, recentModels, favoriteModels } = useModelSelection(opcodeUrl, directory);
   const currentModel = modelString || "";
 
   const { data: allProviders = [], isLoading: loading } = useQuery({
     queryKey: ["providers-with-models", opcodeUrl, directory],
-    queryFn: () => getProvidersWithModels(),
+    queryFn: () => getProvidersWithModels(directory),
     enabled: open,
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
@@ -358,6 +384,10 @@ export function ModelSelectDialog({
       .filter((fm): fm is FlatModel => fm !== undefined)
       .slice(0, 6);
   }, [favoriteModels, flatModels]);
+
+  const favoriteModelKeys = useMemo(() => {
+    return new Set(favoriteModels.map((favorite) => `${favorite.providerID}/${favorite.modelID}`));
+  }, [favoriteModels]);
 
   const recentFlatModels = useMemo((): FlatModel[] => {
     return recentModels
@@ -412,6 +442,10 @@ export function ModelSelectDialog({
     onOpenChange(false);
   }, [setModel, onOpenChange]);
 
+  const handleFavoriteToggle = useCallback((providerId: string, modelId: string) => {
+    toggleFavorite({ providerID: providerId, modelID: modelId });
+  }, [toggleFavorite]);
+
   const searchResetKey = selectedProvider;
 
   return (
@@ -456,7 +490,9 @@ export function ModelSelectDialog({
                 key={selectedProvider || "all"}
                 models={filteredModels}
                 currentModel={currentModel}
+                favoriteModelKeys={favoriteModelKeys}
                 onSelect={handleModelSelect}
+                onToggleFavorite={handleFavoriteToggle}
                 loading={loading}
                 favoriteModels={favoriteFlatModels}
                 recentModels={recentFlatModels}
