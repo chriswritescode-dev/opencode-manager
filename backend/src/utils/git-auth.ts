@@ -1,28 +1,25 @@
 import type { GitCredential } from '@opencode-manager/shared'
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
-  try {
-    const parsed = new URL(repoUrl)
-    return parsed.protocol === 'https:' && parsed.hostname === 'github.com'
-  } catch {
-    return false
-  }
+  const url = normalizeGitCredentialUrl(repoUrl)
+  return url?.protocol === 'https:' && url.hostname === 'github.com'
 }
 
 export function getDefaultUsername(host: string): string {
-  try {
-    const parsed = new URL(host)
-    const hostname = parsed.hostname.toLowerCase()
+  const hostname = normalizeGitCredentialUrl(host)?.hostname.toLowerCase() ?? ''
+  if (hostname === 'github.com') {
+    return 'x-access-token'
+  }
+  return 'oauth2'
+}
 
-    if (hostname === 'github.com') {
-      return 'x-access-token'
-    }
-    if (hostname === 'gitlab.com' || hostname.includes('gitlab')) {
-      return 'oauth2'
-    }
-    return 'oauth2'
+function normalizeGitCredentialUrl(host: string): URL | null {
+  const rawHost = host.trim().replace(/\/+$/, '')
+  if (!rawHost) return null
+  try {
+    return new URL(rawHost.includes('://') ? rawHost : `https://${rawHost}`)
   } catch {
-    return 'oauth2'
+    return null
   }
 }
 
@@ -65,11 +62,9 @@ export function extractHostFromSSHUrl(url: string): string | null {
   return null
 }
 
-export function normalizeHost(host: string): string {
-  if (!host.endsWith('/')) {
-    return `${host}/`
-  }
-  return host
+export function normalizeHost(host: string): string | null {
+  const url = normalizeGitCredentialUrl(host)
+  return url ? `${url.protocol}//${url.host}/` : null
 }
 
 export function createGitEnv(credentials: GitCredential[]): Record<string, string> {
@@ -90,6 +85,9 @@ export function createGitEnv(credentials: GitCredential[]): Record<string, strin
     }
 
     const host = normalizeHost(cred.host)
+    if (!host) {
+      continue
+    }
     const username = cred.username || getDefaultUsername(host)
     const basicAuth = Buffer.from(`${username}:${cred.token}`, 'utf8').toString('base64')
 
@@ -107,12 +105,9 @@ export function findGitHubCredential(credentials: GitCredential[]): GitCredentia
   if (!credentials || credentials.length === 0) return null
 
   return credentials.find(cred => {
-    try {
-      const parsed = new URL(cred.host)
-      return parsed.hostname.toLowerCase() === 'github.com'
-    } catch {
-      return false
-    }
+    if (cred.type === 'ssh') return false
+    const hostname = normalizeGitCredentialUrl(cred.host)?.hostname.toLowerCase()
+    return hostname === 'github.com'
   }) || null
 }
 
