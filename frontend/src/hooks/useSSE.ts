@@ -329,6 +329,18 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
     }
   }, [client, setSessionStatus])
 
+  const syncCurrentSession = useCallback(() => {
+    const sessionId = sessionIdRef.current
+    if (!sessionId || !opcodeUrl) return
+
+    queryClient.invalidateQueries({
+      queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory],
+    })
+    queryClient.invalidateQueries({
+      queryKey: ['opencode', 'messages', opcodeUrl, sessionId, directory],
+    })
+  }, [queryClient, opcodeUrl, directory])
+
   useEffect(() => {
     mountedRef.current = true
     
@@ -351,6 +363,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       if (connected) {
         setError(null)
         fetchInitialData()
+        syncCurrentSession()
         sseManager.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {
         setError('Connection lost. Reconnecting...')
@@ -381,7 +394,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       unsubscribe()
       directoryCleanup?.()
     }
-  }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData])
+  }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData, syncCurrentSession])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {
