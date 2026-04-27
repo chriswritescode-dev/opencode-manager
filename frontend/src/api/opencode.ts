@@ -11,6 +11,7 @@ type CommandListResponse = paths['/command']['get']['responses']['200']['content
 type CommandRequest = NonNullable<paths['/session/{sessionID}/command']['post']['requestBody']>['content']['application/json']
 type ShellRequest = NonNullable<paths['/session/{sessionID}/shell']['post']['requestBody']>['content']['application/json']
 type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
+type PermissionListResponse = paths['/permission']['get']['responses']['200']['content']['application/json']
 type QuestionListResponse = paths['/question']['get']['responses']['200']['content']['application/json']
 type SendPromptResponse = paths['/session/{sessionID}/message']['post']['responses']['200']['content']['application/json']
 type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['application/json']
@@ -183,6 +184,12 @@ export class OpenCodeClient {
     })
   }
 
+  async listPendingPermissions() {
+    return fetchWrapper<PermissionListResponse>(`${this.baseURL}/permission`, {
+      params: this.getParams(),
+    })
+  }
+
   async replyToQuestion(requestID: string, answers: string[][]) {
     return fetchWrapper(`${this.baseURL}/question/${requestID}/reply`, {
       method: 'POST',
@@ -248,4 +255,3 @@ export class OpenCodeClient {
 export const createOpenCodeClient = (baseURL: string, directory?: string) => {
   return new OpenCodeClient(baseURL, directory)
 }
-

@@ -156,7 +156,7 @@ export function SessionDetail() {
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isEnabled: ttsEnabled } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
-  const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion } = useQuestions();
+  const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
 
   const sessionStatus = useSessionStatusForSession(sessionId);
   const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
@@ -189,6 +189,13 @@ export function SessionDetail() {
       setMinimizedQuestion(null)
     }
   }, [sessionId, minimizedQuestion])
+
+  useEffect(() => {
+    if (!repoDirectory || !sessionId) return
+    syncQuestionsForSession(repoDirectory, sessionId).catch(() => {
+      showToast.error('Failed to load pending questions')
+    })
+  }, [repoDirectory, sessionId, syncQuestionsForSession])
 
   const handleNewSession = useCallback(async () => {
     try {

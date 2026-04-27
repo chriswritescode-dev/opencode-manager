@@ -99,6 +99,7 @@ export interface SSETodoUpdatedEvent {
 export interface SSEPermissionAskedEvent {
   type: 'permission.asked'
   properties: PermissionRequest
+  directory?: string
 }
 
 export interface SSEPermissionRepliedEvent {
@@ -113,6 +114,7 @@ export interface SSEPermissionRepliedEvent {
 export interface SSEQuestionAskedEvent {
   type: 'question.asked'
   properties: QuestionRequest
+  directory?: string
 }
 
 export interface SSEQuestionRepliedEvent {
