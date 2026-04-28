@@ -13,6 +13,20 @@ import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessi
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
 
+function groupQuestionsBySession(questions: QuestionRequest[]): QuestionsBySession {
+  return questions.reduce<QuestionsBySession>((grouped, question) => {
+    const existing = grouped[question.sessionID] ?? []
+    return {
+      ...grouped,
+      [question.sessionID]: [...existing, question],
+    }
+  }, {})
+}
+
+function sortQuestionsById(questions: QuestionRequest[]): QuestionRequest[] {
+  return [...questions].sort((a, b) => a.id.localeCompare(b.id))
+}
+
 function optimisticallyErrorToolPart(
   queryClient: ReturnType<typeof useQueryClient>,
   sessionID: string,
@@ -107,6 +121,7 @@ interface EventContextValue {
     getForCallID: (callID: string, sessionID: string) => QuestionRequest | null
     hasForSession: (sessionID: string) => boolean
     navigateToCurrent: () => void
+    syncForSession: (directory: string, sessionID: string) => Promise<void>
   }
   getRepoIdForSession: (sessionID: string) => number | null
   getClient: (sessionID: string) => OpenCodeClient | null
@@ -135,6 +150,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const [showPermissionDialog, setShowPermissionDialog] = useState(true)
 
   const clientsRef = useRef<Map<string, OpenCodeClient>>(new Map())
+  const sessionDirectoriesRef = useRef<Map<string, string>>(new Map())
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
   const MAX_CACHED_CLIENTS = 50
@@ -157,7 +173,15 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const currentPermission = allPermissions[0] ?? null
   const currentQuestion = allQuestions[0] ?? null
 
-  const findSessionInCache = useCallback((sessionID: string): { url: string; directory: string } | null => {
+  const rememberSessionDirectory = useCallback((sessionID: string, directory?: string) => {
+    if (!directory) return
+    sessionDirectoriesRef.current.set(sessionID, directory)
+  }, [])
+
+  const findSessionDirectory = useCallback((sessionID: string): string | null => {
+    const remembered = sessionDirectoriesRef.current.get(sessionID)
+    if (remembered) return remembered
+
     const cache = queryClient.getQueryCache()
     const queries = cache.getAll()
 
@@ -166,9 +190,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       if (key[0] === 'opencode' && key[1] === 'session' && key.length >= 5) {
         const sessionData = query.state.data as { id: string } | undefined
         if (sessionData?.id === sessionID) {
-          const url = key[2] as string
           const directory = key[4] as string
-          if (url && directory) return { url, directory }
+          if (directory) return directory
         }
       }
     }
@@ -180,9 +203,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         if (!sessionsList) continue
         const found = sessionsList.find(s => s.id === sessionID)
         if (found) {
-          const url = key[2] as string
           const directory = key[3] as string
-          if (url && directory) return { url, directory }
+          if (directory) return directory
         }
       }
     }
@@ -190,13 +212,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return null
   }, [queryClient])
 
+  const findSessionInCache = useCallback((sessionID: string): { url: string; directory: string } | null => {
+    const directory = findSessionDirectory(sessionID)
+    if (!directory) return null
+    return { url: OPENCODE_API_ENDPOINT, directory }
+  }, [findSessionDirectory])
+
   const getRepoIdForSession = useCallback((sessionID: string): number | null => {
     if (!repos) return null
-    const result = findSessionInCache(sessionID)
-    if (!result) return null
-    const repo = repos.find(r => r.fullPath === result.directory)
+    const directory = findSessionDirectory(sessionID)
+    if (!directory) return null
+    const repo = repos.find(r => r.fullPath === directory)
     return repo?.id ?? null
-  }, [repos, findSessionInCache])
+  }, [repos, findSessionDirectory])
 
   const getClient = useCallback((sessionID: string): OpenCodeClient | null => {
     const result = findSessionInCache(sessionID)
@@ -230,6 +258,31 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const removeQuestion = useCallback((requestID: string, sessionID?: string) => {
     removeFromSessionKeyedState(setQuestionsBySession, requestID, sessionID)
   }, [])
+
+  const reconcileQuestionsForDirectory = useCallback((directory: string, questions: QuestionRequest[]) => {
+    const grouped = groupQuestionsBySession(questions)
+
+    questions.forEach(question => {
+      rememberSessionDirectory(question.sessionID, directory)
+    })
+
+    setQuestionsBySession(prev => {
+      const next = { ...prev }
+
+      for (const sessionID of Object.keys(prev)) {
+        if (grouped[sessionID]) continue
+        if (sessionDirectoriesRef.current.get(sessionID) === directory) {
+          delete next[sessionID]
+        }
+      }
+
+      for (const [sessionID, sessionQuestions] of Object.entries(grouped)) {
+        next[sessionID] = sortQuestionsById(sessionQuestions)
+      }
+
+      return next
+    })
+  }, [rememberSessionDirectory])
 
   useEffect(() => {
     const permissionCount = allPermissions.length
@@ -275,7 +328,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const client = getClient(question.sessionID)
     if (!client) throw new Error('No client found for session')
     await client.replyToQuestion(requestID, answers)
-  }, [getClient, questionsBySession])
+    removeQuestion(requestID, question.sessionID)
+  }, [getClient, questionsBySession, removeQuestion])
 
   const rejectQuestion = useCallback(async (requestID: string) => {
     const connected = await ensureSSEConnected()
@@ -293,7 +347,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     await client.rejectQuestion(requestID)
-  }, [getClient, questionsBySession, queryClient])
+    removeQuestion(requestID, question.sessionID)
+  }, [getClient, questionsBySession, queryClient, removeQuestion])
 
   const getPermissionForCallID = useCallback((callID: string, sessionID: string): PermissionRequest | null => {
     const perms = permissionsBySession[sessionID] ?? []
@@ -346,17 +401,29 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     for (const directory of uniqueDirectories) {
       try {
         const client = new OpenCodeClient(OPENCODE_API_ENDPOINT, directory)
-        const pendingQuestions = await client.listPendingQuestions()
-        if (pendingQuestions && pendingQuestions.length > 0) {
-          pendingQuestions.forEach(addQuestion)
+        const pendingPermissions = await client.listPendingPermissions()
+        if (pendingPermissions && pendingPermissions.length > 0) {
+          pendingPermissions.forEach(permission => {
+            rememberSessionDirectory(permission.sessionID, directory)
+            addPermission(permission)
+          })
         }
+        const pendingQuestions = await client.listPendingQuestions()
+        reconcileQuestionsForDirectory(directory, pendingQuestions ?? [])
       } catch (error) {
         if (import.meta.env.DEV) {
           console.warn(`Failed to fetch pending questions for ${directory}:`, error)
         }
       }
     }
-  }, [repos, addQuestion])
+  }, [repos, addPermission, rememberSessionDirectory, reconcileQuestionsForDirectory])
+
+  const syncQuestionsForSession = useCallback(async (directory: string, sessionID: string) => {
+    const client = new OpenCodeClient(OPENCODE_API_ENDPOINT, directory)
+    const pendingQuestions = await client.listPendingQuestions()
+    rememberSessionDirectory(sessionID, directory)
+    reconcileQuestionsForDirectory(directory, pendingQuestions ?? [])
+  }, [rememberSessionDirectory, reconcileQuestionsForDirectory])
 
   useEffect(() => {
     const handleSSEMessage = (data: unknown) => {
@@ -367,6 +434,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       switch (event.type) {
         case 'permission.asked':
           if ('permission' in event.properties && 'sessionID' in event.properties) {
+            rememberSessionDirectory(event.properties.sessionID as string, event.directory)
             addPermission(event.properties as PermissionRequest)
           }
           break
@@ -380,6 +448,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         case 'question.asked':
           if ('questions' in event.properties && 'sessionID' in event.properties && 'id' in event.properties) {
+            rememberSessionDirectory(event.properties.sessionID as string, event.directory)
             addQuestion(event.properties as QuestionRequest)
           }
           break
@@ -436,7 +505,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
     const unsubscribe = subscribeToSSE(handleSSEMessage, handleStatusChange)
     return unsubscribe
-  }, [addPermission, removePermission, addQuestion, removeQuestion, fetchInitialPendingData, queryClient])
+  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return
@@ -487,6 +556,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       getForCallID: getQuestionForCallID,
       hasForSession: hasQuestionsForSession,
       navigateToCurrent: navigateToCurrentQuestion,
+      syncForSession: syncQuestionsForSession,
     },
     getRepoIdForSession,
     getClient,
@@ -509,6 +579,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     getQuestionForCallID,
     hasQuestionsForSession,
     navigateToCurrentQuestion,
+    syncQuestionsForSession,
     getRepoIdForSession,
     getClient,
   ])

@@ -27,7 +27,7 @@ import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
-import { useAutoPlayLastResponse } from "@/hooks/useAutoPlayLastResponse";
+import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from "@/hooks/useAutoPlayLastResponse";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
@@ -156,12 +156,13 @@ export function SessionDetail() {
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const { isEnabled: ttsEnabled } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
-  const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion } = useQuestions();
+  const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
 
   const sessionStatus = useSessionStatusForSession(sessionId);
   const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
-  const lastAssistantText = (lastAssistantMessage?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n') || '';
+  const lastAssistantText = getAssistantText(lastAssistantMessage);
+  const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
 
@@ -189,6 +190,13 @@ export function SessionDetail() {
       setMinimizedQuestion(null)
     }
   }, [sessionId, minimizedQuestion])
+
+  useEffect(() => {
+    if (!repoDirectory || !sessionId) return
+    syncQuestionsForSession(repoDirectory, sessionId).catch(() => {
+      showToast.error('Failed to load pending questions')
+    })
+  }, [repoDirectory, sessionId, syncQuestionsForSession])
 
   const handleNewSession = useCallback(async () => {
     try {
@@ -449,10 +457,10 @@ export function SessionDetail() {
           >
             <div className="relative w-[94%] md:max-w-4xl">
               <div className="absolute -top-5 right-0 md:right-4 z-50 flex flex-col items-end gap-2">
-                {ttsEnabled && !hasPromptContent && !isSessionActive && lastAssistantMessage && lastAssistantText && (
+                {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
                   <FloatingTTSButton
-                    messageId={lastAssistantMessage.info.id}
-                    content={lastAssistantText}
+                    messageId={latestPlayableAssistant.message.info.id}
+                    content={latestPlayableAssistant.text}
                   />
                 )}
                 {hasPromptContent && (
