@@ -20,7 +20,8 @@ import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
 import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
 import { useTheme } from './hooks/useTheme'
-import { useSwipeBack } from './hooks/useMobile'
+import { useRightEdgeSwipe, useSwipeBack } from './hooks/useMobile'
+import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
@@ -76,6 +77,7 @@ function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
+  const { open: openMobileSheet, openSheet } = useMobileTabBar()
   useTheme()
 
   const getSwipeBackTarget = () => {
@@ -123,12 +125,32 @@ function AppShell() {
     }
   )
 
+  const canOpenMoreWithSwipe = () => {
+    return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(location.pathname) && !openSheet
+  }
+
+  const { bind: bindMoreSwipe } = useRightEdgeSwipe(
+    () => openMobileSheet('more'),
+    {
+      enabled: canOpenMoreWithSwipe(),
+      edgeWidth: 32,
+      threshold: 72,
+    }
+  )
+
   useEffect(() => {
     const cleanup = bindRouteSwipe(rootRef.current)
     return () => {
       cleanup?.()
     }
   }, [bindRouteSwipe])
+
+  useEffect(() => {
+    const cleanup = bindMoreSwipe(rootRef.current)
+    return () => {
+      cleanup?.()
+    }
+  }, [bindMoreSwipe])
 
   useEffect(() => {
     const channel = new BroadcastChannel('notification-click')

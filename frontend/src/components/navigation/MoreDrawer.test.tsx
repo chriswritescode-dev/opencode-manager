@@ -4,9 +4,14 @@ import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { MoreDrawer } from './MoreDrawer'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useCommands } from '@/hooks/useCommands'
+import { useFileSearch } from '@/hooks/useFileSearch'
+import { useUIState } from '@/stores/uiStateStore'
 
 vi.mock('@/hooks/useAuth')
 vi.mock('@/hooks/useServerHealth')
+vi.mock('@/hooks/useCommands')
+vi.mock('@/hooks/useFileSearch')
 vi.mock('@/hooks/useMemoryPluginStatus', () => ({
   useMemoryPluginStatus: () => ({ memoryPluginEnabled: false }),
 }))
@@ -64,6 +69,28 @@ describe('MoreDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(useNavigate).mockReturnValue(vi.fn())
+    vi.mocked(useCommands).mockReturnValue({
+      commands: [],
+      loading: false,
+      error: null,
+      filterCommands: vi.fn().mockReturnValue([
+        {
+          name: 'help',
+          description: 'Show help',
+          template: '',
+          agent: '',
+          model: '',
+          hints: [],
+        },
+      ]),
+    })
+    vi.mocked(useFileSearch).mockReturnValue({
+      files: ['src/App.tsx'],
+      isLoading: false,
+      error: null,
+    })
+    useUIState.getState().clearPendingPromptCommand()
+    useUIState.getState().clearPendingPromptFile()
   })
 
   it('renders Settings and Logout menu items', () => {
@@ -155,6 +182,39 @@ describe('MoreDrawer', () => {
       { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
     )
     expect(screen.getByText('OpenCode')).toBeInTheDocument()
+  })
+
+  it('shows session commands and selects a command', () => {
+    mockAuth()
+    mockServerHealth()
+    const handleClose = vi.fn()
+    render(
+      <MoreDrawer isOpen onClose={handleClose} />,
+      { wrapper: ({ children }) => <MemoryRouter initialEntries={['/repos/1/sessions/session-1']}>{children}</MemoryRouter> },
+    )
+
+    fireEvent.click(screen.getByText('Commands'))
+    fireEvent.click(screen.getByText('/help'))
+
+    expect(useUIState.getState().pendingPromptCommand?.command.name).toBe('help')
+    expect(handleClose).toHaveBeenCalled()
+  })
+
+  it('shows session files and selects a file mention', () => {
+    mockAuth()
+    mockServerHealth()
+    const handleClose = vi.fn()
+    render(
+      <MoreDrawer isOpen onClose={handleClose} />,
+      { wrapper: ({ children }) => <MemoryRouter initialEntries={['/repos/1/sessions/session-1']}>{children}</MemoryRouter> },
+    )
+
+    fireEvent.click(screen.getByText('Mention File'))
+    fireEvent.change(screen.getByPlaceholderText('Search files...'), { target: { value: 'app' } })
+    fireEvent.click(screen.getByText('App.tsx'))
+
+    expect(useUIState.getState().pendingPromptFile?.path).toBe('src/App.tsx')
+    expect(handleClose).toHaveBeenCalled()
   })
 
 })

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { useSwipeBack, useSwipeDismiss } from './useMobile'
+import { useRightEdgeSwipe, useSwipeBack, useSwipeDismiss } from './useMobile'
 import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 
 describe('useSwipeBack', () => {
@@ -178,6 +178,79 @@ describe('useSwipeBack', () => {
     
     unmount()
     expect(swipeNavValue?.isSuspended()).toBe(false)
+  })
+})
+
+describe('useRightEdgeSwipe', () => {
+  const mockOnOpen = vi.fn()
+
+  beforeEach(() => {
+    mockOnOpen.mockClear()
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 375,
+    })
+  })
+
+  it('opens when swiping left from the right edge', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() =>
+      useRightEdgeSwipe(mockOnOpen, {
+        enabled: true,
+        edgeWidth: 32,
+        threshold: 72,
+      })
+    )
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 365, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 285, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 285, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnOpen).toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
+  it('ignores swipes that do not start on the right edge', () => {
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() =>
+      useRightEdgeSwipe(mockOnOpen, {
+        enabled: true,
+        edgeWidth: 32,
+        threshold: 72,
+      })
+    )
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 300, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 220, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 220, clientY: 100 }] as any,
+    }))
+
+    expect(mockOnOpen).not.toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
   })
 })
 

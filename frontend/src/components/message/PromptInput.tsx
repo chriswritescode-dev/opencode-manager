@@ -11,6 +11,7 @@ import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
+import { useUIState } from '@/stores/uiStateStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
@@ -122,6 +123,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const voiceHoldActivatedRef = useRef(false)
   const voiceStartRequestRef = useRef(0)
   const handleSubmitRef = useRef<() => void>(() => {})
+  const pendingPromptCommand = useUIState((state) => state.pendingPromptCommand)
+  const pendingPromptFile = useUIState((state) => state.pendingPromptFile)
+  const clearPendingPromptCommand = useUIState((state) => state.clearPendingPromptCommand)
+  const clearPendingPromptFile = useUIState((state) => state.clearPendingPromptFile)
+  const setActivePromptDirectory = useUIState((state) => state.setActivePromptDirectory)
 
   const {
     isRecording,
@@ -323,7 +329,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     abortSession.mutate(sessionID)
   }
 
-  const handleCommandSelect = async (command: CommandType) => {
+  const handleCommandSelect = useCallback(async (command: CommandType) => {
     if (!textareaRef.current) return
     
     setShowSuggestions(false)
@@ -348,25 +354,73 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       const cursorPosition = textareaRef.current.selectionStart
       const commandMatch = prompt.slice(0, cursorPosition).match(/(^|\s)\/([a-zA-Z0-9_-]*)$/)
       
-      if (commandMatch) {
-        const beforeCommand = prompt.slice(0, commandMatch.index)
-        const afterCommand = prompt.slice(cursorPosition)
-        const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
-        
-        setPrompt(newPrompt)
-        
-        setTimeout(() => {
-          if (textareaRef.current) {
-            const newCursorPos = beforeCommand.length + command.name.length + 2
-            textareaRef.current.focus()
-            textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-            textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-          }
-        }, 0)
-      }
+      const beforeCommand = commandMatch ? prompt.slice(0, commandMatch.index) : ''
+      const afterCommand = commandMatch ? prompt.slice(cursorPosition) : ''
+      const newPrompt = beforeCommand + '/' + command.name + ' ' + afterCommand
+      
+      setPrompt(newPrompt)
+      
+      setTimeout(() => {
+        if (textareaRef.current) {
+          const newCursorPos = beforeCommand.length + command.name.length + 2
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+        }
+      }, 0)
     }
-  }
-  
+  }, [prompt])
+
+  useEffect(() => {
+    if (!pendingPromptCommand) return
+    handleCommandSelect(pendingPromptCommand.command)
+    clearPendingPromptCommand()
+  }, [pendingPromptCommand, handleCommandSelect, clearPendingPromptCommand])
+
+  const insertFileMention = useCallback((filePath: string, range: { start: number, end: number } | null = mentionRange) => {
+    const filename = getFilename(filePath)
+    const beforeMention = range ? prompt.slice(0, range.start) : `${prompt}${prompt.trim() ? ' ' : ''}`
+    const afterMention = range ? prompt.slice(range.end) : ''
+    const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
+
+    setPrompt(newPrompt)
+
+    const absolutePath = filePath.startsWith('/')
+      ? filePath
+      : directory
+        ? `${directory}/${filePath}`
+        : filePath
+
+    setAttachedFiles(prev => {
+      const next = new Map(prev)
+      next.set(filename.toLowerCase(), {
+        path: absolutePath,
+        name: filename
+      })
+      return next
+    })
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        const newCursorPos = beforeMention.length + filename.length + 2
+        textareaRef.current.focus()
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
+        textareaRef.current.scrollTop = textareaRef.current.scrollHeight
+      }
+    }, 0)
+  }, [directory, mentionRange, prompt])
+
+  useEffect(() => {
+    if (!pendingPromptFile) return
+    insertFileMention(pendingPromptFile.path, null)
+    clearPendingPromptFile()
+  }, [pendingPromptFile, insertFileMention, clearPendingPromptFile])
+
+  useEffect(() => {
+    setActivePromptDirectory(directory ?? null)
+    return () => setActivePromptDirectory(null)
+  }, [directory, setActivePromptDirectory])
+   
   const handleMentionSelect = (item: MentionItem) => {
     if (!mentionRange || !textareaRef.current) return
     
@@ -387,33 +441,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         }
       }, 0)
     } else {
-      const filename = getFilename(item.value)
-      const newPrompt = beforeMention + '@' + filename + ' ' + afterMention
-      setPrompt(newPrompt)
-      
-      const absolutePath = item.value.startsWith('/') 
-        ? item.value 
-        : directory 
-          ? `${directory}/${item.value}` 
-          : item.value
-      
-      setAttachedFiles(prev => {
-        const next = new Map(prev)
-        next.set(filename.toLowerCase(), {
-          path: absolutePath,
-          name: filename
-        })
-        return next
-      })
-      
-      setTimeout(() => {
-        if (textareaRef.current) {
-          const newCursorPos = beforeMention.length + filename.length + 2
-          textareaRef.current.focus()
-          textareaRef.current.setSelectionRange(newCursorPos, newCursorPos)
-          textareaRef.current.scrollTop = textareaRef.current.scrollHeight
-        }
-      }, 0)
+      insertFileMention(item.value, mentionRange)
     }
     
     setShowMentionSuggestions(false)

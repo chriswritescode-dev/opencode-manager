@@ -39,14 +39,20 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   }, [repos, searchQuery])
 
   const handleClick = (id: number) => {
-    if (id === activeRepoId) {
+    const pendingAction = new URLSearchParams(location.search).get('mobileTabAction')
+    if (pendingAction === 'assistant') {
+      navigate(`/repos/${id}/assistant`)
       onClose()
       return
     }
 
-    const pendingAction = new URLSearchParams(location.search).get('mobileTabAction')
-    if (pendingAction === 'assistant') {
-      navigate(`/repos/${id}/assistant`)
+    const isAssistantRoute = location.pathname === `/repos/${id}/assistant`
+    if (id === activeRepoId) {
+      if (isAssistantRoute) {
+        navigate(`/repos/${id}`, { replace: true })
+        return
+      }
+
       onClose()
       return
     }

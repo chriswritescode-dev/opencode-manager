@@ -38,6 +38,12 @@ export interface UseSwipeDismissOptions {
   suspendsRouteSwipe?: boolean
 }
 
+export interface UseRightEdgeSwipeOptions {
+  threshold?: number
+  edgeWidth?: number
+  enabled?: boolean
+}
+
 function useSwipeHandlers(
   onClose: () => void,
   options: UseSwipeBackOptions & { direction: 'horizontal' | 'vertical' } = { direction: 'horizontal' }
@@ -375,4 +381,94 @@ export function useSwipeDismiss(
   )
 
   return { bind: wrappedBind, swipeProgress, swipeStyles }
+}
+
+export function useRightEdgeSwipe(
+  onOpen: () => void,
+  options: UseRightEdgeSwipeOptions = {}
+) {
+  const {
+    threshold = 80,
+    edgeWidth = 28,
+    enabled = true,
+  } = options
+
+  const isMobile = useMobile()
+  const swipeRef = useRef({
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    isSwiping: false,
+    isEdgeSwipe: false,
+  })
+
+  const handleTouchStart = useCallback((event: TouchEvent) => {
+    if (!enabled || !isMobile) return
+
+    const touch = event.touches[0]
+    swipeRef.current = {
+      startX: touch.clientX,
+      startY: touch.clientY,
+      currentX: touch.clientX,
+      isSwiping: false,
+      isEdgeSwipe: window.innerWidth - touch.clientX <= edgeWidth,
+    }
+  }, [edgeWidth, enabled, isMobile])
+
+  const handleTouchMove = useCallback((event: TouchEvent) => {
+    if (!enabled || !isMobile) return
+
+    const state = swipeRef.current
+    if (!state.isEdgeSwipe) return
+
+    const touch = event.touches[0]
+    const deltaX = touch.clientX - state.startX
+    const deltaY = Math.abs(touch.clientY - state.startY)
+
+    if (!state.isSwiping) {
+      if (deltaX < -10 && Math.abs(deltaX) > deltaY * 2) {
+        state.isSwiping = true
+      } else {
+        return
+      }
+    }
+
+    event.preventDefault()
+    state.currentX = touch.clientX
+  }, [enabled, isMobile])
+
+  const handleTouchEnd = useCallback(() => {
+    if (!enabled || !isMobile) return
+
+    const state = swipeRef.current
+    if (state.isSwiping && state.startX - state.currentX >= threshold) {
+      onOpen()
+    }
+
+    swipeRef.current = {
+      startX: 0,
+      startY: 0,
+      currentX: 0,
+      isSwiping: false,
+      isEdgeSwipe: false,
+    }
+  }, [enabled, isMobile, onOpen, threshold])
+
+  const bind = useCallback((element: HTMLElement | null) => {
+    if (!element || !enabled || !isMobile) return undefined
+
+    element.addEventListener('touchstart', handleTouchStart, { passive: true })
+    element.addEventListener('touchmove', handleTouchMove, { passive: false })
+    element.addEventListener('touchend', handleTouchEnd, { passive: true })
+    element.addEventListener('touchcancel', handleTouchEnd, { passive: true })
+
+    return () => {
+      element.removeEventListener('touchstart', handleTouchStart)
+      element.removeEventListener('touchmove', handleTouchMove)
+      element.removeEventListener('touchend', handleTouchEnd)
+      element.removeEventListener('touchcancel', handleTouchEnd)
+    }
+  }, [enabled, handleTouchEnd, handleTouchMove, handleTouchStart, isMobile])
+
+  return { bind }
 }

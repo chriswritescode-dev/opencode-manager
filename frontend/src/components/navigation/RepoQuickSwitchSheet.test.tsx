@@ -164,4 +164,46 @@ describe('RepoQuickSwitchSheet', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/assistant')
     expect(handleClose).toHaveBeenCalled()
   })
+
+  it('navigates from assistant to repo detail when clicking active repo', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    const handleClose = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1/assistant?mobileTab=repos']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('repo1'))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1')
+    expect(handleClose).not.toHaveBeenCalled()
+  })
 })
