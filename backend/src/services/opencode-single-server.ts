@@ -24,6 +24,7 @@ import { patchOpenCodeConfig } from './proxy'
 
 const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
+const OPENCODE_SERVER_CONNECT_HOST = OPENCODE_SERVER_HOST === '0.0.0.0' ? '127.0.0.1' : OPENCODE_SERVER_HOST
 const OPENCODE_SERVER_PUBLIC_URL = ENV.OPENCODE.PUBLIC_URL
 const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
 const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
@@ -549,7 +550,7 @@ class OpenCodeServerManager {
       if (OPENCODE_BASIC_AUTH) {
         headers.Authorization = OPENCODE_BASIC_AUTH
       }
-      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
+      const response = await fetch(`http://${OPENCODE_SERVER_CONNECT_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
         signal: AbortSignal.timeout(3000),
         headers
       })

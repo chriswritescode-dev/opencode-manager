@@ -3,7 +3,8 @@ import { ENV } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { timingSafeEqual } from 'crypto'
 
-export const OPENCODE_SERVER_URL = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
+const OPENCODE_CONNECT_HOST = ENV.OPENCODE.HOST === '0.0.0.0' ? '127.0.0.1' : ENV.OPENCODE.HOST
+export const OPENCODE_SERVER_URL = `http://${OPENCODE_CONNECT_HOST}:${ENV.OPENCODE.PORT}`
 const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
 const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
 

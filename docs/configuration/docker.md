@@ -38,6 +38,7 @@ services:
     container_name: opencode-manager
     ports:
       - "5003:5003"
+      - "5551:5551"
       - "5100:5100"
       - "5101:5101"
       - "5102:5102"
@@ -47,6 +48,8 @@ services:
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
+      - OPENCODE_HOST=0.0.0.0
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?Set OPENCODE_SERVER_PASSWORD before exposing OpenCode on port 5551}
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000
