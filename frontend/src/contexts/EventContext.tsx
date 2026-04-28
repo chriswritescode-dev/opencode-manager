@@ -315,7 +315,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     await client.respondToPermission(sessionID, permissionID, response)
-  }, [getClient, permissionsBySession, queryClient])
+    removePermission(permissionID, sessionID)
+  }, [getClient, permissionsBySession, queryClient, removePermission])
 
   const replyToQuestion = useCallback(async (requestID: string, answers: string[][]) => {
     const connected = await ensureSSEConnected()
