@@ -157,6 +157,8 @@ export function SessionDetail() {
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
   const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
+  const setActivePromptDirectory = useUIState((state) => state.setActivePromptDirectory);
+  const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const { syncForSession: syncPermissionsForSession } = usePermissions();
@@ -169,6 +171,18 @@ export function SessionDetail() {
   const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
+  const assistantFileBasePath = assistantMode?.directory.split('/').filter(Boolean).at(-1);
+  const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo?.localPath) ?? repo?.localPath;
+
+  useEffect(() => {
+    setActivePromptDirectory(repoDirectory ?? null)
+    setActivePromptFileBasePath(repoDirectory ? workspaceBasePath ?? null : null)
+
+    return () => {
+      setActivePromptDirectory(null)
+      setActivePromptFileBasePath(null)
+    }
+  }, [repoDirectory, setActivePromptDirectory, setActivePromptFileBasePath, workspaceBasePath])
 
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',
@@ -403,8 +417,6 @@ export function SessionDetail() {
   }
 
   const workspaceDisplayName = isAssistantSession ? 'Assistant' : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
-  const assistantFileBasePath = assistantMode?.directory.split('/').filter(Boolean).at(-1);
-  const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo.localPath) ?? repo.localPath;
   const sessionBackPath = isAssistantSession ? `/repos/${repoId}/assistant?view=sessions` : `/repos/${repoId}`;
 
   return (

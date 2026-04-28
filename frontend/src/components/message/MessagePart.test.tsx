@@ -676,4 +676,39 @@ describe('MessagePart', () => {
       expect(screen.getByText('Reasoning')).toBeInTheDocument()
     })
   })
+
+  describe('synthetic text parts', () => {
+    const createTextPart = (overrides: Partial<MessagePartType>): MessagePartType => ({
+      type: 'text',
+      text: 'hello',
+      sessionID: 'test-session',
+      messageID: 'm1',
+      ...overrides,
+    } as MessagePartType)
+
+    it('does not render synthetic text parts', () => {
+      setup()
+      const part = createTextPart({
+        text: 'Called the Read tool with the following input: {"filePath":"/x/README.md"}',
+        synthetic: true,
+      } as Partial<MessagePartType>)
+
+      const { container } = render(
+        <MessagePart part={part} role="user" allParts={[part]} partIndex={0} />,
+      )
+
+      expect(container.firstChild).toBeNull()
+    })
+
+    it('renders non-synthetic text parts normally', () => {
+      setup()
+      const part = createTextPart({ text: 'Just a normal user message' })
+
+      render(
+        <MessagePart part={part} role="user" allParts={[part]} partIndex={0} />,
+      )
+
+      expect(screen.getByText('Just a normal user message')).toBeInTheDocument()
+    })
+  })
 })

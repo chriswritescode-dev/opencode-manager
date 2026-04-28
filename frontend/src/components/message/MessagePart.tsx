@@ -111,6 +111,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
   
   switch (part.type) {
     case 'text':
+      if (part.synthetic) return null
       if (role === 'user' && allParts && partIndex !== undefined) {
         const nextPart = allParts[partIndex + 1]
         if (nextPart && nextPart.type === 'file') {

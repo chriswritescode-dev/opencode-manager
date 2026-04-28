@@ -9,6 +9,7 @@ import { GPU_ACCELERATED_STYLE, MODAL_TRANSITION_MS } from '@/lib/utils'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { downloadDirectoryAsZip } from '@/api/files'
 import { downloadRepo } from '@/api/repos'
+import type { FileInfo } from '@/types/files'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,9 +25,10 @@ interface FileBrowserSheetProps {
   repoId?: number
   initialSelectedFile?: string
   allowNavigateAboveBase?: boolean
+  onFileSelect?: (file: FileInfo) => void
 }
 
-export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, repoId, initialSelectedFile, allowNavigateAboveBase = false }: FileBrowserSheetProps) {
+export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose, basePath = '', repoName, repoId, initialSelectedFile, allowNavigateAboveBase = false, onFileSelect }: FileBrowserSheetProps) {
   const normalizedBasePath = basePath || '.'
   const [isEditing, setIsEditing] = useState(false)
   const [displayPath, setDisplayPath] = useState<string>('/')
@@ -197,6 +199,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
             basePath={normalizedBasePath}
             embedded={true}
             initialSelectedFile={initialSelectedFile}
+            onFileSelect={onFileSelect}
             onDirectoryLoad={handleDirectoryLoad}
             onPreviewStateChange={setIsPreviewOpen}
             allowNavigateAboveBase={allowNavigateAboveBase}

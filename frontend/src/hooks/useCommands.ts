@@ -4,6 +4,17 @@ import type { components } from '@/api/opencode-types'
 
 type CommandType = components['schemas']['Command']
 
+function sortCommandsByName(commands: CommandType[]): CommandType[] {
+  return [...commands].sort((a, b) => a.name.localeCompare(b.name))
+}
+
+function rankCommandMatch(command: CommandType, searchTerm: string): number {
+  const name = command.name.toLowerCase()
+  if (name === searchTerm) return 0
+  if (name.startsWith(searchTerm)) return 1
+  return 2
+}
+
 // Built-in OpenCode commands
 const BUILTIN_COMMANDS: CommandType[] = [
   {
@@ -153,7 +164,7 @@ const BUILTIN_COMMANDS: CommandType[] = [
 ]
 
 export function useCommands(opcodeUrl: string | null) {
-  const [commands, setCommands] = useState<CommandType[]>(BUILTIN_COMMANDS)
+  const [commands, setCommands] = useState<CommandType[]>(sortCommandsByName(BUILTIN_COMMANDS))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -171,10 +182,10 @@ export function useCommands(opcodeUrl: string | null) {
         const uniqueCommands = allCommands.filter((command, index, self) =>
           index === self.findIndex((c) => c.name === command.name)
         )
-        setCommands(uniqueCommands)
+        setCommands(sortCommandsByName(uniqueCommands))
       } catch {
         setError('Failed to load commands')
-        setCommands(BUILTIN_COMMANDS)
+        setCommands(sortCommandsByName(BUILTIN_COMMANDS))
       } finally {
         setLoading(false)
       }
@@ -187,9 +198,13 @@ export function useCommands(opcodeUrl: string | null) {
     if (!query.trim()) return commands
     
     const searchTerm = query.toLowerCase()
-    return commands.filter(command =>
-      command.name.toLowerCase().includes(searchTerm)
-    )
+    return commands
+      .filter(command => command.name.toLowerCase().includes(searchTerm))
+      .sort((a, b) => {
+        const rankDifference = rankCommandMatch(a, searchTerm) - rankCommandMatch(b, searchTerm)
+        if (rankDifference !== 0) return rankDifference
+        return a.name.localeCompare(b.name)
+      })
   }
 
   return {
