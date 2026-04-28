@@ -15,7 +15,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
     WORKSPACE: { BASE_PATH: '/test/workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: 'test-opencode-password', SERVER_USERNAME: 'opencode' },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
       MAX_SIZE_BYTES: 1024 * 1024,
@@ -59,6 +59,108 @@ const createMockFetch = (response: Response) => {
 }
 
 describe('proxy service', () => {
+  describe('isOpenCodeProxyBasicAuth', () => {
+    it('should accept OpenCode Basic auth with the server password', async () => {
+      const { isOpenCodeProxyBasicAuth } = await import('../../src/services/proxy')
+      const auth = Buffer.from('opencode:test-opencode-password').toString('base64')
+      const request = new Request('http://manager.test/api/opencode/global/health', {
+        headers: { Authorization: `Basic ${auth}` },
+      })
+
+      expect(isOpenCodeProxyBasicAuth(request)).toBe(true)
+    })
+
+    it('should reject OpenCode Basic auth with the wrong password', async () => {
+      const { isOpenCodeProxyBasicAuth } = await import('../../src/services/proxy')
+      const auth = Buffer.from('opencode:wrong-password').toString('base64')
+      const request = new Request('http://manager.test/api/opencode/global/health', {
+        headers: { Authorization: `Basic ${auth}` },
+      })
+
+      expect(isOpenCodeProxyBasicAuth(request)).toBe(false)
+    })
+  })
+
+  describe('proxyRequest', () => {
+    const originalFetch = global.fetch
+
+    beforeEach(() => {
+      vi.clearAllMocks()
+    })
+
+    afterEach(() => {
+      global.fetch = originalFetch
+    })
+
+    it('should stream upstream responses without buffering', async () => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {}\n\n'))
+          controller.close()
+        },
+      })
+      const upstreamResponse = new Response(stream, {
+        status: 200,
+        statusText: 'OK',
+        headers: {
+          'content-type': 'text/event-stream',
+          'content-length': '128',
+          'content-encoding': 'gzip',
+        },
+      })
+      const fetchMock = vi.fn().mockResolvedValue(upstreamResponse)
+      global.fetch = fetchMock as unknown as typeof fetch
+
+      const { proxyRequest } = await import('../../src/services/proxy')
+      const clientAuth = `Basic ${Buffer.from('opencode:client-password').toString('base64')}`
+      const response = await proxyRequest(new Request('http://manager.test/api/opencode/global/event?directory=/repo', {
+        headers: {
+          Authorization: clientAuth,
+          'X-Test': 'yes',
+        },
+      }))
+
+      expect(response.body).toBe(upstreamResponse.body)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toBe('text/event-stream')
+      expect(response.headers.has('content-length')).toBe(false)
+      expect(response.headers.has('content-encoding')).toBe(false)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      const [targetUrl, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      const headers = init.headers as Record<string, string>
+      expect(targetUrl).toBe('http://127.0.0.1:5551/global/event?directory=/repo')
+      expect(headers.Authorization).toBe(`Basic ${Buffer.from('opencode:test-opencode-password').toString('base64')}`)
+      expect(headers.authorization).toBeUndefined()
+      expect(headers['x-test']).toBe('yes')
+    })
+
+    it('should set duplex when forwarding a streamed request body', async () => {
+      const upstreamResponse = new Response('{}', { status: 200 })
+      const fetchMock = vi.fn().mockResolvedValue(upstreamResponse)
+      global.fetch = fetchMock as unknown as typeof fetch
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('{"prompt":"hi"}'))
+          controller.close()
+        },
+      })
+      const request = new Request('http://manager.test/api/opencode/session', {
+        method: 'POST',
+        body,
+        headers: { 'Content-Type': 'application/json' },
+        duplex: 'half',
+      } as RequestInit & { duplex: 'half' })
+
+      const { proxyRequest } = await import('../../src/services/proxy')
+      await proxyRequest(request)
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit & { duplex?: 'half' }]
+      expect(init.body).toBe(request.body)
+      expect(init.duplex).toBe('half')
+    })
+  })
+
   describe('patchOpenCodeConfig', () => {
     const originalFetch = global.fetch
 

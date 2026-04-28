@@ -1,5 +1,6 @@
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
+import { createMiddleware } from 'hono/factory'
 import { cors } from 'hono/cors'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { readFile } from 'fs/promises'
@@ -39,7 +40,7 @@ import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
-import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
+import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate, isOpenCodeProxyBasicAuth } from './services/proxy'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { migrateGlobalSkills } from './services/skills'
@@ -80,6 +81,14 @@ app.use('/*', cors({
 const db = initializeDatabase(DB_PATH)
 const auth = createAuth(db)
 const requireAuth = createAuthMiddleware(auth)
+const requireOpenCodeProxyAuth = createMiddleware(async (c, next) => {
+  if (isOpenCodeProxyBasicAuth(c.req.raw)) {
+    await next()
+    return
+  }
+
+  return requireAuth(c, next)
+})
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -282,24 +291,24 @@ protectedApi.route('/memory', createMemoryRoutes(db))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 
-app.route('/api', protectedApi)
-
-app.post('/api/opencode/mcp/:name/auth', requireAuth, async (c) => {
+app.post('/api/opencode/mcp/:name/auth', requireOpenCodeProxyAuth, async (c) => {
   const serverName = c.req.param('name')
   const directory = c.req.query('directory')
   return proxyMcpAuthStart(serverName, directory)
 })
 
-app.post('/api/opencode/mcp/:name/auth/authenticate', requireAuth, async (c) => {
+app.post('/api/opencode/mcp/:name/auth/authenticate', requireOpenCodeProxyAuth, async (c) => {
   const serverName = c.req.param('name')
   const directory = c.req.query('directory')
   return proxyMcpAuthAuthenticate(serverName, directory)
 })
 
-app.all('/api/opencode/*', requireAuth, async (c) => {
+app.all('/api/opencode/*', requireOpenCodeProxyAuth, async (c) => {
   const request = c.req.raw
   return proxyRequest(request)
 })
+
+app.route('/api', protectedApi)
 
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
 
