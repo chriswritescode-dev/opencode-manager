@@ -13,6 +13,20 @@ import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessi
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
 
+function groupQuestionsBySession(questions: QuestionRequest[]): QuestionsBySession {
+  return questions.reduce<QuestionsBySession>((grouped, question) => {
+    const existing = grouped[question.sessionID] ?? []
+    return {
+      ...grouped,
+      [question.sessionID]: [...existing, question],
+    }
+  }, {})
+}
+
+function sortQuestionsById(questions: QuestionRequest[]): QuestionRequest[] {
+  return [...questions].sort((a, b) => a.id.localeCompare(b.id))
+}
+
 function optimisticallyErrorToolPart(
   queryClient: ReturnType<typeof useQueryClient>,
   sessionID: string,
@@ -245,17 +259,30 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     removeFromSessionKeyedState(setQuestionsBySession, requestID, sessionID)
   }, [])
 
-  const replaceQuestionsForSession = useCallback((sessionID: string, questions: QuestionRequest[]) => {
+  const reconcileQuestionsForDirectory = useCallback((directory: string, questions: QuestionRequest[]) => {
+    const grouped = groupQuestionsBySession(questions)
+
+    questions.forEach(question => {
+      rememberSessionDirectory(question.sessionID, directory)
+    })
+
     setQuestionsBySession(prev => {
       const next = { ...prev }
-      if (questions.length === 0) {
-        delete next[sessionID]
-        return next
+
+      for (const sessionID of Object.keys(prev)) {
+        if (grouped[sessionID]) continue
+        if (sessionDirectoriesRef.current.get(sessionID) === directory) {
+          delete next[sessionID]
+        }
       }
-      next[sessionID] = questions
+
+      for (const [sessionID, sessionQuestions] of Object.entries(grouped)) {
+        next[sessionID] = sortQuestionsById(sessionQuestions)
+      }
+
       return next
     })
-  }, [])
+  }, [rememberSessionDirectory])
 
   useEffect(() => {
     const permissionCount = allPermissions.length
@@ -301,7 +328,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     const client = getClient(question.sessionID)
     if (!client) throw new Error('No client found for session')
     await client.replyToQuestion(requestID, answers)
-  }, [getClient, questionsBySession])
+    removeQuestion(requestID, question.sessionID)
+  }, [getClient, questionsBySession, removeQuestion])
 
   const rejectQuestion = useCallback(async (requestID: string) => {
     const connected = await ensureSSEConnected()
@@ -319,7 +347,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     await client.rejectQuestion(requestID)
-  }, [getClient, questionsBySession, queryClient])
+    removeQuestion(requestID, question.sessionID)
+  }, [getClient, questionsBySession, queryClient, removeQuestion])
 
   const getPermissionForCallID = useCallback((callID: string, sessionID: string): PermissionRequest | null => {
     const perms = permissionsBySession[sessionID] ?? []
@@ -380,29 +409,21 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           })
         }
         const pendingQuestions = await client.listPendingQuestions()
-        if (pendingQuestions && pendingQuestions.length > 0) {
-          pendingQuestions.forEach(question => {
-            rememberSessionDirectory(question.sessionID, directory)
-            addQuestion(question)
-          })
-        }
+        reconcileQuestionsForDirectory(directory, pendingQuestions ?? [])
       } catch (error) {
         if (import.meta.env.DEV) {
           console.warn(`Failed to fetch pending questions for ${directory}:`, error)
         }
       }
     }
-  }, [repos, addPermission, addQuestion, rememberSessionDirectory])
+  }, [repos, addPermission, rememberSessionDirectory, reconcileQuestionsForDirectory])
 
   const syncQuestionsForSession = useCallback(async (directory: string, sessionID: string) => {
     const client = new OpenCodeClient(OPENCODE_API_ENDPOINT, directory)
     const pendingQuestions = await client.listPendingQuestions()
     rememberSessionDirectory(sessionID, directory)
-    replaceQuestionsForSession(
-      sessionID,
-      (pendingQuestions ?? []).filter(question => question.sessionID === sessionID)
-    )
-  }, [rememberSessionDirectory, replaceQuestionsForSession])
+    reconcileQuestionsForDirectory(directory, pendingQuestions ?? [])
+  }, [rememberSessionDirectory, reconcileQuestionsForDirectory])
 
   useEffect(() => {
     const handleSSEMessage = (data: unknown) => {

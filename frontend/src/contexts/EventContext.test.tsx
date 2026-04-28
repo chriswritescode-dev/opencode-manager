@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
   listPendingPermissions: vi.fn(),
   listPendingQuestions: vi.fn(),
+  replyToQuestion: vi.fn(),
+  rejectQuestion: vi.fn(),
   subscribeToSSE: vi.fn(),
   addSSEDirectory: vi.fn(),
   ensureSSEConnected: vi.fn(),
@@ -24,6 +26,8 @@ vi.mock('@/api/opencode', () => ({
   OpenCodeClient: vi.fn(() => ({
     listPendingPermissions: mocks.listPendingPermissions,
     listPendingQuestions: mocks.listPendingQuestions,
+    replyToQuestion: mocks.replyToQuestion,
+    rejectQuestion: mocks.rejectQuestion,
   })),
 }))
 
@@ -58,8 +62,26 @@ const pendingQuestion: QuestionRequest = {
   ],
 }
 
+const secondPendingQuestion: QuestionRequest = {
+  id: 'question-2',
+  sessionID: 'session-2',
+  questions: [
+    {
+      question: 'Deploy?',
+      header: 'Deploy',
+      options: [
+        {
+          label: 'Yes',
+          description: 'Deploy changes',
+        },
+      ],
+      multiple: false,
+    },
+  ],
+}
+
 function Harness() {
-  const { current, pendingCount, syncForSession, navigateToCurrent } = useQuestions()
+  const { current, pendingCount, syncForSession, navigateToCurrent, reject, reply } = useQuestions()
   const location = useLocation()
 
   return (
@@ -69,6 +91,8 @@ function Harness() {
       <div data-testid="path">{location.pathname}</div>
       <button onClick={() => syncForSession('/repo', 'session-1')}>Sync</button>
       <button onClick={navigateToCurrent}>Navigate</button>
+      <button onClick={() => current && reject(current.id)}>Dismiss</button>
+      <button onClick={() => current && reply(current.id, [['Yes']])}>Reply</button>
     </div>
   )
 }
@@ -95,6 +119,8 @@ describe('EventProvider questions', () => {
     mocks.listRepos.mockResolvedValue([])
     mocks.listPendingPermissions.mockResolvedValue([])
     mocks.listPendingQuestions.mockResolvedValue([])
+    mocks.replyToQuestion.mockResolvedValue(undefined)
+    mocks.rejectQuestion.mockResolvedValue(undefined)
     mocks.subscribeToSSE.mockReturnValue(() => {})
     mocks.addSSEDirectory.mockReturnValue(() => {})
     mocks.ensureSSEConnected.mockResolvedValue(true)
@@ -134,6 +160,49 @@ describe('EventProvider questions', () => {
     })
   })
 
+  it('reconciles pending questions for the whole directory', async () => {
+    mocks.listPendingQuestions
+      .mockResolvedValueOnce([pendingQuestion, secondPendingQuestion])
+      .mockResolvedValueOnce([pendingQuestion])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+    })
+  })
+
+  it('reconciles stale pending questions after reconnect', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+    mocks.listPendingQuestions
+      .mockResolvedValueOnce([pendingQuestion])
+      .mockResolvedValueOnce([])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    const lastSubscribeCall = mocks.subscribeToSSE.mock.calls[mocks.subscribeToSSE.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[1] as (connected: boolean) => void
+    handleStatusChange(true)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
   it('navigates to a synced pending question without session query cache', async () => {
     mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
     mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
@@ -150,6 +219,44 @@ describe('EventProvider questions', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('path')).toHaveTextContent('/repos/123/sessions/session-1')
+    })
+  })
+
+  it('clears a pending question after dismiss succeeds', async () => {
+    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('clears a pending question after reply succeeds', async () => {
+    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reply' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('0')
+      expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
   })
 })

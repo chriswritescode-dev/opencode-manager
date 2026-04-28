@@ -27,7 +27,7 @@ interface MockTTSReturn {
   activeMessageId: string | null
 }
 
-import { useAutoPlayLastResponse } from '../useAutoPlayLastResponse'
+import { getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from '../useAutoPlayLastResponse'
 
 const createMessage = (id: string, completed?: number): MessageWithParts => ({
   info: {
@@ -65,6 +65,29 @@ const createMessage = (id: string, completed?: number): MessageWithParts => ({
       time: {
         start: Date.now(),
         end: Date.now() + 100,
+      },
+    },
+  ],
+})
+
+const createAssistantMessageWithoutText = (id: string): MessageWithParts => ({
+  ...createMessage(id, Date.now()),
+  parts: [
+    {
+      id: 'part-1',
+      sessionID: 'test-session',
+      messageID: id,
+      type: 'tool',
+      callID: 'call-1',
+      tool: 'question',
+      state: {
+        status: 'error',
+        input: {},
+        error: 'Question rejected',
+        time: {
+          start: Date.now(),
+          end: Date.now() + 100,
+        },
       },
     },
   ],
@@ -331,5 +354,28 @@ describe('useAutoPlayLastResponse', () => {
     )
 
     expect(mockSpeakMessage).not.toHaveBeenCalled()
+  })
+})
+
+describe('getLatestPlayableAssistantMessage', () => {
+  it('falls back to the previous assistant message when the latest assistant message has no text', () => {
+    const playableMessage = createMessage('1', Date.now())
+    const erroredMessage = createAssistantMessageWithoutText('2')
+
+    const result = getLatestPlayableAssistantMessage([
+      playableMessage,
+      erroredMessage,
+    ])
+
+    expect(result?.message.info.id).toBe('1')
+    expect(result?.text).toBe('Test message text')
+  })
+
+  it('returns undefined when no assistant message has playable text', () => {
+    const result = getLatestPlayableAssistantMessage([
+      createAssistantMessageWithoutText('1'),
+    ])
+
+    expect(result).toBeUndefined()
   })
 })

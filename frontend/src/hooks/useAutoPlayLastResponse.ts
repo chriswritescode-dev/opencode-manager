@@ -10,6 +10,23 @@ interface UseAutoPlayLastResponseParams {
   isStreamingResponse: boolean
 }
 
+interface PlayableAssistantMessage {
+  message: MessageWithParts
+  text: string
+}
+
+export function getAssistantText(message: MessageWithParts | undefined): string {
+  return (message?.parts ?? []).filter(p => p.type === 'text').map(p => p.text).join('\n\n')
+}
+
+export function getLatestPlayableAssistantMessage(messages: MessageWithParts[] | undefined): PlayableAssistantMessage | undefined {
+  return messages
+    ?.filter(message => message.info.role === 'assistant')
+    .map(message => ({ message, text: getAssistantText(message) }))
+    .filter(({ text }) => text.trim().length > 0)
+    .at(-1)
+}
+
 function isMessageCompleted(message: MessageWithParts['info']): boolean {
   return message.role === 'assistant' && message.time.completed !== undefined
 }
