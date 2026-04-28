@@ -309,6 +309,18 @@ describe('PromptInput STT Gesture Tests', () => {
       expect(mockStartRecording).not.toHaveBeenCalled()
     })
 
+    it('outside press cancels recording and hides voice gesture state', async () => {
+      renderComponent({ isRecording: true })
+      mockAbortRecording.mockClear()
+
+      await act(async () => {
+        fireEvent.pointerDown(document.body)
+      })
+
+      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
+      expect(mockStopRecording).not.toHaveBeenCalled()
+    })
+
     it('failed start clears toggling state', async () => {
       mockStartRecording.mockResolvedValue(false)
 
