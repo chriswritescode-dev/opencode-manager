@@ -157,7 +157,6 @@ export function SessionDetail() {
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
   const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
-  const setActivePromptDirectory = useUIState((state) => state.setActivePromptDirectory);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
   const setSessionStatus = useSessionStatus((state) => state.setStatus);
@@ -175,14 +174,12 @@ export function SessionDetail() {
   const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo?.localPath) ?? repo?.localPath;
 
   useEffect(() => {
-    setActivePromptDirectory(repoDirectory ?? null)
     setActivePromptFileBasePath(repoDirectory ? workspaceBasePath ?? null : null)
 
     return () => {
-      setActivePromptDirectory(null)
       setActivePromptFileBasePath(null)
     }
-  }, [repoDirectory, setActivePromptDirectory, setActivePromptFileBasePath, workspaceBasePath])
+  }, [repoDirectory, setActivePromptFileBasePath, workspaceBasePath])
 
   useAutoPlayLastResponse({
     sessionId: sessionId ?? '',

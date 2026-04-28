@@ -93,7 +93,6 @@ describe('MoreDrawer', () => {
     })
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
-    useUIState.getState().setActivePromptDirectory(null)
     useUIState.getState().setActivePromptFileBasePath(null)
   })
 

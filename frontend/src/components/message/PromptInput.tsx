@@ -127,7 +127,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const pendingPromptFile = useUIState((state) => state.pendingPromptFile)
   const clearPendingPromptCommand = useUIState((state) => state.clearPendingPromptCommand)
   const clearPendingPromptFile = useUIState((state) => state.clearPendingPromptFile)
-  const setActivePromptDirectory = useUIState((state) => state.setActivePromptDirectory)
 
   const {
     isRecording,
@@ -416,11 +415,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     clearPendingPromptFile()
   }, [pendingPromptFile, insertFileMention, clearPendingPromptFile])
 
-  useEffect(() => {
-    setActivePromptDirectory(directory ?? null)
-    return () => setActivePromptDirectory(null)
-  }, [directory, setActivePromptDirectory])
-   
   const handleMentionSelect = (item: MentionItem) => {
     if (!mentionRange || !textareaRef.current) return
     

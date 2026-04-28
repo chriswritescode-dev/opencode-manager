@@ -13,32 +13,43 @@ import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessi
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
 
-function groupPermissionsBySession(permissions: PermissionRequest[]): PermissionsBySession {
-  return permissions.reduce<PermissionsBySession>((grouped, permission) => {
-    const existing = grouped[permission.sessionID] ?? []
+type SessionScopedItem = { id: string; sessionID: string }
+
+function groupBySession<T extends SessionScopedItem>(items: T[]): Record<string, T[]> {
+  return items.reduce<Record<string, T[]>>((grouped, item) => {
+    const existing = grouped[item.sessionID] ?? []
     return {
       ...grouped,
-      [permission.sessionID]: [...existing, permission],
+      [item.sessionID]: [...existing, item],
     }
   }, {})
 }
 
-function groupQuestionsBySession(questions: QuestionRequest[]): QuestionsBySession {
-  return questions.reduce<QuestionsBySession>((grouped, question) => {
-    const existing = grouped[question.sessionID] ?? []
-    return {
-      ...grouped,
-      [question.sessionID]: [...existing, question],
+function sortById<T extends SessionScopedItem>(items: T[]): T[] {
+  return [...items].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+function reconcileBySessionForDirectory<T extends SessionScopedItem>(
+  prev: Record<string, T[]>,
+  directory: string,
+  items: T[],
+  sessionDirectories: Map<string, string>,
+): Record<string, T[]> {
+  const grouped = groupBySession(items)
+  const next = { ...prev }
+
+  for (const sessionID of Object.keys(prev)) {
+    if (grouped[sessionID]) continue
+    if (sessionDirectories.get(sessionID) === directory) {
+      delete next[sessionID]
     }
-  }, {})
-}
+  }
 
-function sortQuestionsById(questions: QuestionRequest[]): QuestionRequest[] {
-  return [...questions].sort((a, b) => a.id.localeCompare(b.id))
-}
+  for (const [sessionID, sessionItems] of Object.entries(grouped)) {
+    next[sessionID] = sortById(sessionItems)
+  }
 
-function sortPermissionsById(permissions: PermissionRequest[]): PermissionRequest[] {
-  return [...permissions].sort((a, b) => a.id.localeCompare(b.id))
+  return next
 }
 
 function optimisticallyErrorToolPart(
@@ -275,53 +286,23 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const reconcilePermissionsForDirectory = useCallback((directory: string, permissions: PermissionRequest[]) => {
-    const grouped = groupPermissionsBySession(permissions)
-
     permissions.forEach(permission => {
       rememberSessionDirectory(permission.sessionID, directory)
     })
 
-    setPermissionsBySession(prev => {
-      const next = { ...prev }
-
-      for (const sessionID of Object.keys(prev)) {
-        if (grouped[sessionID]) continue
-        if (sessionDirectoriesRef.current.get(sessionID) === directory) {
-          delete next[sessionID]
-        }
-      }
-
-      for (const [sessionID, sessionPermissions] of Object.entries(grouped)) {
-        next[sessionID] = sortPermissionsById(sessionPermissions)
-      }
-
-      return next
-    })
+    setPermissionsBySession(prev =>
+      reconcileBySessionForDirectory(prev, directory, permissions, sessionDirectoriesRef.current),
+    )
   }, [rememberSessionDirectory])
 
   const reconcileQuestionsForDirectory = useCallback((directory: string, questions: QuestionRequest[]) => {
-    const grouped = groupQuestionsBySession(questions)
-
     questions.forEach(question => {
       rememberSessionDirectory(question.sessionID, directory)
     })
 
-    setQuestionsBySession(prev => {
-      const next = { ...prev }
-
-      for (const sessionID of Object.keys(prev)) {
-        if (grouped[sessionID]) continue
-        if (sessionDirectoriesRef.current.get(sessionID) === directory) {
-          delete next[sessionID]
-        }
-      }
-
-      for (const [sessionID, sessionQuestions] of Object.entries(grouped)) {
-        next[sessionID] = sortQuestionsById(sessionQuestions)
-      }
-
-      return next
-    })
+    setQuestionsBySession(prev =>
+      reconcileBySessionForDirectory(prev, directory, questions, sessionDirectoriesRef.current),
+    )
   }, [rememberSessionDirectory])
 
   useEffect(() => {
