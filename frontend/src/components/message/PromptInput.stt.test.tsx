@@ -274,6 +274,23 @@ describe('PromptInput STT Gesture Tests', () => {
       })
     })
 
+    it('hold starts recording without requiring a click', async () => {
+      mockStartRecording.mockResolvedValue(true)
+
+      renderComponent()
+
+      const button = getMobileVoiceButton()
+
+      await act(async () => {
+        fireEvent.pointerDown(button)
+        await new Promise(resolve => setTimeout(resolve, 250))
+      })
+
+      await waitFor(() => {
+        expect(mockStartRecording).toHaveBeenCalledTimes(1)
+      })
+    })
+
     it('second tap while recording stops', async () => {
       renderComponent({ isRecording: true })
 
@@ -290,6 +307,18 @@ describe('PromptInput STT Gesture Tests', () => {
         expect(mockStopRecording).toHaveBeenCalledTimes(1)
       })
       expect(mockStartRecording).not.toHaveBeenCalled()
+    })
+
+    it('outside press cancels recording and hides voice gesture state', async () => {
+      renderComponent({ isRecording: true })
+      mockAbortRecording.mockClear()
+
+      await act(async () => {
+        fireEvent.pointerDown(document.body)
+      })
+
+      expect(mockAbortRecording).toHaveBeenCalledTimes(1)
+      expect(mockStopRecording).not.toHaveBeenCalled()
     })
 
     it('failed start clears toggling state', async () => {

@@ -14,7 +14,7 @@ import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
-import { ArrowDown, Upload, X, Mic, MicOff } from 'lucide-react'
+import { ArrowDown, ArrowUp, Upload, X, Mic, MicOff } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
 
@@ -46,6 +46,7 @@ const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
 const VOICE_SEND_SWIPE_THRESHOLD = 48
 const VOICE_HOLD_ACTIVATION_MS = 200
+type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
 type CommandType = components['schemas']['Command']
@@ -111,6 +112,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
   const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
   const lastAddedTranscriptRef = useRef('')
+  const voiceHoldActiveRef = useRef(false)
   const voiceHoldStartYRef = useRef<number | null>(null)
   const voiceSwipeArmedRef = useRef(false)
   const voicePendingReleaseRef = useRef(false)
@@ -118,6 +120,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const ignoreVoiceClickUntilRef = useRef(0)
   const voiceHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const voiceHoldActivatedRef = useRef(false)
+  const voiceStartRequestRef = useRef(0)
   const handleSubmitRef = useRef<() => void>(() => {})
 
   const {
@@ -135,6 +138,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const voiceButtonContainerRef = useRef<HTMLDivElement | null>(null)
   const clearVoiceHoldTimer = useCallback(() => {
     if (voiceHoldTimerRef.current) {
       clearTimeout(voiceHoldTimerRef.current)
@@ -144,6 +148,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const resetVoiceGestureState = useCallback(() => {
     clearVoiceHoldTimer()
+    voiceHoldActiveRef.current = false
     voiceHoldActivatedRef.current = false
     voiceHoldStartYRef.current = null
     voiceSwipeArmedRef.current = false
@@ -429,8 +434,17 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (isRecording) {
       stopRecording()
     } else {
+      const startRequestId = voiceStartRequestRef.current + 1
+      voiceStartRequestRef.current = startRequestId
       setIsTogglingRecording(true)
       const started = await startRecording()
+      if (voiceStartRequestRef.current !== startRequestId) {
+        setIsTogglingRecording(false)
+        if (started) {
+          abortRecording()
+        }
+        return
+      }
       if (!started) {
         setIsTogglingRecording(false)
       } else if (textareaRef.current) {
@@ -449,11 +463,20 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const handleVoiceHoldStart = async () => {
     if (!isRecording && !isProcessing) {
+      const startRequestId = voiceStartRequestRef.current + 1
+      voiceStartRequestRef.current = startRequestId
       pendingVoiceAutoSubmitRef.current = false
       setIsVoiceAutoSendPending(false)
       voiceHoldActivatedRef.current = true
       setIsTogglingRecording(true)
       const started = await startRecording()
+      if (voiceStartRequestRef.current !== startRequestId) {
+        setIsTogglingRecording(false)
+        if (started) {
+          abortRecording()
+        }
+        return
+      }
       if (!started) {
         setIsTogglingRecording(false)
       } else {
@@ -492,6 +515,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     voiceHoldStartYRef.current = event.clientY
+    voiceHoldActiveRef.current = true
     voiceSwipeArmedRef.current = false
     voicePendingReleaseRef.current = false
     pendingVoiceAutoSubmitRef.current = false
@@ -504,14 +528,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     voiceHoldTimerRef.current = setTimeout(() => {
-      if (isVoiceHoldActive && !voiceHoldActivatedRef.current) {
+      if (voiceHoldActiveRef.current && voiceHoldStartYRef.current !== null && !voiceHoldActivatedRef.current) {
         handleVoiceHoldStart()
       }
     }, VOICE_HOLD_ACTIVATION_MS)
   }
 
   const handleVoicePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (!isVoiceHoldActive || voiceHoldStartYRef.current === null) {
+    if (!voiceHoldActiveRef.current || voiceHoldStartYRef.current === null) {
       return
     }
 
@@ -546,14 +570,54 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     if (!voiceHoldActivatedRef.current) {
       clearVoiceHoldTimer()
+      voiceHoldActiveRef.current = false
       setIsVoiceHoldActive(false)
       voiceHoldStartYRef.current = null
       return
     }
 
     ignoreVoiceClickUntilRef.current = Date.now() + 400
+    voiceHoldActiveRef.current = false
     handleVoiceHoldEnd(canceled ? false : voiceSwipeArmedRef.current)
   }
+
+  const cancelVoiceInput = useCallback(() => {
+    voiceStartRequestRef.current += 1
+    resetVoiceGestureState()
+    setIsTogglingRecording(false)
+
+    if (isRecording || isTogglingRecording || isProcessing) {
+      abortRecording()
+    }
+  }, [abortRecording, isProcessing, isRecording, isTogglingRecording, resetVoiceGestureState])
+
+  useEffect(() => {
+    const isVoiceFeedbackVisible = isVoiceHoldActive || isRecording || isTogglingRecording || isProcessing || isVoiceAutoSendPending
+
+    if (!isVoiceFeedbackVisible) {
+      return
+    }
+
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target
+
+      if (!(target instanceof Node)) {
+        return
+      }
+
+      if (voiceButtonContainerRef.current?.contains(target)) {
+        return
+      }
+
+      cancelVoiceInput()
+    }
+
+    document.addEventListener('pointerdown', handleOutsidePointerDown, true)
+
+    return () => {
+      document.removeEventListener('pointerdown', handleOutsidePointerDown, true)
+    }
+  }, [cancelVoiceInput, isProcessing, isRecording, isTogglingRecording, isVoiceAutoSendPending, isVoiceHoldActive])
 
   useEffect(() => {
     const textToUse = transcript || interimTranscript
@@ -972,10 +1036,6 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
       : isTogglingRecording || isVoiceHoldActive
         ? 'Starting microphone...'
         : null
-  const voiceFeedbackToneClasses = isVoiceSwipeArmed || isVoiceAutoSendPending
-    ? 'border-blue-400/60 bg-blue-500/90 text-white shadow-blue-500/30'
-    : 'border-red-500/60 bg-red-600/90 text-white shadow-red-500/30'
-  const voiceFeedbackGlowClasses = isVoiceSwipeArmed || isVoiceAutoSendPending ? 'bg-blue-500/30' : 'bg-red-500/25'
   const voiceButtonTitle = isProcessing
     ? 'Transcribing speech'
     : isRecording
@@ -990,15 +1050,64 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
     }
 
     return (
-      <>
-        <div className={`pointer-events-none absolute -inset-4 rounded-2xl blur-xl ${voiceFeedbackGlowClasses}`} />
-        <div
-          aria-live="polite"
-          className={`pointer-events-none absolute bottom-full right-0 z-10 mb-3 w-[200px] rounded-xl border px-3 py-2 text-center text-xs font-medium leading-tight shadow-lg backdrop-blur-md ${voiceFeedbackToneClasses}`}
-        >
-          {voiceFeedbackLabel}
+      <div
+        aria-live="polite"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
+      >
+        <span className="sr-only">{voiceFeedbackLabel}</span>
+        <div className="relative flex h-36 w-full flex-col items-center justify-between overflow-hidden rounded-xl border border-green-300/70 bg-gradient-to-t from-green-700 via-green-500 to-emerald-400 px-1 py-3 text-white shadow-lg shadow-green-500/40">
+          <div className="absolute inset-x-1 top-1 h-10 rounded-full bg-white/20 blur-sm" />
+          <div className="relative flex flex-1 flex-col items-center justify-center gap-2">
+            <ArrowUp className="h-6 w-6 animate-bounce" />
+            <span className="text-[9px] font-bold uppercase leading-none tracking-tight">Swipe</span>
+          </div>
+          <span className="relative text-[10px] font-bold uppercase leading-none tracking-wide">Send</span>
         </div>
-      </>
+      </div>
+    )
+  }
+
+  const renderVoiceButton = (variant: VoiceButtonVariant) => {
+    const isDesktop = variant === 'desktop'
+    const isBusy = isRecording || isTogglingRecording || (isProcessing && !isRecording)
+    const spinnerClassName = `w-5 h-5 animate-spin rounded-full border-2 ${isDesktop ? 'border-muted-foreground' : 'border-white'} border-t-transparent`
+    const buttonClassName = isDesktop
+      ? `hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
+        isBusy
+          ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
+          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
+      }`
+      : `px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
+        isBusy
+          ? 'bg-gradient-to-t from-green-700 via-green-500 to-emerald-400 text-white border-green-300/70 shadow-lg shadow-green-500/40'
+          : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
+      }`
+
+    return (
+      <div ref={voiceButtonContainerRef} className={isDesktop ? 'relative hidden md:block' : 'relative'}>
+        {renderVoiceStatusOverlay()}
+        <button
+          type="button"
+          onClick={handleVoiceClick}
+          onPointerDown={handleVoicePointerDown}
+          onPointerMove={handleVoicePointerMove}
+          onPointerUp={(event) => handleVoicePointerEnd(event)}
+          onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
+          disabled={disabled || isProcessing}
+          className={buttonClassName}
+          title={voiceButtonTitle}
+        >
+          {isTogglingRecording && !isRecording ? (
+            <div className={spinnerClassName} />
+          ) : isProcessing && !isRecording ? (
+            <div className={spinnerClassName} />
+          ) : isRecording ? (
+            <MicOff className="w-5 h-5" />
+          ) : (
+            <Mic className="w-5 h-5" />
+          )}
+        </button>
+      </div>
     )
   }
 
@@ -1170,63 +1279,10 @@ return (
             <Upload className="w-5 h-5" />
           </button>
           {sttEnabled && sttSupported && (
-            <div className="relative hidden md:block">
-              {renderVoiceStatusOverlay()}
-              <button
-                type="button"
-                onClick={handleVoiceClick}
-                onPointerDown={handleVoicePointerDown}
-                onPointerMove={handleVoicePointerMove}
-                onPointerUp={(event) => handleVoicePointerEnd(event)}
-                onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
-                disabled={disabled || isProcessing}
-                className={`hidden md:flex p-2 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border items-center justify-center touch-none select-none ${
-                  isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                    ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 animate-pulse'
-                    : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border'
-                }`}
-                title={voiceButtonTitle}
-              >
-                {isTogglingRecording && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                ) : isProcessing && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-                ) : isRecording ? (
-                  <MicOff className="w-5 h-5" />
-                ) : (
-                  <Mic className="w-5 h-5" />
-                )}
-              </button>
-            </div>
+            renderVoiceButton('desktop')
           )}
           {isMobile && !showScrollButton && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
-            <div className="relative">
-              {renderVoiceStatusOverlay()}
-              <button
-                onClick={handleVoiceClick}
-                onPointerDown={handleVoicePointerDown}
-                onPointerMove={handleVoicePointerMove}
-                onPointerUp={(event) => handleVoicePointerEnd(event)}
-                onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
-                disabled={disabled || isProcessing}
-                className={`px-4 py-2 rounded-lg transition-all duration-150 flex items-center justify-center min-w-[52px] border touch-none select-none ${
-                  isRecording || isTogglingRecording || (isProcessing && !isRecording)
-                    ? 'bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border-red-500/60 shadow-lg shadow-red-500/30 animate-pulse'
-                    : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
-                }`}
-                title={voiceButtonTitle}
-              >
-                {isTogglingRecording && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : isProcessing && !isRecording ? (
-                  <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                ) : isRecording ? (
-                  <MicOff className="w-5 h-5" />
-                ) : (
-                  <Mic className="w-5 h-5" />
-                )}
-              </button>
-            </div>
+            renderVoiceButton('mobile')
           )}
             <button
               data-submit-prompt
