@@ -139,12 +139,15 @@ describe('buildNavModel', () => {
     expect(model.primary[1].variant).toBe('secondary')
   })
 
-  it('returns assistant primary CTA for assistant workspace', () => {
+  it('returns new-session and assistant primary CTAs for assistant workspace', () => {
     const model = buildNavModel('/repos/5/assistant')
-    expect(model.primary).toHaveLength(1)
-    expect(model.primary[0].key).toBe('assistant')
-    expect(model.primary[0].to).toBe('/repos/5/assistant')
+    expect(model.primary).toHaveLength(2)
+    expect(model.primary[0].key).toBe('new-session')
+    expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[0].variant).toBe('primary')
+    expect(model.primary[1].key).toBe('assistant')
+    expect(model.primary[1].to).toBe('/repos/5/assistant')
+    expect(model.primary[1].variant).toBe('secondary')
   })
 
   it('returns new-schedule primary CTA for schedules routes', () => {
