@@ -423,10 +423,6 @@ app.get('/', async (c) => {
       const options = AssistantModeInitRequestSchema.parse(body)
 
       const status = await ensureAssistantMode(repo, options)
-      if (status.files.opencodeJson.created) {
-        opencodeServerManager.clearStartupError()
-        await restartOpenCode(openCodeSupervisor)
-      }
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to initialize assistant mode:', error)

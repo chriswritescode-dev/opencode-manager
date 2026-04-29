@@ -37,6 +37,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
 
 import * as db from '../../src/db/queries'
 import { createRepoRoutes } from '../../src/routes/repos'
+import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import type { GitAuthService } from '../../src/services/git-auth'
 import type { ScheduleService } from '../../src/services/schedules'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
@@ -215,6 +216,8 @@ describe('Repo Routes', () => {
       })
 
       expect(res.status).toBe(200)
+      expect(opencodeServerManager.clearStartupError).not.toHaveBeenCalled()
+      expect(opencodeServerManager.restart).not.toHaveBeenCalled()
     })
 
     it('should handle errors from ensureAssistantMode', async () => {

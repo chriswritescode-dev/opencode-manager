@@ -10,6 +10,7 @@ interface SessionStatusStore {
   statuses: Map<string, SessionStatusType>
   statusCache: Map<string, string>
   setStatus: (sessionID: string, status: SessionStatusType) => void
+  replaceStatuses: (statuses: Record<string, SessionStatusType>) => void
   getStatus: (sessionID: string) => SessionStatusType
   clearStatus: (sessionID: string) => void
 }
@@ -32,6 +33,19 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => ({
     const previousHash = get().statusCache.get(sessionID)
     
     if (previousHash === hash) return
+
+    if (status.type === 'idle') {
+      if (!previousHash) return
+
+      set((state) => {
+        const newMap = new Map(state.statuses)
+        const newCache = new Map(state.statusCache)
+        newMap.delete(sessionID)
+        newCache.delete(sessionID)
+        return { statuses: newMap, statusCache: newCache }
+      })
+      return
+    }
     
     set((state) => {
       const newMap = new Map(state.statuses)
@@ -40,6 +54,31 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => ({
       newCache.set(sessionID, hash)
       return { statuses: newMap, statusCache: newCache }
     })
+  },
+
+  replaceStatuses: (statuses: Record<string, SessionStatusType>) => {
+    const newMap = new Map<string, SessionStatusType>()
+    const newCache = new Map<string, string>()
+
+    for (const [sessionID, status] of Object.entries(statuses)) {
+      if (status.type === 'idle') continue
+      newMap.set(sessionID, status)
+      newCache.set(sessionID, getStatusHash(status))
+    }
+
+    const currentCache = get().statusCache
+    if (currentCache.size === newCache.size) {
+      let unchanged = true
+      for (const [sessionID, hash] of newCache.entries()) {
+        if (currentCache.get(sessionID) !== hash) {
+          unchanged = false
+          break
+        }
+      }
+      if (unchanged) return
+    }
+
+    set({ statuses: newMap, statusCache: newCache })
   },
   
   getStatus: (sessionID: string) => {
