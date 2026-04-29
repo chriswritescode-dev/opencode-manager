@@ -15,7 +15,7 @@ import { useUIState } from '@/stores/uiStateStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
-import { ArrowDown, ArrowUp, Upload, X, Mic, MicOff } from 'lucide-react'
+import { ArrowDown, Upload, X, Mic, MicOff } from 'lucide-react'
 
 import { SquareFill } from '@/components/ui/square-fill'
 
@@ -24,6 +24,7 @@ import { MentionSuggestions, type MentionItem } from './MentionSuggestions'
 import { SessionStatusIndicator } from '@/components/ui/session-status-indicator'
 import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
+import { VoiceStatusOverlay } from './VoiceStatusOverlay'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 import { formatModelName, getProviders } from '@/api/providers'
 import { useQuery } from '@tanstack/react-query'
@@ -448,7 +449,11 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setStoredAgent(sessionID, agent)
   }
 
-  const handleVoiceToggle = async () => {
+  const handleVoiceClick = async () => {
+    if (Date.now() < ignoreVoiceClickUntilRef.current) {
+      return
+    }
+
     pendingVoiceAutoSubmitRef.current = false
     setIsVoiceAutoSendPending(false)
     setIsVoiceSwipeArmed(false)
@@ -470,18 +475,12 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       if (!started) {
         setIsTogglingRecording(false)
       } else if (textareaRef.current) {
-        textareaRef.current.blur()
+        textareaRef.current?.blur()
       }
     }
   }
 
-  const handleVoiceClick = async () => {
-    if (Date.now() < ignoreVoiceClickUntilRef.current) {
-      return
-    }
 
-    await handleVoiceToggle()
-  }
 
   const handleVoiceHoldStart = async () => {
     if (!isRecording && !isProcessing) {
@@ -531,7 +530,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
   }
 
-  const handleVoicePointerDown = async (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handleVoicePointerDown = async (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.pointerType === 'mouse' && event.button !== 0) || disabled || isProcessing) {
       return
     }
@@ -556,7 +555,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }, VOICE_HOLD_ACTIVATION_MS)
   }
 
-  const handleVoicePointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handleVoicePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!voiceHoldActiveRef.current || voiceHoldStartYRef.current === null) {
       return
     }
@@ -585,7 +584,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
   }
 
-  const handleVoicePointerEnd = (event: ReactPointerEvent<HTMLButtonElement>, canceled = false) => {
+  const handleVoicePointerEnd = (event: ReactPointerEvent<HTMLDivElement>, canceled = false) => {
     if (event.currentTarget.releasePointerCapture && event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
@@ -1066,28 +1065,7 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
         : 'Release to transcribe'
       : 'Tap or hold to speak'
 
-  const renderVoiceStatusOverlay = () => {
-    if (!showVoiceFeedback || !voiceFeedbackLabel) {
-      return null
-    }
 
-    return (
-      <div
-        aria-live="polite"
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-10"
-      >
-        <span className="sr-only">{voiceFeedbackLabel}</span>
-        <div className="relative flex h-36 w-full flex-col items-center justify-between overflow-hidden rounded-xl border border-green-300/70 bg-gradient-to-t from-green-700 via-green-500 to-emerald-400 px-1 py-3 text-white shadow-lg shadow-green-500/40">
-          <div className="absolute inset-x-1 top-1 h-10 rounded-full bg-white/20 blur-sm" />
-          <div className="relative flex flex-1 flex-col items-center justify-center gap-2">
-            <ArrowUp className="h-6 w-6 animate-bounce" />
-            <span className="text-[9px] font-bold uppercase leading-none tracking-tight">Swipe</span>
-          </div>
-          <span className="relative text-[10px] font-bold uppercase leading-none tracking-wide">Send</span>
-        </div>
-      </div>
-    )
-  }
 
   const renderVoiceButton = (variant: VoiceButtonVariant) => {
     const isDesktop = variant === 'desktop'
@@ -1105,16 +1083,21 @@ const { model, modelString, setModel: setStoredModel } = useModelSelection(opcod
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
       }`
 
+    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full'
+
     return (
-      <div ref={voiceButtonContainerRef} className={isDesktop ? 'relative hidden md:block' : 'relative'}>
-        {renderVoiceStatusOverlay()}
+      <div
+        ref={voiceButtonContainerRef}
+        className={containerClassName}
+        onPointerDown={handleVoicePointerDown}
+        onPointerMove={handleVoicePointerMove}
+        onPointerUp={(event) => handleVoicePointerEnd(event)}
+        onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
+      >
+        <VoiceStatusOverlay show={showVoiceFeedback} label={voiceFeedbackLabel} />
         <button
           type="button"
           onClick={handleVoiceClick}
-          onPointerDown={handleVoicePointerDown}
-          onPointerMove={handleVoicePointerMove}
-          onPointerUp={(event) => handleVoicePointerEnd(event)}
-          onPointerCancel={(event) => handleVoicePointerEnd(event, true)}
           disabled={disabled || isProcessing}
           className={buttonClassName}
           title={voiceButtonTitle}
