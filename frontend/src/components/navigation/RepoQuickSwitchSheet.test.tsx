@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
 import { listRepos } from '@/api/repos'
+import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 
 vi.mock('@/api/repos')
 
@@ -27,6 +28,16 @@ function createWrapper() {
 function LocationSpy() {
   const { pathname, search } = useLocation()
   return <div data-testid="location">{`${pathname}${search}`}</div>
+}
+
+function MobileSheetHarness() {
+  const { close } = useMobileTabBar()
+  return (
+    <>
+      <RepoQuickSwitchSheet isOpen onClose={close} />
+      <LocationSpy />
+    </>
+  )
 }
 
 describe('RepoQuickSwitchSheet', () => {
@@ -162,7 +173,7 @@ describe('RepoQuickSwitchSheet', () => {
     fireEvent.click(screen.getByText('repo1'))
 
     expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/assistant')
-    expect(handleClose).toHaveBeenCalled()
+    expect(handleClose).not.toHaveBeenCalled()
   })
 
   it('navigates from assistant to repo detail when clicking active repo', async () => {
@@ -205,5 +216,48 @@ describe('RepoQuickSwitchSheet', () => {
 
     expect(screen.getByTestId('location')).toHaveTextContent('/repos/1')
     expect(handleClose).not.toHaveBeenCalled()
+  })
+
+  it('switches repos from the mobile repos sheet without navigating back to the previous repo', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 2,
+        repoUrl: 'https://github.com/test/repo2.git',
+        localPath: '/path/to/repo2',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1?mobileTab=repos']}>
+          <Routes>
+            <Route path="*" element={<MobileSheetHarness />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('repo2')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('repo2'))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/2')
   })
 })

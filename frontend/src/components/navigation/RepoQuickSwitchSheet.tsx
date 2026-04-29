@@ -38,18 +38,26 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     )
   }, [repos, searchQuery])
 
+  const isUrlControlledSheet = new URLSearchParams(location.search).get('mobileTab') === 'repos'
+
+  const navigateAndClose = (path: string, options?: { replace?: boolean }) => {
+    navigate(path, options)
+    if (!isUrlControlledSheet) {
+      onClose()
+    }
+  }
+
   const handleClick = (id: number) => {
     const pendingAction = new URLSearchParams(location.search).get('mobileTabAction')
     if (pendingAction === 'assistant') {
-      navigate(`/repos/${id}/assistant`)
-      onClose()
+      navigateAndClose(`/repos/${id}/assistant`)
       return
     }
 
     const isAssistantRoute = location.pathname === `/repos/${id}/assistant`
     if (id === activeRepoId) {
       if (isAssistantRoute) {
-        navigate(`/repos/${id}`, { replace: true })
+        navigateAndClose(`/repos/${id}`, { replace: true })
         return
       }
 
@@ -57,8 +65,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
       return
     }
 
-    navigate(`/repos/${id}`, { replace: true })
-    onClose()
+    navigateAndClose(`/repos/${id}`, { replace: true })
   }
 
   return (
