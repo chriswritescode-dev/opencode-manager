@@ -1,7 +1,6 @@
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
-import { timingSafeEqual } from 'crypto'
 
 const OPENCODE_CONNECT_HOST = ENV.OPENCODE.HOST === '0.0.0.0' ? '127.0.0.1' : ENV.OPENCODE.HOST
 export const OPENCODE_SERVER_URL = `http://${OPENCODE_CONNECT_HOST}:${ENV.OPENCODE.PORT}`
@@ -11,70 +10,6 @@ const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
 const OPENCODE_BASIC_AUTH = OPENCODE_SERVER_PASSWORD
   ? `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${OPENCODE_SERVER_PASSWORD}`).toString('base64')}`
   : ''
-
-const RESPONSE_HEADERS_TO_DROP = new Set(['connection', 'transfer-encoding', 'content-encoding', 'content-length'])
-
-function safeEqual(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left)
-  const rightBuffer = Buffer.from(right)
-
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false
-  }
-
-  return timingSafeEqual(leftBuffer, rightBuffer)
-}
-
-function getBasicCredentials(header: string | null): { username: string; password: string } | undefined {
-  if (!header?.startsWith('Basic ')) {
-    return undefined
-  }
-
-  try {
-    const decoded = Buffer.from(header.slice('Basic '.length), 'base64').toString('utf8')
-    const separator = decoded.indexOf(':')
-
-    if (separator === -1) {
-      return undefined
-    }
-
-    return {
-      username: decoded.slice(0, separator),
-      password: decoded.slice(separator + 1),
-    }
-  } catch {
-    return undefined
-  }
-}
-
-function createProxyResponse(response: Response): Response {
-  const responseHeaders = new Headers()
-  response.headers.forEach((value, key) => {
-    if (!RESPONSE_HEADERS_TO_DROP.has(key.toLowerCase())) {
-      responseHeaders.set(key, value)
-    }
-  })
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers: responseHeaders,
-  })
-}
-
-export function isOpenCodeProxyBasicAuth(request: Request): boolean {
-  if (!OPENCODE_SERVER_PASSWORD) {
-    return false
-  }
-
-  const credentials = getBasicCredentials(request.headers.get('authorization'))
-
-  if (!credentials) {
-    return false
-  }
-
-  return credentials.username === OPENCODE_SERVER_USERNAME && safeEqual(credentials.password, OPENCODE_SERVER_PASSWORD)
-}
 
 export function withOpenCodeAuth(headers: Record<string, string> = {}): Record<string, string> {
   if (OPENCODE_BASIC_AUTH) {
@@ -355,6 +290,8 @@ export async function patchOpenCodeConfig(config: Record<string, unknown>): Prom
 
 export async function proxyRequest(request: Request) {
   const url = new URL(request.url)
+  
+  // Remove /api/opencode prefix from pathname before forwarding
   const cleanPathname = url.pathname.replace(/^\/api\/opencode/, '')
   const targetUrl = `${OPENCODE_SERVER_URL}${cleanPathname}${url.search}`
   
@@ -370,20 +307,26 @@ export async function proxyRequest(request: Request) {
       }
     })
 
-    const body = request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined
-    const init: RequestInit & { duplex?: 'half' } = {
+    const response = await fetch(targetUrl, {
       method: request.method,
       headers: withOpenCodeAuth(headers),
-      body: body ?? undefined,
-      signal: request.signal,
-    }
-    if (body) {
-      init.duplex = 'half'
-    }
+      body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : undefined,
+    })
 
-    const response = await fetch(targetUrl, init)
+    const responseHeaders: Record<string, string> = {}
+    const skipHeaders = new Set(['connection', 'transfer-encoding', 'content-encoding', 'content-length'])
+    response.headers.forEach((value, key) => {
+      if (!skipHeaders.has(key.toLowerCase())) {
+        responseHeaders[key] = value
+      }
+    })
 
-    return createProxyResponse(response)
+    const body = await response.text()
+    return new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: responseHeaders,
+    })
   } catch (error) {
     logger.error(`Proxy request failed for ${url.pathname}${url.search}:`, error)
     return new Response(JSON.stringify({ error: 'Proxy request failed' }), {
