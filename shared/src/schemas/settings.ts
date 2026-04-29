@@ -328,3 +328,17 @@ export const OpenCodeConfigResponseSchema = z.object({
   configs: z.array(OpenCodeConfigMetadataSchema),
   defaultConfig: OpenCodeConfigMetadataSchema.nullable(),
 });
+
+export const OpenCodeServerAuthSettingsSchema = z.object({
+  username: z.string().min(1),
+  hasPassword: z.boolean(),
+  source: z.enum(['configured', 'env', 'none']),
+});
+
+export const UpdateOpenCodeServerAuthSettingsSchema = z.object({
+  password: z.string().min(1).optional(),
+  clearPassword: z.boolean().optional(),
+});
+
+export type OpenCodeServerAuthSettings = z.infer<typeof OpenCodeServerAuthSettingsSchema>;
+export type UpdateOpenCodeServerAuthSettings = z.infer<typeof UpdateOpenCodeServerAuthSettingsSchema>;

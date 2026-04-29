@@ -7,7 +7,7 @@ import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
 import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
-import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeConfigFilePath, getAgentsMdPath, ENV } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
   OpenCodeConfigSchema,
@@ -17,10 +17,11 @@ import {
   CreateSkillRequestSchema,
   UpdateSkillRequestSchema,
   SkillScopeSchema,
+  UpdateOpenCodeServerAuthSettingsSchema,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
-import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import type { OpenCodeLifecycleStatus, OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -78,14 +79,21 @@ async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Pr
   await opencodeServerManager.reloadConfig()
 }
 
-async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
+async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<OpenCodeLifecycleStatus | void> {
   if (openCodeSupervisor) {
-    await openCodeSupervisor.restart('settings_restart')
-    return
+    return openCodeSupervisor.restart('settings_restart')
   }
 
   opencodeServerManager.clearStartupError()
   await opencodeServerManager.restart()
+}
+
+function getRestartFailureMessage(status: OpenCodeLifecycleStatus | void): string | undefined {
+  if (!status || status.healthy) {
+    return undefined
+  }
+
+  return status.lastError || `OpenCode server restart finished in ${status.state} state`
 }
 
 function didConfigFieldChange(
@@ -1505,6 +1513,96 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to remove MCP auth' }, 500)
+    }
+  })
+
+  app.get('/opencode-server-auth', async (c) => {
+    try {
+      const hasConfiguredPassword = settingsService.hasConfiguredOpenCodeServerPassword()
+      const envPasswordExists = !!ENV.OPENCODE.SERVER_PASSWORD
+      
+      let source: 'configured' | 'env' | 'none'
+      if (hasConfiguredPassword) {
+        source = 'configured'
+      } else if (envPasswordExists) {
+        source = 'env'
+      } else {
+        source = 'none'
+      }
+
+      return c.json({
+        username: ENV.OPENCODE.SERVER_USERNAME,
+        hasPassword: hasConfiguredPassword || envPasswordExists,
+        source,
+      })
+    } catch (error) {
+      logger.error('Failed to get OpenCode server auth settings:', error)
+      return c.json({ error: 'Failed to get OpenCode server auth settings' }, 500)
+    }
+  })
+
+  app.patch('/opencode-server-auth', async (c) => {
+    try {
+      const body = await c.req.json()
+      const validated = UpdateOpenCodeServerAuthSettingsSchema.parse(body)
+
+      if (validated.password && validated.clearPassword) {
+        return c.json({ error: 'Cannot set and clear password simultaneously' }, 400)
+      }
+
+      let serverRestarted = false
+      let restartError: string | undefined
+
+      if (validated.clearPassword) {
+        settingsService.clearOpenCodeServerPassword()
+        logger.info('Cleared stored OpenCode server password')
+      } else if (validated.password) {
+        settingsService.setOpenCodeServerPassword(validated.password)
+        logger.info('Stored new OpenCode server password')
+      } else {
+        const hasConfiguredPassword = settingsService.hasConfiguredOpenCodeServerPassword()
+        const envPasswordExists = !!ENV.OPENCODE.SERVER_PASSWORD
+        const source = hasConfiguredPassword ? 'configured' : envPasswordExists ? 'env' : 'none'
+        
+        return c.json({
+          username: ENV.OPENCODE.SERVER_USERNAME,
+          hasPassword: hasConfiguredPassword || envPasswordExists,
+          source,
+          serverRestarted: false,
+        })
+      }
+
+      try {
+        const restartStatus = await restartOpenCode(openCodeSupervisor)
+        restartError = getRestartFailureMessage(restartStatus)
+        serverRestarted = !restartError
+        if (restartError) {
+          logger.warn('OpenCode server restart after password change finished unhealthy:', restartError)
+        } else {
+          logger.info('OpenCode server restarted after password change')
+        }
+      } catch (error) {
+        logger.warn('Failed to restart OpenCode server after password change:', error)
+        restartError = error instanceof Error ? error.message : 'Unknown error'
+      }
+
+      const hasConfiguredPassword = settingsService.hasConfiguredOpenCodeServerPassword()
+      const envPasswordExists = !!ENV.OPENCODE.SERVER_PASSWORD
+      const source = hasConfiguredPassword ? 'configured' : envPasswordExists ? 'env' : 'none'
+
+      return c.json({
+        username: ENV.OPENCODE.SERVER_USERNAME,
+        hasPassword: hasConfiguredPassword || envPasswordExists,
+        source,
+        serverRestarted,
+        restartError,
+      })
+    } catch (error) {
+      logger.error('Failed to update OpenCode server auth settings:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to update OpenCode server auth settings' }, 500)
     }
   })
 

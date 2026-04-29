@@ -43,6 +43,11 @@ vi.mock('../../src/constants', () => ({
   DEFAULT_AGENTS_MD: '# Test Agents MD',
 }))
 
+const mockHasConfiguredOpenCodeServerPassword = vi.fn()
+const mockSetOpenCodeServerPassword = vi.fn()
+const mockClearOpenCodeServerPassword = vi.fn()
+const mockGetOpenCodeServerPassword = vi.fn()
+
 vi.mock('../../src/services/settings', () => ({
   SettingsService: vi.fn().mockImplementation(() => ({
     getSettings: mockGetSettings,
@@ -53,6 +58,10 @@ vi.mock('../../src/services/settings', () => ({
     deleteOpenCodeConfig: mockDeleteOpenCodeConfig,
     getOpenCodeConfigByName: mockGetOpenCodeConfigByName,
     setDefaultOpenCodeConfig: mockSetDefaultOpenCodeConfig,
+    hasConfiguredOpenCodeServerPassword: mockHasConfiguredOpenCodeServerPassword,
+    setOpenCodeServerPassword: mockSetOpenCodeServerPassword,
+    clearOpenCodeServerPassword: mockClearOpenCodeServerPassword,
+    getOpenCodeServerPassword: mockGetOpenCodeServerPassword,
   })),
 }))
 
@@ -1015,6 +1024,125 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       expect(json.details).toBe('Reload failed')
       expect(json.validationIssues).toEqual([])
       expect(json.removedFields).toEqual([])
+    })
+  })
+
+  describe('GET /opencode-server-auth', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      mockHasConfiguredOpenCodeServerPassword.mockReset()
+      mockGetOpenCodeServerPassword.mockReset()
+    })
+
+    it('should return configured source when DB password exists', async () => {
+      mockHasConfiguredOpenCodeServerPassword.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-server-auth')
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.hasPassword).toBe(true)
+      expect(json.source).toBe('configured')
+    })
+
+    it('should return none source when no password exists', async () => {
+      mockHasConfiguredOpenCodeServerPassword.mockReturnValue(false)
+
+      const req = new Request('http://localhost/opencode-server-auth')
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.hasPassword).toBe(false)
+      expect(json.source).toBe('none')
+    })
+  })
+
+  describe('PATCH /opencode-server-auth', () => {
+    beforeEach(() => {
+      vi.clearAllMocks()
+      mockHasConfiguredOpenCodeServerPassword.mockReset()
+      mockSetOpenCodeServerPassword.mockReset()
+      mockClearOpenCodeServerPassword.mockReset()
+    })
+
+    it('should store encrypted password and restart server', async () => {
+      mockHasConfiguredOpenCodeServerPassword.mockReturnValue(true)
+
+      const req = new Request('http://localhost/opencode-server-auth', {
+        method: 'PATCH',
+        body: JSON.stringify({ password: 'new_password' }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockSetOpenCodeServerPassword).toHaveBeenCalledWith('new_password')
+      expect(json.hasPassword).toBe(true)
+      expect(json.source).toBe('configured')
+      expect(json.serverRestarted).toBe(true)
+    })
+
+    it('should clear password when clearPassword is true', async () => {
+      mockHasConfiguredOpenCodeServerPassword.mockReturnValue(false)
+
+      const req = new Request('http://localhost/opencode-server-auth', {
+        method: 'PATCH',
+        body: JSON.stringify({ clearPassword: true }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockClearOpenCodeServerPassword).toHaveBeenCalled()
+      expect(json.hasPassword).toBe(false)
+    })
+
+    it('should report restart error when supervisor restart returns unhealthy status', async () => {
+      mockHasConfiguredOpenCodeServerPassword.mockReturnValue(true)
+      const restart = vi.fn().mockResolvedValue({
+        state: 'failed',
+        healthy: false,
+        port: 5551,
+        version: null,
+        minVersion: '1.0.137',
+        versionSupported: false,
+        lastError: 'OpenCode failed to restart',
+        activeRecoveryAction: null,
+        attemptedRecoveryActions: [],
+        nextRecoveryAction: null,
+        failureCount: 1,
+        watching: false,
+        updatedAt: new Date().toISOString(),
+      })
+      const supervisorApp = createSettingsRoutes(
+        testDb,
+        { getGitEnvironment: vi.fn().mockReturnValue({}) } as any,
+        { restart } as any,
+      )
+
+      const req = new Request('http://localhost/opencode-server-auth', {
+        method: 'PATCH',
+        body: JSON.stringify({ password: 'new_password' }),
+      })
+      const res = await supervisorApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.serverRestarted).toBe(false)
+      expect(json.restartError).toBe('OpenCode failed to restart')
+      expect(restart).toHaveBeenCalledWith('settings_restart')
+    })
+
+    it('should reject request when both password and clearPassword are provided', async () => {
+      const req = new Request('http://localhost/opencode-server-auth', {
+        method: 'PATCH',
+        body: JSON.stringify({ password: 'test', clearPassword: true }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(400)
     })
   })
 })

@@ -132,3 +132,19 @@ export interface SyncOpenCodeImportResponse extends OpenCodeImportStatus {
     errors: Array<{ path: string; error: string }>
   }
 }
+
+export interface OpenCodeServerAuthSettings {
+  username: string
+  hasPassword: boolean
+  source: 'configured' | 'env' | 'none'
+}
+
+export interface UpdateOpenCodeServerAuthSettings {
+  password?: string
+  clearPassword?: boolean
+}
+
+export interface OpenCodeServerAuthSettingsResponse extends OpenCodeServerAuthSettings {
+  serverRestarted: boolean
+  restartError?: string
+}

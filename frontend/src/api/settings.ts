@@ -11,6 +11,9 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SkillScope,
+  OpenCodeServerAuthSettings,
+  UpdateOpenCodeServerAuthSettings,
+  OpenCodeServerAuthSettingsResponse,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
@@ -267,6 +270,18 @@ export const settingsApi = {
     if (repoId) params.set('repoId', String(repoId))
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills/${name}?${params}`, {
       method: 'DELETE',
+    })
+  },
+
+  getOpenCodeServerAuthSettings: async (): Promise<OpenCodeServerAuthSettings> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-server-auth`)
+  },
+
+  updateOpenCodeServerAuthSettings: async (request: UpdateOpenCodeServerAuthSettings): Promise<OpenCodeServerAuthSettingsResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-server-auth`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
     })
   },
 }

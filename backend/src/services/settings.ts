@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite'
 import { unlinkSync, existsSync } from 'fs'
-import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
+import { getOpenCodeConfigFilePath, ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import { z } from 'zod'
@@ -15,6 +15,7 @@ import {
   OpenCodeConfigSchema,
   DEFAULT_USER_PREFERENCES,
 } from '../types/settings'
+import { encryptSecret, decryptSecret } from '../utils/crypto'
 
 interface OpenCodeConfigValidationIssue {
   path: string
@@ -596,5 +597,67 @@ export class SettingsService {
       logger.error('Failed to delete config file:', error)
       return false
     }
+  }
+
+  getSystemSetting(key: string): string | undefined {
+    const row = this.db
+      .query('SELECT value FROM system_settings WHERE key = ?')
+      .get(key) as { value: string } | undefined
+
+    return row?.value
+  }
+
+  setSystemSetting(key: string, value: string): void {
+    const updatedAt = Date.now()
+    this.db
+      .query(
+        `INSERT INTO system_settings (key, value, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET
+           value = excluded.value,
+           updated_at = excluded.updated_at`
+      )
+      .run(key, value, updatedAt)
+  }
+
+  deleteSystemSetting(key: string): void {
+    this.db.query('DELETE FROM system_settings WHERE key = ?').run(key)
+  }
+
+  getOpenCodeServerPassword(): string {
+    const encrypted = this.getSystemSetting('opencode.serverPassword')
+    if (!encrypted) {
+      return ENV.OPENCODE.SERVER_PASSWORD
+    }
+
+    try {
+      return decryptSecret(encrypted)
+    } catch (error) {
+      logger.warn('Failed to decrypt stored OpenCode server password, falling back to env:', error)
+      return ENV.OPENCODE.SERVER_PASSWORD
+    }
+  }
+
+  hasConfiguredOpenCodeServerPassword(): boolean {
+    const encrypted = this.getSystemSetting('opencode.serverPassword')
+    if (!encrypted) {
+      return false
+    }
+
+    try {
+      decryptSecret(encrypted)
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  setOpenCodeServerPassword(password: string): void {
+    const encrypted = encryptSecret(password)
+    this.setSystemSetting('opencode.serverPassword', encrypted)
+  }
+
+  clearOpenCodeServerPassword(): void {
+    this.deleteSystemSetting('opencode.serverPassword')
   }
 }

@@ -26,11 +26,7 @@ const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
 const OPENCODE_SERVER_CONNECT_HOST = OPENCODE_SERVER_HOST === '0.0.0.0' ? '127.0.0.1' : OPENCODE_SERVER_HOST
 const OPENCODE_SERVER_PUBLIC_URL = ENV.OPENCODE.PUBLIC_URL
-const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
 const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
-const OPENCODE_BASIC_AUTH = OPENCODE_SERVER_PASSWORD
-  ? `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${OPENCODE_SERVER_PASSWORD}`).toString('base64')}`
-  : ''
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 
@@ -104,6 +100,29 @@ class OpenCodeServerManager {
   private opInProgress: boolean = false
 
   private constructor() {}
+
+  private getSettingsService(): SettingsService | undefined {
+    if (!this.db) {
+      return undefined
+    }
+    return new SettingsService(this.db)
+  }
+
+  private getOpenCodeServerPassword(): string {
+    const settingsService = this.getSettingsService()
+    if (settingsService) {
+      return settingsService.getOpenCodeServerPassword()
+    }
+    return ENV.OPENCODE.SERVER_PASSWORD
+  }
+
+  private getOpenCodeBasicAuth(): string {
+    const password = this.getOpenCodeServerPassword()
+    if (!password) {
+      return ''
+    }
+    return `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${password}`).toString('base64')}`
+  }
 
   setDatabase(db: Database) {
     this.db = db
@@ -268,6 +287,8 @@ class OpenCodeServerManager {
 
     let stderrOutput = ''
 
+    const opencodeServerPassword = this.getOpenCodeServerPassword()
+
     const cleanEnv = { ...process.env }
     delete cleanEnv.OPENCODE_SERVER_PASSWORD
     delete cleanEnv.OPENCODE_RUN_ID
@@ -291,12 +312,10 @@ class OpenCodeServerManager {
           XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
           ...(OPENCODE_SERVER_PUBLIC_URL ? { OPENCODE_PUBLIC_URL: OPENCODE_SERVER_PUBLIC_URL } : {}),
-          ...(OPENCODE_SERVER_PASSWORD
-            ? {
-              OPENCODE_SERVER_PASSWORD,
-              OPENCODE_SERVER_USERNAME,
-            }
-            : {}),
+          ...(opencodeServerPassword ? {
+            OPENCODE_SERVER_PASSWORD: opencodeServerPassword,
+            OPENCODE_SERVER_USERNAME,
+          } : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
         }
       }
@@ -547,8 +566,9 @@ class OpenCodeServerManager {
   async checkHealth(): Promise<boolean> {
     try {
       const headers: Record<string, string> = {}
-      if (OPENCODE_BASIC_AUTH) {
-        headers.Authorization = OPENCODE_BASIC_AUTH
+      const basicAuth = this.getOpenCodeBasicAuth()
+      if (basicAuth) {
+        headers.Authorization = basicAuth
       }
       const response = await fetch(`http://${OPENCODE_SERVER_CONNECT_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
         signal: AbortSignal.timeout(3000),
