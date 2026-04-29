@@ -29,6 +29,16 @@ describe('model-state', () => {
       expect(state).toEqual({ recent: [], favorite: [], variant: {} })
     })
 
+    it('creates the model state table when an existing database is missing it', () => {
+      db.run('DROP TABLE opencode_model_state')
+
+      const state = getOpenCodeModelState(db)
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'opencode_model_state'").get()
+
+      expect(state).toEqual({ recent: [], favorite: [], variant: {} })
+      expect(table).toBeTruthy()
+    })
+
     it('returns defaults with explicit userId when no row exists', () => {
       const state = getOpenCodeModelState(db, 'user123')
       expect(state).toEqual({ recent: [], favorite: [], variant: {} })

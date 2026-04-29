@@ -16,6 +16,21 @@ export const MAX_RECENT_MODELS = 10
 
 const EMPTY_STATE: OpenCodeModelStateRecord = { recent: [], favorite: [], variant: {} }
 
+export function ensureOpenCodeModelStateTable(db: Database): void {
+  db.run(`
+    CREATE TABLE IF NOT EXISTS opencode_model_state (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL DEFAULT 'default',
+      recent TEXT NOT NULL DEFAULT '[]',
+      favorite TEXT NOT NULL DEFAULT '[]',
+      variant TEXT NOT NULL DEFAULT '{}',
+      updated_at INTEGER NOT NULL,
+      UNIQUE(user_id)
+    )
+  `)
+  db.run('CREATE INDEX IF NOT EXISTS idx_opencode_model_state_user ON opencode_model_state(user_id)')
+}
+
 function parseJsonSafe<T>(json: string, fallback: T): T {
   try {
     return JSON.parse(json) as T
@@ -26,6 +41,8 @@ function parseJsonSafe<T>(json: string, fallback: T): T {
 }
 
 export function getOpenCodeModelState(db: Database, userId = 'default'): OpenCodeModelStateRecord {
+  ensureOpenCodeModelStateTable(db)
+
   const row = db.prepare('SELECT recent, favorite, variant FROM opencode_model_state WHERE user_id = ?').get(userId) as
     | { recent: string; favorite: string; variant: string }
     | undefined
