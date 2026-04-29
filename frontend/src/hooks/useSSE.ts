@@ -10,6 +10,11 @@ import { sseManager, subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 import { createPartsBatcher } from '@/lib/partsBatcher'
 
+const getEventDirectory = (event: SSEEvent): string | undefined => {
+  const directory = (event as { directory?: unknown }).directory
+  return typeof directory === 'string' ? directory : undefined
+}
+
 const handleRestartServer = async () => {
   showToast.loading('Reloading OpenCode configuration...', {
     id: 'restart-server',
@@ -45,16 +50,18 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
   const sessionIdRef = useRef(currentSessionId)
+  const statusSyncVersionRef = useRef(0)
   sessionIdRef.current = currentSessionId
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isReconnecting, setIsReconnecting] = useState(false)
   const setSessionStatus = useSessionStatus((state) => state.setStatus)
+  const replaceSessionStatuses = useSessionStatus((state) => state.replaceStatuses)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
   const batcherRef = useRef<ReturnType<typeof createPartsBatcher> | null>(null)
 
   useEffect(() => {
-    if (!opcodeUrl) {
+    if (!opcodeUrl || !directory) {
       batcherRef.current?.destroy()
       batcherRef.current = null
       return
@@ -69,7 +76,11 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   }, [queryClient, opcodeUrl, directory])
 
   const handleSSEEvent = useCallback((event: SSEEvent) => {
+    const eventDirectory = getEventDirectory(event)
+    if (eventDirectory && directory && eventDirectory !== directory) return
+
     switch (event.type) {
+      case 'session.created':
       case 'session.updated':
         if ('info' in event.properties) {
           const session = event.properties.info
@@ -118,17 +129,19 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         break
       }
 
+      case 'message.part.delta': {
+        if (!('sessionID' in event.properties && 'messageID' in event.properties && 'partID' in event.properties && 'field' in event.properties && 'delta' in event.properties)) break
+        const { sessionID, messageID, partID, field, delta } = event.properties
+        batcherRef.current?.queuePartDelta(sessionID, messageID, partID, field, delta)
+        break
+      }
+
       case 'message.updated':
       case 'messagev2.updated': {
         if (!('info' in event.properties)) break
         
         const { info } = event.properties
         const sessionID = info.sessionID
-        
-        if (info.role === 'assistant') {
-          const isComplete = 'completed' in info.time && info.time.completed
-          setSessionStatus(sessionID, isComplete ? { type: 'idle' } : { type: 'busy' })
-        }
         
         const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
         const currentData = queryClient.getQueryData<MessageWithParts[]>(messagesQueryKey)
@@ -313,25 +326,24 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   }, [queryClient, opcodeUrl, directory, setSessionStatus, setSessionTodos, currentSessionId])
 
   const fetchInitialData = useCallback(async () => {
-    if (!client || !mountedRef.current) return
+    if (!client || !directory || !mountedRef.current) return
+    const syncVersion = ++statusSyncVersionRef.current
     
     try {
       const statuses = await client.getSessionStatuses()
-      if (mountedRef.current && statuses) {
-        Object.entries(statuses).forEach(([sessionID, status]) => {
-          setSessionStatus(sessionID, status)
-        })
+      if (mountedRef.current && statusSyncVersionRef.current === syncVersion && statuses) {
+        replaceSessionStatuses(statuses)
       }
     } catch (err) {
       if (err instanceof Error && !err.message.includes('aborted')) {
         throw err
       }
     }
-  }, [client, setSessionStatus])
+  }, [client, directory, replaceSessionStatuses])
 
   const syncCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current
-    if (!sessionId || !opcodeUrl) return
+    if (!sessionId || !opcodeUrl || !directory) return
 
     queryClient.invalidateQueries({
       queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory],
@@ -344,8 +356,10 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   useEffect(() => {
     mountedRef.current = true
     
-    if (!opcodeUrl) {
+    if (!opcodeUrl || !directory) {
+      statusSyncVersionRef.current += 1
       setIsConnected(false)
+      setIsReconnecting(false)
       return
     }
 
@@ -370,7 +384,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       }
     }
 
-    const directoryCleanup = directory ? addSSEDirectory(directory) : undefined
+    const directoryCleanup = addSSEDirectory(directory)
 
     const unsubscribe = subscribeToSSE(handleMessage, handleStatusChange)
 
@@ -388,11 +402,12 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
 
     return () => {
       mountedRef.current = false
+      statusSyncVersionRef.current += 1
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
       unsubscribe()
-      directoryCleanup?.()
+      directoryCleanup()
     }
   }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData, syncCurrentSession])
 

@@ -43,6 +43,17 @@ export interface SSEMessagePartUpdatedEvent {
   }
 }
 
+export interface SSEMessagePartDeltaEvent {
+  type: 'message.part.delta'
+  properties: {
+    sessionID: string
+    messageID: string
+    partID: string
+    field: string
+    delta: string
+  }
+}
+
 export interface SSEMessageUpdatedEvent {
   type: 'message.updated' | 'messagev2.updated'
   properties: {
@@ -70,6 +81,14 @@ export interface SSEMessagePartRemovedEvent {
 export interface SSESessionUpdatedEvent {
   type: 'session.updated'
   properties: {
+    info: Session
+  }
+}
+
+export interface SSESessionCreatedEvent {
+  type: 'session.created'
+  properties: {
+    sessionID: string
     info: Session
   }
 }
@@ -196,9 +215,11 @@ export interface SSESSHHostKeyRequestEvent {
 
 export type SSEEvent =
   | SSEMessagePartUpdatedEvent
+  | SSEMessagePartDeltaEvent
   | SSEMessageUpdatedEvent
   | SSEMessageRemovedEvent
   | SSEMessagePartRemovedEvent
+  | SSESessionCreatedEvent
   | SSESessionUpdatedEvent
   | SSESessionDeletedEvent
   | SSESessionCompactedEvent
