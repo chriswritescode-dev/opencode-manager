@@ -38,7 +38,7 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
   const repoId = repoMatch?.[1] ?? null
   const repoSection = repoMatch?.[2]
 
-  if (pathname === '/' || pathname === '/schedules') {
+  if (pathname === '/' || pathname === '/schedules' || pathname === '/assistant') {
     return { mode: 'global', isInsideRepo: false, repoId: null }
   }
 

@@ -62,35 +62,6 @@ export function useSessionAgent(
   )
 
   const result = useMemo(() => {
-    if (storedAgent && messages && messages.length > 0) {
-      let model: { providerID: string; modelID: string } | undefined
-      let variant: string | undefined
-
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msgWithParts = messages[i]
-        if (msgWithParts.info.role === 'user') {
-          const userInfo = msgWithParts.info as UserMessage
-          model = userInfo.model
-          variant = userInfo.variant
-          break
-        }
-      }
-
-      const prev = prevRef.current
-      if (
-        prev.agent === storedAgent &&
-        prev.variant === variant &&
-        prev.model?.providerID === model?.providerID &&
-        prev.model?.modelID === model?.modelID
-      ) {
-        return { ...prev, fromMessage: false }
-      }
-
-      const next: SessionAgentResult = { agent: storedAgent, model, variant, fromMessage: false }
-      prevRef.current = next
-      return next
-    }
-
     if (messagesLoading) {
       return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
     }
@@ -99,31 +70,58 @@ export function useSessionAgent(
       return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
     }
 
+    let latestAgent: string | undefined
+    let latestModel: { providerID: string; modelID: string } | undefined
+    let latestVariant: string | undefined
+
     for (let i = messages.length - 1; i >= 0; i--) {
       const msgWithParts = messages[i]
       if (msgWithParts.info.role === 'user') {
         const userInfo = msgWithParts.info as UserMessage
         if (userInfo.agent) {
-          const prev = prevRef.current
-          if (
-            prev.agent === userInfo.agent &&
-            prev.variant === userInfo.variant &&
-            prev.model?.providerID === userInfo.model?.providerID &&
-            prev.model?.modelID === userInfo.model?.modelID
-          ) {
-            return { ...prev, fromMessage: true }
-          }
-
-          const next: SessionAgentResult = {
-            agent: userInfo.agent,
-            model: userInfo.model,
-            variant: userInfo.variant,
-            fromMessage: true,
-          }
-          prevRef.current = next
-          return next
+          latestAgent = userInfo.agent
+          latestModel = userInfo.model
+          latestVariant = userInfo.variant
+          break
         }
       }
+    }
+
+    if (latestAgent) {
+      const prev = prevRef.current
+      if (
+        prev.agent === latestAgent &&
+        prev.variant === latestVariant &&
+        prev.model?.providerID === latestModel?.providerID &&
+        prev.model?.modelID === latestModel?.modelID
+      ) {
+        return { ...prev, fromMessage: true }
+      }
+
+      const next: SessionAgentResult = {
+        agent: latestAgent,
+        model: latestModel,
+        variant: latestVariant,
+        fromMessage: true,
+      }
+      prevRef.current = next
+      return next
+    }
+
+    if (storedAgent) {
+      const prev = prevRef.current
+      if (
+        prev.agent === storedAgent &&
+        prev.variant === latestVariant &&
+        prev.model?.providerID === latestModel?.providerID &&
+        prev.model?.modelID === latestModel?.modelID
+      ) {
+        return { ...prev, fromMessage: false }
+      }
+
+      const next: SessionAgentResult = { agent: storedAgent, model: latestModel, variant: latestVariant, fromMessage: false }
+      prevRef.current = next
+      return next
     }
 
     return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }

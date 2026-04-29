@@ -7,15 +7,22 @@ import { logger } from '../utils/logger'
 import { setOpenCodeAuth, deleteOpenCodeAuth } from '../services/proxy'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-import { fileExists, readFileContent, writeFileContent } from '../services/file-operations'
+import type { Database } from 'bun:sqlite'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import {
+  addRecentOpenCodeModel,
+  getOpenCodeModelState as readModelStateFromDb,
+  toggleFavoriteOpenCodeModel,
+  type OpenCodeModelStateRecord,
+} from '../db/model-state'
+import { writeJsonAtomic, withFileLock } from '../utils/atomic-json'
 
-const ModelSelectionSchema = z.object({
+export const ModelSelectionSchema = z.object({
   providerID: z.string().min(1),
   modelID: z.string().min(1),
 })
 
-const ModelStateSchema = z.object({
+export const ModelStateSchema = z.object({
   recent: z.array(ModelSelectionSchema).default([]),
   favorite: z.array(ModelSelectionSchema).default([]),
   variant: z.record(z.string(), z.string().optional()).default({}),
@@ -24,55 +31,25 @@ const ModelStateSchema = z.object({
 const UpdateModelStateSchema = z.object({
   recent: ModelSelectionSchema.optional(),
   favorite: ModelSelectionSchema.optional(),
-})
+}).strict()
 
-type ModelSelection = z.infer<typeof ModelSelectionSchema>
-type ModelState = z.infer<typeof ModelStateSchema>
-
-const MAX_RECENT_MODELS = 10
-
-function getModelStatePath(): string {
+export function getModelStatePath(): string {
   return path.join(getWorkspacePath(), '.opencode', 'state', 'opencode', 'model.json')
 }
 
-async function readModelState(): Promise<ModelState> {
+async function mirrorModelStateToFile(state: OpenCodeModelStateRecord): Promise<void> {
   const modelStatePath = getModelStatePath()
-  if (!await fileExists(modelStatePath)) {
-    return { recent: [], favorite: [], variant: {} }
+  try {
+    await withFileLock(modelStatePath, async () => {
+      await writeJsonAtomic(modelStatePath, {
+        recent: state.recent,
+        favorite: state.favorite,
+        variant: state.variant,
+      })
+    })
+  } catch (error) {
+    logger.warn(`Failed to mirror model state to file ${modelStatePath}:`, error)
   }
-
-  return ModelStateSchema.parse(JSON.parse(await readFileContent(modelStatePath)))
-}
-
-function uniqueModels(models: ModelSelection[]): ModelSelection[] {
-  const seen = new Set<string>()
-  return models.filter((model) => {
-    const key = `${model.providerID}/${model.modelID}`
-    if (seen.has(key)) {
-      return false
-    }
-    seen.add(key)
-    return true
-  })
-}
-
-async function addRecentModel(model: ModelSelection): Promise<ModelState> {
-  const state = await readModelState()
-  const recent = uniqueModels([model, ...state.recent]).slice(0, MAX_RECENT_MODELS)
-  const nextState = { ...state, recent }
-  await writeFileContent(getModelStatePath(), JSON.stringify(nextState, null, 2))
-  return nextState
-}
-
-async function toggleFavoriteModel(model: ModelSelection): Promise<ModelState> {
-  const state = await readModelState()
-  const exists = state.favorite.some((favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID)
-  const favorite = exists
-    ? state.favorite.filter((favorite) => favorite.providerID !== model.providerID || favorite.modelID !== model.modelID)
-    : uniqueModels([model, ...state.favorite])
-  const nextState = { ...state, favorite }
-  await writeFileContent(getModelStatePath(), JSON.stringify(nextState, null, 2))
-  return nextState
 }
 
 async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
@@ -84,15 +61,16 @@ async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Pr
   await opencodeServerManager.reloadConfig()
 }
 
-export function createProvidersRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
+export function createProvidersRoutes(db: Database, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const authService = new AuthService()
 
   app.get('/model-state', async (c) => {
     try {
-      return c.json(await readModelState())
+      const state = readModelStateFromDb(db)
+      return c.json(state)
     } catch (error) {
-      logger.error('Failed to read OpenCode model state:', error)
+      logger.error('Failed to read OpenCode model state from DB:', error)
       return c.json({ recent: [], favorite: [], variant: {} })
     }
   })
@@ -101,13 +79,20 @@ export function createProvidersRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
     try {
       const body = await c.req.json()
       const validated = UpdateModelStateSchema.parse(body)
+      
+      let nextState: OpenCodeModelStateRecord
+      
       if (validated.favorite) {
-        return c.json(await toggleFavoriteModel(validated.favorite))
+        nextState = toggleFavoriteOpenCodeModel(db, validated.favorite)
+      } else if (validated.recent) {
+        nextState = addRecentOpenCodeModel(db, validated.recent)
+      } else {
+        nextState = readModelStateFromDb(db)
       }
-      if (!validated.recent) {
-        return c.json(await readModelState())
-      }
-      return c.json(await addRecentModel(validated.recent))
+      
+      await mirrorModelStateToFile(nextState)
+      
+      return c.json(nextState)
     } catch (error) {
       logger.error('Failed to update OpenCode model state:', error)
       if (error instanceof z.ZodError) {

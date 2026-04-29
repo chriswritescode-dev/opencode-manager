@@ -47,6 +47,11 @@ import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parse as parseJsonc } from 'jsonc-parser'
+import { getModelStatePath, ModelStateSchema } from './routes/providers'
+import { readJsonSafe } from './utils/atomic-json'
+import {
+  type OpenCodeModelStateRecord,
+} from './db/model-state'
 
 import { logger } from './utils/logger'
 import { 
@@ -158,6 +163,42 @@ async function ensureDefaultConfigExists(): Promise<void> {
   logger.info('Created minimal seed config')
 }
 
+async function backfillOpenCodeModelStateFromFile(): Promise<void> {
+  try {
+    const modelStatePath = getModelStatePath()
+    const fileState = await readJsonSafe<OpenCodeModelStateRecord | null>(modelStatePath, null)
+
+    if (!fileState) {
+      return
+    }
+
+    const existingRow = db.prepare('SELECT 1 FROM opencode_model_state WHERE user_id = ?').get('default')
+    if (existingRow) {
+      return
+    }
+
+    const validated = ModelStateSchema.safeParse(fileState)
+    if (!validated.success) {
+      logger.warn('Model state file has invalid structure, skipping backfill', validated.error)
+      return
+    }
+
+    db.prepare(
+      'INSERT INTO opencode_model_state(user_id, recent, favorite, variant, updated_at) VALUES(?,?,?,?,?)'
+    ).run(
+      'default',
+      JSON.stringify(validated.data.recent),
+      JSON.stringify(validated.data.favorite),
+      JSON.stringify(validated.data.variant),
+      Date.now()
+    )
+
+    logger.info('Backfilled OpenCode model state from model.json to database')
+  } catch (error) {
+    logger.warn('Failed to backfill OpenCode model state from file:', error)
+  }
+}
+
 async function ensureHomeStateImported(): Promise<void> {
   try {
     const status = await getOpenCodeImportStatus()
@@ -204,6 +245,7 @@ try {
   await cleanupExpiredCache()
 
   await ensureDefaultConfigExists()
+  await backfillOpenCodeModelStateFromFile()
   await ensureHomeStateImported()
   await ensureDefaultAgentsMdExists()
 
@@ -271,7 +313,7 @@ protectedApi.use('/*', requireAuth)
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeSupervisor))
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeSupervisor))
 protectedApi.route('/files', createFileRoutes())
-protectedApi.route('/providers', createProvidersRoutes(openCodeSupervisor))
+protectedApi.route('/providers', createProvidersRoutes(db, openCodeSupervisor))
 protectedApi.route('/oauth', createOAuthRoutes(openCodeSupervisor))
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))

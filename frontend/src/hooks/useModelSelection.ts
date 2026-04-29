@@ -58,6 +58,9 @@ export function useModelSelection(
       queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
       queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
     },
+    onError: (error) => {
+      console.error('Failed to sync recent model to backend', error)
+    },
   })
 
   const updateFavoriteModel = useMutation({
@@ -66,6 +69,9 @@ export function useModelSelection(
       syncModelState(state)
       queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
       queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
+    },
+    onError: (error) => {
+      console.error('Failed to toggle favorite model on backend', error)
     },
   })
 

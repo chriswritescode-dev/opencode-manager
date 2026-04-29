@@ -8,7 +8,9 @@
     "start": "bun src/index.ts",
     "build": "bun build src/index.ts --outdir=dist --target=bun",
     "typecheck": "tsc --noEmit",
-    "test": "vitest",
+    "test": "bun test src/",
+    "test:vitest": "vitest",
+    "test:all": "bun test src/ && vitest test/",
     "test:ui": "vitest --ui",
     "test:watch": "vitest --watch",
     "lint": "eslint . --ext .ts",
@@ -37,6 +39,7 @@
     "@types/web-push": "^3.6.4",
     "@vitest/coverage-v8": "^3.2.4",
     "@vitest/ui": "^3.2.4",
+    "better-sqlite3": "^12.9.0",
     "eslint": "^9.39.1",
     "typescript-eslint": "^8.45.0",
     "vitest": "^3.2.4"

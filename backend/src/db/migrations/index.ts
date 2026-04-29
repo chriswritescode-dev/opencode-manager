@@ -10,6 +10,7 @@ import migration008 from './008-schedule-cron-support'
 import migration009 from './009-repo-source-path'
 import migration010 from './009-prompt-templates'
 import migration011 from './011-repo-last-accessed'
+import migration012 from './012-opencode-model-state'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -23,4 +24,5 @@ export const allMigrations: Migration[] = [
   migration009,
   migration010,
   migration011,
+  migration012,
 ]

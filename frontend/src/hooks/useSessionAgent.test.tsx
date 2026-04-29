@@ -1,9 +1,8 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { resolveDefaultSessionAgent } from './useSessionAgent'
-import { useSessionAgent } from './useSessionAgent'
+import { useSessionAgent, resolveDefaultSessionAgent } from './useSessionAgent'
 import { useMessages, useConfig, useAgents } from './useOpenCode'
-import { useSessionAgentStore } from '@/stores/sessionAgentStore'
+import { useSessionAgentStore } from '../stores/sessionAgentStore'
 
 const sessionAgentStoreMock = vi.hoisted(() => {
   const state = {
@@ -36,6 +35,11 @@ vi.mock('./useOpenCode', () => ({
 vi.mock('@/stores/sessionAgentStore', () => ({
   useSessionAgentStore: sessionAgentStoreMock.store,
 }))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  sessionAgentStoreMock.store.setState({ agents: {} })
+})
 
 describe('resolveDefaultSessionAgent', () => {
   it('returns config.default_agent when present and agents not loaded', () => {
@@ -107,7 +111,7 @@ describe('useSessionAgent', () => {
     vi.mocked(useMessages).mockReturnValue({
       data: [],
       isLoading: false,
-    } as ReturnType<typeof useMessages>)
+    } as unknown as ReturnType<typeof useMessages>)
     vi.mocked(useConfig).mockReturnValue({
       data: { default_agent: 'code' },
     } as ReturnType<typeof useConfig>)
@@ -163,7 +167,7 @@ describe('useSessionAgent', () => {
     vi.mocked(useMessages).mockReturnValue({
       data: [],
       isLoading: false,
-    } as ReturnType<typeof useMessages>)
+    } as unknown as ReturnType<typeof useMessages>)
     vi.mocked(useConfig).mockReturnValue({
       data: { default_agent: 'code' },
     } as ReturnType<typeof useConfig>)

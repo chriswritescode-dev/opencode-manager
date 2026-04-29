@@ -8,10 +8,6 @@ interface FileApiUrlOptions {
   params?: Record<string, string | number | boolean | undefined>
 }
 
-function pathRequiresQuery(path: string): boolean {
-  return path.split('/').some(segment => segment === '.' || segment === '..')
-}
-
 export function getFileApiUrl(path: string, options: FileApiUrlOptions = {}): string {
   const searchParams = new URLSearchParams()
   Object.entries(options.params ?? {}).forEach(([key, value]) => {
@@ -20,17 +16,10 @@ export function getFileApiUrl(path: string, options: FileApiUrlOptions = {}): st
     }
   })
 
-  const routePath = options.route ? `/${options.route}` : ''
-
-  if (pathRequiresQuery(path)) {
-    searchParams.set('path', path)
-    const query = searchParams.toString()
-    return `${API_BASE_URL}/api/files${routePath}${query ? `?${query}` : ''}`
-  }
-
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  searchParams.set('path', path)
   const query = searchParams.toString()
-  return `${API_BASE_URL}/api/files/${encodedPath}${routePath}${query ? `?${query}` : ''}`
+  const routePath = options.route ? `/${options.route}` : ''
+  return `${API_BASE_URL}/api/files${routePath}${query ? `?${query}` : ''}`
 }
 
 async function fetchFile(path: string): Promise<FileInfo> {
@@ -48,14 +37,6 @@ export function useFile(path: string | undefined) {
 export async function fetchFileRange(path: string, startLine: number, endLine: number): Promise<ChunkedFileInfo> {
   return fetchWrapper(getFileApiUrl(path), {
     params: { startLine, endLine },
-  })
-}
-
-export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
-  return fetchWrapper(getFileApiUrl(path, { route: 'patches' }), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ patches }),
   })
 }
 
@@ -87,4 +68,12 @@ export async function downloadDirectoryAsZip(path: string, options?: DownloadOpt
   a.click()
   document.body.removeChild(a)
   window.URL.revokeObjectURL(urlObj)
+}
+
+export async function applyFilePatches(path: string, patches: PatchOperation[]): Promise<{ success: boolean; totalLines: number }> {
+  const url = getFileApiUrl(path)
+  return fetchWrapper(url, {
+    method: 'PATCH',
+    body: JSON.stringify({ patches }),
+  })
 }
