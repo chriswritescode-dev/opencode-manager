@@ -83,13 +83,15 @@ ENV WORKSPACE_PATH=/workspace
 ENV XDG_CACHE_HOME=/home/node/.cache
 
 COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=deps --chown=node:node /app/backend/node_modules ./backend/node_modules
+COPY --from=deps --chown=node:node /app/frontend/node_modules ./frontend/node_modules
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/backend ./backend
 COPY --from=builder /app/frontend/dist ./frontend/dist
 COPY package.json pnpm-workspace.yaml ./
 
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
-    ln -s /app/shared /app/backend/node_modules/@opencode-manager/shared
+    ln -sfn /app/shared /app/backend/node_modules/@opencode-manager/shared
 
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
