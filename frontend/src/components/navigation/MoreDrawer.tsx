@@ -1,11 +1,13 @@
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useState } from 'react'
-import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X, GitBranch } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useMemoryPluginStatus } from '@/hooks/useMemoryPluginStatus'
 import { useCommands } from '@/hooks/useCommands'
 import { useUIState } from '@/stores/uiStateStore'
+import { useQuery } from '@tanstack/react-query'
+import { getRepo } from '@/api/repos'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
@@ -22,6 +24,8 @@ interface MoreDrawerProps {
 export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const navigate = useNavigate()
   const location = useLocation()
+  const { id } = useParams<{ id: string }>()
+  const repoId = id ? Number(id) : null
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
   const { logout } = useAuth()
@@ -32,6 +36,14 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
   const selectPromptFile = useUIState((state) => state.selectPromptFile)
+
+  const { data: repo } = useQuery({
+    queryKey: ['repo', repoId],
+    queryFn: () => repoId ? getRepo(repoId) : null,
+    enabled: !!repoId,
+  })
+
+  const currentBranch = repo?.currentBranch || repo?.branch
 
   const handleSettingsClick = () => {
     const newParams = new URLSearchParams(location.search)
@@ -95,18 +107,26 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   return (
     <SideDrawer isOpen={isOpen} onClose={onClose} side="right" ariaLabel="More" widthClass="w-screen sm:w-[min(90vw,420px)]">
-      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 py-1.5">
-        {versionLabel && (
-          <span className="truncate text-xs leading-tight text-muted-foreground">{versionLabel}</span>
+      <div className="flex flex-col flex-shrink-0 border-b border-border bg-background px-4 py-1.5">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          {versionLabel && (
+            <span className="truncate text-xs leading-tight text-muted-foreground">{versionLabel}</span>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {currentBranch && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <GitBranch className="h-3.5 w-3.5" />
+            <span>{currentBranch}</span>
+          </div>
         )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" />
-        </button>
       </div>
       <SideDrawerContent className="flex flex-col gap-1">
         {isSessionDetail && (
