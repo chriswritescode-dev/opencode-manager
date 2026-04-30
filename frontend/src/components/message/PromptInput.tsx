@@ -47,7 +47,7 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
 
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
-const VOICE_SEND_SWIPE_THRESHOLD = 48
+const VOICE_SEND_SWIPE_THRESHOLD = 30
 type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
