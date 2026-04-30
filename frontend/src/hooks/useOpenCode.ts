@@ -21,6 +21,13 @@ type SendPromptRequest = NonNullable<
   paths["/session/{sessionID}/message"]["post"]["requestBody"]
 >["content"]["application/json"];
 
+const parseModelString = (model: string) => {
+  const [providerID, ...rest] = model.split("/");
+  const modelID = rest.join("/");
+  if (!providerID || !modelID) return undefined;
+  return { providerID, modelID };
+};
+
 export const useOpenCodeClient = (opcodeUrl: string | null | undefined, directory?: string) => {
   return useMemo(
     () => (opcodeUrl ? new OpenCodeClient(opcodeUrl, directory) : null),
@@ -205,11 +212,11 @@ const createOptimisticUserMessageInfo = (
   } as Message;
 
   if (model) {
-    const [providerID, modelID] = model.split("/");
-    if (providerID && modelID) {
+    const parsedModel = parseModelString(model);
+    if (parsedModel) {
       return {
         ...message,
-        model: { providerID, modelID },
+        model: parsedModel,
         agent,
         variant,
       } as Message;
@@ -295,11 +302,11 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       };
 
       if (model) {
-        const [providerID, modelID] = model.split("/");
-        if (providerID && modelID) {
+        const parsedModel = parseModelString(model);
+        if (parsedModel) {
           requestData.model = {
-            providerID,
-            modelID,
+            providerID: parsedModel.providerID,
+            modelID: parsedModel.modelID,
           };
         }
       }
