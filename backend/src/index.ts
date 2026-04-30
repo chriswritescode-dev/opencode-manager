@@ -13,6 +13,7 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
 import { createScheduleRoutes } from './routes/schedules'
+import { createAssistantScheduleRoutes } from './routes/assistant-schedules'
 
 async function getAppVersion(): Promise<string> {
   try {
@@ -264,6 +265,7 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(requireAuth))
+app.route('/api/assistant/schedules', createAssistantScheduleRoutes(db, scheduleService))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)

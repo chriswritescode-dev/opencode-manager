@@ -422,7 +422,7 @@ app.get('/', async (c) => {
       const body = await c.req.json().catch(() => ({}))
       const options = AssistantModeInitRequestSchema.parse(body)
 
-      const status = await ensureAssistantMode(repo, options)
+      const status = await ensureAssistantMode(repo, options, database)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to initialize assistant mode:', error)

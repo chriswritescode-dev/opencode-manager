@@ -63,6 +63,13 @@ export function AssistantRedirect() {
   const assistantDirectory = assistantMode?.directory
   const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
 
+  useEffect(() => {
+    if (assistantMode) {
+      queryClient.invalidateQueries({ queryKey: ["repos"] })
+      queryClient.invalidateQueries({ queryKey: ["all-schedules"] })
+    }
+  }, [assistantMode, queryClient])
+
   useSSE(opcodeUrl, assistantDirectory)
 
   const createSessionMutation = useCreateSession(opcodeUrl, assistantDirectory, (session) => {

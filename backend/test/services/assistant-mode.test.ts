@@ -81,6 +81,11 @@ describe('buildAssistantOpenCodeConfig', () => {
     expect(config.instructions).toEqual(['AGENTS.md'])
   })
 
+  it('includes the assistant skills path', () => {
+    const config = buildAssistantOpenCodeConfig()
+    expect(config.skills?.paths).toEqual(['.opencode/skills'])
+  })
+
   it('has permission rules for the assistant workspace', () => {
     const config = buildAssistantOpenCodeConfig()
     expect(config.permission).toEqual({
@@ -110,6 +115,10 @@ describe('ensureAssistantMode', () => {
     expect(result.relativePath).toBe('repos/assistant')
     expect(result.files.agentsMd.exists).toBe(true)
     expect(result.files.opencodeJson.exists).toBe(true)
+    expect(writeFile).toHaveBeenCalledWith(
+      expect.stringContaining(path.join('.opencode', 'skills', 'scheduler', 'SKILL.md')),
+      expect.any(Buffer),
+    )
   })
 
   it('does not overwrite existing customized files by default', async () => {
