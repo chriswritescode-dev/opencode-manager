@@ -115,7 +115,7 @@ function AppShell() {
     {
       enabled: canOpenMoreWithSwipe(),
       edgeWidth: 32,
-      threshold: 72,
+      threshold: 60,
     }
   )
 

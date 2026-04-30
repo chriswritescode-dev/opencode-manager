@@ -25,7 +25,7 @@ export function BottomSheet({
 
   const { bind, swipeStyles } = useSwipeDismiss(onClose, {
     enabled: isOpen,
-    threshold: 80,
+    threshold: 60,
   })
 
   useEffect(() => {
