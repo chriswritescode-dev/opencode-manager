@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -19,12 +19,44 @@ type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'pro
 export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
+  const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
   const contentRef = useRef<HTMLDivElement>(null)
+
+  const pushSectionHistory = useCallback((view: SettingsView) => {
+    if (view === 'menu') return
+    setSectionHistory((history) => {
+      if (history.at(-1) === view) return history
+      return [...history, view]
+    })
+  }, [])
+
+  const handleSettingsBack = useCallback(() => {
+    if (mobileView === 'menu') {
+      close()
+      return
+    }
+
+    const currentIndex = sectionHistory.lastIndexOf(mobileView)
+    const previousHistory = currentIndex >= 0
+      ? sectionHistory.slice(0, currentIndex)
+      : sectionHistory
+    const previousView = previousHistory.at(-1)
+
+    if (previousView) {
+      setSectionHistory(previousHistory)
+      setMobileView(previousView)
+      setActiveTab(previousView)
+      return
+    }
+
+    setSectionHistory([])
+    setMobileView('menu')
+  }, [mobileView, sectionHistory, close, setActiveTab])
 
   const { bind: bindSwipe, swipeStyles } = useSwipeBack(close, {
     enabled: isOpen,
     canBack: () => mobileView !== 'menu',
-    onBack: () => setMobileView('menu'),
+    onBack: handleSettingsBack,
   })
 
   useEffect(() => {
@@ -32,7 +64,11 @@ export function SettingsDialog() {
   }, [bindSwipe])
 
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      setMobileView('menu')
+      setSectionHistory([])
+      return
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
@@ -54,8 +90,17 @@ export function SettingsDialog() {
     { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
   ]
 
+  const handleOpenMobileView = useCallback((view: SettingsView) => {
+    setMobileView(view)
+    setActiveTab(view)
+    pushSectionHistory(view)
+  }, [setActiveTab, pushSectionHistory])
+
   const handleTabChange = (tab: string) => {
-    setActiveTab(tab as SettingsView)
+    const nextView = tab as SettingsView
+    setActiveTab(nextView)
+    setMobileView(nextView)
+    pushSectionHistory(nextView)
   }
 
    return (
@@ -128,16 +173,16 @@ export function SettingsDialog() {
         <div className="sm:hidden flex flex-col h-full min-h-0 pt-safe">
            <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-4 py-4 flex items-center justify-between">
              <div className="flex items-center gap-2 flex-1">
-               {mobileView !== 'menu' && (
-                 <Button
-                   variant="ghost"
-                   size="icon"
-                   onClick={() => setMobileView('menu')}
-                   className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
-                 >
-                   <ChevronLeft className="w-6 h-6" />
-                 </Button>
-               )}
+                {mobileView !== 'menu' && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleSettingsBack}
+                    className="text-muted-foreground hover:text-foreground min-w-[44px] min-h-[44px]"
+                  >
+                    <ChevronLeft className="w-6 h-6" />
+                  </Button>
+                )}
                <h2 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
                  {mobileView === 'menu' ? 'Settings' : menuItems.find(item => item.id === mobileView)?.label}
                </h2>
@@ -156,14 +201,11 @@ export function SettingsDialog() {
              {mobileView === 'menu' && (
                <div className="space-y-3">
                  {menuItems.map((item) => (
-                   <button
-                     key={item.id}
-                     onClick={() => {
-                       setMobileView(item.id as SettingsView)
-                       setActiveTab(item.id as SettingsView)
-                     }}
-                     className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
-                   >
+                    <button
+                      key={item.id}
+                      onClick={() => handleOpenMobileView(item.id as SettingsView)}
+                      className="w-full bg-gradient-to-br from-card to-card-hover border border-border rounded-xl p-4 hover:border-border transition-all duration-200 text-left"
+                    >
                      <div className="flex items-center gap-4">
                        <div className="p-3 bg-accent rounded-lg">
                          <item.icon className="w-6 h-6 text-blue-600 dark:text-blue-400" />

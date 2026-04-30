@@ -9,6 +9,7 @@ import { X, CornerUpLeft } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
+import { getSessionListPath } from '@/lib/navigation'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -297,8 +298,8 @@ export function SessionDetail() {
   }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId, sessionRouteSuffix]);
 
   const handleCloseSession = useCallback(() => {
-    navigate(isAssistantSession ? `/repos/${repoId}/assistant?view=sessions` : `/repos/${repoId}`);
-  }, [navigate, repoId, isAssistantSession]);
+    navigate(getSessionListPath(repoId, isAssistantSession))
+  }, [navigate, repoId, isAssistantSession])
 
   const { leaderActive } = useKeyboardShortcuts({
     openModelDialog: () => setModelDialogOpen(true),
@@ -414,7 +415,7 @@ export function SessionDetail() {
   }
 
   const workspaceDisplayName = isAssistantSession ? 'Assistant' : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
-  const sessionBackPath = isAssistantSession ? `/repos/${repoId}/assistant?view=sessions` : `/repos/${repoId}`;
+  const sessionBackPath = getSessionListPath(repoId, isAssistantSession);
 
   return (
     <div

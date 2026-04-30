@@ -14,6 +14,7 @@ export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayPro
   }
 
   const isLoading = state === 'starting' || state === 'processing' || state === 'sending'
+  const showLoadingText = state !== 'starting'
   const topLabel = state === 'readyToSend'
     ? 'Release'
     : state === 'starting'
@@ -48,7 +49,9 @@ export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayPro
           {isLoading ? (
             <>
               <LoaderCircle className="h-6 w-6 animate-spin" />
-              <span className="text-[10px] font-bold uppercase leading-none tracking-wide">{topLabel}</span>
+              {showLoadingText && (
+                <span className="text-[10px] font-bold uppercase leading-none tracking-wide">{topLabel}</span>
+              )}
             </>
           ) : (
             <>
@@ -61,11 +64,11 @@ export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayPro
             </>
           )}
         </div>
-        {isLoading ? (
+        {isLoading && showLoadingText ? (
           <span className="relative text-[10px] font-bold uppercase leading-none tracking-wide">{bottomLabel}</span>
-        ) : (
+        ) : !isLoading ? (
           <X className="relative h-4 w-4" />
-        )}
+        ) : null}
       </div>
     </div>
   )

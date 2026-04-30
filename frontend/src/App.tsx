@@ -1,7 +1,7 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
@@ -29,6 +29,7 @@ import { SwipeNavigationProvider } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
+import { getSwipeBackTarget } from '@/lib/navigation'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,40 +81,20 @@ function AppShell() {
   const { open: openMobileSheet, openSheet } = useMobileTabBar()
   useTheme()
 
-  const getSwipeBackTarget = () => {
-    const path = location.pathname
-    if (path.match(/^\/repos\/[^/]+\/sessions\/[^/]+$/)) {
-      const repoId = path.split('/')[2]
-      return `/repos/${repoId}`
-    }
-    if (path.match(/^\/repos\/[^/]+$/)) {
-      return '/'
-    }
-    if (path.match(/^\/repos\/[^/]+\/memories$/)) {
-      const repoId = path.split('/')[2]
-      return `/repos/${repoId}`
-    }
-    if (path.match(/^\/repos\/[^/]+\/schedules$/)) {
-      const repoId = path.split('/')[2]
-      return `/repos/${repoId}`
-    }
-    if (path === '/schedules') {
-      return '/'
-    }
-    return null
-  }
+  const getRouteSwipeBackTarget = useCallback(
+    () => getSwipeBackTarget(location.pathname, location.search),
+    [location.pathname, location.search]
+  )
 
-  const canSwipeBack = () => {
-    const path = location.pathname
-    return !['/login', '/setup', '/register', '/'].includes(path) && getSwipeBackTarget() !== null
-  }
+  const canSwipeBack = useCallback(
+    () => getRouteSwipeBackTarget() !== null,
+    [getRouteSwipeBackTarget]
+  )
 
-  const handleSwipeBack = () => {
-    const target = getSwipeBackTarget()
-    if (target) {
-      navigate(target)
-    }
-  }
+  const handleSwipeBack = useCallback(() => {
+    const target = getRouteSwipeBackTarget()
+    if (target) navigate(target)
+  }, [getRouteSwipeBackTarget, navigate])
 
   const { bind: bindRouteSwipe } = useSwipeBack(
     () => {},

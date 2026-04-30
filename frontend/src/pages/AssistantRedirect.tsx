@@ -17,6 +17,7 @@ import { SourceControlPanel } from "@/components/source-control"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
 import { invalidateConfigCaches } from "@/lib/queryInvalidation"
+import { getSessionListPath } from "@/lib/navigation"
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Loader2, Plus } from "lucide-react"
 
@@ -45,8 +46,11 @@ export function AssistantRedirect() {
 
   const handleNavigate = useCallback((sessionId: string) => {
     setStatus("opening")
+    if (!showSessionList) {
+      window.history.replaceState(window.history.state, "", getSessionListPath(repoId, true))
+    }
     navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)
-  }, [navigate, repoId])
+  }, [navigate, repoId, showSessionList])
 
   const { openAssistant } = useAssistantSessionLauncher({
     repoId,
