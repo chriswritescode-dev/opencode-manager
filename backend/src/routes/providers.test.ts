@@ -3,9 +3,9 @@ import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
 import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
-import { createProvidersRoutes, getModelStatePath } from './providers'
-import { join } from 'node:path'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { createProvidersRoutes } from './providers'
+import { join, dirname } from 'node:path'
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 function createTestApp(db: Database): Hono {
@@ -30,15 +30,20 @@ describe('providers routes', () => {
     db = createTestDb()
     app = createTestApp(db)
     tmpDir = await mkdtemp(join(tmpdir(), 'providers-test-'))
-    originalWorkspacePath = process.env.OPENCODE_WORKSPACE_PATH
-    process.env.OPENCODE_WORKSPACE_PATH = tmpDir
+    originalWorkspacePath = process.env.WORKSPACE_PATH
+    process.env.WORKSPACE_PATH = tmpDir
+    
+    const { getModelStatePath } = await import('./providers')
+    const modelStatePath = getModelStatePath()
+    const modelStateDir = dirname(modelStatePath)
+    await mkdir(modelStateDir, { recursive: true })
   })
 
   afterEach(async () => {
     if (originalWorkspacePath) {
-      process.env.OPENCODE_WORKSPACE_PATH = originalWorkspacePath
+      process.env.WORKSPACE_PATH = originalWorkspacePath
     } else {
-      delete process.env.OPENCODE_WORKSPACE_PATH
+      delete process.env.WORKSPACE_PATH
     }
     await rm(tmpDir, { recursive: true, force: true })
   })
@@ -99,6 +104,7 @@ describe('providers routes', () => {
     })
 
     it('with corrupt model.json on disk still returns 200 and overwrites with valid JSON', async () => {
+      const { getModelStatePath } = await import('./providers')
       const modelStatePath = getModelStatePath()
       await writeFile(modelStatePath, '{ invalid json content }', 'utf8')
 

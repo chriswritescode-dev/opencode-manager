@@ -193,13 +193,30 @@ const createOptimisticUserMessageParts = (
 const createOptimisticUserMessageInfo = (
   sessionID: string,
   optimisticID: string,
+  model?: string,
+  agent?: string,
+  variant?: string,
 ): Message => {
-  return {
+  const message = {
     id: optimisticID,
     role: "user",
     sessionID,
     time: { created: Date.now() },
   } as Message;
+
+  if (model) {
+    const [providerID, modelID] = model.split("/");
+    if (providerID && modelID) {
+      return {
+        ...message,
+        model: { providerID, modelID },
+        agent,
+        variant,
+      } as Message;
+    }
+  }
+
+  return { ...message, agent, variant } as Message;
 };
 
 export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: string) => {
@@ -241,7 +258,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         contentParts,
         optimisticUserID,
       );
-      const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID);
+      const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID, model, agent, variant);
 
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
       await queryClient.cancelQueries({ queryKey: messagesQueryKey });

@@ -10,6 +10,7 @@ import { useSessionAgent } from '@/hooks/useSessionAgent'
 import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
+import { useModelStore } from '@/stores/modelStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useUIState } from '@/stores/uiStateStore'
 import { useMobile } from '@/hooks/useMobile'
@@ -980,6 +981,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
+  const syncedSessionModelRef = useRef<string | undefined>(undefined)
 
   const client = useOpenCodeClient(opcodeUrl, directory)
   const { data: providersData } = useQuery({
@@ -989,7 +991,29 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     staleTime: 30000,
   })
 
-const { model, modelString, setModel: setStoredModel } = useModelSelection(opcodeUrl, directory)
+  const { model, modelString, setModel: setStoredModel, setActiveModel } = useModelSelection(opcodeUrl, directory)
+  const setStoreVariant = useModelStore((state) => state.setVariant)
+  const clearStoreVariant = useModelStore((state) => state.clearVariant)
+
+  const sessionModelSyncKey = sessionID ? `${directory ?? ''}:${sessionID}` : undefined
+
+  useEffect(() => {
+    if (!sessionModelSyncKey) return
+    if (syncedSessionModelRef.current === sessionModelSyncKey) return
+    if (!sessionAgent.model) return
+
+    const restored = setActiveModel(sessionAgent.model)
+    if (!restored) return
+
+    syncedSessionModelRef.current = sessionModelSyncKey
+
+    if (sessionAgent.variant) {
+      setStoreVariant(sessionAgent.model, sessionAgent.variant)
+    } else {
+      clearStoreVariant(sessionAgent.model)
+    }
+  }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, setActiveModel, setStoreVariant])
+
   const currentModel = modelString || ''
   const displayModelName = useMemo(() => {
     if (!model) {

@@ -36,8 +36,6 @@ const resolveWorkspacePath = (): string => {
   return path.resolve(DEFAULTS.WORKSPACE.BASE_PATH)
 }
 
-const workspaceBasePath = resolveWorkspacePath()
-
 const generateDefaultSecret = (): string => {
   return randomBytes(32).toString('base64').slice(0, 32)
 }
@@ -70,7 +68,7 @@ export const ENV = {
   },
 
   WORKSPACE: {
-    BASE_PATH: workspaceBasePath,
+    get BASE_PATH() { return resolveWorkspacePath() },
     REPOS_DIR: DEFAULTS.WORKSPACE.REPOS_DIR,
     CONFIG_DIR: DEFAULTS.WORKSPACE.CONFIG_DIR,
     AUTH_FILE: DEFAULTS.WORKSPACE.AUTH_FILE,

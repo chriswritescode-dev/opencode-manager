@@ -49,7 +49,7 @@ export function useSessionAgent(
   sessionID: string | undefined,
   directory?: string
 ) {
-  const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
+  const { data: messages, isLoading: messagesLoading, isFetching: messagesFetching } = useMessages(opcodeUrl, sessionID, directory)
   const { data: config } = useConfig(opcodeUrl, directory)
   const { data: agents, isSuccess: agentsLoaded } = useAgents(opcodeUrl, directory)
   const storedAgent = useSessionAgentStore((s) => s.agents[sessionID ?? ''] ?? null)
@@ -62,7 +62,7 @@ export function useSessionAgent(
   )
 
   const result = useMemo(() => {
-    if (messagesLoading) {
+    if (messagesLoading || messagesFetching) {
       return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
     }
 
@@ -125,7 +125,7 @@ export function useSessionAgent(
     }
 
     return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
-  }, [messages, messagesLoading, storedAgent, defaultAgent])
+  }, [messages, messagesLoading, messagesFetching, storedAgent, defaultAgent])
 
   useEffect(() => {
     if (result.agent && sessionID && result.fromMessage) {

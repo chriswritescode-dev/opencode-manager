@@ -11,6 +11,7 @@ interface UseModelSelectionResult {
   recentModels: ModelSelection[]
   favoriteModels: ModelSelection[]
   setModel: (model: ModelSelection) => void
+  setActiveModel: (model: ModelSelection) => boolean
   toggleFavorite: (model: ModelSelection) => void
   isModelStateLoading: boolean
 }
@@ -37,6 +38,7 @@ export function useModelSelection(
     recentModels, 
     favoriteModels,
     setModel: setStoreModel,
+    setActiveModel: setStoreActiveModel,
     syncModelState,
     toggleFavorite: toggleStoreFavorite,
     validateAndSyncModel, 
@@ -97,6 +99,20 @@ export function useModelSelection(
     updateRecentModel.mutate(nextModel)
   }
 
+  const setActiveModel = (nextModel: ModelSelection): boolean => {
+    const providers = providersData?.providers
+    if (!providers) return false
+
+    const isAvailable = providers.some(
+      (provider) => provider.id === nextModel.providerID && provider.models && nextModel.modelID in provider.models
+    )
+
+    if (!isAvailable) return false
+
+    setStoreActiveModel(nextModel)
+    return true
+  }
+
   const toggleFavorite = (nextModel: ModelSelection) => {
     toggleStoreFavorite(nextModel)
     updateFavoriteModel.mutate(nextModel)
@@ -108,6 +124,7 @@ export function useModelSelection(
     recentModels,
     favoriteModels,
     setModel,
+    setActiveModel,
     toggleFavorite,
     isModelStateLoading,
   }

@@ -163,6 +163,40 @@ describe('useSessionAgent', () => {
     })
   })
 
+  it('does not restore model from cached messages while refetching', async () => {
+    vi.mocked(useMessages).mockReturnValue({
+      data: [
+        {
+          info: {
+            role: 'user',
+            agent: 'assistant',
+            model: { providerID: 'provider', modelID: 'stale-model' },
+            variant: 'stale-variant',
+          },
+        },
+      ],
+      isLoading: false,
+      isFetching: true,
+    } as ReturnType<typeof useMessages>)
+    vi.mocked(useConfig).mockReturnValue({
+      data: { default_agent: 'code' },
+    } as ReturnType<typeof useConfig>)
+    vi.mocked(useAgents).mockReturnValue({
+      data: [{ name: 'code', mode: 'primary' }],
+      isSuccess: true,
+    } as ReturnType<typeof useAgents>)
+
+    const { result } = renderHook(() =>
+      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+    )
+
+    await waitFor(() => {
+      expect(result.current.agent).toBe('code')
+      expect(result.current.model).toBeUndefined()
+      expect(result.current.variant).toBeUndefined()
+    })
+  })
+
   it('does not persist default agent fallback to store', async () => {
     vi.mocked(useMessages).mockReturnValue({
       data: [],

@@ -15,6 +15,7 @@ interface ModelStore {
   lastConfigModel: string | undefined
 
   setModel: (model: ModelSelection) => void
+  setActiveModel: (model: ModelSelection) => void
   syncModelState: (state: { recent: ModelSelection[], favorite: ModelSelection[], variant: Record<string, string | undefined> }) => void
   toggleFavorite: (model: ModelSelection) => void
   syncFromConfig: (configModel: string | undefined, force?: boolean) => void
@@ -57,6 +58,10 @@ export const useModelStore = create<ModelStore>()(
             recentModels: newRecent,
           }
         })
+      },
+
+      setActiveModel: (model: ModelSelection) => {
+        set({ model })
       },
 
       syncModelState: (modelState) => {
