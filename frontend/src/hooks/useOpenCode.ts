@@ -685,17 +685,15 @@ export const useLoadSkill = (
       const response = await client.sendCommand(sessionID, { command: skillName, arguments: "" });
       return { optimisticUserID, response };
     },
-    onError: (error) => {
+    onError: () => {
       if (sessionID) {
         const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
-      setSessionStatus(sessionID!, { type: "idle" });
+        setSessionStatus(sessionID!, { type: "idle" });
         queryClient.setQueryData<MessageWithParts[]>(
           messagesQueryKey,
           (old) => old?.filter((m) => !m.info.id.startsWith("optimistic_")),
         );
       }
-      const message = error instanceof Error ? error.message : "Failed to load skill";
-      showToast.error(message);
     },
     onSuccess: (data) => {
       const { response } = data;

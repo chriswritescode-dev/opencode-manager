@@ -1,5 +1,4 @@
-import { AlertCircle, Loader2, Sparkles } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { AlertCircle, Loader2 } from 'lucide-react'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 
 interface RepoSkillsListProps {
@@ -74,15 +73,13 @@ export function RepoSkillsList({
               )}
             </div>
             {onLoad && (
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 onClick={() => onLoad(skill)}
-                className="shrink-0"
+                className="shrink-0 text-xs font-medium text-primary hover:text-foreground transition-colors"
               >
-                <Sparkles className="w-4 h-4" />
-                <span>Load</span>
-              </Button>
+                Load
+              </button>
             )}
           </div>
         ))}
