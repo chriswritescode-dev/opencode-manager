@@ -9,7 +9,14 @@ interface SSESubscriber {
   onStatusChange?: SSEStatusHandler
 }
 
-const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
+export interface SSEHealthState {
+  isConnected: boolean
+  isHealthy: boolean
+  lastEventAt: number | null
+  isStalled: boolean
+}
+
+const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, STALL_THRESHOLD_MS, WATCHDOG_TICK_MS } = DEFAULTS.SSE
 
 class SSEManager {
   private static instance: SSEManager
@@ -22,6 +29,9 @@ class SSEManager {
   private isConnected = false
   private subscriberIdCounter = 0
   private clientId: string | null = null
+  private lastEventAt: number | null = null
+  private healthListeners: Set<(state: SSEHealthState) => void> = new Set()
+  private watchdogTimer: ReturnType<typeof setInterval> | null = null
 
   private constructor() {}
 
@@ -30,6 +40,69 @@ class SSEManager {
       SSEManager.instance = new SSEManager()
     }
     return SSEManager.instance
+  }
+
+  private markActivity() {
+    this.lastEventAt = Date.now()
+    this.notifyHealth()
+  }
+
+  private startWatchdog() {
+    if (this.watchdogTimer) return
+    this.watchdogTimer = setInterval(() => {
+      if (this.lastEventAt == null) return
+      if (Date.now() - this.lastEventAt > STALL_THRESHOLD_MS) {
+        this.handleStall()
+      }
+    }, WATCHDOG_TICK_MS)
+  }
+
+  private stopWatchdog() {
+    if (this.watchdogTimer) {
+      clearInterval(this.watchdogTimer)
+      this.watchdogTimer = null
+    }
+  }
+
+  private handleStall() {
+    this.eventSource?.close()
+    this.eventSource = null
+    this.lastEventAt = null
+    this.notifyHealth()
+    this.connect()
+  }
+
+  private notifyHealth() {
+    const state: SSEHealthState = {
+      isConnected: this.isConnected,
+      isHealthy: this.isConnected && this.lastEventAt != null && Date.now() - this.lastEventAt <= STALL_THRESHOLD_MS,
+      lastEventAt: this.lastEventAt,
+      isStalled: this.isConnected && this.lastEventAt != null && Date.now() - this.lastEventAt > STALL_THRESHOLD_MS,
+    }
+    this.healthListeners.forEach(listener => {
+      try {
+        listener(state)
+      } catch {
+        // Ignore listener errors
+      }
+    })
+  }
+
+  subscribeHealth(listener: (state: SSEHealthState) => void): () => void {
+    this.healthListeners.add(listener)
+    listener(this.getHealth())
+    return () => {
+      this.healthListeners.delete(listener)
+    }
+  }
+
+  getHealth(): SSEHealthState {
+    return {
+      isConnected: this.isConnected,
+      isHealthy: this.isConnected && this.lastEventAt != null && Date.now() - this.lastEventAt <= STALL_THRESHOLD_MS,
+      lastEventAt: this.lastEventAt,
+      isStalled: this.isConnected && this.lastEventAt != null && Date.now() - this.lastEventAt > STALL_THRESHOLD_MS,
+    }
   }
 
   subscribe(
@@ -161,13 +234,37 @@ class SSEManager {
     this.eventSource.onopen = () => {
       this.isConnected = true
       this.reconnectDelay = RECONNECT_DELAY_MS
+      this.startWatchdog()
+      this.markActivity()
       this.notifyStatusChange(true)
+      this.notifyHealth()
     }
 
     this.eventSource.onerror = () => {
       this.isConnected = false
       this.clientId = null
+      this.stopWatchdog()
+      this.lastEventAt = null
       this.notifyStatusChange(false)
+      this.notifyHealth()
+
+      if (this.eventSource) {
+        this.eventSource.close()
+        this.eventSource = null
+      }
+
+      if (this.subscribers.size > 0) {
+        this.scheduleReconnect()
+      }
+    }
+
+    this.eventSource.onerror = () => {
+      this.isConnected = false
+      this.clientId = null
+      this.stopWatchdog()
+      this.lastEventAt = null
+      this.notifyStatusChange(false)
+      this.notifyHealth()
 
       if (this.eventSource) {
         this.eventSource.close()
@@ -182,6 +279,7 @@ class SSEManager {
     this.eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        this.markActivity()
         this.broadcast(data)
       } catch {
         // Ignore parse errors
@@ -195,7 +293,10 @@ class SSEManager {
           this.clientId = data.clientId
         }
         this.isConnected = true
+        this.startWatchdog()
+        this.markActivity()
         this.notifyStatusChange(true)
+        this.notifyHealth()
         this.flushPendingDirectories()
       } catch {
         // Ignore
@@ -203,7 +304,7 @@ class SSEManager {
     })
 
     this.eventSource.addEventListener('heartbeat', () => {
-      // Heartbeat received - connection is alive
+      this.markActivity()
     })
   }
 
@@ -213,6 +314,8 @@ class SSEManager {
       this.reconnectTimeout = null
     }
 
+    this.stopWatchdog()
+
     if (this.eventSource) {
       this.eventSource.close()
       this.eventSource = null
@@ -220,6 +323,8 @@ class SSEManager {
 
     this.isConnected = false
     this.clientId = null
+    this.lastEventAt = null
+    this.notifyHealth()
   }
 
   private scheduleReconnect(): void {

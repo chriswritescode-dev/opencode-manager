@@ -4,6 +4,7 @@ import { createOpenCodeClient } from '@/api/opencode'
 import { useCreateSession } from '@/hooks/useOpenCode'
 import { useModelSelection } from '@/hooks/useModelSelection'
 import { showToast } from '@/lib/toast'
+import { ensureSSEConnected } from '@/lib/sseManager'
 import type { components } from '@/api/opencode-types'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 
@@ -46,6 +47,15 @@ export function useCommandHandler({
     try {
       const client = createOpenCodeClient(opcodeUrl, directory)
       
+      const ensureLive = async () => {
+        const ok = await ensureSSEConnected()
+        if (!ok) {
+          showToast.error('Unable to connect. Please try again.')
+          setSessionStatus(sessionID, { type: 'idle' })
+        }
+        return ok
+      }
+      
       switch (command.name) {
         case 'sessions':
         case 'resume':
@@ -57,7 +67,8 @@ export function useCommandHandler({
           onShowModelsDialog?.()
           break
           
-        case 'themes':
+        case 'themes': {
+          if (!(await ensureLive())) break
           await client.sendCommand(sessionID, {
             command: command.name,
             arguments: args,
@@ -65,6 +76,7 @@ export function useCommandHandler({
             model: modelString || undefined
           })
           break
+        }
           
         case 'help':
           onShowHelpDialog?.()
@@ -113,6 +125,8 @@ export function useCommandHandler({
             break
           }
 
+          if (!(await ensureLive())) break
+
           showToast.loading('Compacting session...', { id: `compact-${sessionID}` })
 
           setSessionStatus(sessionID, { type: 'compact' })
@@ -130,7 +144,8 @@ export function useCommandHandler({
         case 'undo':
         case 'redo':
         case 'editor':
-        case 'init':
+        case 'init': {
+          if (!(await ensureLive())) break
           await client.sendCommand(sessionID, {
             command: command.name,
             arguments: args,
@@ -138,14 +153,17 @@ export function useCommandHandler({
             model: modelString || undefined
           })
           break
+        }
 
-        default:
+        default: {
+          if (!(await ensureLive())) break
           await client.sendCommand(sessionID, {
             command: command.name,
             arguments: args,
             agent: currentAgent,
             model: modelString || undefined
           })
+        }
       }
     } catch (error) {
       showToast.error(`Command failed: ${error instanceof Error ? error.message : 'Unknown error'}`)

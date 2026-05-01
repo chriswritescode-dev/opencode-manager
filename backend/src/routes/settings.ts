@@ -1138,7 +1138,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Invalid repoId' }, 400)
       }
       
-      const skills = await listManagedSkills(db, repoId)
+      const skills = await listManagedSkills(db, openCodeClient, repoId)
       return c.json(skills)
     } catch (error) {
       logger.error('Failed to list skills:', error)
@@ -1160,7 +1160,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
-      const skill = await getSkill(db, name, scope, repoId)
+      const skill = await getSkill(db, openCodeClient, name, scope, repoId)
       return c.json(skill)
     } catch (error) {
       logger.error('Failed to get skill:', error)
@@ -1220,7 +1220,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
-      const skill = await updateSkill(db, name, scope, validated, repoId)
+      const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
       
       try {
         await restartOpenCode(openCodeSupervisor)

@@ -351,6 +351,9 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
     queryClient.invalidateQueries({
       queryKey: ['opencode', 'messages', opcodeUrl, sessionId, directory],
     })
+    queryClient.invalidateQueries({
+      queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, directory],
+    })
   }, [queryClient, opcodeUrl, directory])
 
   useEffect(() => {

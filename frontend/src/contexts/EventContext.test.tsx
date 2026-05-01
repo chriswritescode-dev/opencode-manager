@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionRequest, QuestionRequest } from '@/api/types'
-import { EventProvider, usePermissions, useQuestions } from './EventContext'
+import { EventProvider, usePermissions, useQuestions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
@@ -311,6 +311,41 @@ describe('EventProvider questions', () => {
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('exposes sseHealth through context', async () => {
+    const mockSseManager = {
+      getHealth: vi.fn(() => ({ isConnected: true, isHealthy: true, lastEventAt: Date.now(), isStalled: false })),
+      subscribeHealth: vi.fn((listener) => {
+        listener({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
+        return () => {}
+      }),
+    }
+
+    vi.mock('@/lib/sseManager', () => ({
+      sseManager: mockSseManager,
+      subscribeToSSE: mocks.subscribeToSSE,
+      addSSEDirectory: mocks.addSSEDirectory,
+      ensureSSEConnected: mocks.ensureSSEConnected,
+    }))
+
+    const TestComponent = () => {
+      const { isConnected, isHealthy, isStalled } = useSSEHealth()
+      return (
+        <div>
+          <div data-testid="connected">{String(isConnected)}</div>
+          <div data-testid="healthy">{String(isHealthy)}</div>
+          <div data-testid="stalled">{String(isStalled)}</div>
+        </div>
+      )
+    }
+
+    render(<TestComponent />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected')).toHaveTextContent('false')
+      expect(screen.getByTestId('healthy')).toHaveTextContent('false')
     })
   })
 })

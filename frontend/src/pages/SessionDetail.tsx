@@ -41,7 +41,7 @@ import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
-import { usePermissions, useQuestions } from "@/contexts/EventContext";
+import { usePermissions, useQuestions, useSSEHealth } from "@/contexts/EventContext";
 import type { QuestionRequest } from "@/api/types";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
@@ -126,7 +126,12 @@ export function SessionDetail() {
   const repoDirectory = isAssistantSession ? assistantMode?.directory : repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
-  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
+  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
+  const sseHealth = useSSEHealth();
+  const sessionStatus = useSessionStatusForSession(sessionId);
+  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
+
+  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory, { fallbackPoll: !sseHealth.isHealthy && isSessionActive });
   const { data: session, isLoading: sessionLoading } = useSession(
     opcodeUrl,
     sessionId,
@@ -151,8 +156,6 @@ export function SessionDetail() {
     contentVersion: messages?.reduce((sum, m) => sum + m.parts.length, 0) ?? 0,
     onScrollStateChange: setShowScrollButton
   });
-
-  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
@@ -164,8 +167,6 @@ export function SessionDetail() {
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
 
-  const sessionStatus = useSessionStatusForSession(sessionId);
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
   const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
@@ -225,7 +226,7 @@ export function SessionDetail() {
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
-    refetchInterval: isSessionActive || hasIncompleteMessages ? PENDING_ACTION_SYNC_INTERVAL_MS : false,
+    refetchInterval: !sseHealth.isHealthy && (isSessionActive || hasIncompleteMessages) ? PENDING_ACTION_SYNC_INTERVAL_MS : false,
     retry: false,
   })
 
@@ -599,11 +600,17 @@ export function SessionDetail() {
         directory={repoDirectory}
       />
 
-      <RepoSkillsDialog
-        open={skillsDialogOpen}
-        onOpenChange={setSkillsDialogOpen}
-        repoId={repoId}
-      />
+      {repoDirectory && opcodeUrl && sessionId && (
+        <RepoSkillsDialog
+          open={skillsDialogOpen}
+          onOpenChange={setSkillsDialogOpen}
+          repoId={repoId}
+          sessionId={sessionId}
+          opcodeUrl={opcodeUrl}
+          directory={repoDirectory}
+          onSkillLoaded={(skill) => showToast.success(`Loaded skill: ${skill.name}`)}
+        />
+      )}
 
       <RepoMcpDialog
         open={mcpDialogOpen}

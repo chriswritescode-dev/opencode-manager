@@ -21,6 +21,8 @@ type SendPromptRequest = NonNullable<
   paths["/session/{sessionID}/message"]["post"]["requestBody"]
 >["content"]["application/json"];
 
+type SendCommandResponse = paths["/session/{sessionID}/command"]["post"]["responses"]["200"]["content"]["application/json"];
+
 const parseModelString = (model: string) => {
   const [providerID, ...rest] = model.split("/");
   const modelID = rest.join("/");
@@ -61,7 +63,7 @@ export const useSession = (opcodeUrl: string | null | undefined, sessionID: stri
   });
 };
 
-export const useMessages = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string) => {
+export const useMessages = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string, opts?: { fallbackPoll?: boolean }) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
 
   return useQuery({
@@ -76,7 +78,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     refetchOnReconnect: true,
     staleTime: 30000,
     gcTime: 10 * 60 * 1000,
-    
+    refetchInterval: opts?.fallbackPoll ? 5000 : undefined,
   });
 };
 
@@ -590,6 +592,8 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
           return old.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_"));
         },
       );
+
+      setSessionStatus(sessionID!, { type: "idle" });
     },
     onSuccess: (data, variables) => {
       const { sessionID } = variables;
@@ -629,5 +633,91 @@ export const useAgents = (opcodeUrl: string | null | undefined, directory?: stri
     queryKey: ["opencode", "agents", opcodeUrl, directory],
     queryFn: () => client!.listAgents(),
     enabled: !!client,
+  });
+};
+
+export const useLoadSkill = (
+  opcodeUrl: string | null | undefined,
+  sessionID: string | undefined,
+  directory?: string,
+) => {
+  const client = useOpenCodeClient(opcodeUrl, directory);
+  const queryClient = useQueryClient();
+  const setSessionStatus = useSessionStatus((state) => state.setStatus);
+
+  return useMutation<
+    { optimisticUserID: string; response: SendCommandResponse },
+    Error,
+    { skillName: string }
+  >({
+    mutationFn: async ({ skillName }: { skillName: string }) => {
+      if (!client) throw new Error("No OpenCode client available");
+      if (!sessionID) throw new Error("No active session");
+
+      const connected = await ensureSSEConnected();
+      if (!connected) {
+        showToast.error("Unable to connect. Please try again.");
+        throw new Error("SSE connection failed");
+      }
+
+      setSessionStatus(sessionID, { type: "busy" });
+
+      const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
+      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+
+      const userMessageParts = createOptimisticUserMessageParts(
+        sessionID,
+        [{ type: "text" as const, content: `Loading skill: ${skillName}` }],
+        optimisticUserID,
+      );
+      const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID);
+      const optimisticMessageWithParts: MessageWithParts = {
+        info: userMessageInfo,
+        parts: userMessageParts,
+      };
+
+      await queryClient.cancelQueries({ queryKey: messagesQueryKey });
+      queryClient.setQueryData<MessageWithParts[]>(
+        messagesQueryKey,
+        (old) => [...(old || []), optimisticMessageWithParts],
+      );
+
+      const response = await client.sendCommand(sessionID, { command: skillName, arguments: "" });
+      return { optimisticUserID, response };
+    },
+    onError: (error) => {
+      if (sessionID) {
+        const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      setSessionStatus(sessionID!, { type: "idle" });
+        queryClient.setQueryData<MessageWithParts[]>(
+          messagesQueryKey,
+          (old) => old?.filter((m) => !m.info.id.startsWith("optimistic_")),
+        );
+      }
+      const message = error instanceof Error ? error.message : "Failed to load skill";
+      showToast.error(message);
+    },
+    onSuccess: (data) => {
+      const { response } = data;
+      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+
+      queryClient.setQueryData<MessageWithParts[]>(
+        messagesQueryKey,
+        (old) => {
+          if (!old) return old;
+
+          const existingIdx = old.findIndex(m => m.info.id === response.info.id);
+          if (existingIdx >= 0) {
+            const updated = [...old];
+            updated[existingIdx] = { info: response.info, parts: response.parts };
+            return updated;
+          }
+
+          return [...old, { info: response.info, parts: response.parts }];
+        },
+      );
+
+      setSessionStatus(sessionID!, { type: "idle" });
+    },
   });
 };

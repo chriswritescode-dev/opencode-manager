@@ -1,13 +1,24 @@
-import { AlertCircle, Loader2 } from 'lucide-react'
+import { AlertCircle, Loader2, Sparkles } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 
 interface RepoSkillsListProps {
   isLoading: boolean
   data: SkillFileInfo[] | undefined
   error: Error | null
+  emptyTitle?: string
+  emptyHint?: string
+  onLoad?: (skill: SkillFileInfo) => void
 }
 
-export function RepoSkillsList({ isLoading, data, error }: RepoSkillsListProps) {
+export function RepoSkillsList({
+  isLoading,
+  data,
+  error,
+  emptyTitle,
+  emptyHint,
+  onLoad,
+}: RepoSkillsListProps) {
   const formatSkillName = (name: string): string => {
     const formatted = name.replace(/-/g, ' ')
     return formatted.charAt(0).toUpperCase() + formatted.slice(1)
@@ -35,8 +46,11 @@ export function RepoSkillsList({ isLoading, data, error }: RepoSkillsListProps) 
   if (!data || data.length === 0) {
     return (
       <div className="text-center py-6 text-muted-foreground">
-        <p className="text-sm">No skills available</p>
-        <p className="text-xs mt-1">Skills will appear here when configured in the project's .opencode/skills/ directory</p>
+        <p className="text-sm">{emptyTitle || 'No skills available'}</p>
+        <p className="text-xs mt-1">
+          {emptyHint ||
+            'Skills will appear here when configured in the project\'s .opencode/skills/ directory'}
+        </p>
       </div>
     )
   }
@@ -47,15 +61,28 @@ export function RepoSkillsList({ isLoading, data, error }: RepoSkillsListProps) 
         {data.map((skill) => (
           <div
             key={skill.name}
-            className="p-2 rounded-lg border border-border bg-card"
+            className="p-2 rounded-lg border border-border bg-card flex items-center justify-between gap-2"
           >
-            <p className="text-sm font-medium truncate">
-              {formatSkillName(skill.name)}
-            </p>
-            {skill.description && (
-              <p className="text-xs text-muted-foreground truncate mt-0.5">
-                {skill.description}
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium truncate">
+                {formatSkillName(skill.name)}
               </p>
+              {skill.description && (
+                <p className="text-xs text-muted-foreground truncate mt-0.5">
+                  {skill.description}
+                </p>
+              )}
+            </div>
+            {onLoad && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onLoad(skill)}
+                className="shrink-0"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>Load</span>
+              </Button>
             )}
           </div>
         ))}

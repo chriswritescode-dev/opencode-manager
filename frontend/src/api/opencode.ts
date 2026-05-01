@@ -9,6 +9,7 @@ type SendPromptRequest = NonNullable<paths['/session/{sessionID}/message']['post
 type ConfigResponse = paths['/config']['get']['responses']['200']['content']['application/json']
 type CommandListResponse = paths['/command']['get']['responses']['200']['content']['application/json']
 type CommandRequest = NonNullable<paths['/session/{sessionID}/command']['post']['requestBody']>['content']['application/json']
+type SendCommandResponse = paths['/session/{sessionID}/command']['post']['responses']['200']['content']['application/json']
 type ShellRequest = NonNullable<paths['/session/{sessionID}/shell']['post']['requestBody']>['content']['application/json']
 type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
 type PermissionListResponse = paths['/permission']['get']['responses']['200']['content']['application/json']
@@ -17,7 +18,7 @@ type SendPromptResponse = paths['/session/{sessionID}/message']['post']['respons
 type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['application/json']
 type LspStatus = LspStatusResponse[number]
 
-export type { SendPromptResponse, LspStatus }
+export type { SendPromptResponse, SendCommandResponse, LspStatus }
 
 export class OpenCodeClient {
   private baseURL: string
@@ -157,12 +158,13 @@ export class OpenCodeClient {
     })
   }
 
-  async sendCommand(sessionID: string, data: CommandRequest) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}/command`, {
+  async sendCommand(sessionID: string, data: CommandRequest): Promise<SendCommandResponse> {
+    return fetchWrapper<SendCommandResponse>(`${this.baseURL}/session/${sessionID}/command`, {
       method: 'POST',
       params: this.getParams(),
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
+      timeout: 0,
     })
   }
 

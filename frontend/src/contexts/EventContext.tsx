@@ -6,7 +6,7 @@ import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, SSHHostKeyRequest, MessageWithParts } from '@/api/types'
 import { showToast } from '@/lib/toast'
-import { subscribeToSSE, addSSEDirectory, ensureSSEConnected } from '@/lib/sseManager'
+import { subscribeToSSE, addSSEDirectory, ensureSSEConnected, type SSEHealthState, sseManager } from '@/lib/sseManager'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
@@ -149,6 +149,7 @@ interface EventContextValue {
     navigateToCurrent: () => void
     syncForSession: (directory: string, sessionID: string) => Promise<void>
   }
+  sseHealth: SSEHealthState
   getRepoIdForSession: (sessionID: string) => number | null
   getClient: (sessionID: string) => OpenCodeClient | null
 }
@@ -160,6 +161,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
 
   const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
+  const [sseHealth, setSseHealth] = useState<SSEHealthState>(() => sseManager.getHealth())
 
   const respondToSSHHostKey = useCallback(async (requestId: string, approved: boolean) => {
     try {
@@ -528,7 +530,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     }
 
     const unsubscribe = subscribeToSSE(handleSSEMessage, handleStatusChange)
-    return unsubscribe
+    
+    const sseHealthUnsubscribe = sseManager.subscribeHealth(setSseHealth)
+    
+    return () => {
+      unsubscribe()
+      sseHealthUnsubscribe()
+    }
   }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient])
 
   useEffect(() => {
@@ -583,6 +591,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       navigateToCurrent: navigateToCurrentQuestion,
       syncForSession: syncQuestionsForSession,
     },
+    sseHealth,
     getRepoIdForSession,
     getClient,
   }), [
@@ -606,6 +615,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     hasQuestionsForSession,
     navigateToCurrentQuestion,
     syncQuestionsForSession,
+    sseHealth,
     getRepoIdForSession,
     getClient,
   ])
@@ -634,4 +644,8 @@ export function useQuestions() {
 export function usePendingAlerts(): boolean {
   const { permissions, questions } = useEventContext()
   return permissions.pendingCount + questions.pendingCount > 0
+}
+
+export function useSSEHealth(): SSEHealthState {
+  return useEventContext().sseHealth
 }

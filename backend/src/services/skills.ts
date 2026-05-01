@@ -5,8 +5,17 @@ import type { SkillFileInfo, SkillScope, CreateSkillRequest, UpdateSkillRequest 
 import { SKILL_NAME_REGEX } from '@opencode-manager/shared'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { getRepoById, listRepos } from '../db/queries'
+import type { Repo } from '@opencode-manager/shared/types'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory } from './file-operations'
+import type { OpenCodeClient } from './opencode/client'
 import { logger } from '../utils/logger'
+
+interface OpenCodeSkillInfo {
+  name: string
+  description: string
+  location: string
+  content: string
+}
 
 function getGlobalSkillsPath(): string {
   return path.join(getWorkspacePath(), '.config', 'opencode', 'skills')
@@ -16,43 +25,47 @@ function getOldGlobalSkillsPath(): string {
   return path.join(os.homedir(), '.config', 'opencode', 'skills')
 }
 
+function getProjectSkillsPath(repo: Repo): string {
+  return path.join(repo.fullPath, '.opencode', 'skills')
+}
+
 export async function migrateGlobalSkills(): Promise<void> {
   const oldSkillsPath = getOldGlobalSkillsPath()
   const newSkillsPath = getGlobalSkillsPath()
-  
+
   const oldSkillsExist = await fileExists(oldSkillsPath)
   if (!oldSkillsExist) {
     logger.debug('No old global skills found to migrate')
     return
   }
-  
+
   const entries = await listDirectory(oldSkillsPath)
   const skillDirs = entries.filter(entry => entry.isDirectory)
-  
+
   if (skillDirs.length === 0) {
     logger.debug('No skill directories found in old location')
     return
   }
-  
+
   let migratedCount = 0
   let skippedCount = 0
-  
+
   for (const entry of skillDirs) {
     const oldSkillPath = path.join(entry.path, 'SKILL.md')
     const newSkillPath = path.join(newSkillsPath, entry.name, 'SKILL.md')
-    
+
     const alreadyMigrated = await fileExists(newSkillPath)
     if (alreadyMigrated) {
       skippedCount++
       continue
     }
-    
+
     const skillExists = await fileExists(oldSkillPath)
     if (!skillExists) {
       logger.warn(`Skill ${entry.name} has no SKILL.md file, skipping`)
       continue
     }
-    
+
     try {
       const content = await readFileContent(oldSkillPath)
       await writeFileContent(newSkillPath, content)
@@ -62,131 +75,10 @@ export async function migrateGlobalSkills(): Promise<void> {
       logger.error(`Failed to migrate skill ${entry.name}:`, error)
     }
   }
-  
+
   if (migratedCount > 0 || skippedCount > 0) {
     logger.info(`Skill migration complete: ${migratedCount} migrated, ${skippedCount} skipped (already existed)`)
   }
-}
-
-interface ParsedSkillFile {
-  frontmatter: {
-    name: string
-    description: string
-    license?: string
-    compatibility?: string
-    metadata?: Record<string, string>
-  }
-  body: string
-}
-
-function parseSkillFile(content: string): ParsedSkillFile {
-  const firstDelim = content.indexOf('---')
-  if (firstDelim === -1) {
-    throw new Error('Invalid SKILL.md format: missing frontmatter delimiters')
-  }
-  const afterFirst = firstDelim + 3
-  const secondDelim = content.indexOf('\n---', afterFirst)
-  if (secondDelim === -1) {
-    throw new Error('Invalid SKILL.md format: missing closing frontmatter delimiter')
-  }
-  const frontmatterStr = content.substring(afterFirst, secondDelim).trim()
-  const afterSecond = secondDelim + 4
-  const body = content.substring(afterSecond).trim()
-  
-  const frontmatter: Record<string, unknown> = {}
-  const lines = frontmatterStr.split('\n')
-  
-  let currentKey: string | null = null
-  const metadataObj: Record<string, string> = {}
-  
-  for (const line of lines) {
-    const trimmedLine = line.trim()
-    if (!trimmedLine) continue
-    
-    const kvMatch = trimmedLine.match(/^([^:]+):\s*(.*)$/)
-    if (kvMatch) {
-      const key = kvMatch[1]?.trim()
-      const value = kvMatch[2]?.trim()
-      
-      if (key === 'metadata') {
-        currentKey = 'metadata'
-        continue
-      }
-      
-      if (key && value !== undefined) {
-        frontmatter[key] = value
-        currentKey = null
-      }
-    } else if (currentKey === 'metadata' && trimmedLine) {
-      const metaMatch = trimmedLine.match(/^\s*([^:]+):\s*(.*)$/)
-      if (metaMatch) {
-        const metaKey = metaMatch[1]?.trim()
-        const metaValue = metaMatch[2]?.trim()
-        if (metaKey && metaValue !== undefined) {
-          metadataObj[metaKey] = metaValue
-        }
-      }
-    }
-  }
-  
-  if (Object.keys(metadataObj).length > 0) {
-    frontmatter.metadata = metadataObj
-  }
-  
-  return {
-    frontmatter: {
-      name: frontmatter.name as string || '',
-      description: frontmatter.description as string || '',
-      license: frontmatter.license as string | undefined,
-      compatibility: frontmatter.compatibility as string | undefined,
-      metadata: frontmatter.metadata as Record<string, string> | undefined,
-    },
-    body,
-  }
-}
-
-function generateSkillFrontmatter(
-  name: string,
-  description: string,
-  license?: string,
-  compatibility?: string,
-  metadata?: Record<string, string>
-): string {
-  let frontmatter = `name: ${name}\ndescription: ${description}`
-  
-  if (license) {
-    frontmatter += `\nlicense: ${license}`
-  }
-  
-  if (compatibility) {
-    frontmatter += `\ncompatibility: ${compatibility}`
-  }
-  
-  if (metadata && Object.keys(metadata).length > 0) {
-    frontmatter += '\nmetadata:'
-    for (const [key, value] of Object.entries(metadata)) {
-      frontmatter += `\n  ${key}: ${value}`
-    }
-  }
-  
-  return frontmatter
-}
-
-function getSkillDirectoryPath(db: Database, scope: SkillScope, repoId?: number): string {
-  if (scope === 'global') {
-    return getGlobalSkillsPath()
-  }
-  
-  if (!repoId) {
-    throw new Error('repoId is required for project-scoped skills')
-  }
-  
-  const repo = getRepoById(db, repoId)
-  if (!repo) {
-    throw new Error(`Repository with id ${repoId} not found`)
-  }
-  
-  return path.join(repo.fullPath, '.opencode', 'skills')
 }
 
 function validateSkillName(name: string): void {
@@ -197,171 +89,153 @@ function validateSkillName(name: string): void {
 
 function getSkillFilePath(db: Database, scope: SkillScope, name: string, repoId?: number): string {
   validateSkillName(name)
-  const skillsDir = getSkillDirectoryPath(db, scope, repoId)
-  return path.join(skillsDir, name, 'SKILL.md')
+  if (scope === 'global') {
+    return path.join(getGlobalSkillsPath(), name, 'SKILL.md')
+  }
+  if (!repoId) {
+    throw new Error('repoId is required for project-scoped skills')
+  }
+  const repo = getRepoById(db, repoId)
+  if (!repo) {
+    throw new Error(`Repository with id ${repoId} not found`)
+  }
+  return path.join(getProjectSkillsPath(repo), name, 'SKILL.md')
 }
 
-export async function listManagedSkills(db: Database, repoId?: number): Promise<SkillFileInfo[]> {
-  const skills: SkillFileInfo[] = []
-  
-  const globalSkillsDir = getGlobalSkillsPath()
-  const globalSkillsExist = await fileExists(globalSkillsDir)
-  
-  if (globalSkillsExist) {
-    const entries = await listDirectory(globalSkillsDir)
-    for (const entry of entries) {
-      if (entry.isDirectory) {
-        const skillPath = path.join(entry.path, 'SKILL.md')
-        const skillExists = await fileExists(skillPath)
-        if (skillExists) {
-          const skillInfo = await readSkillFile(db, 'global', entry.name)
-          if (skillInfo) {
-            skills.push(skillInfo)
-          }
-        }
-      }
+function buildSkillFileContent(name: string, description: string, body: string): string {
+  return `---\nname: ${name}\ndescription: ${description}\n---\n${body}`
+}
+
+async function fetchOpenCodeSkills(openCodeClient: OpenCodeClient, directory: string): Promise<OpenCodeSkillInfo[]> {
+  try {
+    const response = await openCodeClient.forward({
+      method: 'GET',
+      path: '/skill',
+      directory,
+    })
+    if (!response.ok) {
+      logger.warn(`Failed to fetch skills from OpenCode (${response.status})`)
+      return []
+    }
+    return await response.json() as OpenCodeSkillInfo[]
+  } catch (error) {
+    logger.warn('Error fetching skills from OpenCode:', error)
+    return []
+  }
+}
+
+function classifySkillLocation(
+  location: string,
+  globalPrefix: string,
+  repos: Repo[],
+): { scope: SkillScope; repo?: Repo } | null {
+  if (location.startsWith(globalPrefix + path.sep)) {
+    return { scope: 'global' }
+  }
+  for (const repo of repos) {
+    const projectPrefix = getProjectSkillsPath(repo)
+    if (location.startsWith(projectPrefix + path.sep)) {
+      return { scope: 'project', repo }
     }
   }
-  
-  if (repoId) {
-    const repo = getRepoById(db, repoId)
-    if (repo) {
-      const projectSkillsDir = path.join(repo.fullPath, '.opencode', 'skills')
-      const projectSkillsExist = await fileExists(projectSkillsDir)
-      
-      if (projectSkillsExist) {
-        const entries = await listDirectory(projectSkillsDir)
-        for (const entry of entries) {
-          if (entry.isDirectory) {
-            const skillPath = path.join(entry.path, 'SKILL.md')
-            const skillExists = await fileExists(skillPath)
-            if (skillExists) {
-              const skillInfo = await readSkillFile(db, 'project', entry.name, repoId)
-              if (skillInfo) {
-                skills.push(skillInfo)
-              }
-            }
-          }
-        }
-      }
-    }
-  } else {
-    const allRepos = listRepos(db)
-    for (const repo of allRepos) {
-      const projectSkillsDir = path.join(repo.fullPath, '.opencode', 'skills')
-      const projectSkillsExist = await fileExists(projectSkillsDir)
-      
-      if (projectSkillsExist) {
-        const entries = await listDirectory(projectSkillsDir)
-        for (const entry of entries) {
-          if (entry.isDirectory) {
-            const skillPath = path.join(entry.path, 'SKILL.md')
-            const skillExists = await fileExists(skillPath)
-            if (skillExists) {
-              const skillInfo = await readSkillFile(db, 'project', entry.name, repo.id)
-              if (skillInfo) {
-                skills.push(skillInfo)
-              }
-            }
-          }
-        }
-      }
+  return null
+}
+
+function toSkillFileInfo(
+  skill: OpenCodeSkillInfo,
+  classification: { scope: SkillScope; repo?: Repo },
+): SkillFileInfo {
+  return {
+    name: skill.name,
+    description: skill.description,
+    body: skill.content,
+    scope: classification.scope,
+    location: skill.location,
+    repoId: classification.repo?.id,
+    repoName: classification.repo?.localPath,
+  }
+}
+
+export async function listManagedSkills(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  repoId?: number,
+): Promise<SkillFileInfo[]> {
+  const globalPrefix = getGlobalSkillsPath()
+  const allRepos = listRepos(db)
+
+  const targetRepos = repoId
+    ? allRepos.filter(r => r.id === repoId)
+    : allRepos
+
+  if (repoId && targetRepos.length === 0) {
+    throw new Error(`Repository with id ${repoId} not found`)
+  }
+
+  const directories = targetRepos.length > 0
+    ? targetRepos.map(r => r.fullPath)
+    : [getWorkspacePath()]
+
+  const seenLocations = new Set<string>()
+  const result: SkillFileInfo[] = []
+
+  for (const directory of directories) {
+    const skills = await fetchOpenCodeSkills(openCodeClient, directory)
+    for (const skill of skills) {
+      if (seenLocations.has(skill.location)) continue
+      const classification = classifySkillLocation(skill.location, globalPrefix, allRepos)
+      if (!classification) continue
+      seenLocations.add(skill.location)
+      result.push(toSkillFileInfo(skill, classification))
     }
   }
-  
-  return skills
+
+  return result
 }
 
 export async function getSkill(
   db: Database,
+  openCodeClient: OpenCodeClient,
   name: string,
   scope: SkillScope,
-  repoId?: number
+  repoId?: number,
 ): Promise<SkillFileInfo> {
-  const skillPath = getSkillFilePath(db, scope, name, repoId)
-  const exists = await fileExists(skillPath)
-  
-  if (!exists) {
+  validateSkillName(name)
+  const skills = await listManagedSkills(db, openCodeClient, repoId)
+  const match = skills.find(s =>
+    s.name === name &&
+    s.scope === scope &&
+    (scope === 'global' || s.repoId === repoId),
+  )
+  if (!match) {
     throw new Error(`Skill "${name}" not found in ${scope} scope`)
   }
-  
-  const skillInfo = await readSkillFile(db, scope, name, repoId)
-  if (!skillInfo) {
-    throw new Error(`Failed to read skill "${name}"`)
-  }
-  
-  return skillInfo
-}
-
-async function readSkillFile(
-  db: Database,
-  scope: SkillScope,
-  name: string,
-  repoId?: number
-): Promise<SkillFileInfo | null> {
-  try {
-    const skillPath = getSkillFilePath(db, scope, name, repoId)
-    const content = await readFileContent(skillPath)
-    const parsed = parseSkillFile(content)
-    
-    const repo = repoId ? getRepoById(db, repoId) : null
-    
-    return {
-      name: parsed.frontmatter.name,
-      description: parsed.frontmatter.description,
-      body: parsed.body,
-      license: parsed.frontmatter.license,
-      compatibility: parsed.frontmatter.compatibility,
-      metadata: parsed.frontmatter.metadata,
-      scope,
-      location: skillPath,
-      repoId: scope === 'project' ? repoId : undefined,
-      repoName: repo?.localPath,
-    }
-  } catch (error) {
-    logger.error(`Failed to read skill ${name}:`, error)
-    return null
-  }
+  return match
 }
 
 export async function createSkill(
   db: Database,
-  input: CreateSkillRequest
+  input: CreateSkillRequest,
 ): Promise<SkillFileInfo> {
-  const { name, description, body, license, compatibility, metadata, scope, repoId } = input
-  
+  const { name, description, body, scope, repoId } = input
+
   const skillPath = getSkillFilePath(db, scope, name, repoId)
   const exists = await fileExists(skillPath)
-  
+
   if (exists) {
     throw new Error(`Skill "${name}" already exists in ${scope} scope`)
   }
-  
-  const skillDir = path.dirname(skillPath)
-  await ensureDirectoryExists(skillDir)
-  
-  const frontmatter = generateSkillFrontmatter(
-    name,
-    description,
-    license,
-    compatibility,
-    metadata
-  )
-  
-  const content = `---\n${frontmatter}\n---\n${body}`
-  
-  await writeFileContent(skillPath, content)
+
+  await ensureDirectoryExists(path.dirname(skillPath))
+  await writeFileContent(skillPath, buildSkillFileContent(name, description, body))
   logger.info(`Created skill "${name}" at ${skillPath}`)
-  
+
   const repo = repoId ? getRepoById(db, repoId) : null
-  
+
   return {
     name,
     description,
     body,
-    license,
-    compatibility,
-    metadata,
     scope,
     location: skillPath,
     repoId: scope === 'project' ? repoId : undefined,
@@ -371,63 +245,35 @@ export async function createSkill(
 
 export async function updateSkill(
   db: Database,
+  openCodeClient: OpenCodeClient,
   name: string,
   scope: SkillScope,
   input: UpdateSkillRequest,
-  repoId?: number
+  repoId?: number,
 ): Promise<SkillFileInfo> {
   const skillPath = getSkillFilePath(db, scope, name, repoId)
   const exists = await fileExists(skillPath)
-  
+
   if (!exists) {
     throw new Error(`Skill "${name}" not found in ${scope} scope`)
   }
-  
-  const existingContent = await readFileContent(skillPath)
-  const parsed = parseSkillFile(existingContent)
-  
-  const resolveField = <T>(field: T | null | undefined, existing: T | undefined): T | undefined => {
-    if (field === null) return undefined
-    if (field === undefined) return existing
-    return field
-  }
 
-  const updatedFrontmatter = {
-    name: parsed.frontmatter.name,
-    description: input.description ?? parsed.frontmatter.description,
-    license: resolveField(input.license, parsed.frontmatter.license),
-    compatibility: resolveField(input.compatibility, parsed.frontmatter.compatibility),
-    metadata: resolveField(input.metadata, parsed.frontmatter.metadata),
-  }
-  
-  const updatedBody = input.body ?? parsed.body
-  
-  const frontmatter = generateSkillFrontmatter(
-    updatedFrontmatter.name,
-    updatedFrontmatter.description,
-    updatedFrontmatter.license,
-    updatedFrontmatter.compatibility,
-    updatedFrontmatter.metadata
-  )
-  
-  const content = `---\n${frontmatter}\n---\n${updatedBody}`
-  
-  await writeFileContent(skillPath, content)
+  const existing = await getSkill(db, openCodeClient, name, scope, repoId)
+
+  const description = input.description ?? existing.description
+  const body = input.body ?? existing.body
+
+  await writeFileContent(skillPath, buildSkillFileContent(name, description, body))
   logger.info(`Updated skill "${name}" at ${skillPath}`)
-  
-  const repo = repoId ? getRepoById(db, repoId) : null
-  
+
   return {
-    name: updatedFrontmatter.name,
-    description: updatedFrontmatter.description,
-    body: updatedBody,
-    license: updatedFrontmatter.license,
-    compatibility: updatedFrontmatter.compatibility,
-    metadata: updatedFrontmatter.metadata,
+    name,
+    description,
+    body,
     scope,
     location: skillPath,
-    repoId: scope === 'project' ? repoId : undefined,
-    repoName: repo?.localPath,
+    repoId: existing.repoId,
+    repoName: existing.repoName,
   }
 }
 
@@ -435,16 +281,15 @@ export async function deleteSkill(
   db: Database,
   name: string,
   scope: SkillScope,
-  repoId?: number
+  repoId?: number,
 ): Promise<void> {
   const skillPath = getSkillFilePath(db, scope, name, repoId)
   const exists = await fileExists(skillPath)
-  
+
   if (!exists) {
     throw new Error(`Skill "${name}" not found in ${scope} scope`)
   }
-  
-  const skillDir = path.dirname(skillPath)
-  await deletePath(skillDir)
-  logger.info(`Deleted skill "${name}" from ${skillDir}`)
+
+  await deletePath(path.dirname(skillPath))
+  logger.info(`Deleted skill "${name}" from ${path.dirname(skillPath)}`)
 }
