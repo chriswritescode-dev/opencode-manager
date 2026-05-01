@@ -83,6 +83,8 @@ export function SessionDetail() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
   const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastHeaderScrollTopRef = useRef(0);
 
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
@@ -207,6 +209,34 @@ export function SessionDetail() {
       setMinimizedQuestion(null)
     }
   }, [sessionId, minimizedQuestion])
+
+  useEffect(() => {
+    const container = messageContainerRef.current
+    if (!container) return
+
+    lastHeaderScrollTopRef.current = container.scrollTop
+    setIsHeaderVisible(true)
+
+    const handleScroll = () => {
+      const currentScrollTop = container.scrollTop
+      const previousScrollTop = lastHeaderScrollTopRef.current
+      const maxScrollTop = container.scrollHeight - container.clientHeight
+      const isAtBottom = maxScrollTop - currentScrollTop < 24
+      const isScrollingDown = currentScrollTop > previousScrollTop + 4
+      const isScrollingUp = currentScrollTop < previousScrollTop - 4
+
+      if (isAtBottom || isScrollingDown) {
+        setIsHeaderVisible(true)
+      } else if (isScrollingUp) {
+        setIsHeaderVisible(false)
+      }
+
+      lastHeaderScrollTopRef.current = currentScrollTop
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [repoDirectory, sessionId])
 
   const syncPendingActionsForSession = useCallback(async () => {
     if (!repoDirectory || !sessionId) return
@@ -420,9 +450,9 @@ export function SessionDetail() {
 
   return (
     <div
-      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
+      className="relative h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
-      <Header>
+      <Header className={`!absolute left-0 right-0 top-0 !z-20 bg-gradient-to-b from-background from-65% via-background/90 via-80% to-transparent pb-5 transition-all duration-200 ease-out [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900 ${isHeaderVisible ? 'translate-y-0 opacity-100 pointer-events-auto' : '-translate-y-full opacity-0 pointer-events-none'}`}>
         <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
           {session?.parentID ? (
             <>
@@ -467,7 +497,7 @@ export function SessionDetail() {
       <SessionTodoDisplay sessionID={sessionId} />
 
       <div className="flex-1 overflow-hidden flex flex-col relative">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
+        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pt-12 sm:pt-14 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
           {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (

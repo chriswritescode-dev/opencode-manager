@@ -2,6 +2,8 @@ import { useRef, useEffect, useCallback } from 'react'
 import type { Message } from '@/api/types'
 
 const SCROLL_LOCK_MS = 300
+const BOTTOM_THRESHOLD_PX = 8
+const USER_SCROLL_DELTA_PX = 0.5
 
 interface UseAutoScrollOptions {
   containerRef?: React.RefObject<HTMLDivElement | null>
@@ -27,6 +29,7 @@ export function useAutoScroll({
   const userScrolledAtRef = useRef(0)
   const userDisengagedRef = useRef(false)
   const pointerStartYRef = useRef<number | null>(null)
+  const lastScrollTopRef = useRef(0)
   const onScrollStateChangeRef = useRef(onScrollStateChange)
   
   onScrollStateChangeRef.current = onScrollStateChange
@@ -36,6 +39,7 @@ export function useAutoScroll({
     userScrolledAtRef.current = 0
     userDisengagedRef.current = false
     containerRef.current.scrollTop = containerRef.current.scrollHeight
+    lastScrollTopRef.current = containerRef.current.scrollTop
     onScrollStateChangeRef.current?.(false)
   }, [containerRef])
 
@@ -44,6 +48,7 @@ export function useAutoScroll({
     hasInitialScrolledRef.current = false
     userScrolledAtRef.current = 0
     userDisengagedRef.current = false
+    lastScrollTopRef.current = 0
   }, [sessionId])
 
   useEffect(() => {
@@ -52,6 +57,9 @@ export function useAutoScroll({
     
     const markDisengaged = () => {
       userScrolledAtRef.current = Date.now()
+      if (!userDisengagedRef.current) {
+        onScrollStateChangeRef.current?.(true)
+      }
       userDisengagedRef.current = true
     }
 
@@ -84,9 +92,14 @@ export function useAutoScroll({
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 150
-      
-      if (isAtBottom) {
+      const isUserScrollingUp = scrollTop < lastScrollTopRef.current - USER_SCROLL_DELTA_PX
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < BOTTOM_THRESHOLD_PX
+
+      if (isUserScrollingUp) {
+        markDisengaged()
+      }
+       
+      if (isAtBottom && !isUserScrollingUp) {
         if (userDisengagedRef.current) {
           userScrolledAtRef.current = 0
           userDisengagedRef.current = false
@@ -99,6 +112,8 @@ export function useAutoScroll({
           onScrollStateChangeRef.current?.(true)
         }
       }
+
+      lastScrollTopRef.current = scrollTop
     }
     
     container.addEventListener('pointerdown', handlePointerDown, { passive: true })

@@ -1244,7 +1244,7 @@ return (
             {isMobile && showScrollButton ? (
               <button
                 onClick={onScrollToBottom}
-                className="px-4 py-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 shadow-md flex items-center justify-center min-w-[52px] border border-border"
+                className="px-4 py-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 shadow-md flex items-center justify-center min-w-[52px] border border-zinc-700"
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-5 h-5" />
@@ -1252,7 +1252,7 @@ return (
             ) : !isMobile ? (
               <button
                 onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${showScrollButton ? 'visible' : 'invisible'}`}
+                className={`p-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-zinc-700 ${showScrollButton ? 'visible' : 'invisible'}`}
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-6 h-6" />
