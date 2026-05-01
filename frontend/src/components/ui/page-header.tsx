@@ -11,7 +11,7 @@ export const PageHeader = React.forwardRef<HTMLElement, PageHeaderProps>(
       <header
         ref={ref}
         className={cn(
-          "sticky top-0 z-10 bg-gradient-to-b from-background via-background to-background backdrop-blur-sm pt-safe",
+          "sticky top-0 z-10 bg-transparent pt-safe",
           className
         )}
         {...props}
