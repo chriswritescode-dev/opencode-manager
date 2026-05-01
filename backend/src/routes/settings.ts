@@ -6,7 +6,8 @@ import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
-import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
+import { patchConfigWithRecovery } from '../services/opencode/config-recovery'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
@@ -219,7 +220,7 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
     : defaultError
 }
 
-export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeSupervisor?: OpenCodeSupervisor) {
+export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
 
@@ -371,7 +372,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           return c.json(config)
         }
 
-        const patchResult = await patchOpenCodeConfig(provisionalConfig.content)
+        const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
         if (!patchResult.success) {
           settingsService.deleteOpenCodeConfig(provisionalConfig.name, userId)
           return c.json({ 
@@ -448,7 +449,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           opencodeServerManager.clearStartupError()
           await restartOpenCode(openCodeSupervisor)
         } else {
-          const patchResult = await patchOpenCodeConfig(config.content)
+          const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
           if (!patchResult.success) {
             return c.json({ 
               error: 'Config saved but failed to apply', 
@@ -459,7 +460,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
           
           const contentToWrite = patchResult.removedFields && patchResult.removedFields.length > 0
-            ? JSON.stringify(config.content, null, 2)
+            ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
             : config.rawContent
           
           await writeFileContent(configPath, contentToWrite)
@@ -526,7 +527,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json(config)
       }
 
-      const patchResult = await patchOpenCodeConfig(existingConfig.content)
+      const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
       if (!patchResult.success) {
         return c.json({ 
           error: 'Config validation failed', 
@@ -1406,11 +1407,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/connect`,
-        'POST',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/connect`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to connect MCP server')
@@ -1433,11 +1434,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/disconnect`,
-        'POST',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/disconnect`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to disconnect MCP server')
@@ -1460,11 +1461,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = McpAuthDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
-        'POST',
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
         directory,
-      )
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to authenticate MCP server')
@@ -1487,11 +1488,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/auth`,
-        'DELETE',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'DELETE',
+        path: `/mcp/${encodeURIComponent(serverName)}/auth`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to remove MCP auth')

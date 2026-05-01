@@ -1,21 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const { proxyToOpenCodeWithDirectory } = vi.hoisted(() => ({
-  proxyToOpenCodeWithDirectory: vi.fn(),
-}))
-
-vi.mock('../../src/services/proxy', () => ({
-  proxyToOpenCodeWithDirectory,
-}))
-
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { resolveOpenCodeModel } from '../../src/services/opencode-models'
-
-function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), {
-    status: 200,
-    headers: { 'content-type': 'application/json' },
-  })
-}
 
 describe('resolveOpenCodeModel', () => {
   beforeEach(() => {
@@ -23,20 +8,24 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('returns the preferred model when it is available', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({ model: 'openai/gpt-5' }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({ model: 'openai/gpt-5' })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
+            ],
+            default: { openai: 'gpt-5-mini' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
-        ],
-        default: { openai: 'gpt-5-mini' },
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project', {
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
       preferredModel: 'openai/gpt-5',
     })
 
@@ -48,20 +37,24 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('falls back to the provider default when the preferred model is unavailable', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({ model: 'openai/gpt-5.4' }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({ model: 'openai/gpt-5.4' })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5.3-codex-spark': {}, 'gpt-5-mini': {} } },
+            ],
+            default: { openai: 'gpt-5.3-codex-spark' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'openai', models: { 'gpt-5.3-codex-spark': {}, 'gpt-5-mini': {} } },
-        ],
-        default: { openai: 'gpt-5.3-codex-spark' },
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project', {
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
       preferredModel: 'openai/gpt-5.4',
     })
 
@@ -73,23 +66,27 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('prefers the configured small model when requested', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({
-          model: 'openai/gpt-5',
-          small_model: 'openai/gpt-5-mini',
-        }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({
+            model: 'openai/gpt-5',
+            small_model: 'openai/gpt-5-mini',
+          })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
+            ],
+            default: { openai: 'gpt-5' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
-        ],
-        default: { openai: 'gpt-5' },
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project', {
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
       preferSmallModel: true,
     })
 
@@ -101,23 +98,27 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('falls back to config.model when small_model is unavailable', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({
-          model: 'openai/gpt-5',
-          small_model: 'openai/gpt-5-unavailable',
-        }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({
+            model: 'openai/gpt-5',
+            small_model: 'openai/gpt-5-unavailable',
+          })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
+            ],
+            default: { openai: 'gpt-5-mini' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'openai', models: { 'gpt-5': {}, 'gpt-5-mini': {} } },
-        ],
-        default: { openai: 'gpt-5-mini' },
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project', {
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
       preferSmallModel: true,
     })
 
@@ -129,23 +130,27 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('falls back to provider default only after all configured candidates fail', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({
-          model: 'openai/gpt-5-configured',
-          small_model: 'openai/gpt-5-small-unavailable',
-        }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({
+            model: 'openai/gpt-5-configured',
+            small_model: 'openai/gpt-5-small-unavailable',
+          })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5-mini': {}, 'gpt-5-turbo': {}, 'gpt-5-configured': {} } },
+            ],
+            default: { openai: 'gpt-5-mini' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'openai', models: { 'gpt-5-mini': {}, 'gpt-5-turbo': {}, 'gpt-5-configured': {} } },
-        ],
-        default: { openai: 'gpt-5-mini' },
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project', {
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
       preferSmallModel: true,
     })
 
@@ -157,23 +162,27 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('falls back to provider default when both small_model and model are unavailable', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({
-          model: 'openai/gpt-5-unavailable',
-          small_model: 'openai/gpt-5-also-unavailable',
-        }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({
+            model: 'openai/gpt-5-unavailable',
+            small_model: 'openai/gpt-5-also-unavailable',
+          })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'openai', models: { 'gpt-5-mini': {}, 'gpt-5-turbo': {} } },
+            ],
+            default: { openai: 'gpt-5-mini' },
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'openai', models: { 'gpt-5-mini': {}, 'gpt-5-turbo': {} } },
-        ],
-        default: { openai: 'gpt-5-mini' },
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project', {
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project', {
       preferSmallModel: true,
     })
 
@@ -185,19 +194,23 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('falls back to the first available model when defaults are missing', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({}))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({})
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({
+            providers: [
+              { id: 'anthropic', models: { 'claude-sonnet-4': {}, 'claude-haiku-4': {} } },
+            ],
+          })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({
-        providers: [
-          { id: 'anthropic', models: { 'claude-sonnet-4': {}, 'claude-haiku-4': {} } },
-        ],
-      }))
-    })
-
-    const result = await resolveOpenCodeModel('/workspace/repos/sample-project')
+    const result = await resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project')
 
     expect(result).toEqual({
       providerID: 'anthropic',
@@ -207,15 +220,19 @@ describe('resolveOpenCodeModel', () => {
   })
 
   it('throws when no configured models are available', async () => {
-    proxyToOpenCodeWithDirectory.mockImplementation((path: string) => {
-      if (path === '/config') {
-        return Promise.resolve(jsonResponse({ model: 'openai/gpt-5' }))
-      }
+    const mockClient = {
+      getJson: vi.fn().mockImplementation((path: string) => {
+        if (path === '/config') {
+          return Promise.resolve({ model: 'openai/gpt-5' })
+        }
+        if (path === '/config/providers') {
+          return Promise.resolve({ providers: [], default: {} })
+        }
+        throw new Error(`Unexpected path: ${path}`)
+      }),
+    } as unknown as OpenCodeClient
 
-      return Promise.resolve(jsonResponse({ providers: [], default: {} }))
-    })
-
-    await expect(resolveOpenCodeModel('/workspace/repos/sample-project')).rejects.toThrow(
+    await expect(resolveOpenCodeModel(mockClient, '/workspace/repos/sample-project')).rejects.toThrow(
       'No configured OpenCode models are available',
     )
   })

@@ -46,8 +46,21 @@ vi.mock('child_process', () => ({
   execSync: vi.fn(),
 }))
 
-vi.mock('../../src/services/proxy', () => ({
-  patchOpenCodeConfig: vi.fn(),
+vi.mock('../../src/services/opencode/config-recovery', () => ({
+  patchConfigWithRecovery: vi.fn(),
+}))
+
+vi.mock('../../src/services/opencode/client', () => ({
+  createOpenCodeClient: () => ({
+    forward: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    forwardRaw: vi.fn(),
+    getJson: vi.fn(),
+    postJson: vi.fn(),
+    setProviderAuth: vi.fn(),
+    deleteProviderAuth: vi.fn(),
+    startMcpAuth: vi.fn(),
+    authenticateMcp: vi.fn(),
+  }),
 }))
 
 import { promises as fs } from 'fs'
@@ -250,13 +263,13 @@ describe('OpenCodeServerManager - reloadConfig', () => {
     const mockReadFile = vi.fn().mockResolvedValue(JSON.stringify({ command: { review: 'test' } }))
     fs.readFile = mockReadFile
 
-    const { patchOpenCodeConfig } = await import('../../src/services/proxy')
+    const { patchConfigWithRecovery } = await import('../../src/services/opencode/config-recovery')
     const mockPatchResult = { success: true }
-    vi.mocked(patchOpenCodeConfig).mockResolvedValue(mockPatchResult)
-
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 200 }))
+    vi.mocked(patchConfigWithRecovery).mockResolvedValue(mockPatchResult as any)
 
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient())
 
     await opencodeServerManager.reloadConfig()
 
@@ -264,8 +277,34 @@ describe('OpenCodeServerManager - reloadConfig', () => {
       expect.stringContaining('.config/opencode.json'),
       'utf-8'
     )
-    expect(patchOpenCodeConfig).toHaveBeenCalled()
-
-    fetchSpy.mockRestore()
+    expect(patchConfigWithRecovery).toHaveBeenCalled()
   })
+})
+
+describe('OpenCodeServerManager - checkHealth', () => {
+  it('returns false when the upstream times out and aborts the upstream fetch', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+
+    let capturedSignal: AbortSignal | undefined
+    let aborted = false
+    const stubClient = createStubOpenCodeClient({
+      forward: vi.fn(async (req: { signal?: AbortSignal }) => {
+        capturedSignal = req.signal
+        return await new Promise<Response>((resolve) => {
+          req.signal?.addEventListener('abort', () => {
+            aborted = true
+            resolve(new Response(JSON.stringify({ error: 'Proxy request failed' }), { status: 502 }))
+          })
+        })
+      }),
+    })
+    opencodeServerManager.setOpenCodeClient(stubClient)
+
+    const healthy = await opencodeServerManager.checkHealth()
+
+    expect(healthy).toBe(false)
+    expect(capturedSignal).toBeDefined()
+    expect(aborted).toBe(true)
+  }, 5000)
 })

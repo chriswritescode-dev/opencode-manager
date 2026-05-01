@@ -1,4 +1,4 @@
-import { proxyToOpenCodeWithDirectory } from './proxy'
+import type { OpenCodeClient } from './opencode/client'
 
 interface OpenCodeConfigResponse {
   model?: string
@@ -63,29 +63,16 @@ function uniqueCandidates(candidates: Array<string | null | undefined>): string[
   return [...new Set(normalizedCandidates)]
 }
 
-async function fetchOpenCodeConfig(directory?: string): Promise<OpenCodeConfigResponse> {
-  const response = await proxyToOpenCodeWithDirectory('/config', 'GET', directory)
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(errorText || 'Failed to fetch OpenCode config')
-  }
-
-  return await response.json() as OpenCodeConfigResponse
+async function fetchOpenCodeConfig(client: OpenCodeClient, directory?: string): Promise<OpenCodeConfigResponse> {
+  return client.getJson<OpenCodeConfigResponse>('/config', { directory })
 }
 
-async function fetchOpenCodeProviders(directory?: string): Promise<OpenCodeProviderResponse> {
-  const response = await proxyToOpenCodeWithDirectory('/config/providers', 'GET', directory)
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(errorText || 'Failed to fetch OpenCode providers')
-  }
-
-  return await response.json() as OpenCodeProviderResponse
+async function fetchOpenCodeProviders(client: OpenCodeClient, directory?: string): Promise<OpenCodeProviderResponse> {
+  return client.getJson<OpenCodeProviderResponse>('/config/providers', { directory })
 }
 
 export async function resolveOpenCodeModel(
+  client: OpenCodeClient,
   directory: string | undefined,
   options?: {
     preferredModel?: string | null
@@ -93,8 +80,8 @@ export async function resolveOpenCodeModel(
   },
 ): Promise<ResolvedOpenCodeModel> {
   const [config, providersResponse] = await Promise.all([
-    fetchOpenCodeConfig(directory),
-    fetchOpenCodeProviders(directory),
+    fetchOpenCodeConfig(client, directory),
+    fetchOpenCodeProviders(client, directory),
   ])
 
   const availableModels = buildAvailableModels(providersResponse)

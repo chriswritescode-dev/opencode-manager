@@ -8,7 +8,7 @@ import { resolveProjectId } from '../services/project-id-resolver'
 import { getRepoById } from '../db/queries'
 import { getWorkspacePath, getConfigPath } from '@opencode-manager/shared/config/env'
 import { parseJsonc } from '@opencode-manager/shared/utils'
-import { OPENCODE_SERVER_URL, withOpenCodeAuth } from '../services/proxy'
+import type { OpenCodeClient } from '../services/opencode/client'
 import {
   CreateMemoryRequestSchema,
   UpdateMemoryRequestSchema,
@@ -134,7 +134,7 @@ function savePluginConfigToDisk(config: PluginConfig): void {
   }
 }
 
-export function createMemoryRoutes(db: Database): Hono {
+export function createMemoryRoutes(db: Database, openCodeClient: OpenCodeClient): Hono {
   const app = new Hono()
   const pluginMemory = new PluginMemoryService()
 
@@ -638,9 +638,11 @@ export function createMemoryRoutes(db: Database): Hono {
       pluginMemory.setKv(projectId, `loop:${worktreeNameToUse}`, updatedState)
 
       try {
-        const abortUrl = new URL(`${OPENCODE_SERVER_URL}/session/${state.sessionId}/abort`)
-        abortUrl.searchParams.set('directory', repo.fullPath)
-        await fetch(abortUrl.toString(), { method: 'POST', headers: withOpenCodeAuth() })
+        await openCodeClient.forward({
+          method: 'POST',
+          path: `/session/${state.sessionId}/abort`,
+          directory: repo.fullPath,
+        })
       } catch {
         // Session may already be idle
       }

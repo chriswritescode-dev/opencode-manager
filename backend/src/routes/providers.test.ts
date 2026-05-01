@@ -7,10 +7,11 @@ import { createProvidersRoutes } from './providers'
 import { join, dirname } from 'node:path'
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 
 function createTestApp(db: Database): Hono {
   const app = new Hono()
-  app.route('/providers', createProvidersRoutes(db, undefined))
+  app.route('/providers', createProvidersRoutes(db, createStubOpenCodeClient()))
   return app
 }
 

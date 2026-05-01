@@ -9,7 +9,7 @@ import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-import { proxyToOpenCodeWithDirectory } from '../services/proxy'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
 import { getErrorMessage, getStatusCode } from '../utils/error-utils'
 import { getOpenCodeConfigFilePath } from '@opencode-manager/shared/config/env'
@@ -34,6 +34,7 @@ export function createRepoRoutes(
   database: Database,
   gitAuthService: GitAuthService,
   scheduleService: ScheduleService,
+  openCodeClient: OpenCodeClient,
   openCodeSupervisor?: OpenCodeSupervisor,
 ) {
   const app = new Hono()
@@ -373,11 +374,11 @@ app.get('/', async (c) => {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const response = await proxyToOpenCodeWithDirectory(
-        '/instance/dispose',
-        'POST',
-        repo.fullPath
-      )
+      const response = await openCodeClient.forward({
+        method: 'POST',
+        path: '/instance/dispose',
+        directory: repo.fullPath,
+      })
       
       if (!response.ok) {
         const errorText = await response.text()

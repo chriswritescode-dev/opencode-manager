@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn().mockImplementation(() => ({})),
@@ -74,7 +75,7 @@ describe('Memory Routes - Loop Status', () => {
     mockGetRepoById.mockReset()
 
     testDb = {} as any
-    memoryApp = createMemoryRoutes(testDb)
+    memoryApp = createMemoryRoutes(testDb, createStubOpenCodeClient())
   })
 
   describe('GET /loop/status', () => {

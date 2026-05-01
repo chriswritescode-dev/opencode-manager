@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   computeNextRunAtForJob: vi.fn(),
 
   resolveOpenCodeModel: vi.fn(),
-  proxyToOpenCodeWithDirectory: vi.fn(),
+  forward: vi.fn(),
   addClient: vi.fn(),
   onEvent: vi.fn(),
   loggerError: vi.fn(),
@@ -59,9 +59,7 @@ vi.mock('../../src/services/opencode-models', () => ({
   resolveOpenCodeModel: mocks.resolveOpenCodeModel,
 }))
 
-vi.mock('../../src/services/proxy', () => ({
-  proxyToOpenCodeWithDirectory: mocks.proxyToOpenCodeWithDirectory,
-}))
+
 
 vi.mock('../../src/services/sse-aggregator', () => ({
   sseAggregator: {
@@ -90,6 +88,7 @@ vi.mock('croner', () => ({
 }))
 
 import { ScheduleRunner, ScheduleService } from '../../src/services/schedules'
+import type { ForwardRequest, OpenCodeClient } from '../../src/services/opencode/client'
 
 function jsonResponse(body: unknown, status: number = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -100,6 +99,23 @@ function jsonResponse(body: unknown, status: number = 200): Response {
 
 function textResponse(body: string, status: number = 200): Response {
   return new Response(body, { status })
+}
+
+function createOpenCodeClientStub(): OpenCodeClient {
+  return {
+    forward: mocks.forward,
+    forwardRaw: vi.fn(async () => new Response('', { status: 200 })),
+    getJson: vi.fn(async () => ({}) as unknown),
+    postJson: vi.fn(async () => ({}) as unknown),
+    setProviderAuth: vi.fn(async () => true),
+    deleteProviderAuth: vi.fn(async () => true),
+    startMcpAuth: vi.fn(async () => new Response('', { status: 200 })),
+    authenticateMcp: vi.fn(async () => new Response('', { status: 200 })),
+  } as OpenCodeClient
+}
+
+function routeForward(handler: (req: ForwardRequest) => Promise<Response> | Response) {
+  mocks.forward.mockImplementation((req: ForwardRequest) => Promise.resolve(handler(req)))
 }
 
 const repo = {
@@ -166,7 +182,7 @@ describe('ScheduleService', () => {
   })
 
   it('starts a run immediately and completes it after polling session messages', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runWithSession: ScheduleRun = {
       ...baseRun,
       sessionId: 'ses-run-1',
@@ -175,7 +191,7 @@ describe('ScheduleService', () => {
     }
 
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-run-1' }))
       }
@@ -222,8 +238,48 @@ describe('ScheduleService', () => {
     )
   })
 
+  it('sends session and message JSON POSTs with Content-Type: application/json', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-content-type',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    routeForward(({ path, method }) => {
+      if (path === '/session' && method === 'POST') {
+        return jsonResponse({ id: 'ses-content-type' })
+      }
+      if (path === '/session/ses-content-type/message' && method === 'POST') {
+        return textResponse(JSON.stringify({ parts: [{ type: 'text', text: 'Done.' }] }))
+      }
+      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    })
+
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/session',
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        }),
+      )
+      expect(mocks.forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/session/ses-content-type/message',
+          headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
+        }),
+      )
+    })
+  })
+
   it('completes a run immediately when the prompt endpoint returns JSON', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runWithSession: ScheduleRun = {
       ...baseRun,
       sessionId: 'ses-run-2',
@@ -233,7 +289,7 @@ describe('ScheduleService', () => {
 
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-run-2' }))
       }
@@ -264,7 +320,7 @@ describe('ScheduleService', () => {
   })
 
   it('rejects a new run when the job already has a running entry', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
 
     mocks.getRunningScheduleRunByJob.mockReturnValue({
       ...baseRun,
@@ -279,7 +335,7 @@ describe('ScheduleService', () => {
   })
 
   it('surfaces setup failures when the model cannot be resolved', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
 
     mocks.resolveOpenCodeModel.mockRejectedValueOnce(new Error('No configured models are available.'))
     mocks.updateScheduleRun.mockReturnValue({
@@ -307,7 +363,7 @@ describe('ScheduleService', () => {
   })
 
   it('marks the run failed when prompt submission is rejected after session creation', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runWithSession: ScheduleRun = {
       ...baseRun,
       sessionId: 'ses-run-6',
@@ -317,7 +373,7 @@ describe('ScheduleService', () => {
 
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-run-6' }))
       }
@@ -349,7 +405,7 @@ describe('ScheduleService', () => {
   })
 
   it('cancels an in-progress run by aborting the linked session', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runningRun: ScheduleRun = {
       ...baseRun,
       sessionId: 'ses-run-3',
@@ -365,7 +421,7 @@ describe('ScheduleService', () => {
 
     mocks.getScheduleRunById.mockReturnValue(runningRun)
     mocks.updateScheduleRun.mockReturnValue(cancelledRun)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session/ses-run-3/message' && method === 'GET') {
         return Promise.resolve(jsonResponse([]))
       }
@@ -380,10 +436,12 @@ describe('ScheduleService', () => {
     const result = await service.cancelRun(42, 7, 5)
 
     expect(result).toEqual(cancelledRun)
-    expect(mocks.proxyToOpenCodeWithDirectory).toHaveBeenCalledWith(
-      '/session/ses-run-3/abort',
-      'POST',
-      repo.fullPath,
+    expect(mocks.forward).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: '/session/ses-run-3/abort',
+        method: 'POST',
+        directory: repo.fullPath,
+      }),
     )
     expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
       expect.anything(),
@@ -395,7 +453,7 @@ describe('ScheduleService', () => {
   })
 
   it('rejects cancellation for runs that already finished', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
 
     mocks.getScheduleRunById.mockReturnValue({
       ...baseRun,
@@ -411,7 +469,7 @@ describe('ScheduleService', () => {
   })
 
   it('cancels a running entry without a linked session', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runningRun: ScheduleRun = {
       ...baseRun,
       sessionId: null,
@@ -430,11 +488,11 @@ describe('ScheduleService', () => {
     const result = await service.cancelRun(42, 7, 5)
 
     expect(result).toEqual(cancelledRun)
-    expect(mocks.proxyToOpenCodeWithDirectory).not.toHaveBeenCalled()
+    expect(mocks.forward).not.toHaveBeenCalled()
   })
 
   it('surfaces abort failures when cancellation cannot reach OpenCode', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runningRun: ScheduleRun = {
       ...baseRun,
       sessionId: 'ses-run-7',
@@ -442,7 +500,7 @@ describe('ScheduleService', () => {
     }
 
     mocks.getScheduleRunById.mockReturnValue(runningRun)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session/ses-run-7/message' && method === 'GET') {
         return Promise.resolve(jsonResponse([]))
       }
@@ -461,7 +519,7 @@ describe('ScheduleService', () => {
   })
 
   it('marks orphaned idle runs as failed during recovery', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const orphanedRun: ScheduleRun = {
       ...baseRun,
       triggerSource: 'schedule',
@@ -471,7 +529,7 @@ describe('ScheduleService', () => {
     }
 
     mocks.listRunningScheduleRuns.mockReturnValue([orphanedRun])
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session/ses-run-4/message' && method === 'GET') {
         return Promise.resolve(jsonResponse([
           {
@@ -506,7 +564,7 @@ describe('ScheduleService', () => {
   })
 
   it('finalizes interrupted runs without a linked session during recovery', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
 
     mocks.listRunningScheduleRuns.mockReturnValue([
       {
@@ -531,7 +589,7 @@ describe('ScheduleService', () => {
   })
 
   it('completes recoverable runs when the assistant already finished', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const completedRun: ScheduleRun = {
       ...baseRun,
       triggerSource: 'schedule',
@@ -540,7 +598,7 @@ describe('ScheduleService', () => {
     }
 
     mocks.listRunningScheduleRuns.mockReturnValue([completedRun])
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session/ses-run-8/message' && method === 'GET') {
         return Promise.resolve(jsonResponse([
           {
@@ -568,7 +626,7 @@ describe('ScheduleService', () => {
   })
 
   it('resumes recoverable runs when the session is still active', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const resumedRun: ScheduleRun = {
       ...baseRun,
       triggerSource: 'schedule',
@@ -579,7 +637,7 @@ describe('ScheduleService', () => {
 
     mocks.listRunningScheduleRuns.mockReturnValue([resumedRun])
     mocks.getScheduleRunById.mockReturnValue(resumedRun)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session/ses-run-9/message' && method === 'GET') {
         messageRequests += 1
 
@@ -622,7 +680,7 @@ describe('ScheduleService', () => {
   })
 
   it('lists jobs and runs through the persistence layer', () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const listedRun = { ...baseRun, status: 'completed', finishedAt: Date.UTC(2026, 2, 9, 12, 10, 0) }
 
     mocks.listScheduleJobsByRepo.mockReturnValue([job])
@@ -635,7 +693,7 @@ describe('ScheduleService', () => {
   })
 
   it('creates and updates jobs using normalized persistence input', () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const createdJob = { ...job, id: 8, name: 'Daily release summary' }
     const updatedJob = { ...job, name: 'Updated release summary' }
 
@@ -660,7 +718,7 @@ describe('ScheduleService', () => {
   })
 
   it('throws when deleting or loading missing records', () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
 
     mocks.deleteScheduleJob.mockReturnValue(false)
     mocks.getScheduleRunById.mockReturnValue(null)
@@ -670,7 +728,7 @@ describe('ScheduleService', () => {
   })
 
   it('cancels by finalizing the run when the assistant already completed', async () => {
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runningRun: ScheduleRun = {
       ...baseRun,
       sessionId: 'ses-run-5',
@@ -684,7 +742,7 @@ describe('ScheduleService', () => {
     }
 
     mocks.getScheduleRunById.mockReturnValueOnce(runningRun).mockReturnValueOnce(completedRun)
-    mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string) => {
+    routeForward(({ path, method }) => {
       if (path === '/session/ses-run-5/message' && method === 'GET') {
         return Promise.resolve(jsonResponse([
           {
@@ -711,7 +769,7 @@ describe('ScheduleService', () => {
 
   describe('skill injection in prompt', () => {
     it('appends skill content to the prompt when skillSlugs are set', async () => {
-      const service = new ScheduleService({} as never)
+      const service = new ScheduleService({} as never, createOpenCodeClientStub())
       const jobWithSkills: ScheduleJob = {
         ...job,
         skillMetadata: { skillSlugs: ['git-release', 'code-review'], notes: undefined },
@@ -728,7 +786,7 @@ describe('ScheduleService', () => {
       mocks.getScheduleRunById.mockReturnValue(runWithSession)
 
       let capturedPromptBody: string | undefined
-      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+      routeForward(({ path, method, body }) => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(jsonResponse([
             { name: 'git-release', description: 'Git release workflow', location: '/path/SKILL.md', content: 'Release instructions here' },
@@ -761,7 +819,7 @@ describe('ScheduleService', () => {
     })
 
     it('appends skill notes when provided', async () => {
-      const service = new ScheduleService({} as never)
+      const service = new ScheduleService({} as never, createOpenCodeClientStub())
       const jobWithSkillsAndNotes: ScheduleJob = {
         ...job,
         skillMetadata: { skillSlugs: ['git-release'], notes: 'Focus on changelog' },
@@ -778,7 +836,7 @@ describe('ScheduleService', () => {
       mocks.getScheduleRunById.mockReturnValue(runWithSession)
 
       let capturedPromptBody: string | undefined
-      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+      routeForward(({ path, method, body }) => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(jsonResponse([
             { name: 'git-release', description: 'Git release workflow', location: '/path/SKILL.md', content: 'Release instructions here' },
@@ -809,7 +867,7 @@ describe('ScheduleService', () => {
     })
 
     it('does not modify the prompt when skillSlugs is empty', async () => {
-      const service = new ScheduleService({} as never)
+      const service = new ScheduleService({} as never, createOpenCodeClientStub())
       const jobWithEmptySkills: ScheduleJob = {
         ...job,
         skillMetadata: { skillSlugs: [], notes: 'some notes' },
@@ -826,7 +884,7 @@ describe('ScheduleService', () => {
       mocks.getScheduleRunById.mockReturnValue(runWithSession)
 
       let capturedPromptBody: string | undefined
-      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+      routeForward(({ path, method, body }) => {
         if (path === '/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-3' }))
         }
@@ -850,7 +908,7 @@ describe('ScheduleService', () => {
     })
 
     it('falls back to name-only injection when skill endpoint fails', async () => {
-      const service = new ScheduleService({} as never)
+      const service = new ScheduleService({} as never, createOpenCodeClientStub())
       const jobWithSkills: ScheduleJob = {
         ...job,
         skillMetadata: { skillSlugs: ['git-release'], notes: undefined },
@@ -867,7 +925,7 @@ describe('ScheduleService', () => {
       mocks.getScheduleRunById.mockReturnValue(runWithSession)
 
       let capturedPromptBody: string | undefined
-      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+      routeForward(({ path, method, body }) => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(new Response('error', { status: 500 }))
         }
@@ -894,7 +952,7 @@ describe('ScheduleService', () => {
     })
 
     it('falls back gracefully when a skill slug is not found in the list', async () => {
-      const service = new ScheduleService({} as never)
+      const service = new ScheduleService({} as never, createOpenCodeClientStub())
       const jobWithUnknownSkill: ScheduleJob = {
         ...job,
         skillMetadata: { skillSlugs: ['unknown-skill'], notes: undefined },
@@ -911,7 +969,7 @@ describe('ScheduleService', () => {
       mocks.getScheduleRunById.mockReturnValue(runWithSession)
 
       let capturedPromptBody: string | undefined
-      mocks.proxyToOpenCodeWithDirectory.mockImplementation((path: string, method: string, _dir: string, body?: string) => {
+      routeForward(({ path, method, body }) => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(jsonResponse([]))
         }
@@ -968,7 +1026,7 @@ describe('ScheduleRunner', () => {
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
 
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runner = new ScheduleRunner(service)
     await runner.start()
 
@@ -1002,7 +1060,7 @@ describe('ScheduleRunner', () => {
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
 
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runner = new ScheduleRunner(service)
     await runner.start()
 
@@ -1034,7 +1092,7 @@ describe('ScheduleRunner', () => {
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([])
 
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runner = new ScheduleRunner(service)
     await runner.start()
 
@@ -1065,7 +1123,7 @@ describe('ScheduleRunner', () => {
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
 
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runner = new ScheduleRunner(service)
     await runner.start()
 
@@ -1096,7 +1154,7 @@ describe('ScheduleRunner', () => {
     mocks.listRunningScheduleRuns.mockReturnValue([])
     mocks.listEnabledScheduleJobs.mockReturnValue([mockJob])
 
-    const service = new ScheduleService({} as never)
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
     const runner = new ScheduleRunner(service)
     await runner.start()
 
