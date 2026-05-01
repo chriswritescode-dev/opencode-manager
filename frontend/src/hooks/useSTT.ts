@@ -5,6 +5,8 @@ import { AudioRecorder } from '@/lib/audioRecorder'
 import { sttApi } from '@/api/stt'
 import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
 
+const STT_START_TIMEOUT_MS = 10_000
+
 export function useSTT(userId = 'default') {
   const { preferences } = useSettings(userId)
   const [isRecording, setIsRecording] = useState(false)
@@ -21,6 +23,8 @@ export function useSTT(userId = 'default') {
   const userIdRef = useRef(userId)
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastProcessedBlobRef = useRef<Blob | null>(null)
+  const startupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const startOpIdRef = useRef(0)
   
   useEffect(() => {
     userIdRef.current = userId
@@ -202,6 +206,9 @@ export function useSTT(userId = 'default') {
     setError(null)
     lastProcessedBlobRef.current = null
 
+    const startOpId = ++startOpIdRef.current
+    clearStartupTimeout()
+
     if (isExternalProvider) {
       if (!audioRecorder.current) {
         audioRecorder.current = new AudioRecorder()
@@ -210,11 +217,30 @@ export function useSTT(userId = 'default') {
 
       try {
         setIsProcessing(true)
-        await audioRecorder.current.start()
+
+        const startupPromise = audioRecorder.current.start()
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          startupTimeoutRef.current = setTimeout(() => {
+            if (startOpIdRef.current !== startOpId) return
+            reject(new Error('Microphone start timed out'))
+          }, STT_START_TIMEOUT_MS)
+        })
+
+        await Promise.race([startupPromise, timeoutPromise])
+        clearStartupTimeout()
+
+        if (startOpIdRef.current !== startOpId) return false
+
         setIsProcessing(false)
         return true
       } catch (err) {
+        clearStartupTimeout()
+        if (startOpIdRef.current !== startOpId) return false
         setIsProcessing(false)
+        if (err instanceof Error && err.message === 'Microphone start timed out') {
+          abortAndResetOnTimeout()
+          return false
+        }
         setIsError(true)
         setError(err instanceof Error ? err.message : 'Failed to start recording')
         return false
@@ -228,16 +254,35 @@ export function useSTT(userId = 'default') {
 
       try {
         setIsProcessing(true)
-        await recognizer.current.start(options)
+
+        const startupPromise = recognizer.current.start(options)
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          startupTimeoutRef.current = setTimeout(() => {
+            if (startOpIdRef.current !== startOpId) return
+            reject(new Error('Microphone start timed out'))
+          }, STT_START_TIMEOUT_MS)
+        })
+
+        await Promise.race([startupPromise, timeoutPromise])
+        clearStartupTimeout()
+
+        if (startOpIdRef.current !== startOpId) return false
+
         return true
       } catch (err) {
+        clearStartupTimeout()
+        if (startOpIdRef.current !== startOpId) return false
         setIsProcessing(false)
+        if (err instanceof Error && err.message === 'Microphone start timed out') {
+          abortAndResetOnTimeout()
+          return false
+        }
         setIsError(true)
         setError(err instanceof Error ? err.message : 'Failed to start recording')
         return false
       }
     }
-  }, [isSupported, isEnabled, isExternalProvider, config.language, setupAudioRecorder])
+  }, [isSupported, isEnabled, isExternalProvider, config.language, setupAudioRecorder, clearStartupTimeout, abortAndResetOnTimeout])
 
   const stopRecording = useCallback(() => {
     if (isExternalProvider && audioRecorder.current) {
@@ -283,11 +328,32 @@ export function useSTT(userId = 'default') {
     setInterimTranscript('')
   }, [])
 
+  const clearStartupTimeout = useCallback(() => {
+    if (startupTimeoutRef.current) {
+      clearTimeout(startupTimeoutRef.current)
+      startupTimeoutRef.current = null
+    }
+  }, [])
+
+  const abortAndResetOnTimeout = useCallback(() => {
+    if (isExternalProvider && audioRecorder.current) {
+      audioRecorder.current.abort()
+    } else {
+      recognizer.current.abort()
+    }
+    setIsRecording(false)
+    setIsProcessing(false)
+    setState('idle')
+    setIsError(true)
+    setError('Microphone start timed out')
+  }, [isExternalProvider])
+
   useEffect(() => {
     return () => {
       if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
+      clearStartupTimeout()
     }
-  }, [])
+  }, [clearStartupTimeout])
 
   return {
     isRecording,
