@@ -135,11 +135,9 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
         {(repo || currentBranch) && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             {repo && (
-              <span className="font-medium text-foreground">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>
+              <span className="font-medium text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>
             )}
-            {repo && currentBranch && (
-              <span className="text-muted-foreground">·</span>
-            )}
+
             {currentBranch && (
               <>
                 <GitBranch className="h-3.5 w-3.5" />
