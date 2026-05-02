@@ -11,7 +11,8 @@ import { createOpenCodeClient } from '../../src/services/opencode/client'
 describe('ensureAssistantMode', () => {
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
   let db: ReturnType<typeof createTestDb>
-  const apiBaseUrl = 'http://127.0.0.1:5003/api/internal'
+  const apiBaseUrl = 'http://example.test:5003/api/internal'
+  const localApiBaseUrl = 'http://localhost:5003/api/internal'
 
   beforeEach(async () => {
     ws = await createTempAssistantWorkspace()
@@ -30,7 +31,8 @@ describe('ensureAssistantMode', () => {
     expect(JSON.parse(opencodeJson)).not.toHaveProperty('mcp')
     expect(token).toMatch(/^[0-9a-f]{64}$/)
     expect(skill).toContain('Authorization: Bearer')
-    expect(skill).toContain(apiBaseUrl)
+    expect(skill).toContain(localApiBaseUrl)
+    expect(skill).not.toContain(apiBaseUrl)
   })
 
   it('does not rewrite the token file on a second run with the same db', async () => {

@@ -85,7 +85,15 @@ This workspace ships a workspace-scoped skill at \`.opencode/skills/schedule-man
 `
 }
 
+function toLocalhostInternalBaseUrl(baseUrl: string): string {
+  const url = new URL(baseUrl)
+  url.hostname = 'localhost'
+  return url.toString().replace(/\/$/, '')
+}
+
 export function buildSchedulesSkill(baseUrl: string): string {
+  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
+
   return `---
 name: schedule-management
 description: Manage schedule jobs and runs across any repo via the internal HTTP API
@@ -105,7 +113,7 @@ Authorization: Bearer <token>
 
 ## Base URL
 
-\`${baseUrl}\`
+\`${internalBaseUrl}\`
 
 ## Endpoints
 
@@ -113,7 +121,7 @@ Authorization: Bearer <token>
 List all schedule jobs across all repos.
 
 \`\`\`bash
-curl -H "Authorization: Bearer <token>" ${baseUrl}/schedules/all
+curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/schedules/all
 \`\`\`
 
 ### GET /schedules/all/runs
@@ -122,14 +130,14 @@ List all schedule runs across all repos with optional filtering.
 Query params: \`limit\`, \`offset\`, \`status\`, \`repoId\`, \`jobId\`, \`triggerSource\`
 
 \`\`\`bash
-curl -H "Authorization: Bearer <token>" "${baseUrl}/schedules/all/runs?limit=20"
+curl -H "Authorization: Bearer <token>" "${internalBaseUrl}/schedules/all/runs?limit=20"
 \`\`\`
 
 ### GET /repos/:repoId/schedules
 List all schedule jobs for a specific repo.
 
 \`\`\`bash
-curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules
+curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules
 \`\`\`
 
 ### POST /repos/:repoId/schedules
@@ -140,14 +148,14 @@ Body matches \`CreateScheduleJobRequest\` schema (discriminated union with \`sch
 \`\`\`bash
 curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \\
   -d '{"name":"my-job","prompt":"do something","scheduleMode":"interval","intervalMinutes":60}' \\
-  ${baseUrl}/repos/:repoId/schedules
+  ${internalBaseUrl}/repos/:repoId/schedules
 \`\`\`
 
 ### GET /repos/:repoId/schedules/:jobId
 Get a specific schedule job.
 
 \`\`\`bash
-curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId
+curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId
 \`\`\`
 
 ### PATCH /repos/:repoId/schedules/:jobId
@@ -158,21 +166,21 @@ Body matches \`UpdateScheduleJobRequest\` schema.
 \`\`\`bash
 curl -X PATCH -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \\
   -d '{"enabled":false}' \\
-  ${baseUrl}/repos/:repoId/schedules/:jobId
+  ${internalBaseUrl}/repos/:repoId/schedules/:jobId
 \`\`\`
 
 ### DELETE /repos/:repoId/schedules/:jobId
 Delete a schedule job.
 
 \`\`\`bash
-curl -X DELETE -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId
+curl -X DELETE -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId
 \`\`\`
 
 ### POST /repos/:repoId/schedules/:jobId/run
 Manually trigger a schedule job.
 
 \`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/run
+curl -X POST -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/run
 \`\`\`
 
 ### GET /repos/:repoId/schedules/:jobId/runs
@@ -181,21 +189,21 @@ List runs for a specific job.
 Query params: \`limit\`
 
 \`\`\`bash
-curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/runs?limit=20
+curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/runs?limit=20
 \`\`\`
 
 ### GET /repos/:repoId/schedules/:jobId/runs/:runId
 Get a specific schedule run.
 
 \`\`\`bash
-curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/runs/:runId
+curl -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/runs/:runId
 \`\`\`
 
 ### POST /repos/:repoId/schedules/:jobId/runs/:runId/cancel
 Cancel a running schedule run.
 
 \`\`\`bash
-curl -X POST -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/runs/:runId/cancel
+curl -X POST -H "Authorization: Bearer <token>" ${internalBaseUrl}/repos/:repoId/schedules/:jobId/runs/:runId/cancel
 \`\`\`
 
 ## Safety

@@ -218,6 +218,10 @@ export function SessionDetail() {
     setIsHeaderVisible(true)
 
     const handleScroll = () => {
+      if (!isMobile) {
+        setIsHeaderVisible(true)
+        return
+      }
       const currentScrollTop = container.scrollTop
       const previousScrollTop = lastHeaderScrollTopRef.current
       const maxScrollTop = container.scrollHeight - container.clientHeight
@@ -236,7 +240,7 @@ export function SessionDetail() {
 
     container.addEventListener('scroll', handleScroll, { passive: true })
     return () => container.removeEventListener('scroll', handleScroll)
-  }, [repoDirectory, sessionId])
+  }, [repoDirectory, sessionId, isMobile])
 
   const syncPendingActionsForSession = useCallback(async () => {
     if (!repoDirectory || !sessionId) return
@@ -453,11 +457,12 @@ export function SessionDetail() {
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
       <div
-        className={`grid flex-shrink-0 bg-background transition-[grid-template-rows] duration-300 ease-in-out sm:grid-rows-[1fr] ${
-          isHeaderVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        className={`flex-shrink-0 overflow-hidden bg-background transition-all duration-200 ease-out ${
+          isHeaderVisible
+            ? 'max-h-40 opacity-100 translate-y-0'
+            : 'max-h-0 opacity-0 -translate-y-2'
         }`}
       >
-        <div className="overflow-hidden min-h-0">
         <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
             {session?.parentID ? (
@@ -502,7 +507,6 @@ export function SessionDetail() {
 
         <div className="px-3 sm:px-4">
           <SessionTodoDisplay sessionID={sessionId} />
-        </div>
         </div>
       </div>
 
