@@ -181,6 +181,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const sessionDirectoriesRef = useRef<Map<string, string>>(new Map())
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
+  const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
+  const reposRef = useRef<typeof repos>(null)
   const MAX_CACHED_CLIENTS = 50
 
   useEffect(() => {
@@ -403,9 +405,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [currentPermission, getRepoIdForSession, navigate])
 
   const fetchInitialPendingData = useCallback(async () => {
-    if (!repos || repos.length === 0) return
+    const reposToUse = reposRef.current
+    if (!reposToUse || reposToUse.length === 0) return
 
-    const uniqueDirectories = [...new Set(repos.map(r => r.fullPath))]
+    const uniqueDirectories = [...new Set(reposToUse.map(r => r.fullPath))]
     
     for (const directory of uniqueDirectories) {
       try {
@@ -420,7 +423,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }
-  }, [repos, reconcilePermissionsForDirectory, reconcileQuestionsForDirectory])
+  }, [reconcilePermissionsForDirectory, reconcileQuestionsForDirectory])
 
   const syncPermissionsForSession = useCallback(async (directory: string, sessionID: string) => {
     const client = new OpenCodeClient(OPENCODE_API_ENDPOINT, directory)
@@ -514,17 +517,28 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]
     const subscription = openCodeEventStream.subscribeGlobalMonitor({
-      directories: [...new Set((repos ?? []).map(r => r.fullPath))],
+      directories: initialDirectories,
       onEvent: handleSSEMessage,
       onStatusChange: handleStatusChange,
       onHealthChange: setSseHealth,
     })
+    subscriptionRef.current = subscription
     
     return () => {
       subscription.dispose()
+      subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient, repos])
+  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient, setSseHealth])
+
+  useEffect(() => {
+    reposRef.current = repos
+    const sub = subscriptionRef.current
+    if (!sub) return
+    const directories = [...new Set((repos ?? []).map(r => r.fullPath))]
+    sub.updateDirectories(directories)
+  }, [repos])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return
@@ -617,6 +631,6 @@ export function usePendingAlerts(): boolean {
   return permissions.pendingCount + questions.pendingCount > 0
 }
 
-export function useSSEHealth(): SSEHealthState {
+export function useSSEHealth(): EventStreamHealthState {
   return useEventContext().sseHealth
 }

@@ -315,11 +315,9 @@ function getSessionStatusType(event: SSEEvent): string | null {
 }
 
 function createSessionMonitor(directory: string, sessionId: string): SessionMonitor {
-  const clientId = `schedule-monitor-${sessionId}-${Date.now()}`
   let errorText: string | null = null
   let idle = false
 
-  const removeClient = sseAggregator.addClient(clientId, () => {}, [directory])
   const unsubscribe = sseAggregator.onEvent((eventDirectory, event) => {
     if (eventDirectory !== directory) {
       return
@@ -347,10 +345,7 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
   return {
     getErrorText: () => errorText,
     isIdle: () => idle,
-    dispose: () => {
-      unsubscribe()
-      removeClient()
-    },
+    dispose: unsubscribe,
   }
 }
 

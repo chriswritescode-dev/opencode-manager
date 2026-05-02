@@ -414,6 +414,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
+      subscription.reportVisibility(false, undefined)
       subscription.dispose()
       if (eventStreamSubscriptionRef.current === subscription) {
         eventStreamSubscriptionRef.current = null

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
@@ -317,6 +317,34 @@ describe('EventProvider questions', () => {
       expect(screen.getByTestId('current')).toHaveTextContent('none')
     })
   })
+
+  it('adds a pending question received via the global monitor onEvent', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'question.asked',
+        properties: pendingQuestion,
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+    })
+  })
+
+
 
   it('exposes sseHealth through context', async () => {
     mocks.getHealth.mockReturnValue({ isConnected: true, isHealthy: true, lastEventAt: Date.now(), isStalled: false })

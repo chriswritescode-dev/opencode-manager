@@ -1,5 +1,6 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
+import { buildOpenCodeBasicAuthHeader } from './auth'
 
 export interface ForwardRequest {
   method: string
@@ -40,7 +41,7 @@ export interface OpenCodeClient {
 
 export interface FetchOpenCodeClientConfig {
   baseUrl: string
-  basicAuth: string
+  basicAuth: string | null
   fetchFn?: typeof fetch
 }
 
@@ -239,11 +240,7 @@ export class FetchOpenCodeClient implements OpenCodeClient {
 
 export function createOpenCodeClient(): OpenCodeClient {
   const baseUrl = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
-  const password = ENV.OPENCODE.SERVER_PASSWORD
-  const username = ENV.OPENCODE.SERVER_USERNAME
-  const basicAuth = password
-    ? `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}`
-    : ''
+  const basicAuth = buildOpenCodeBasicAuthHeader()
 
   return new FetchOpenCodeClient({ baseUrl, basicAuth })
 }

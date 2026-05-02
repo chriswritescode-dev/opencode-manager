@@ -2,6 +2,7 @@ import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
+import { buildOpenCodeBasicAuthHeader } from './opencode/auth'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEEventListener = (directory: string, event: SSEEvent) => void
@@ -14,38 +15,68 @@ interface SSEClient {
   activeSessionId: string | null
 }
 
-interface DirectoryConnection {
-  eventSource: EventSource | null
-  reconnectTimeout: ReturnType<typeof setTimeout> | null
-  reconnectDelay: number
-  isConnected: boolean
-}
-
 export interface SSEEvent {
   type: string
   properties: Record<string, unknown>
 }
 
+interface GlobalEventEnvelope {
+  directory?: string
+  project?: string
+  workspace?: string
+  payload: SSEEvent
+}
+
+export interface PendingActionsFetcher {
+  getJson<T>(path: string, opts?: { directory?: string; signal?: AbortSignal }): Promise<T>
+}
+
+interface PendingPermission {
+  id: string
+  sessionID: string
+  [key: string]: unknown
+}
+
+interface PendingQuestion {
+  id: string
+  sessionID: string
+  [key: string]: unknown
+}
+
 const OPENCODE_PORT = ENV.OPENCODE.PORT
-const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, IDLE_GRACE_PERIOD_MS } = DEFAULTS.SSE
+const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 
 class SSEAggregator {
   private static instance: SSEAggregator
   private clients: Map<string, SSEClient> = new Map()
-  private connections: Map<string, DirectoryConnection> = new Map()
   private activeSessions: Map<string, Set<string>> = new Map()
-  private idleTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map()
-  private sessionStateVersion: Map<string, number> = new Map()
   private eventListeners: Set<SSEEventListener> = new Set()
   private subagentSessions: Map<string, Set<string>> = new Map()
+  private upstream: EventSource | null = null
+  private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+  private reconnectDelay: number = RECONNECT_DELAY_MS
+  private upstreamConnected = false
+  private everConnected = false
+  private started = false
+  private pendingActionsFetcher: PendingActionsFetcher | null = null
 
   private constructor() {}
+
+  setPendingActionsFetcher(fetcher: PendingActionsFetcher | null): void {
+    this.pendingActionsFetcher = fetcher
+  }
 
   static getInstance(): SSEAggregator {
     if (!SSEAggregator.instance) {
       SSEAggregator.instance = new SSEAggregator()
     }
     return SSEAggregator.instance
+  }
+
+  start(): void {
+    if (this.started) return
+    this.started = true
+    this.connectUpstream()
   }
 
   addClient(id: string, callback: SSEClientCallback, directories: string[]): () => void {
@@ -57,16 +88,18 @@ class SSEAggregator {
       activeSessionId: null
     }
     this.clients.set(id, client)
-    
+
     logger.info(`Client ${id} connected with directories: ${directories.length > 0 ? directories.join(', ') : '(none)'}`)
-    this.syncConnections()
+
+    if (directories.length > 0) {
+      void this.replayPendingActionsForClient(id, directories)
+    }
 
     return () => this.removeClient(id)
   }
 
   removeClient(id: string): void {
     this.clients.delete(id)
-    this.syncConnections()
   }
 
   addDirectories(clientId: string, directories: string[]): boolean {
@@ -75,9 +108,19 @@ class SSEAggregator {
       logger.warn(`addDirectories: client ${clientId} not found`)
       return false
     }
-    directories.forEach(dir => client.directories.add(dir))
+    const newDirectories: string[] = []
+    directories.forEach(dir => {
+      if (!client.directories.has(dir)) {
+        newDirectories.push(dir)
+      }
+      client.directories.add(dir)
+    })
     logger.info(`Client ${clientId} subscribed to: ${directories.join(', ')}`)
-    this.syncConnections()
+
+    if (newDirectories.length > 0) {
+      void this.replayPendingActionsForClient(clientId, newDirectories)
+    }
+
     return true
   }
 
@@ -89,114 +132,143 @@ class SSEAggregator {
     }
     directories.forEach(dir => client.directories.delete(dir))
     logger.info(`Client ${clientId} unsubscribed from: ${directories.join(', ')}`)
-    this.syncConnections()
     return true
   }
 
-  private getRequiredDirectories(): Set<string> {
-    const dirs = new Set<string>()
-    this.clients.forEach(client => {
-      client.directories.forEach(dir => dirs.add(dir))
+  private async replayPendingActionsForClient(clientId: string, directories: string[]): Promise<void> {
+    const fetcher = this.pendingActionsFetcher
+    if (!fetcher) return
+
+    await Promise.allSettled(directories.map(directory =>
+      this.replayPendingActionsForDirectory(clientId, directory, fetcher)
+    ))
+  }
+
+  private async replayPendingActionsForAllClients(): Promise<void> {
+    const fetcher = this.pendingActionsFetcher
+    if (!fetcher) return
+
+    const tasks: Promise<void>[] = []
+    this.clients.forEach((client) => {
+      const directories = Array.from(client.directories)
+      if (directories.length === 0) return
+      tasks.push(this.replayPendingActionsForClient(client.id, directories))
     })
-    return dirs
+
+    if (tasks.length === 0) return
+    logger.info(`replay: replaying pending actions to ${tasks.length} client(s) after upstream reconnect`)
+    await Promise.allSettled(tasks)
   }
 
-  private syncConnections(): void {
-    const required = this.getRequiredDirectories()
+  private async replayPendingActionsForDirectory(
+    clientId: string,
+    directory: string,
+    fetcher: PendingActionsFetcher,
+  ): Promise<void> {
+    const [permissionsResult, questionsResult] = await Promise.allSettled([
+      fetcher.getJson<PendingPermission[]>('/permission', { directory }),
+      fetcher.getJson<PendingQuestion[]>('/question', { directory }),
+    ])
 
-    this.connections.forEach((_, dir) => {
-      if (!required.has(dir)) {
-        this.disconnectDirectory(dir)
-      }
-    })
+    if (permissionsResult.status === 'rejected') {
+      logger.warn(`replay: failed to fetch pending permissions for ${directory}: ${String(permissionsResult.reason)}`)
+    } else {
+      this.emitPendingEventsToClient(clientId, directory, 'permission.asked', permissionsResult.value)
+    }
 
-    required.forEach(dir => {
-      if (!this.connections.has(dir)) {
-        this.connectDirectory(dir)
-      }
-    })
+    if (questionsResult.status === 'rejected') {
+      logger.warn(`replay: failed to fetch pending questions for ${directory}: ${String(questionsResult.reason)}`)
+    } else {
+      this.emitPendingEventsToClient(clientId, directory, 'question.asked', questionsResult.value)
+    }
   }
 
-  private connectDirectory(directory: string): void {
-    if (this.connections.has(directory)) return
+  private emitPendingEventsToClient(
+    clientId: string,
+    directory: string,
+    type: 'permission.asked' | 'question.asked',
+    items: Array<PendingPermission | PendingQuestion> | null,
+  ): void {
+    if (!items || items.length === 0) return
 
-    const conn: DirectoryConnection = {
-      eventSource: null,
-      reconnectTimeout: null,
-      reconnectDelay: RECONNECT_DELAY_MS,
-      isConnected: false
-    }
-    this.connections.set(directory, conn)
+    const client = this.clients.get(clientId)
+    if (!client || !client.directories.has(directory)) return
 
-    this.establishConnection(directory)
-  }
-
-  private establishConnection(directory: string): void {
-    const conn = this.connections.get(directory)
-    if (!conn) return
-
-    if (conn.eventSource) {
-      conn.eventSource.close()
-      conn.eventSource = null
-    }
-
-    const url = new URL(`http://127.0.0.1:${OPENCODE_PORT}/event`)
-    url.searchParams.set('directory', directory)
-    
-    logger.info(`SSE connecting to OpenCode: ${directory}`)
-
-    const eventSource = new EventSource(url.toString())
-    conn.eventSource = eventSource
-
-    eventSource.onopen = () => {
-      logger.info(`SSE connected: ${directory}`)
-      conn.isConnected = true
-      conn.reconnectDelay = RECONNECT_DELAY_MS
-    }
-
-    eventSource.onerror = () => {
-      conn.isConnected = false
-
-      if (conn.eventSource) {
-        conn.eventSource.close()
-        conn.eventSource = null
-      }
-
-      if (this.connections.has(directory)) {
-        this.scheduleReconnect(directory)
+    for (const item of items) {
+      const payload = JSON.stringify({ type, properties: item, directory })
+      try {
+        client.callback('message', payload)
+      } catch (error) {
+        logger.error(`replay: failed to deliver ${type} to client ${clientId}:`, error)
+        return
       }
     }
 
-    eventSource.onmessage = (event) => {
-      this.broadcastToDirectory(directory, 'message', event.data)
+    logger.info(`replay: sent ${items.length} ${type} event(s) for ${directory} to client ${clientId}`)
+  }
+
+  private connectUpstream(): void {
+    if (!this.started) return
+    if (this.upstream) {
+      this.upstream.close()
+      this.upstream = null
+    }
+
+    const url = `http://127.0.0.1:${OPENCODE_PORT}/global/event`
+    const wasConnectedBefore = this.everConnected
+    logger.info(`SSE connecting to OpenCode global stream: ${url}`)
+
+    const authHeader = buildOpenCodeBasicAuthHeader()
+    const init: ConstructorParameters<typeof EventSource>[1] = authHeader
+      ? {
+          fetch: (input, fetchInit) =>
+            fetch(input, {
+              ...fetchInit,
+              headers: {
+                ...(fetchInit?.headers ?? {}),
+                Authorization: authHeader,
+              },
+            }),
+        }
+      : undefined
+
+    const es = new EventSource(url, init)
+    this.upstream = es
+
+    es.onopen = () => {
+      logger.info('SSE global stream connected')
+      this.upstreamConnected = true
+      this.reconnectDelay = RECONNECT_DELAY_MS
+      this.everConnected = true
+      if (wasConnectedBefore) {
+        void this.replayPendingActionsForAllClients()
+      }
+    }
+
+    es.onerror = (event) => {
+      this.upstreamConnected = false
+      if (es === this.upstream) {
+        const code = (event as { code?: number }).code
+        const message = (event as { message?: string }).message
+        logger.warn(`SSE upstream error${code ? ` (code=${code})` : ''}${message ? `: ${message}` : ''}`)
+        es.close()
+        this.upstream = null
+        this.scheduleReconnect()
+      }
+    }
+
+    es.onmessage = (event) => {
+      this.handleUpstreamMessage(event.data)
     }
   }
 
-  private disconnectDirectory(directory: string): void {
-    const conn = this.connections.get(directory)
-    if (!conn) return
-
-    if (conn.reconnectTimeout) {
-      clearTimeout(conn.reconnectTimeout)
-    }
-
-    if (conn.eventSource) {
-      conn.eventSource.close()
-    }
-
-    this.connections.delete(directory)
-    logger.info(`SSE disconnected: ${directory}`)
-  }
-
-  private scheduleReconnect(directory: string): void {
-    const conn = this.connections.get(directory)
-    if (!conn || conn.reconnectTimeout) return
-
-    conn.reconnectTimeout = setTimeout(() => {
-      conn.reconnectTimeout = null
-      conn.reconnectDelay = Math.min(conn.reconnectDelay * 2, MAX_RECONNECT_DELAY_MS)
-      this.establishConnection(directory)
-    }, conn.reconnectDelay)
+  private scheduleReconnect(): void {
+    if (!this.started || this.reconnectTimeout) return
+    this.reconnectTimeout = setTimeout(() => {
+      this.reconnectTimeout = null
+      this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY_MS)
+      this.connectUpstream()
+    }, this.reconnectDelay)
   }
 
   onEvent(listener: SSEEventListener): () => void {
@@ -204,24 +276,30 @@ class SSEAggregator {
     return () => { this.eventListeners.delete(listener) }
   }
 
-  private broadcastToDirectory(directory: string, event: string, data: string): void {
-    let clientData = data
-
+  private handleUpstreamMessage(data: string): void {
+    let envelope: GlobalEventEnvelope
     try {
-      const parsed = JSON.parse(data) as SSEEvent
-      this.handleEvent(directory, parsed)
-      this.eventListeners.forEach(listener => {
-        try { listener(directory, parsed) } catch { /* ignore listener errors */ }
-      })
-      clientData = JSON.stringify({ ...parsed, directory })
+      envelope = JSON.parse(data) as GlobalEventEnvelope
     } catch {
-      // Ignore parse errors
+      return
     }
 
+    if (!envelope.directory || !envelope.payload?.type) return
+
+    const directory = envelope.directory
+    const parsed = envelope.payload
+
+    this.handleEvent(directory, parsed)
+
+    this.eventListeners.forEach(listener => {
+      try { listener(directory, parsed) } catch { /* ignore listener errors */ }
+    })
+
+    const clientData = JSON.stringify({ ...parsed, directory })
     this.clients.forEach((client) => {
       if (client.directories.has(directory)) {
         try {
-          client.callback(event, clientData)
+          client.callback('message', clientData)
         } catch (error) {
           logger.error(`Failed to send to client ${client.id}:`, error)
         }
@@ -235,11 +313,11 @@ class SSEAggregator {
     if (type === 'session.status') {
       const sessionID = properties.sessionID as string
       const status = properties.status as { type: string }
-      
+
       if (!sessionID || !status) return
 
       const isActive = status.type === 'busy' || status.type === 'retry' || status.type === 'compact'
-      
+
       if (isActive) {
         this.markSessionActive(directory, sessionID)
       } else if (status.type === 'idle') {
@@ -274,106 +352,32 @@ class SSEAggregator {
     }
   }
 
-  private getStateVersion(directory: string): number {
-    return this.sessionStateVersion.get(directory) ?? 0
-  }
-
-  private incrementStateVersion(directory: string): number {
-    const newVersion = this.getStateVersion(directory) + 1
-    this.sessionStateVersion.set(directory, newVersion)
-    return newVersion
-  }
-
   private markSessionActive(directory: string, sessionID: string): void {
-    this.incrementStateVersion(directory)
-    
-    const existingTimeout = this.idleTimeouts.get(directory)
-    if (existingTimeout) {
-      clearTimeout(existingTimeout)
-      this.idleTimeouts.delete(directory)
-    }
-
     let sessions = this.activeSessions.get(directory)
     if (!sessions) {
       sessions = new Set()
       this.activeSessions.set(directory, sessions)
     }
     sessions.add(sessionID)
-    
+
     logger.info(`Session active: ${sessionID} in ${directory} (${sessions.size} active)`)
   }
 
   private markSessionIdle(directory: string, sessionID: string): void {
-    const existingTimeout = this.idleTimeouts.get(directory)
-    if (existingTimeout) {
-      clearTimeout(existingTimeout)
-      this.idleTimeouts.delete(directory)
-    }
-
     const sessions = this.activeSessions.get(directory)
     if (sessions) {
       sessions.delete(sessionID)
       logger.info(`Session idle: ${sessionID} in ${directory} (${sessions.size} active)`)
-      
+
       if (sessions.size === 0) {
         this.activeSessions.delete(directory)
-        this.scheduleIdleDisconnect(directory)
       }
     }
-  }
-
-  private hasActiveViewers(directory: string): boolean {
-    for (const client of this.clients.values()) {
-      if (client.directories.has(directory)) {
-        return true
-      }
-    }
-    return false
-  }
-
-  private scheduleIdleDisconnect(directory: string): void {
-    if (this.hasActiveViewers(directory)) {
-      logger.info(`Skipping idle disconnect for ${directory} - has active viewers`)
-      return
-    }
-
-    const existingTimeout = this.idleTimeouts.get(directory)
-    if (existingTimeout) {
-      clearTimeout(existingTimeout)
-    }
-
-    const versionAtSchedule = this.getStateVersion(directory)
-    logger.info(`Scheduling idle disconnect for ${directory} in ${IDLE_GRACE_PERIOD_MS}ms (version: ${versionAtSchedule})`)
-    
-    const timeout = setTimeout(() => {
-      this.idleTimeouts.delete(directory)
-      
-      const currentVersion = this.getStateVersion(directory)
-      if (currentVersion !== versionAtSchedule) {
-        logger.info(`Cancelled idle disconnect for ${directory} - state changed (${versionAtSchedule} -> ${currentVersion})`)
-        return
-      }
-      
-      const sessions = this.activeSessions.get(directory)
-      const hasViewers = this.hasActiveViewers(directory)
-      
-      if ((!sessions || sessions.size === 0) && !hasViewers) {
-        logger.info(`Idle disconnect: ${directory}`)
-        this.disconnectDirectory(directory)
-      } else if (hasViewers) {
-        logger.info(`Cancelled idle disconnect for ${directory} - has active viewers`)
-      }
-    }, IDLE_GRACE_PERIOD_MS)
-
-    this.idleTimeouts.set(directory, timeout)
   }
 
   getConnectionStatus(): { connected: number; total: number } {
-    let connected = 0
-    this.connections.forEach(conn => {
-      if (conn.isConnected) connected++
-    })
-    return { connected, total: this.connections.size }
+    const total = this.started ? 1 : 0
+    return { connected: this.upstreamConnected ? 1 : 0, total }
   }
 
   getClientCount(): number {
@@ -410,30 +414,7 @@ class SSEAggregator {
   }
 
   getActiveDirectories(): string[] {
-    return Array.from(this.connections.keys())
-  }
-
-  shutdown(): void {
-    this.idleTimeouts.forEach((timeout) => {
-      clearTimeout(timeout)
-    })
-    this.idleTimeouts.clear()
-    this.activeSessions.clear()
-    this.subagentSessions.clear()
-    this.sessionStateVersion.clear()
-
-    this.connections.forEach((conn, dir) => {
-      if (conn.reconnectTimeout) {
-        clearTimeout(conn.reconnectTimeout)
-      }
-      if (conn.eventSource) {
-        conn.eventSource.close()
-      }
-      logger.info(`SSE closed: ${dir}`)
-    })
-    this.connections.clear()
-    this.clients.clear()
-    this.eventListeners.clear()
+    return Array.from(this.activeSessions.keys())
   }
 
   getActiveSessions(): Record<string, string[]> {
@@ -442,6 +423,25 @@ class SSEAggregator {
       result[dir] = Array.from(sessions)
     })
     return result
+  }
+
+  shutdown(): void {
+    this.started = false
+
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
+    if (this.upstream) {
+      this.upstream.close()
+      this.upstream = null
+    }
+    this.upstreamConnected = false
+
+    this.activeSessions.clear()
+    this.subagentSessions.clear()
+    this.clients.clear()
+    this.eventListeners.clear()
   }
 
   broadcastToAll(event: string, data: string): void {

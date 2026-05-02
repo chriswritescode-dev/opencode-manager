@@ -30,7 +30,7 @@ export class OpenCodeEventStream {
   private directoryRefCounts = new Map<string, number>()
   private pendingDirectories = new Set<string>()
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
-  private reconnectDelay = RECONNECT_DELAY_MS
+  private reconnectDelay: number = RECONNECT_DELAY_MS
   private connected = false
   private subscriberIdCounter = 0
   private clientId: string | null = null
