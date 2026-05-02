@@ -2,11 +2,20 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import path from 'path'
 import { readFile, stat } from 'fs/promises'
 import { Hono } from 'hono'
-import { ensureAssistantMode } from '../../src/services/assistant-mode'
+import { ensureAssistantMode, buildSchedulesSkill } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
 import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
+import { ENV } from '@opencode-manager/shared/config/env'
+
+describe('buildSchedulesSkill', () => {
+  it('uses ENV.SERVER.PORT in the internal base URL', () => {
+    const skill = buildSchedulesSkill('https://example.com:443/api/internal')
+    expect(skill).toContain(`http://localhost:${ENV.SERVER.PORT}/api/internal`)
+    expect(skill).not.toContain(':443')
+  })
+})
 
 describe('ensureAssistantMode', () => {
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>

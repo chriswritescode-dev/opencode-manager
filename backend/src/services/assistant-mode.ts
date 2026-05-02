@@ -12,7 +12,7 @@ import {
   ensureDirectoryExists,
 } from './file-operations'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
-import { getReposPath } from '@opencode-manager/shared/config/env'
+import { getReposPath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
 import { getOrCreateInternalToken } from './internal-token'
 
@@ -87,7 +87,9 @@ This workspace ships a workspace-scoped skill at \`.opencode/skills/schedule-man
 
 function toLocalhostInternalBaseUrl(baseUrl: string): string {
   const url = new URL(baseUrl)
+  url.protocol = 'http'
   url.hostname = 'localhost'
+  url.port = String(ENV.SERVER.PORT)
   return url.toString().replace(/\/$/, '')
 }
 
