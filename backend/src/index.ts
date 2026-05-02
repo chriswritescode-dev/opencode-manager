@@ -303,6 +303,7 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 }
 
 sseAggregator.setPendingActionsFetcher(openCodeClient)
+sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
 sseAggregator.start()
 
 void scheduleRunnerInstance.start()

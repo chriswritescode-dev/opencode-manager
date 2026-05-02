@@ -2,7 +2,7 @@ import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import { getOpenCodeBasicAuthHeader } from './opencode/auth'
+import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEEventListener = (directory: string, event: SSEEvent) => void
@@ -59,11 +59,27 @@ class SSEAggregator {
   private everConnected = false
   private started = false
   private pendingActionsFetcher: PendingActionsFetcher | null = null
+  private passwordResolver: OpenCodePasswordResolver | null = null
 
   private constructor() {}
 
   setPendingActionsFetcher(fetcher: PendingActionsFetcher | null): void {
     this.pendingActionsFetcher = fetcher
+  }
+
+  setPasswordResolver(resolver: OpenCodePasswordResolver | null): void {
+    this.passwordResolver = resolver
+  }
+
+  reconnect(): void {
+    if (!this.started) return
+    logger.info('SSE forcing upstream reconnect (auth changed)')
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout)
+      this.reconnectTimeout = null
+    }
+    this.reconnectDelay = RECONNECT_DELAY_MS
+    void this.connectUpstream()
   }
 
   static getInstance(): SSEAggregator {
@@ -76,7 +92,7 @@ class SSEAggregator {
   start(): void {
     if (this.started) return
     this.started = true
-    this.connectUpstream()
+    void this.connectUpstream()
   }
 
   addClient(id: string, callback: SSEClientCallback, directories: string[]): () => void {
@@ -207,7 +223,7 @@ class SSEAggregator {
     logger.info(`replay: sent ${items.length} ${type} event(s) for ${directory} to client ${clientId}`)
   }
 
-  private connectUpstream(): void {
+  private async connectUpstream(): Promise<void> {
     if (!this.started) return
     if (this.upstream) {
       this.upstream.close()
@@ -218,7 +234,12 @@ class SSEAggregator {
     const wasConnectedBefore = this.everConnected
     logger.info(`SSE connecting to OpenCode global stream: ${url}`)
 
-    const authHeader = getOpenCodeBasicAuthHeader()
+    const authHeader = this.passwordResolver
+      ? await getOpenCodeBasicAuthHeader(this.passwordResolver)
+      : getOpenCodeBasicAuthHeader()
+
+    if (!this.started) return
+
     const init: ConstructorParameters<typeof EventSource>[1] = authHeader
       ? {
           fetch: (input, fetchInit) =>
@@ -267,7 +288,7 @@ class SSEAggregator {
     this.reconnectTimeout = setTimeout(() => {
       this.reconnectTimeout = null
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, MAX_RECONNECT_DELAY_MS)
-      this.connectUpstream()
+      void this.connectUpstream()
     }, this.reconnectDelay)
   }
 

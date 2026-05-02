@@ -30,6 +30,8 @@ import { PermissionRequestDialog } from './components/session/PermissionRequestD
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
 import { getSwipeBackTarget } from '@/lib/navigation'
+import { useAuth } from '@/hooks/useAuth'
+import { useServerHealth } from '@/hooks/useServerHealth'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -50,6 +52,12 @@ function SSHHostKeyDialogWrapper() {
       }}
     />
   )
+}
+
+function HealthMonitor() {
+  const { isAuthenticated } = useAuth()
+  useServerHealth(isAuthenticated)
+  return null
 }
 
 function PermissionDialogWrapper() {
@@ -158,6 +166,7 @@ function AppShell() {
         <PermissionDialogWrapper />
         <SSHHostKeyDialogWrapper />
         <SettingsDialog />
+        <HealthMonitor />
         <VersionNotifier />
         <PwaUpdatePrompt />
         <Toaster

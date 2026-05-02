@@ -21,6 +21,7 @@ import {
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
@@ -1544,11 +1545,14 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         try {
           settingsService.restoreOpenCodeServerPasswordState(previousPasswordState)
           await opencodeServerManager.restart()
+          sseAggregator.reconnect()
         } catch (restoreError) {
           logger.error('Failed to restore OpenCode server auth runtime after restart failure:', restoreError)
         }
         throw restartError
       }
+
+      sseAggregator.reconnect()
 
       const hasStored = settingsService.hasStoredOpenCodeServerPassword()
       const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
