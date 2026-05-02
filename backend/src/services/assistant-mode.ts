@@ -13,11 +13,18 @@ import {
 } from './file-operations'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import type { Database } from 'bun:sqlite'
+import { getOrCreateInternalToken } from './internal-token'
 
 const ASSISTANT_MODE_DIR = 'assistant'
 const ASSISTANT_MODE_RELATIVE_PATH = 'repos/assistant'
 const ASSISTANT_AGENTS_MD_FILENAME = 'AGENTS.md'
 const ASSISTANT_OPENCODE_CONFIG_FILENAME = 'opencode.json'
+const ASSISTANT_OPENCODE_DIR = '.opencode'
+const ASSISTANT_INTERNAL_TOKEN_FILENAME = 'internal-token'
+const ASSISTANT_SKILLS_DIR = 'skills'
+const ASSISTANT_SCHEDULES_SKILL_DIR = 'schedule-management'
+const ASSISTANT_SKILL_FILENAME = 'SKILL.md'
 
 export function getAssistantModeDirectory(): string {
   const reposPath = getReposPath()
@@ -30,6 +37,14 @@ export function getAssistantModeDirectory(): string {
   }
 
   return resolvedAssistantDir
+}
+
+function getInternalTokenPath(assistantDir: string): string {
+  return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_INTERNAL_TOKEN_FILENAME)
+}
+
+function getSchedulesSkillPath(assistantDir: string): string {
+  return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SCHEDULES_SKILL_DIR, ASSISTANT_SKILL_FILENAME)
 }
 
 export function buildAssistantAgentsMd(): string {
@@ -63,6 +78,129 @@ The agent MAY self-edit the following files within this workspace:
 2. Update AGENTS.md when learning durable preferences
 3. Maintain version control awareness
 4. Document significant changes in commit messages
+
+## Schedule Management
+
+This workspace ships a workspace-scoped skill at \`.opencode/skills/schedule-management/SKILL.md\` that documents how to list, create, update, delete, run, inspect, and cancel schedule jobs and runs across any repo via the internal HTTP API. Load it whenever the user asks about schedules.
+`
+}
+
+export function buildSchedulesSkill(baseUrl: string): string {
+  return `---
+name: schedule-management
+description: Manage schedule jobs and runs across any repo via the internal HTTP API
+---
+
+## When to Load
+
+Load this skill when the user asks about managing schedules, schedule jobs, schedule runs, or anything related to automated task execution across repos.
+
+## Authentication
+
+All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+
+\`\`\`
+Authorization: Bearer <token>
+\`\`\`
+
+## Base URL
+
+\`${baseUrl}\`
+
+## Endpoints
+
+### GET /schedules/all
+List all schedule jobs across all repos.
+
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" ${baseUrl}/schedules/all
+\`\`\`
+
+### GET /schedules/all/runs
+List all schedule runs across all repos with optional filtering.
+
+Query params: \`limit\`, \`offset\`, \`status\`, \`repoId\`, \`jobId\`, \`triggerSource\`
+
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" "${baseUrl}/schedules/all/runs?limit=20"
+\`\`\`
+
+### GET /repos/:repoId/schedules
+List all schedule jobs for a specific repo.
+
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules
+\`\`\`
+
+### POST /repos/:repoId/schedules
+Create a new schedule job.
+
+Body matches \`CreateScheduleJobRequest\` schema (discriminated union with \`scheduleMode: 'interval' | 'cron'\`).
+
+\`\`\`bash
+curl -X POST -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \\
+  -d '{"name":"my-job","prompt":"do something","scheduleMode":"interval","intervalMinutes":60}' \\
+  ${baseUrl}/repos/:repoId/schedules
+\`\`\`
+
+### GET /repos/:repoId/schedules/:jobId
+Get a specific schedule job.
+
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId
+\`\`\`
+
+### PATCH /repos/:repoId/schedules/:jobId
+Update an existing schedule job.
+
+Body matches \`UpdateScheduleJobRequest\` schema.
+
+\`\`\`bash
+curl -X PATCH -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \\
+  -d '{"enabled":false}' \\
+  ${baseUrl}/repos/:repoId/schedules/:jobId
+\`\`\`
+
+### DELETE /repos/:repoId/schedules/:jobId
+Delete a schedule job.
+
+\`\`\`bash
+curl -X DELETE -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId
+\`\`\`
+
+### POST /repos/:repoId/schedules/:jobId/run
+Manually trigger a schedule job.
+
+\`\`\`bash
+curl -X POST -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/run
+\`\`\`
+
+### GET /repos/:repoId/schedules/:jobId/runs
+List runs for a specific job.
+
+Query params: \`limit\`
+
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/runs?limit=20
+\`\`\`
+
+### GET /repos/:repoId/schedules/:jobId/runs/:runId
+Get a specific schedule run.
+
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/runs/:runId
+\`\`\`
+
+### POST /repos/:repoId/schedules/:jobId/runs/:runId/cancel
+Cancel a running schedule run.
+
+\`\`\`bash
+curl -X POST -H "Authorization: Bearer <token>" ${baseUrl}/repos/:repoId/schedules/:jobId/runs/:runId/cancel
+\`\`\`
+
+## Safety
+
+Always confirm destructive operations (\`DELETE\` jobs, \`cancel\` runs) with the user before executing.
 `
 }
 
@@ -92,7 +230,8 @@ export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
 
 export async function ensureAssistantMode(
   repo: Repo,
-  options?: AssistantModeInitRequest
+  deps: { db: Database; apiBaseUrl: string },
+  options?: AssistantModeInitRequest,
 ): Promise<AssistantModeStatus> {
   const assistantDir = getAssistantModeDirectory()
 
@@ -100,6 +239,8 @@ export async function ensureAssistantMode(
 
   const agentsMdPath = path.join(assistantDir, ASSISTANT_AGENTS_MD_FILENAME)
   const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
+  const tokenPath = getInternalTokenPath(assistantDir)
+  const skillPath = getSchedulesSkillPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
   const opencodeJsonExists = await fileExists(opencodeJsonPath)
@@ -119,6 +260,23 @@ export async function ensureAssistantMode(
     await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
   }
 
+  await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR))
+  await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SCHEDULES_SKILL_DIR))
+
+  const token = getOrCreateInternalToken(deps.db)
+  const existingTokenContent = await fileExists(tokenPath) ? await readFileContent(tokenPath) : undefined
+  const tokenCreated = !existingTokenContent || existingTokenContent.trim() !== token
+  if (tokenCreated) {
+    await writeFileContent(tokenPath, token)
+  }
+
+  const skillContent = buildSchedulesSkill(deps.apiBaseUrl)
+  const existingSkillContent = await fileExists(skillPath) ? await readFileContent(skillPath) : undefined
+  const skillCreated = !existingSkillContent || existingSkillContent !== skillContent
+  if (skillCreated) {
+    await writeFileContent(skillPath, skillContent)
+  }
+
   return {
     repoId: repo.id,
     directory: assistantDir,
@@ -135,14 +293,25 @@ export async function ensureAssistantMode(
         created: !opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig,
       },
     },
+    internalToken: {
+      path: tokenPath,
+      created: tokenCreated,
+    },
+    schedulesSkill: {
+      path: skillPath,
+      created: skillCreated,
+    },
   }
 }
 
 async function isLegacyAssistantOpenCodeConfig(opencodeJsonPath: string): Promise<boolean> {
   try {
     const content = await readFileContent(opencodeJsonPath)
-    const config = JSON.parse(content) as { permission?: { allow?: unknown; ask?: unknown } }
-    return Array.isArray(config.permission?.allow) || Array.isArray(config.permission?.ask)
+    const config = JSON.parse(content) as {
+      permission?: { allow?: unknown; ask?: unknown }
+    }
+    if (Array.isArray(config.permission?.allow) || Array.isArray(config.permission?.ask)) return true
+    return false
   } catch {
     return false
   }
@@ -153,9 +322,13 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
 
   const agentsMdPath = path.join(assistantDir, ASSISTANT_AGENTS_MD_FILENAME)
   const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
+  const tokenPath = getInternalTokenPath(assistantDir)
+  const skillPath = getSchedulesSkillPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
   const opencodeJsonExists = await fileExists(opencodeJsonPath)
+  await fileExists(tokenPath)
+  await fileExists(skillPath)
 
   return {
     repoId: repo.id,
@@ -172,6 +345,14 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
         exists: opencodeJsonExists,
         created: false,
       },
+    },
+    internalToken: {
+      path: tokenPath,
+      created: false,
+    },
+    schedulesSkill: {
+      path: skillPath,
+      created: false,
     },
   }
 }

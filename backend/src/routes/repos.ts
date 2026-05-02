@@ -422,8 +422,11 @@ app.get('/', async (c) => {
 
       const body = await c.req.json().catch(() => ({}))
       const options = AssistantModeInitRequestSchema.parse(body)
+      const protocol = c.req.header('x-forwarded-proto') || 'http'
+      const host = c.req.header('host') || 'localhost:5003'
+      const apiBaseUrl = `${protocol}://${host}/api/internal`
 
-      const status = await ensureAssistantMode(repo, options)
+      const status = await ensureAssistantMode(repo, { db: database, apiBaseUrl }, options)
       return c.json(status)
     } catch (error: unknown) {
       logger.error('Failed to initialize assistant mode:', error)

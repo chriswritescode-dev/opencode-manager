@@ -20,7 +20,7 @@
     "typecheck:backend": "pnpm --filter backend typecheck",
     "test": "pnpm run test:backend && pnpm run test:frontend",
     "test:frontend": "pnpm --filter frontend exec vitest run",
-    "test:backend": "pnpm --filter backend exec vitest run",
+    "test:backend": "pnpm --filter backend run test",
     "lint": "pnpm run lint:frontend && pnpm run lint:backend",
     "lint:frontend": "pnpm --filter frontend lint",
     "lint:backend": "pnpm --filter backend lint",

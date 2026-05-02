@@ -35,6 +35,7 @@ import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './rout
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
+import { createInternalRoutes } from './routes/internal'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -308,6 +309,7 @@ app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
+app.route('/api/internal', createInternalRoutes(db, scheduleService))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
