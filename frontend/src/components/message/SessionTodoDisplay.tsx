@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import { TodoItem } from './TodoItem'
 import { useSessionTodosForSession } from '@/stores/sessionTodosStore'
 import type { components } from '@/api/opencode-types'
@@ -10,9 +10,28 @@ interface SessionTodoDisplayProps {
   sessionID: string | undefined
 }
 
+const todoSignature = (todos: Todo[]) =>
+  todos.map((t) => `${t.id}:${t.status}`).join(',')
+
 export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
   const todos = useSessionTodosForSession(sessionID)
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isDismissed, setIsDismissed] = useState(false)
+  const dismissedSignatureRef = useRef<string>('')
+
+  const signature = useMemo(() => todoSignature(todos), [todos])
+
+  useEffect(() => {
+    if (isDismissed && signature !== dismissedSignatureRef.current) {
+      setIsDismissed(false)
+    }
+  }, [signature, isDismissed])
+
+  const handleDismiss = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    dismissedSignatureRef.current = signature
+    setIsDismissed(true)
+  }
 
   const stats = useMemo(() => {
     const completed = todos.filter((t) => t.status === 'completed').length
@@ -53,7 +72,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
     )
   }
 
-  if (!sessionID || todos.length === 0 || stats.completed === stats.total) {
+  if (!sessionID || todos.length === 0 || stats.completed === stats.total || isDismissed) {
     return null
   }
 
@@ -74,6 +93,13 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
               style={{ width: `${stats.percentage}%` }}
             />
           </div>
+          <button
+            onClick={handleDismiss}
+            className="ml-1 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss tasks"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       </div>
     )
@@ -95,6 +121,13 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
             style={{ width: `${stats.percentage}%` }}
           />
         </div>
+        <button
+          onClick={handleDismiss}
+          className="ml-1 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Dismiss tasks"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
       </div>
       <div className="max-h-[80px] sm:max-h-[160px] overflow-y-auto p-1.5 sm:p-2 bg-muted/30">
         {renderGroup('In Progress', inProgress)}
