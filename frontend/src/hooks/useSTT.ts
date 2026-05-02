@@ -187,6 +187,26 @@ export function useSTT(userId = 'default') {
     }
   }, [isEnabled, isExternalProvider, setupAudioRecorder])
 
+  const clearStartupTimeout = useCallback(() => {
+    if (startupTimeoutRef.current) {
+      clearTimeout(startupTimeoutRef.current)
+      startupTimeoutRef.current = null
+    }
+  }, [])
+
+  const abortAndResetOnTimeout = useCallback(() => {
+    if (isExternalProvider && audioRecorder.current) {
+      audioRecorder.current.abort()
+    } else {
+      recognizer.current.abort()
+    }
+    setIsRecording(false)
+    setIsProcessing(false)
+    setState('idle')
+    setIsError(true)
+    setError('Microphone start timed out')
+  }, [isExternalProvider])
+
   const startRecording = useCallback(async (): Promise<boolean> => {
     if (!isSupported) {
       setError('Speech recognition is not supported in this browser')
@@ -327,26 +347,6 @@ export function useSTT(userId = 'default') {
     setTranscript('')
     setInterimTranscript('')
   }, [])
-
-  const clearStartupTimeout = useCallback(() => {
-    if (startupTimeoutRef.current) {
-      clearTimeout(startupTimeoutRef.current)
-      startupTimeoutRef.current = null
-    }
-  }, [])
-
-  const abortAndResetOnTimeout = useCallback(() => {
-    if (isExternalProvider && audioRecorder.current) {
-      audioRecorder.current.abort()
-    } else {
-      recognizer.current.abort()
-    }
-    setIsRecording(false)
-    setIsProcessing(false)
-    setState('idle')
-    setIsError(true)
-    setError('Microphone start timed out')
-  }, [isExternalProvider])
 
   useEffect(() => {
     return () => {

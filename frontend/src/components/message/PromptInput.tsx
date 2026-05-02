@@ -1241,7 +1241,7 @@ return (
           
         </div>
 <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            {isMobile && showScrollButton ? (
+            {isMobile && showScrollButton && !showVoiceFeedback ? (
               <button
                 onClick={onScrollToBottom}
                 className="px-4 py-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 shadow-md flex items-center justify-center min-w-[52px] border border-zinc-700"
@@ -1286,7 +1286,7 @@ return (
           {sttEnabled && sttSupported && (
             renderVoiceButton('desktop')
           )}
-          {isMobile && !showScrollButton && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
+          {isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession && (!showScrollButton || showVoiceFeedback) && (
             renderVoiceButton('mobile')
           )}
             <button
