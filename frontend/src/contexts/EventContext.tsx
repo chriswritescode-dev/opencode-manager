@@ -6,7 +6,7 @@ import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, SSHHostKeyRequest, MessageWithParts } from '@/api/types'
 import { showToast } from '@/lib/toast'
-import { subscribeToSSE, addSSEDirectory, ensureSSEConnected, type SSEHealthState, sseManager } from '@/lib/sseManager'
+import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
@@ -149,7 +149,7 @@ interface EventContextValue {
     navigateToCurrent: () => void
     syncForSession: (directory: string, sessionID: string) => Promise<void>
   }
-  sseHealth: SSEHealthState
+  sseHealth: EventStreamHealthState
   getRepoIdForSession: (sessionID: string) => number | null
   getClient: (sessionID: string) => OpenCodeClient | null
 }
@@ -161,7 +161,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
 
   const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
-  const [sseHealth, setSseHealth] = useState<SSEHealthState>(() => sseManager.getHealth())
+  const [sseHealth, setSseHealth] = useState<EventStreamHealthState>(() => openCodeEventStream.getHealth())
 
   const respondToSSHHostKey = useCallback(async (requestId: string, approved: boolean) => {
     try {
@@ -322,11 +322,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [allPermissions.length, showPermissionDialog])
 
   const respondToPermission = useCallback(async (permissionID: string, sessionID: string, response: PermissionResponse) => {
-    const connected = await ensureSSEConnected()
-    if (!connected) {
-      showToast.error('Unable to connect. Please try again.')
-      throw new Error('SSE connection failed')
-    }
     const client = getClient(sessionID)
     if (!client) throw new Error('No client found for session')
 
@@ -342,11 +337,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [getClient, permissionsBySession, queryClient, removePermission])
 
   const replyToQuestion = useCallback(async (requestID: string, answers: string[][]) => {
-    const connected = await ensureSSEConnected()
-    if (!connected) {
-      showToast.error('Unable to connect. Please try again.')
-      throw new Error('SSE connection failed')
-    }
     const question = Object.values(questionsBySession).flat().find(q => q.id === requestID)
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
@@ -356,11 +346,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [getClient, questionsBySession, removeQuestion])
 
   const rejectQuestion = useCallback(async (requestID: string) => {
-    const connected = await ensureSSEConnected()
-    if (!connected) {
-      showToast.error('Unable to connect. Please try again.')
-      throw new Error('SSE connection failed')
-    }
     const question = Object.values(questionsBySession).flat().find(q => q.id === requestID)
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
@@ -529,31 +514,17 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const unsubscribe = subscribeToSSE(handleSSEMessage, handleStatusChange)
-    
-    const sseHealthUnsubscribe = sseManager.subscribeHealth(setSseHealth)
-    
-    return () => {
-      unsubscribe()
-      sseHealthUnsubscribe()
-    }
-  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient])
-
-  useEffect(() => {
-    if (!repos || repos.length === 0) return
-
-    const cleanupFns: (() => void)[] = []
-    const uniqueDirectories = [...new Set(repos.map(r => r.fullPath))]
-
-    uniqueDirectories.forEach(directory => {
-      const cleanup = addSSEDirectory(directory)
-      cleanupFns.push(cleanup)
+    const subscription = openCodeEventStream.subscribeGlobalMonitor({
+      directories: [...new Set((repos ?? []).map(r => r.fullPath))],
+      onEvent: handleSSEMessage,
+      onStatusChange: handleStatusChange,
+      onHealthChange: setSseHealth,
     })
-
+    
     return () => {
-      cleanupFns.forEach(fn => fn())
+      subscription.dispose()
     }
-  }, [repos])
+  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient, repos])
 
   useEffect(() => {
     if (!repos || repos.length === 0) return
