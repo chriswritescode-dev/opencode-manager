@@ -36,6 +36,8 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { data: health } = useServerHealth()
   const { memoryPluginEnabled } = useMemoryPluginStatus()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
+  const isAssistantRoute = /^\/repos\/\d+\/assistant$/.test(location.pathname)
+  const isAssistantSession = isSessionDetail && new URLSearchParams(location.search).get('assistant') === '1'
   const { filterCommands } = useCommands(isSessionDetail ? OPENCODE_API_ENDPOINT : null)
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
@@ -55,6 +57,9 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   })
 
   const currentBranch = repo?.currentBranch || repo?.branch
+  const repoDisplayName = isAssistantRoute || isAssistantSession
+    ? 'Assistant'
+    : repo ? getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath) : null
 
   const handleSettingsClick = () => {
     const newParams = new URLSearchParams(location.search)
@@ -132,10 +137,10 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
             <X className="h-5 w-5" />
           </button>
         </div>
-        {(repo || currentBranch) && (
+        {(repoDisplayName || currentBranch) && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {repo && (
-              <span className="font-medium text-orange-600 dark:text-orange-400">{getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}</span>
+            {repoDisplayName && (
+              <span className="font-medium text-orange-600 dark:text-orange-400">{repoDisplayName}</span>
             )}
 
             {currentBranch && (

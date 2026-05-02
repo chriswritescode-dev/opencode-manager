@@ -1,15 +1,20 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { beforeEach, describe, it, expect, vi } from 'vitest'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MoreDrawer } from './MoreDrawer'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useCommands } from '@/hooks/useCommands'
 import { useUIState } from '@/stores/uiStateStore'
+import { getRepo } from '@/api/repos'
 
 vi.mock('@/hooks/useAuth')
 vi.mock('@/hooks/useServerHealth')
 vi.mock('@/hooks/useCommands')
+vi.mock('@/api/repos', () => ({
+  getRepo: vi.fn(),
+}))
 vi.mock('@/hooks/useMemoryPluginStatus', () => ({
   useMemoryPluginStatus: () => ({ memoryPluginEnabled: false }),
 }))
@@ -72,6 +77,32 @@ const mockServerHealth = (health?: Partial<ReturnType<typeof useServerHealth>['d
   })
 }
 
+const createQueryClient = () => new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: false,
+    },
+  },
+})
+
+const renderMoreDrawer = ({
+  initialEntry = '/',
+  routePath = '*',
+  onClose = vi.fn(),
+}: {
+  initialEntry?: string
+  routePath?: string
+  onClose?: () => void
+} = {}) => render(
+  <QueryClientProvider client={createQueryClient()}>
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path={routePath} element={<MoreDrawer isOpen onClose={onClose} />} />
+      </Routes>
+    </MemoryRouter>
+  </QueryClientProvider>,
+)
+
 describe('MoreDrawer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -94,16 +125,22 @@ describe('MoreDrawer', () => {
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
     useUIState.getState().setActivePromptFileBasePath(null)
+    vi.mocked(getRepo).mockResolvedValue({
+      id: 1,
+      localPath: 'wrong-repo',
+      fullPath: '/workspace/repos/wrong-repo',
+      branch: 'main',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: 0,
+    })
   })
 
   it('renders Settings and Logout menu items', () => {
     mockAuth()
     mockServerHealth()
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     expect(screen.getByText('Settings')).toBeInTheDocument()
     expect(screen.getByText('Logout')).toBeInTheDocument()
   })
@@ -112,10 +149,7 @@ describe('MoreDrawer', () => {
     mockAuth()
     mockServerHealth()
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     expect(screen.queryByText('Theme')).not.toBeInTheDocument()
     expect(screen.queryByText('Light')).not.toBeInTheDocument()
     expect(screen.queryByText('Dark')).not.toBeInTheDocument()
@@ -128,10 +162,7 @@ describe('MoreDrawer', () => {
     mockAuth()
     mockServerHealth()
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     fireEvent.click(screen.getByText('Settings'))
     expect(navigateMock).toHaveBeenCalledWith(
       { search: 'settings=open&tab=account' },
@@ -144,10 +175,7 @@ describe('MoreDrawer', () => {
     mockAuth(logoutMock)
     mockServerHealth()
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     fireEvent.click(screen.getByText('Logout'))
     expect(logoutMock).toHaveBeenCalled()
   })
@@ -156,10 +184,7 @@ describe('MoreDrawer', () => {
     mockAuth()
     mockServerHealth({ opencodeVersion: '1.4.11', opencodeManagerVersion: '0.9.16' })
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     expect(screen.getByText('v1.4.11 · Manager v0.9.16')).toBeInTheDocument()
   })
 
@@ -167,10 +192,7 @@ describe('MoreDrawer', () => {
     mockAuth()
     mockServerHealth({ opencode: 'unhealthy' as const, opencodeVersion: '1.4.11' })
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     expect(screen.getByText('v1.4.11')).toBeInTheDocument()
   })
 
@@ -178,10 +200,7 @@ describe('MoreDrawer', () => {
     mockAuth()
     mockServerHealth({ opencodeVersion: null, opencodeManagerVersion: null })
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ onClose: handleClose })
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument()
   })
 
@@ -189,10 +208,7 @@ describe('MoreDrawer', () => {
     mockAuth()
     mockServerHealth()
     const handleClose = vi.fn()
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter initialEntries={['/repos/1/sessions/session-1']}>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId', onClose: handleClose })
 
     fireEvent.click(screen.getByText('Commands'))
     expect(screen.queryByText('/help')).not.toBeInTheDocument()
@@ -207,10 +223,7 @@ describe('MoreDrawer', () => {
     mockServerHealth()
     const handleClose = vi.fn()
     useUIState.getState().setActivePromptFileBasePath('repo')
-    render(
-      <MoreDrawer isOpen onClose={handleClose} />,
-      { wrapper: ({ children }) => <MemoryRouter initialEntries={['/repos/1/sessions/session-1']}>{children}</MemoryRouter> },
-    )
+    renderMoreDrawer({ initialEntry: '/repos/1/sessions/session-1', routePath: '/repos/:id/sessions/:sessionId', onClose: handleClose })
 
     fireEvent.click(screen.getByText('Mention File'))
     expect(screen.getByTestId('mention-file-browser')).toHaveAttribute('data-base-path', 'repo')
@@ -218,6 +231,16 @@ describe('MoreDrawer', () => {
 
     expect(useUIState.getState().pendingPromptFile?.path).toBe('src/App.tsx')
     expect(handleClose).toHaveBeenCalled()
+  })
+
+  it('shows Assistant instead of the source repo on assistant routes', () => {
+    mockAuth()
+    mockServerHealth()
+    const handleClose = vi.fn()
+    renderMoreDrawer({ initialEntry: '/repos/1/assistant', routePath: '/repos/:id/assistant', onClose: handleClose })
+
+    expect(screen.getByText('Assistant')).toBeInTheDocument()
+    expect(screen.queryByText('wrong-repo')).not.toBeInTheDocument()
   })
 
 })
