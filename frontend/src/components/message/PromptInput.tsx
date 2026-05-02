@@ -241,7 +241,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         parts,
         model: currentModel,
         agent: agentUsed,
-        variant: currentVariant
+        variant: currentVariant,
+        queued: true
       })
       setStoredAgent(sessionID, agentUsed)
       if (model) {

@@ -11,7 +11,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
     WORKSPACE: { BASE_PATH: '/test/workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1' },
+    OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: '', SERVER_USERNAME: 'opencode' },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
       MAX_SIZE_BYTES: 1024 * 1024,
@@ -32,13 +32,37 @@ vi.mock('../../../src/utils/logger', () => ({
   },
 }))
 
-import { FetchOpenCodeClient, UpstreamError } from '../../../src/services/opencode/client'
+import { createOpenCodeClient, FetchOpenCodeClient, UpstreamError } from '../../../src/services/opencode/client'
+import { ENV } from '@opencode-manager/shared/config/env'
 
 describe('OpenCodeClient', () => {
   const baseUrl = 'http://127.0.0.1:5551'
   const basicAuth = 'Basic dXNlcjpwYXNz'
 
   describe('forward', () => {
+    it('should resolve basic auth dynamically for each request', async () => {
+      const capturedAuthHeaders: Array<string | undefined> = []
+      const passwords = ['first-password', 'second-password']
+      const fetchFn = async (_: URL | Request | string, init?: RequestInit) => {
+        capturedAuthHeaders.push((init?.headers as Record<string, string>).Authorization)
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      const client = new FetchOpenCodeClient({
+        baseUrl,
+        basicAuth: null,
+        passwordResolver: () => passwords.shift() ?? '',
+        fetchFn: fetchFn as unknown as typeof fetch,
+      })
+
+      await client.forward({ method: 'GET', path: '/config' })
+      await client.forward({ method: 'GET', path: '/config' })
+
+      expect(capturedAuthHeaders).toEqual([
+        `Basic ${Buffer.from('opencode:first-password').toString('base64')}`,
+        `Basic ${Buffer.from('opencode:second-password').toString('base64')}`,
+      ])
+    })
+
     it('should build URL from baseUrl and path, inject auth when present, and strip hop-by-hop headers', async () => {
       const mockResponse = new Response(JSON.stringify({ data: 'test' }), {
         status: 200,
@@ -155,6 +179,29 @@ describe('OpenCodeClient', () => {
       expect(result.status).toBe(502)
       const body = await result.json()
       expect(body).toEqual({ error: 'Proxy request failed' })
+    })
+  })
+
+  describe('createOpenCodeClient', () => {
+    it('uses loopback connect host when OPENCODE_HOST binds externally', async () => {
+      const originalFetch = globalThis.fetch
+      Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '0.0.0.0', configurable: true, writable: true })
+      let capturedUrl: URL | undefined
+      const fetchFn = async (input: URL | Request | string) => {
+        capturedUrl = input instanceof URL ? input : new URL(input.toString())
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      Object.defineProperty(globalThis, 'fetch', { value: fetchFn, configurable: true, writable: true })
+
+      try {
+        const client = createOpenCodeClient('testpassword')
+        await client.forward({ method: 'GET', path: '/doc' })
+
+        expect(capturedUrl?.origin).toBe('http://127.0.0.1:5551')
+      } finally {
+        Object.defineProperty(ENV.OPENCODE, 'HOST', { value: '127.0.0.1', configurable: true, writable: true })
+        Object.defineProperty(globalThis, 'fetch', { value: originalFetch, configurable: true, writable: true })
+      }
     })
   })
 

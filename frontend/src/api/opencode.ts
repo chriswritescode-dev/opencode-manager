@@ -1,11 +1,12 @@
 import type { paths } from './opencode-types'
-import { fetchWrapper } from './fetchWrapper'
+import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 
 type SessionListResponse = paths['/session']['get']['responses']['200']['content']['application/json']
 type SessionResponse = paths['/session/{sessionID}']['get']['responses']['200']['content']['application/json']
 type CreateSessionRequest = NonNullable<paths['/session']['post']['requestBody']>['content']['application/json']
 type MessageListResponse = paths['/session/{sessionID}/message']['get']['responses']['200']['content']['application/json']
 type SendPromptRequest = NonNullable<paths['/session/{sessionID}/message']['post']['requestBody']>['content']['application/json']
+type SendPromptAsyncRequest = NonNullable<paths['/session/{sessionID}/prompt_async']['post']['requestBody']>['content']['application/json']
 type ConfigResponse = paths['/config']['get']['responses']['200']['content']['application/json']
 type CommandListResponse = paths['/command']['get']['responses']['200']['content']['application/json']
 type CommandRequest = NonNullable<paths['/session/{sessionID}/command']['post']['requestBody']>['content']['application/json']
@@ -100,6 +101,19 @@ export class OpenCodeClient {
   async sendPrompt(sessionID: string, data: SendPromptRequest): Promise<SendPromptResponse> {
     return fetchWrapper<SendPromptResponse>(
       `${this.baseURL}/session/${sessionID}/message`,
+      {
+        method: 'POST',
+        params: this.getParams(),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+        timeout: 0,
+      }
+    )
+  }
+
+  async sendPromptAsync(sessionID: string, data: SendPromptAsyncRequest): Promise<void> {
+    return fetchWrapperVoid(
+      `${this.baseURL}/session/${sessionID}/prompt_async`,
       {
         method: 'POST',
         params: this.getParams(),

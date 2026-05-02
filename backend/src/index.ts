@@ -86,7 +86,7 @@ app.use('/*', cors({
 const db = initializeDatabase(DB_PATH)
 const auth = createAuth(db)
 const requireAuth = createAuthMiddleware(auth)
-const openCodeClient = createOpenCodeClient()
+const openCodeClient = createOpenCodeClient(() => new SettingsService(db).getOpenCodeServerPassword())
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -264,8 +264,9 @@ try {
   await gitAuthService.initialize(ipcServer, db)
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
+  await syncAdminFromEnv(auth, db)
+
   opencodeServerManager.setDatabase(db)
-  opencodeServerManager.setOpenCodeClient(openCodeClient)
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
@@ -273,7 +274,6 @@ try {
     logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
   }
 
-  await syncAdminFromEnv(auth, db)
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }

@@ -387,3 +387,44 @@ docker exec -it opencode-manager vi /workspace/.config/opencode/AGENTS.md
 ### Precedence
 
 Global instructions merge with repository-specific `AGENTS.md` files. Repository instructions take precedence.
+
+## Exposing the OpenCode Server (Advanced)
+
+By default, the OpenCode server binds to `127.0.0.1` inside the container and is **not reachable from outside the container**. This is the correct and safe default for nearly all users.
+
+### When to Expose Externally
+
+You only need to expose the OpenCode server on an external interface if you have a specific use case that requires other services or machines to connect directly to it.
+
+### How to Expose Safely
+
+To expose the OpenCode server on the host network:
+
+1. **Set `OPENCODE_HOST=0.0.0.0`** in your environment
+2. **Add port `5551:5551`** to the compose ports
+3. **Set `OPENCODE_SERVER_PASSWORD`** — this is **required**; the managed OpenCode server will refuse to start without it
+
+Example compose override:
+
+```yaml
+services:
+  app:
+    ports:
+      - "5551:5551"
+    environment:
+      - OPENCODE_HOST=0.0.0.0
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD:?Set OPENCODE_SERVER_PASSWORD before exposing OpenCode on port 5551}
+```
+
+### Password Configuration
+
+The password can be configured in two ways:
+
+1. **Environment variable:** Set `OPENCODE_SERVER_PASSWORD` in your `.env` file or compose environment
+2. **Via UI:** Use Settings → OpenCode → Server Auth to set a password at runtime
+
+**DB-stored passwords take precedence over the environment variable.** If you set a password via the UI, it will override the env var.
+
+### Startup Guard
+
+If you set `OPENCODE_HOST=0.0.0.0` (or any non-localhost host) without configuring a password (either via env var or UI), the managed OpenCode server will refuse to start with an error message explaining how to fix it. The OpenCode Manager UI/API may remain available so you can configure a password and restart the managed server.

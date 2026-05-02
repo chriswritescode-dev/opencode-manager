@@ -29,6 +29,7 @@ import { encryptSecret } from '../utils/crypto'
 import { compareVersions, isValidVersion } from '../utils/version-utils'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../services/repo'
+import { ENV } from '@opencode-manager/shared/config/env'
 import {
   listManagedSkills,
   getSkill,
@@ -1506,6 +1507,59 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to remove MCP auth' }, 500)
+    }
+  })
+
+  const OpenCodeServerAuthBodySchema = z.object({
+    password: z.union([z.string().min(8), z.null()]),
+  })
+
+  app.get('/opencode-server-auth', async (c) => {
+    try {
+      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
+      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
+      const isSet = source !== 'none'
+      return c.json({ isSet, source })
+    } catch (error) {
+      logger.error('Failed to get OpenCode server auth status:', error)
+      return c.json({ error: 'Failed to get OpenCode server auth status' }, 500)
+    }
+  })
+
+  app.patch('/opencode-server-auth', async (c) => {
+    try {
+      const body = await c.req.json()
+      const validated = OpenCodeServerAuthBodySchema.parse(body)
+      const previousPasswordState = settingsService.getStoredOpenCodeServerPasswordState()
+
+      if (validated.password === null) {
+        settingsService.clearOpenCodeServerPassword()
+      } else if (validated.password) {
+        settingsService.setOpenCodeServerPassword(validated.password)
+      }
+
+      try {
+        await opencodeServerManager.restart()
+      } catch (restartError) {
+        try {
+          settingsService.restoreOpenCodeServerPasswordState(previousPasswordState)
+          await opencodeServerManager.restart()
+        } catch (restoreError) {
+          logger.error('Failed to restore OpenCode server auth runtime after restart failure:', restoreError)
+        }
+        throw restartError
+      }
+
+      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
+      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
+      const isSet = source !== 'none'
+      return c.json({ isSet, source })
+    } catch (error) {
+      logger.error('Failed to update OpenCode server auth:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to update OpenCode server auth' }, 500)
     }
   })
 

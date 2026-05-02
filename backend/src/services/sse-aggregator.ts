@@ -2,7 +2,7 @@ import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
-import { buildOpenCodeBasicAuthHeader } from './opencode/auth'
+import { getOpenCodeBasicAuthHeader } from './opencode/auth'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEEventListener = (directory: string, event: SSEEvent) => void
@@ -218,7 +218,7 @@ class SSEAggregator {
     const wasConnectedBefore = this.everConnected
     logger.info(`SSE connecting to OpenCode global stream: ${url}`)
 
-    const authHeader = buildOpenCodeBasicAuthHeader()
+    const authHeader = getOpenCodeBasicAuthHeader()
     const init: ConstructorParameters<typeof EventSource>[1] = authHeader
       ? {
           fetch: (input, fetchInit) =>

@@ -24,11 +24,8 @@ import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import { writeFileContent } from './file-operations'
 
-const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
-const OPENCODE_SERVER_PUBLIC_URL = ENV.OPENCODE.PUBLIC_URL
-const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
-const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
+export const OPENCODE_SERVER_CONNECT_HOST = OPENCODE_SERVER_HOST === '0.0.0.0' ? '127.0.0.1' : OPENCODE_SERVER_HOST
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 const HEALTH_CHECK_TIMEOUT_MS = 3000
@@ -91,6 +88,10 @@ function formatStartupError(stderrOutput: string, fallback: string): string {
 // This allows proper mocking in tests
 const getOpenCodeServerDirectory = () => getWorkspacePath()
 const getOpenCodeConfigPath = () => getOpenCodeConfigFilePath()
+const getOpenCodeServerPort = () => ENV.OPENCODE.PORT
+const getOpenCodeServerHost = () => ENV.OPENCODE.HOST
+const getOpenCodeServerPublicUrl = () => ENV.OPENCODE.PUBLIC_URL
+const getOpenCodeServerUsername = () => ENV.OPENCODE.SERVER_USERNAME
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
@@ -111,6 +112,20 @@ class OpenCodeServerManager {
 
   setOpenCodeClient(client: OpenCodeClient) {
     this.openCodeClient = client
+  }
+
+  async rebuildClient(): Promise<void> {
+    const password = this.getResolvedPassword()
+    const { createOpenCodeClient } = await import('./opencode/client')
+    this.openCodeClient = createOpenCodeClient(password)
+  }
+
+  private getResolvedPassword(): string {
+    if (this.db) {
+      const settingsService = new SettingsService(this.db)
+      return settingsService.getOpenCodeServerPassword()
+    }
+    return ENV.OPENCODE.SERVER_PASSWORD
   }
 
   private requireClient(): OpenCodeClient {
@@ -166,7 +181,18 @@ class OpenCodeServerManager {
         return
       }
 
+    await this.rebuildClient()
+
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
+    const password = this.getResolvedPassword()
+    const openCodeServerHost = getOpenCodeServerHost()
+    const isExposed = openCodeServerHost !== '127.0.0.1' && openCodeServerHost !== 'localhost'
+    if (isExposed && !password) {
+      const msg = `OPENCODE_HOST=${openCodeServerHost} exposes the OpenCode server externally but no password is configured. Set OPENCODE_SERVER_PASSWORD env var or configure a password via Settings → OpenCode → Server Auth.`
+      this.lastStartupError = msg
+      logger.error(msg)
+      throw new Error(msg)
+    }
 
     let gitCredentials: GitCredential[] = []
     let gitIdentityEnv: Record<string, string> = {}
@@ -186,9 +212,10 @@ class OpenCodeServerManager {
       }
     }
 
-    const existingProcesses = await this.findProcessesByPort(OPENCODE_SERVER_PORT)
+    const openCodeServerPort = getOpenCodeServerPort()
+    const existingProcesses = await this.findProcessesByPort(openCodeServerPort)
     if (existingProcesses.length > 0) {
-      logger.info(`OpenCode server already running on port ${OPENCODE_SERVER_PORT}`)
+      logger.info(`OpenCode server already running on port ${openCodeServerPort}`)
       const healthy = await this.checkHealth()
       if (healthy) {
         if (isDevelopment) {
@@ -288,7 +315,7 @@ class OpenCodeServerManager {
 
     this.serverProcess = spawn(
       'opencode',
-      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', OPENCODE_SERVER_HOST],
+      ['serve', '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
       {
         cwd: openCodeServerDirectory,
         detached: !isDevelopment,
@@ -301,11 +328,11 @@ class OpenCodeServerManager {
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
-          ...(OPENCODE_SERVER_PUBLIC_URL ? { OPENCODE_PUBLIC_URL: OPENCODE_SERVER_PUBLIC_URL } : {}),
-          ...(OPENCODE_SERVER_PASSWORD
+          ...(getOpenCodeServerPublicUrl() ? { OPENCODE_PUBLIC_URL: getOpenCodeServerPublicUrl() } : {}),
+          ...(password
             ? {
-              OPENCODE_SERVER_PASSWORD,
-              OPENCODE_SERVER_USERNAME,
+              OPENCODE_SERVER_PASSWORD: password,
+              OPENCODE_SERVER_USERNAME: getOpenCodeServerUsername(),
             }
             : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
@@ -531,7 +558,7 @@ class OpenCodeServerManager {
   }
 
   getPort(): number {
-    return OPENCODE_SERVER_PORT
+    return getOpenCodeServerPort()
   }
 
   getVersion(): string | null {

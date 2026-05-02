@@ -1,6 +1,6 @@
 import { logger } from '../../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
-import { buildOpenCodeBasicAuthHeader } from './auth'
+import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './auth'
 
 export interface ForwardRequest {
   method: string
@@ -42,6 +42,7 @@ export interface OpenCodeClient {
 export interface FetchOpenCodeClientConfig {
   baseUrl: string
   basicAuth: string | null
+  passwordResolver?: OpenCodePasswordResolver
   fetchFn?: typeof fetch
 }
 
@@ -52,6 +53,14 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     return this.config.fetchFn ?? fetch
   }
 
+  private async getBasicAuth(): Promise<string> {
+    if (!this.config.passwordResolver) {
+      return this.config.basicAuth ?? ''
+    }
+
+    return await getOpenCodeBasicAuthHeader(this.config.passwordResolver) ?? ''
+  }
+
   private async request(req: ForwardRequest): Promise<Response> {
     const url = new URL(this.config.baseUrl + req.path)
 
@@ -60,9 +69,10 @@ export class FetchOpenCodeClient implements OpenCodeClient {
     }
 
     const headers: Record<string, string> = { ...(req.headers ?? {}) }
+    const basicAuth = await this.getBasicAuth()
 
-    if (this.config.basicAuth) {
-      headers.Authorization = this.config.basicAuth
+    if (basicAuth) {
+      headers.Authorization = basicAuth
     }
 
     try {
@@ -238,9 +248,12 @@ export class FetchOpenCodeClient implements OpenCodeClient {
   }
 }
 
-export function createOpenCodeClient(): OpenCodeClient {
-  const baseUrl = `http://${ENV.OPENCODE.HOST}:${ENV.OPENCODE.PORT}`
-  const basicAuth = buildOpenCodeBasicAuthHeader()
+export function createOpenCodeClient(passwordOverride?: string | OpenCodePasswordResolver): OpenCodeClient {
+  const host = ENV.OPENCODE.HOST === '0.0.0.0' ? '127.0.0.1' : ENV.OPENCODE.HOST
+  const baseUrl = `http://${host}:${ENV.OPENCODE.PORT}`
+  const passwordResolver = typeof passwordOverride === 'function' ? passwordOverride : undefined
+  const password = typeof passwordOverride === 'string' ? passwordOverride : ENV.OPENCODE.SERVER_PASSWORD
+  const basicAuth = getOpenCodeBasicAuthHeader(password)
 
-  return new FetchOpenCodeClient({ baseUrl, basicAuth })
+  return new FetchOpenCodeClient({ baseUrl, basicAuth, passwordResolver })
 }

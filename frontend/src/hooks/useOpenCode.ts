@@ -240,6 +240,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       model,
       agent,
       variant,
+      queued,
     }: {
       sessionID: string;
       prompt?: string;
@@ -247,6 +248,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       model?: string;
       agent?: string;
       variant?: string;
+      queued?: boolean;
     }) => {
       if (!client) throw new Error("No client available");
 
@@ -314,9 +316,14 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         requestData.variant = variant;
       }
 
+      if (queued) {
+        await client.sendPromptAsync(sessionID, requestData);
+        return { optimisticUserID, queued: true };
+      }
+
       const response = await client.sendPrompt(sessionID, requestData);
 
-      return { optimisticUserID, response };
+      return { optimisticUserID, response, queued: false };
     },
     onError: (error, variables) => {
       const { sessionID } = variables;
@@ -345,6 +352,11 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       const { sessionID } = variables;
       const { response } = data;
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+
+      if (data.queued || !response) {
+        queryClient.invalidateQueries({ queryKey: messagesQueryKey });
+        return;
+      }
 
       queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey,
