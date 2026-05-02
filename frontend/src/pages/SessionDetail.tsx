@@ -450,54 +450,64 @@ export function SessionDetail() {
 
   return (
     <div
-      className="relative h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
+      className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
-      <Header className={`!absolute left-0 right-0 top-0 !z-20 bg-gradient-to-b from-background from-65% via-background/90 via-80% to-transparent pb-5 transition-all duration-200 ease-out [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900 ${isHeaderVisible ? 'translate-y-0 opacity-100 pointer-events-auto' : '-translate-y-full opacity-0 pointer-events-none'}`}>
-        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
-          {session?.parentID ? (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleParentSessionClick}
-                className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
-                title="Back to parent session"
-              >
-                <CornerUpLeft className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline text-xs">Parent</span>
-              </Button>
-              <div className="hidden sm:block">
-                <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-              </div>
-            </>
-          ) : (
-            <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-          )}
+      <div
+        className={`grid flex-shrink-0 bg-background transition-[grid-template-rows] duration-300 ease-in-out sm:grid-rows-[1fr] ${
+          isHeaderVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        }`}
+      >
+        <div className="overflow-hidden min-h-0">
+        <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
+            {session?.parentID ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleParentSessionClick}
+                  className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
+                  title="Back to parent session"
+                >
+                  <CornerUpLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-xs">Parent</span>
+                </Button>
+                <div className="hidden sm:block">
+                  <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+                </div>
+              </>
+            ) : (
+              <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+            )}
             <Header.EditableTitle
               value={session?.title || "Untitled Session"}
               onChange={handleSessionTitleUpdate}
               subtitle={<span className="text-orange-600 dark:text-orange-400">{workspaceDisplayName}</span>}
             />
-        </div>
-        <Header.Actions className="gap-2 sm:gap-4">
-          <div className="flex items-center gap-1">
-            <PendingActionsGroup />
           </div>
-          <ContextUsageIndicator
-            opcodeUrl={opcodeUrl}
-            sessionID={sessionId}
-            directory={repoDirectory}
-            isConnected={isConnected}
-            isReconnecting={isReconnecting}
-          />
-          <SessionMoreButton />
-        </Header.Actions>
-      </Header>
+          <Header.Actions className="gap-2 sm:gap-4">
+            <div className="flex items-center gap-1">
+              <PendingActionsGroup />
+            </div>
+            <ContextUsageIndicator
+              opcodeUrl={opcodeUrl}
+              sessionID={sessionId}
+              directory={repoDirectory}
+              isConnected={isConnected}
+              isReconnecting={isReconnecting}
+            />
+            <SessionMoreButton />
+          </Header.Actions>
+        </Header>
 
-      <SessionTodoDisplay sessionID={sessionId} />
+        <div className="px-3 sm:px-4">
+          <SessionTodoDisplay sessionID={sessionId} />
+        </div>
+        </div>
+      </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col relative">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pt-12 sm:pt-14 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
+      <div className="flex-1 overflow-hidden flex flex-col">
+        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
           {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (

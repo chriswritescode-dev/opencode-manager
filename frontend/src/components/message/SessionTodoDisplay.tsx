@@ -2,7 +2,6 @@ import { useState, useMemo } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { TodoItem } from './TodoItem'
 import { useSessionTodosForSession } from '@/stores/sessionTodosStore'
-import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import type { components } from '@/api/opencode-types'
 
 export type Todo = components['schemas']['Todo']
@@ -13,10 +12,7 @@ interface SessionTodoDisplayProps {
 
 export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
   const todos = useSessionTodosForSession(sessionID)
-  const sessionStatus = useSessionStatusForSession(sessionID)
   const [isCollapsed, setIsCollapsed] = useState(false)
-
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry'
 
   const stats = useMemo(() => {
     const completed = todos.filter((t) => t.status === 'completed').length
@@ -57,7 +53,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
     )
   }
 
-  if (!sessionID || !isSessionActive || todos.length === 0 || stats.completed === stats.total) {
+  if (!sessionID || todos.length === 0 || stats.completed === stats.total) {
     return null
   }
 
