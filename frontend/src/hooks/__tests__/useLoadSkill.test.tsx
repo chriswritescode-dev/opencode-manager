@@ -11,13 +11,6 @@ const mocks = vi.hoisted(() => ({
   setStatus: vi.fn(),
 }))
 
-vi.mock('../../lib/sseManager', () => ({
-  ensureSSEConnected: vi.fn().mockResolvedValue(true),
-  reconnectSSE: vi.fn(),
-}))
-
-const { ensureSSEConnected } = await vi.importMock('../../lib/sseManager')
-
 vi.mock('../../api/opencode', () => ({
   OpenCodeClient: vi.fn().mockImplementation(() => ({
     sendCommand: mocks.sendCommand,
@@ -224,42 +217,6 @@ describe('useLoadSkill', () => {
 
     const messages = queryClient.getQueryData<MessageWithParts[]>(messagesKey)
     expect(messages).toHaveLength(0)
-  })
-
-  it('ensures SSE is connected before sending command', async () => {
-    mocks.sendCommand.mockResolvedValue({ info: { id: 'asm_1', sessionID: 'test-session-id', role: 'assistant' }, parts: [] })
-    const { result } = renderHook(
-      () => useLoadSkill('http://localhost:5551', 'test-session-id', '/test/dir'),
-      { wrapper: createWrapper() }
-    )
-
-    result.current.mutate({ skillName: 'my-skill' })
-
-    await waitFor(() => {
-      expect(result.current.isSuccess).toBe(true)
-    })
-
-    expect(ensureSSEConnected).toHaveBeenCalledTimes(1)
-    const sseCallOrder = (ensureSSEConnected as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]
-    const sendCallOrder = mocks.sendCommand.mock.invocationCallOrder[0]
-    expect(sseCallOrder).toBeLessThan(sendCallOrder)
-  })
-
-  it('aborts when SSE cannot connect', async () => {
-    ;(ensureSSEConnected as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false)
-    const { result } = renderHook(
-      () => useLoadSkill('http://localhost:5551', 'test-session-id', '/test/dir'),
-      { wrapper: createWrapper() }
-    )
-
-    result.current.mutate({ skillName: 'my-skill' })
-
-    await waitFor(() => {
-      expect(result.current.isError).toBe(true)
-    })
-
-    expect(mocks.sendCommand).not.toHaveBeenCalled()
-    expect(showToast.error).toHaveBeenCalledWith('Unable to connect. Please try again.')
   })
 
   it('replaces optimistic message with assistant response on success', async () => {

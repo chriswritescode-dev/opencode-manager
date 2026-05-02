@@ -6,7 +6,7 @@ import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
 import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, SSHHostKeyRequest, MessageWithParts } from '@/api/types'
 import { showToast } from '@/lib/toast'
-import { subscribeToSSE, addSSEDirectory, ensureSSEConnected, type SSEHealthState, sseManager } from '@/lib/sseManager'
+import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
@@ -149,7 +149,7 @@ interface EventContextValue {
     navigateToCurrent: () => void
     syncForSession: (directory: string, sessionID: string) => Promise<void>
   }
-  sseHealth: SSEHealthState
+  sseHealth: EventStreamHealthState
   getRepoIdForSession: (sessionID: string) => number | null
   getClient: (sessionID: string) => OpenCodeClient | null
 }
@@ -161,7 +161,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
 
   const [sshHostKeyRequest, setSSHHostKeyRequest] = useState<SSHHostKeyRequest | null>(null)
-  const [sseHealth, setSseHealth] = useState<SSEHealthState>(() => sseManager.getHealth())
+  const [sseHealth, setSseHealth] = useState<EventStreamHealthState>(() => openCodeEventStream.getHealth())
 
   const respondToSSHHostKey = useCallback(async (requestId: string, approved: boolean) => {
     try {
@@ -181,6 +181,8 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   const sessionDirectoriesRef = useRef<Map<string, string>>(new Map())
   const prevPermissionCountRef = useRef(0)
   const initialFetchDoneRef = useRef(false)
+  const subscriptionRef = useRef<ReturnType<typeof openCodeEventStream.subscribeGlobalMonitor> | null>(null)
+  const reposRef = useRef<typeof repos>(null)
   const MAX_CACHED_CLIENTS = 50
 
   useEffect(() => {
@@ -322,11 +324,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [allPermissions.length, showPermissionDialog])
 
   const respondToPermission = useCallback(async (permissionID: string, sessionID: string, response: PermissionResponse) => {
-    const connected = await ensureSSEConnected()
-    if (!connected) {
-      showToast.error('Unable to connect. Please try again.')
-      throw new Error('SSE connection failed')
-    }
     const client = getClient(sessionID)
     if (!client) throw new Error('No client found for session')
 
@@ -342,11 +339,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [getClient, permissionsBySession, queryClient, removePermission])
 
   const replyToQuestion = useCallback(async (requestID: string, answers: string[][]) => {
-    const connected = await ensureSSEConnected()
-    if (!connected) {
-      showToast.error('Unable to connect. Please try again.')
-      throw new Error('SSE connection failed')
-    }
     const question = Object.values(questionsBySession).flat().find(q => q.id === requestID)
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
@@ -356,11 +348,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [getClient, questionsBySession, removeQuestion])
 
   const rejectQuestion = useCallback(async (requestID: string) => {
-    const connected = await ensureSSEConnected()
-    if (!connected) {
-      showToast.error('Unable to connect. Please try again.')
-      throw new Error('SSE connection failed')
-    }
     const question = Object.values(questionsBySession).flat().find(q => q.id === requestID)
     if (!question) throw new Error('Question not found')
     const client = getClient(question.sessionID)
@@ -418,9 +405,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
   }, [currentPermission, getRepoIdForSession, navigate])
 
   const fetchInitialPendingData = useCallback(async () => {
-    if (!repos || repos.length === 0) return
+    const reposToUse = reposRef.current
+    if (!reposToUse || reposToUse.length === 0) return
 
-    const uniqueDirectories = [...new Set(repos.map(r => r.fullPath))]
+    const uniqueDirectories = [...new Set(reposToUse.map(r => r.fullPath))]
     
     for (const directory of uniqueDirectories) {
       try {
@@ -435,7 +423,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         }
       }
     }
-  }, [repos, reconcilePermissionsForDirectory, reconcileQuestionsForDirectory])
+  }, [reconcilePermissionsForDirectory, reconcileQuestionsForDirectory])
 
   const syncPermissionsForSession = useCallback(async (directory: string, sessionID: string) => {
     const client = new OpenCodeClient(OPENCODE_API_ENDPOINT, directory)
@@ -529,30 +517,27 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    const unsubscribe = subscribeToSSE(handleSSEMessage, handleStatusChange)
-    
-    const sseHealthUnsubscribe = sseManager.subscribeHealth(setSseHealth)
+    const initialDirectories = [...new Set((reposRef.current ?? []).map(r => r.fullPath))]
+    const subscription = openCodeEventStream.subscribeGlobalMonitor({
+      directories: initialDirectories,
+      onEvent: handleSSEMessage,
+      onStatusChange: handleStatusChange,
+      onHealthChange: setSseHealth,
+    })
+    subscriptionRef.current = subscription
     
     return () => {
-      unsubscribe()
-      sseHealthUnsubscribe()
+      subscription.dispose()
+      subscriptionRef.current = null
     }
-  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient])
+  }, [addPermission, removePermission, addQuestion, removeQuestion, rememberSessionDirectory, fetchInitialPendingData, queryClient, setSseHealth])
 
   useEffect(() => {
-    if (!repos || repos.length === 0) return
-
-    const cleanupFns: (() => void)[] = []
-    const uniqueDirectories = [...new Set(repos.map(r => r.fullPath))]
-
-    uniqueDirectories.forEach(directory => {
-      const cleanup = addSSEDirectory(directory)
-      cleanupFns.push(cleanup)
-    })
-
-    return () => {
-      cleanupFns.forEach(fn => fn())
-    }
+    reposRef.current = repos
+    const sub = subscriptionRef.current
+    if (!sub) return
+    const directories = [...new Set((repos ?? []).map(r => r.fullPath))]
+    sub.updateDirectories(directories)
   }, [repos])
 
   useEffect(() => {
@@ -646,6 +631,6 @@ export function usePendingAlerts(): boolean {
   return permissions.pendingCount + questions.pendingCount > 0
 }
 
-export function useSSEHealth(): SSEHealthState {
+export function useSSEHealth(): EventStreamHealthState {
   return useEventContext().sseHealth
 }

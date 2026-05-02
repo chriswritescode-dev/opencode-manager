@@ -13,7 +13,6 @@ import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
-import { ensureSSEConnected, reconnectSSE } from "../lib/sseManager";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -251,12 +250,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     }) => {
       if (!client) throw new Error("No client available");
 
-      const connected = await ensureSSEConnected();
-      if (!connected) {
-        showToast.error("Unable to connect. Please try again.");
-        throw new Error("SSE connection failed");
-      }
-
       setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
@@ -336,19 +329,12 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       );
       
       const isNetworkError = error instanceof TypeError ||
-        (error instanceof FetchError && error.code === 'TIMEOUT');
+        (error instanceof FetchError && (error.code === 'TIMEOUT' || error.statusCode === 524));
 
       if (isNetworkError) {
         return;
       }
 
-      const fetchError = error as { statusCode?: number };
-      const isCloudflareTimeout = fetchError.statusCode === 524;
-      if (isCloudflareTimeout) {
-        reconnectSSE();
-        return;
-      }
-      
       const parsed = parseNetworkError(error);
       showToast.error(parsed.title, {
         description: parsed.message,
@@ -654,12 +640,6 @@ export const useLoadSkill = (
       if (!client) throw new Error("No OpenCode client available");
       if (!sessionID) throw new Error("No active session");
 
-      const connected = await ensureSSEConnected();
-      if (!connected) {
-        showToast.error("Unable to connect. Please try again.");
-        throw new Error("SSE connection failed");
-      }
-
       setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
@@ -685,7 +665,7 @@ export const useLoadSkill = (
       const response = await client.sendCommand(sessionID, { command: skillName, arguments: "" });
       return { optimisticUserID, response };
     },
-    onError: () => {
+    onError: (error) => {
       if (sessionID) {
         const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
         setSessionStatus(sessionID!, { type: "idle" });
@@ -694,6 +674,7 @@ export const useLoadSkill = (
           (old) => old?.filter((m) => !m.info.id.startsWith("optimistic_")),
         );
       }
+      showToast.error(error instanceof Error ? error.message : "Failed to load skill");
     },
     onSuccess: (data) => {
       const { response } = data;

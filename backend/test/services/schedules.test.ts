@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
 
   resolveOpenCodeModel: vi.fn(),
   forward: vi.fn(),
-  addClient: vi.fn(),
   onEvent: vi.fn(),
   loggerError: vi.fn(),
 }))
@@ -63,7 +62,6 @@ vi.mock('../../src/services/opencode-models', () => ({
 
 vi.mock('../../src/services/sse-aggregator', () => ({
   sseAggregator: {
-    addClient: mocks.addClient,
     onEvent: mocks.onEvent,
   },
 }))
@@ -171,7 +169,6 @@ describe('ScheduleService', () => {
     mocks.getRunningScheduleRunByJob.mockReturnValue(null)
     mocks.createScheduleRun.mockReturnValue(baseRun)
     mocks.resolveOpenCodeModel.mockResolvedValue({ providerID: 'openai', modelID: 'gpt-5-mini' })
-    mocks.addClient.mockReturnValue(vi.fn())
     mocks.onEvent.mockReturnValue(vi.fn())
     mocks.getScheduleRunById.mockReturnValue({
       ...baseRun,

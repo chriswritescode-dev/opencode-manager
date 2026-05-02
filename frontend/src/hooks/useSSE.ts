@@ -6,7 +6,8 @@ import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
-import { sseManager, subscribeToSSE, reconnectSSE, addSSEDirectory } from '@/lib/sseManager'
+import { openCodeEventStream } from '@/lib/opencode-event-stream'
+import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 import { createPartsBatcher } from '@/lib/partsBatcher'
 
@@ -51,6 +52,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const mountedRef = useRef(true)
   const sessionIdRef = useRef(currentSessionId)
   const statusSyncVersionRef = useRef(0)
+  const eventStreamSubscriptionRef = useRef<EventStreamSubscription | null>(null)
   sessionIdRef.current = currentSessionId
   const [isConnected, setIsConnected] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -381,22 +383,25 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         setError(null)
         fetchInitialData()
         syncCurrentSession()
-        sseManager.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
+        eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {
         setError('Connection lost. Reconnecting...')
       }
     }
 
-    const directoryCleanup = addSSEDirectory(directory)
-
-    const unsubscribe = subscribeToSSE(handleMessage, handleStatusChange)
+    const subscription = openCodeEventStream.subscribeToDirectory({
+      directory,
+      onEvent: handleMessage,
+      onStatusChange: handleStatusChange,
+    })
+    eventStreamSubscriptionRef.current = subscription
 
     const handleReconnect = () => {
-      reconnectSSE()
+      subscription.reconnect()
     }
 
     const handleVisibilityChange = () => {
-      sseManager.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
+      subscription.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
     }
 
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -409,14 +414,17 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('focus', handleReconnect)
       window.removeEventListener('online', handleReconnect)
-      unsubscribe()
-      directoryCleanup()
+      subscription.reportVisibility(false, undefined)
+      subscription.dispose()
+      if (eventStreamSubscriptionRef.current === subscription) {
+        eventStreamSubscriptionRef.current = null
+      }
     }
   }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData, syncCurrentSession])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {
-      sseManager.reportVisibility(true, currentSessionId)
+      eventStreamSubscriptionRef.current?.reportVisibility(true, currentSessionId)
     }
   }, [currentSessionId, isConnected])
 
