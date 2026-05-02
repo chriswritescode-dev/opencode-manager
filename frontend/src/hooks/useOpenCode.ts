@@ -329,7 +329,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       );
       
       const isNetworkError = error instanceof TypeError ||
-        (error instanceof FetchError && error.code === 'TIMEOUT');
+        (error instanceof FetchError && (error.code === 'TIMEOUT' || error.statusCode === 524));
 
       if (isNetworkError) {
         return;
