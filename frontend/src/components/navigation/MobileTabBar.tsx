@@ -4,6 +4,7 @@ import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar, useScheduleTab, type ScheduleTabKey } from '@/hooks/useMobileTabBar'
+import { useUIState } from '@/stores/uiStateStore'
 
 interface TabDef {
   key: string
@@ -23,6 +24,8 @@ interface GlobalTabsArgs {
   navigate: ReturnType<typeof useNavigate>
   isInsideRepo: boolean
   repoId: string | null
+  isMoreDrawerOpen: boolean
+  setMoreDrawerOpen: (open: boolean) => void
 }
 
 type TabBarMode = 'hidden' | 'global' | 'schedule'
@@ -57,7 +60,7 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
   }
 }
 
-function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, isInsideRepo, repoId }: GlobalTabsArgs): TabDef[] {
+function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, isInsideRepo, repoId, isMoreDrawerOpen, setMoreDrawerOpen }: GlobalTabsArgs): TabDef[] {
   const navigateWithSearch = (params: URLSearchParams) => {
     const nextSearch = params.toString()
     navigate(nextSearch ? `${pathname}?${nextSearch}` : pathname, { replace: true })
@@ -117,8 +120,8 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
       key: 'more',
       label: 'More',
       icon: Menu,
-      onClick: () => open('more'),
-      active: openSheet === 'more',
+      onClick: () => setMoreDrawerOpen(true),
+      active: isMoreDrawerOpen,
     },
   ]
 }
@@ -190,6 +193,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
   const { openSheet, open, close } = useMobileTabBar()
   const { scheduleTab, setScheduleTab } = useScheduleTab()
   const isMobile = useMobile()
+  const isMoreDrawerOpen = useUIState((state) => state.isMoreDrawerOpen)
+  const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)
   const routeState = useMemo(() => getMobileTabRouteState(pathname), [pathname])
 
   const tabs = useMemo<TabDef[]>(
@@ -204,6 +209,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
         navigate,
         isInsideRepo: routeState.isInsideRepo,
         repoId: routeState.repoId,
+        isMoreDrawerOpen,
+        setMoreDrawerOpen,
       })),
     [
       routeState,
@@ -215,6 +222,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
       open,
       close,
       navigate,
+      isMoreDrawerOpen,
+      setMoreDrawerOpen,
     ],
   )
 

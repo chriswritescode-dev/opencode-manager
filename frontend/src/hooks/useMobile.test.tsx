@@ -101,6 +101,41 @@ describe('useSwipeBack', () => {
     document.body.removeChild(element)
   })
 
+  it('does not call onBack when canBack was false at swipe start', () => {
+    mockCanBack.mockReturnValueOnce(false).mockReturnValue(true)
+
+    const element = document.createElement('div')
+    document.body.appendChild(element)
+
+    const { result } = renderHook(() =>
+      useSwipeBack(mockOnClose, {
+        enabled: true,
+        canBack: mockCanBack,
+        onBack: mockOnBack,
+        threshold: 80,
+      })
+    )
+
+    const cleanup = result.current.bind(element)
+
+    element.dispatchEvent(new TouchEvent('touchstart', {
+      touches: [{ clientX: 10, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchmove', {
+      touches: [{ clientX: 100, clientY: 100 }] as any,
+    }))
+    element.dispatchEvent(new TouchEvent('touchend', {
+      changedTouches: [{ clientX: 100, clientY: 100 }] as any,
+    }))
+
+    expect(mockCanBack).toHaveBeenCalledTimes(1)
+    expect(mockOnBack).not.toHaveBeenCalled()
+    expect(mockOnClose).toHaveBeenCalled()
+
+    cleanup?.()
+    document.body.removeChild(element)
+  })
+
   it('falls back to onClose when canBack is not provided', () => {
     const { result } = renderHook(() =>
       useSwipeBack(mockOnClose, {

@@ -43,6 +43,7 @@
 html {
   background-color: #0a0a0a;
   min-height: calc(100% + env(safe-area-inset-top));
+  overscroll-behavior-x: none;
 }
 
 :root:not(.dark) html {
@@ -58,6 +59,7 @@ body {
   overflow: hidden;
   position: fixed;
   width: 100%;
+  overscroll-behavior-x: none;
 }
 
 #root {

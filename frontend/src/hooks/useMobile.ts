@@ -68,6 +68,7 @@ function useSwipeHandlers(
     isEdgeSwipe: boolean
     startTime: number
     blockedByScroll: boolean
+    canBackAtStart: boolean
   }>({
     startX: 0,
     startY: 0,
@@ -77,6 +78,7 @@ function useSwipeHandlers(
     isEdgeSwipe: false,
     startTime: 0,
     blockedByScroll: false,
+    canBackAtStart: true,
   })
   const [swipeProgress, setSwipeProgress] = useState(0)
   const [swipeDeltaPx, setSwipeDeltaPx] = useState(0)
@@ -118,6 +120,7 @@ function useSwipeHandlers(
         isEdgeSwipe: false,
         startTime: Date.now(),
         blockedByScroll: !!blockedByScroll,
+        canBackAtStart: canBack?.() ?? true,
       }
     } else {
       swipeRef.current = {
@@ -129,9 +132,10 @@ function useSwipeHandlers(
         isEdgeSwipe: touch.clientX <= edgeWidth,
         startTime: Date.now(),
         blockedByScroll: false,
+        canBackAtStart: canBack?.() ?? true,
       }
     }
-  }, [enabled, isMobile, edgeWidth, direction])
+  }, [enabled, isMobile, edgeWidth, direction, canBack])
 
   const handleTouchMove = useCallback((e: TouchEvent) => {
     if (!enabled || !isMobile) return
@@ -196,7 +200,7 @@ function useSwipeHandlers(
         if (deltaY >= threshold || velocity >= velocityThreshold) {
           setDismissing(true)
           setTimeout(() => {
-            if (canBack?.()) {
+            if (state.canBackAtStart && canBack?.()) {
               onBack?.()
             } else {
               onClose()
@@ -209,7 +213,7 @@ function useSwipeHandlers(
       } else {
         const deltaX = state.currentX - state.startX
         if (deltaX >= threshold) {
-          if (canBack?.()) {
+          if (state.canBackAtStart && canBack?.()) {
             onBack?.()
           } else {
             onClose()
@@ -231,6 +235,7 @@ function useSwipeHandlers(
       isEdgeSwipe: false,
       startTime: 0,
       blockedByScroll: false,
+      canBackAtStart: true,
     }
   }, [enabled, isMobile, threshold, direction, velocityThreshold, onClose, canBack, onBack])
 

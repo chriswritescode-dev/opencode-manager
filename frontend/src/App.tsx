@@ -31,6 +31,7 @@ import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib
 import { getSwipeBackTarget } from '@/lib/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useUIState } from '@/stores/uiStateStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -85,7 +86,7 @@ function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
-  const { open: openMobileSheet, openSheet } = useMobileTabBar()
+  const { openSheet } = useMobileTabBar()
   useTheme()
 
   const swipeNav = useSwipeNavigation()
@@ -119,8 +120,9 @@ function AppShell() {
     return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(location.pathname) && !openSheet
   }
 
+  const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)
   const { bind: bindMoreSwipe } = useRightEdgeSwipe(
-    () => openMobileSheet('more'),
+    () => setMoreDrawerOpen(true),
     {
       enabled: canOpenMoreWithSwipe(),
       edgeWidth: 32,
