@@ -30,7 +30,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
   const swipeRef = useRef<HTMLDivElement>(null)
-  const { bind } = useSwipeBack(onClose, { enabled: true, suspendsRouteSwipe: false })
+  const { bind } = useSwipeBack(onClose, { enabled: true, suspendsRouteSwipe: true })
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)

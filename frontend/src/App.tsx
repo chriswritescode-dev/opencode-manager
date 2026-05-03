@@ -24,7 +24,7 @@ import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
-import { SwipeNavigationProvider } from '@/contexts/SwipeNavigationContext'
+import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
@@ -88,14 +88,16 @@ function AppShell() {
   const { open: openMobileSheet, openSheet } = useMobileTabBar()
   useTheme()
 
+  const swipeNav = useSwipeNavigation()
+
   const getRouteSwipeBackTarget = useCallback(
     () => getSwipeBackTarget(location.pathname, location.search),
     [location.pathname, location.search]
   )
 
   const canSwipeBack = useCallback(
-    () => getRouteSwipeBackTarget() !== null,
-    [getRouteSwipeBackTarget]
+    () => !swipeNav?.isSuspended() && getRouteSwipeBackTarget() !== null,
+    [swipeNav, getRouteSwipeBackTarget]
   )
 
   const handleSwipeBack = useCallback(() => {
