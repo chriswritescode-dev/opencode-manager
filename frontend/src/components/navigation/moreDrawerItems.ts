@@ -70,7 +70,6 @@ export function buildNavModel(pathname: string): NavModel {
 
   const sessionDetailMatch = /^\/repos\/(\d+)\/sessions\/[^/]+$/.exec(pathname)
   if (sessionDetailMatch) {
-    const id = sessionDetailMatch[1]
     const items: MoreDrawerItem[] = [
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
