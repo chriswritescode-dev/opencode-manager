@@ -75,6 +75,16 @@ export const AssistantModeStatusSchema = z.object({
     created: z.boolean(),
     exists: z.boolean().optional(),
   }).optional(),
+  notificationsSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+    exists: z.boolean().optional(),
+  }).optional(),
+  settingsSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+    exists: z.boolean().optional(),
+  }).optional(),
 })
 
 export const AssistantModeInitRequestSchema = z.object({

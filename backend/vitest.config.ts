@@ -13,6 +13,8 @@ export default defineConfig({
       'test/services/internal-token.test.ts',
       'test/auth/internal-token-middleware.test.ts',
       'test/routes/internal-schedules.test.ts',
+      'test/routes/internal-notifications.test.ts',
+      'test/routes/internal-settings.test.ts',
       'src/db/model-state.test.ts',
       'src/routes/providers.test.ts',
     ],

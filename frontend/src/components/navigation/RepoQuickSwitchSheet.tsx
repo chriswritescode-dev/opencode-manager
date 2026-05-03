@@ -3,9 +3,11 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
+import { Button } from '@/components/ui/button'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { listRepos } from '@/api/repos'
-import { FolderGit2, Check } from 'lucide-react'
+import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
+import { FolderGit2, Check, Plus } from 'lucide-react'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -16,6 +18,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   const navigate = useNavigate()
   const location = useLocation()
   const [searchQuery, setSearchQuery] = useState('')
+  const [addRepoOpen, setAddRepoOpen] = useState(false)
 
   const activeRepoId = useMemo(() => {
     const match = location.pathname.match(/^\/repos\/(\d+)/)
@@ -69,17 +72,29 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   }
 
   return (
-    <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
-      <BottomSheetHeader>
-        <Input
-          type="text"
-          placeholder="Search projects..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          autoFocus
-          className="flex-shrink-0"
-        />
-      </BottomSheetHeader>
+    <>
+      <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
+        <BottomSheetHeader>
+          <div className="flex items-center gap-2">
+            <Input
+              type="text"
+              placeholder="Search projects..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              autoFocus
+              className="flex-1"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => setAddRepoOpen(true)}
+              className="flex-shrink-0"
+            >
+              <Plus className="h-4 w-4" /> Repo
+              <span className="sr-only">Add repository</span>
+            </Button>
+          </div>
+        </BottomSheetHeader>
       <BottomSheetContent className="flex flex-col gap-2 overflow-y-auto pt-2">
         {isLoading ? (
           <div className="flex flex-col gap-2">
@@ -129,6 +144,8 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
           </div>
         )}
       </BottomSheetContent>
-    </BottomSheet>
+      </BottomSheet>
+      <AddRepoDialog open={addRepoOpen} onOpenChange={setAddRepoOpen} />
+    </>
   )
 }

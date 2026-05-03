@@ -6,6 +6,8 @@ import { ensureAssistantMode, buildSchedulesSkill } from '../../src/services/ass
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
 import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
+import { NotificationService } from '../../src/services/notification'
+import { SettingsService } from '../../src/services/settings'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { ENV } from '@opencode-manager/shared/config/env'
 
@@ -80,8 +82,10 @@ describe('assistant-mode end-to-end', () => {
     const token = (await readFile(path.join(ws.assistantDir, '.opencode/internal-token'), 'utf8')).trim()
 
     const scheduleService = new ScheduleService(db, createOpenCodeClient())
+    const notificationService = new NotificationService(db)
+    const settingsService = new SettingsService(db)
     const app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService))
 
     const unauth = await app.request('/api/internal/schedules/all')
     expect(unauth.status).toBe(401)

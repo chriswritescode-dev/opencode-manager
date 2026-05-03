@@ -308,12 +308,14 @@ sseAggregator.start()
 
 void scheduleRunnerInstance.start()
 
+const settingsService = new SettingsService(db)
+
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
