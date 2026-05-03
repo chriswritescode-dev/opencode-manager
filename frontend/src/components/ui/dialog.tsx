@@ -34,6 +34,8 @@ interface DialogContentProps
   fullscreen?: boolean
   mobileFullscreen?: boolean
   mobileSwipeToClose?: boolean
+  canSwipeBack?: () => boolean
+  onSwipeBack?: () => void
   onOpenChange?: (open: boolean) => void
   overlayClassName?: string
 }
@@ -41,14 +43,15 @@ interface DialogContentProps
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, overlayClassName, ...props }, ref) => {
+>(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, canSwipeBack, onSwipeBack, overlayClassName, style, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
+  const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
+  const shouldEnableMobileSwipe = mobileSwipeToClose !== false && isMobile
+  const shouldAnimateSwipe = shouldEnableMobileSwipe && isMobileFullscreenMode
   const swipeContainerRef = React.useRef<HTMLDivElement>(null)
-  const contentRef = React.useRef<HTMLDivElement>(null)
   const closeTriggerRef = React.useRef<HTMLButtonElement>(null)
   
   const combinedRef = React.useCallback((node: HTMLDivElement | null) => {
-    contentRef.current = node
     swipeContainerRef.current = node
     if (typeof ref === 'function') {
       ref(node)
@@ -57,25 +60,33 @@ const DialogContent = React.forwardRef<
     }
   }, [ref])
   
-  const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
-
   React.useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
   }, [])
-  const { bind: swipeBind } = useSwipeBack(
+  const { bind: swipeBind, swipeStyles } = useSwipeBack(
     () => closeTriggerRef.current?.click(),
-    { enabled: isMobileFullscreenMode && mobileSwipeToClose === true && isMobile }
+    { enabled: shouldEnableMobileSwipe, canBack: canSwipeBack, onBack: onSwipeBack }
   )
   
   React.useEffect(() => {
-    if (isMobileFullscreenMode && mobileSwipeToClose && isMobile) {
+    if (shouldEnableMobileSwipe) {
       return swipeBind(swipeContainerRef.current)
     }
     return undefined
-  }, [isMobileFullscreenMode, mobileSwipeToClose, isMobile, swipeBind])
-   
+  }, [shouldEnableMobileSwipe, swipeBind])
+  
+  const baseStyle = isMobileFullscreenMode
+    ? { paddingTop: 'env(safe-area-inset-top, 0px)' }
+    : undefined
+
+  const mergedStyle = {
+    ...baseStyle,
+    ...style,
+    ...(shouldAnimateSwipe ? swipeStyles : undefined),
+  }
+
   return (
     <DialogPortal>
       {!fullscreen && <DialogOverlay className={overlayClassName} />}
@@ -92,13 +103,11 @@ const DialogContent = React.forwardRef<
               : "left-[50%] top-[50%] w-[90%] max-w-lg translate-x-[-50%] translate-y-[-50%] p-6 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:rounded-lg",
           className
         )}
-        style={isMobileFullscreenMode ? {
-          paddingTop: 'env(safe-area-inset-top, 0px)',
-        } : undefined}
+        style={Object.keys(mergedStyle).length > 0 ? mergedStyle : undefined}
         {...props}
       >
         {children}
-        {mobileSwipeToClose && isMobileFullscreenMode && (
+        {shouldEnableMobileSwipe && (
           <DialogPrimitive.Close ref={closeTriggerRef} className="sr-only" data-swipe-close-trigger />
         )}
         {!hideCloseButton && !fullscreen && (

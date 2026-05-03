@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -12,7 +12,6 @@ import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useSwipeBack } from '@/hooks/useMobile'
 import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 
 type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
@@ -21,7 +20,6 @@ export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
-  const contentRef = useRef<HTMLDivElement>(null)
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -53,16 +51,6 @@ export function SettingsDialog() {
     setSectionHistory([])
     setMobileView('menu')
   }, [mobileView, sectionHistory, close, setActiveTab])
-
-  const { bind: bindSwipe, swipeStyles } = useSwipeBack(close, {
-    enabled: isOpen,
-    canBack: () => mobileView !== 'menu',
-    onBack: handleSettingsBack,
-  })
-
-  useEffect(() => {
-    return bindSwipe(contentRef.current)
-  }, [bindSwipe])
 
   useEffect(() => {
     if (!isOpen) {
@@ -105,13 +93,13 @@ export function SettingsDialog() {
   }
 
    return (
-     <Dialog open={isOpen} modal={false}>
-       <DialogContent 
-         ref={contentRef}
-         className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col"
-         style={swipeStyles}
-         fullscreen
-       >
+      <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && close()}>
+        <DialogContent 
+          className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col"
+          fullscreen
+          canSwipeBack={() => mobileView !== 'menu'}
+          onSwipeBack={handleSettingsBack}
+        >
          <div className="hidden sm:flex sm:flex-col sm:h-full">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
              <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
