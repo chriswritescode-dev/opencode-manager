@@ -3,7 +3,6 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X, GitBranch } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useMemoryPluginStatus } from '@/hooks/useMemoryPluginStatus'
 import { useCommands } from '@/hooks/useCommands'
 import { useUIState } from '@/stores/uiStateStore'
 import { useQuery } from '@tanstack/react-query'
@@ -34,7 +33,6 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { bind } = useSwipeBack(onClose, { enabled: true, suspendsRouteSwipe: false })
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
-  const { memoryPluginEnabled } = useMemoryPluginStatus()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
   const isAssistantRoute = /^\/repos\/\d+\/assistant$/.test(location.pathname)
   const isAssistantSession = isSessionDetail && new URLSearchParams(location.search).get('assistant') === '1'
@@ -111,7 +109,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     onClose()
   }
 
-  const items = buildMoreItems(location.pathname, { memoryPluginEnabled })
+  const items = buildMoreItems(location.pathname)
   const commands = filterCommands('')
 
   const opencodeVersion = health?.opencodeVersion

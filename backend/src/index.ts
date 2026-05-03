@@ -29,7 +29,6 @@ import { createOAuthRoutes } from './routes/oauth'
 import { createSSERoutes } from './routes/sse'
 import { createSSHRoutes } from './routes/ssh'
 import { createNotificationRoutes } from './routes/notifications'
-import { createMemoryRoutes } from './routes/memory'
 import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
 import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
@@ -330,7 +329,6 @@ protectedApi.route('/stt', createSTTRoutes(db))
 protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
-protectedApi.route('/memory', createMemoryRoutes(db, openCodeClient))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 

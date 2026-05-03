@@ -2,7 +2,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
-import { cancelLoop } from "../api/memory";
 import type {
   Message,
   Part,
@@ -386,7 +385,6 @@ export const useAbortSession = (
   opcodeUrl: string | null | undefined,
   directory?: string,
   sessionID?: string,
-  repoId?: number
 ) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
@@ -505,10 +503,6 @@ export const useAbortSession = (
       };
 
       attemptAbort();
-
-      if (repoId) {
-        cancelLoop(repoId, targetSessionID).catch(() => {})
-      }
 
       retryIntervalRef.current = setInterval(() => {
         retryCountRef.current++;

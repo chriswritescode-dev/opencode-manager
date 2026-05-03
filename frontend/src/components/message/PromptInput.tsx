@@ -63,7 +63,6 @@ interface PromptInputProps {
   opcodeUrl: string
   directory?: string
   sessionID: string
-  repoId?: number
   disabled?: boolean
   showScrollButton?: boolean
   isSessionActive?: boolean
@@ -81,7 +80,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   opcodeUrl,
   directory,
   sessionID,
-  repoId,
   disabled,
   showScrollButton,
   isSessionActive = false,
@@ -177,7 +175,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
-  const abortSession = useAbortSession(opcodeUrl, directory, sessionID, repoId)
+  const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
     opcodeUrl,

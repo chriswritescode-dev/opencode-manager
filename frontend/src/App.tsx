@@ -6,7 +6,6 @@ import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
 import { SessionDetail } from './pages/SessionDetail'
-import { Memories } from './pages/Memories'
 import { Schedules } from './pages/Schedules'
 import { GlobalSchedules } from './pages/GlobalSchedules'
 import { Login } from './pages/Login'
@@ -223,11 +222,6 @@ const router = createBrowserRouter([
       {
         path: '/repos/:id/sessions/:sessionId',
         element: <SessionDetail />,
-        loader: protectedLoader,
-      },
-      {
-        path: '/repos/:id/memories',
-        element: <Memories />,
         loader: protectedLoader,
       },
       {

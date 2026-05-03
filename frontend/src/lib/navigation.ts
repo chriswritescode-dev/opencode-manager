@@ -30,11 +30,6 @@ export function getSwipeBackTarget(pathname: string, search = ''): string | null
     return '/';
   }
 
-  if (/^\/repos\/[^/]+\/memories$/.test(pathname)) {
-    const repoId = pathname.split('/')[2];
-    return `/repos/${repoId}`;
-  }
-
   if (/^\/repos\/[^/]+\/schedules$/.test(pathname)) {
     const repoId = pathname.split('/')[2];
     return `/repos/${repoId}`;

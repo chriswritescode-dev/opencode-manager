@@ -58,7 +58,6 @@ For local development setup, see the [Development Guide](https://chriswritescode
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download
 - **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, markdown-rendered output
 - **AI & OpenCode** — Model/provider configuration, OAuth for Anthropic/GitHub Copilot, custom agents, OpenCode server supervision and proxying
-- **MCP, Skills, Memory** — MCP server management, skill support, optional memory plugin with semantic search ([plugin repo](https://github.com/chriswritescode-dev/opencode-memory))
 - **Audio** — Text-to-speech and speech-to-text (browser + OpenAI-compatible)
 - **Mobile & Notifications** — Responsive PWA, mobile-first navigation, push notification support
 

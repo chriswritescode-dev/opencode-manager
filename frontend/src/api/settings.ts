@@ -229,10 +229,6 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/health/version`)
   },
 
-  getMemoryPluginStatus: async (): Promise<{ memoryPluginEnabled: boolean }> => {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/memory-plugin-status`)
-  },
-
   listManagedSkills: async (repoId?: number): Promise<SkillFileInfo[]> => {
     const params = repoId ? `?repoId=${repoId}` : ''
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills${params}`)

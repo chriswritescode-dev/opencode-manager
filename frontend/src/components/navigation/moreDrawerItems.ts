@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { Brain, Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus } from 'lucide-react'
+import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus } from 'lucide-react'
 
 export interface MoreDrawerItem {
   key: string
@@ -24,12 +24,6 @@ export interface NavModel {
   items: MoreDrawerItem[]
 }
 
-export interface BuildMoreItemsOptions {
-  memoryPluginEnabled?: boolean
-}
-
-export type BuildNavOptions = BuildMoreItemsOptions
-
 function getAssistantNavItem(pathname: string, variant: NavPrimaryCta['variant'] = 'secondary'): NavPrimaryCta {
   const repoMatch = /^\/repos\/(\d+)/.exec(pathname)
 
@@ -49,8 +43,7 @@ function getBaseItems(): MoreDrawerItem[] {
   ]
 }
 
-export function buildNavModel(pathname: string, options: BuildNavOptions = {}): NavModel {
-  const { memoryPluginEnabled = false } = options
+export function buildNavModel(pathname: string): NavModel {
   const baseItems = getBaseItems()
 
   const repoDetailMatch = /^\/repos\/(\d+)$/.exec(pathname)
@@ -58,9 +51,6 @@ export function buildNavModel(pathname: string, options: BuildNavOptions = {}): 
     const id = repoDetailMatch[1]
     const items: MoreDrawerItem[] = [
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
-      ...(memoryPluginEnabled
-        ? [{ key: 'memory', label: 'Memory', icon: Brain, to: `/repos/${id}/memories` }]
-        : []),
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
@@ -83,9 +73,6 @@ export function buildNavModel(pathname: string, options: BuildNavOptions = {}): 
     const id = sessionDetailMatch[1]
     const items: MoreDrawerItem[] = [
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
-      ...(memoryPluginEnabled
-        ? [{ key: 'memory', label: 'Memory', icon: Brain, to: `/repos/${id}/memories` }]
-        : []),
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'lsp', label: 'LSP', icon: Code2, dialog: 'lsp' },
@@ -108,9 +95,6 @@ export function buildNavModel(pathname: string, options: BuildNavOptions = {}): 
     const id = assistantMatch[1]
     const items: MoreDrawerItem[] = [
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
-      ...(memoryPluginEnabled
-        ? [{ key: 'memory', label: 'Memory', icon: Brain, to: `/repos/${id}/memories` }]
-        : []),
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
@@ -152,15 +136,6 @@ export function buildNavModel(pathname: string, options: BuildNavOptions = {}): 
     }
   }
 
-  if (/^\/repos\/\d+\/memories$/.test(pathname)) {
-    return {
-      primary: [
-        getAssistantNavItem(pathname),
-      ],
-      items: baseItems,
-    }
-  }
-
   return {
     primary: [
       getAssistantNavItem(pathname),
@@ -169,6 +144,6 @@ export function buildNavModel(pathname: string, options: BuildNavOptions = {}): 
   }
 }
 
-export function buildMoreItems(pathname: string, options: BuildMoreItemsOptions = {}): MoreDrawerItem[] {
-  return buildNavModel(pathname, options).items
+export function buildMoreItems(pathname: string): MoreDrawerItem[] {
+  return buildNavModel(pathname).items
 }
