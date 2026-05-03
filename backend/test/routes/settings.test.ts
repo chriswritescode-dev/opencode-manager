@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { execSync, spawnSync } from 'child_process'
+import { createStubOpenCodeClient } from '../helpers/stub-opencode-client'
 
 const mockGetSettings = vi.fn()
 const mockUpdateSettings = vi.fn()
@@ -62,9 +63,21 @@ vi.mock('../../src/services/file-operations', () => ({
   fileExists: vi.fn(),
 }))
 
-vi.mock('../../src/services/proxy', () => ({
-  patchOpenCodeConfig: vi.fn(),
-  proxyToOpenCodeWithDirectory: vi.fn(),
+vi.mock('../../src/services/opencode/config-recovery', () => ({
+  patchConfigWithRecovery: vi.fn(),
+}))
+
+vi.mock('../../src/services/opencode/client', () => ({
+  createOpenCodeClient: () => ({
+    forward: vi.fn(),
+    forwardRaw: vi.fn(),
+    getJson: vi.fn(),
+    postJson: vi.fn(),
+    setProviderAuth: vi.fn(),
+    deleteProviderAuth: vi.fn(),
+    startMcpAuth: vi.fn(),
+    authenticateMcp: vi.fn(),
+  }),
 }))
 
 vi.mock('../../src/services/opencode-single-server', async (importOriginal) => {
@@ -146,7 +159,7 @@ import { writeFileContent } from '../../src/services/file-operations'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../../src/services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../../src/services/repo'
 import { opencodeServerManager, ConfigReloadError } from '../../src/services/opencode-single-server'
-import { patchOpenCodeConfig } from '../../src/services/proxy'
+import { patchConfigWithRecovery } from '../../src/services/opencode/config-recovery'
 
 const mockExecSync = execSync as ReturnType<typeof vi.fn>
 const mockSpawnSync = spawnSync as ReturnType<typeof vi.fn>
@@ -160,7 +173,7 @@ const mockSyncOpenCodeImport = syncOpenCodeImport as ReturnType<typeof vi.fn>
 const mockGetImportedSessionDirectories = getImportedSessionDirectories as ReturnType<typeof vi.fn>
 const mockRelinkReposFromSessionDirectories = relinkReposFromSessionDirectories as ReturnType<typeof vi.fn>
 const mockWriteFileContent = writeFileContent as ReturnType<typeof vi.fn>
-const mockPatchOpenCodeConfig = patchOpenCodeConfig as ReturnType<typeof vi.fn>
+const mockPatchConfigWithRecovery = patchConfigWithRecovery as ReturnType<typeof vi.fn>
 
 describe('Settings Routes - OpenCode Upgrade', () => {
   let settingsApp: ReturnType<typeof createSettingsRoutes>
@@ -187,15 +200,15 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     mockGetImportedSessionDirectories.mockReset()
     mockRelinkReposFromSessionDirectories.mockReset()
     mockWriteFileContent.mockReset()
-    mockPatchOpenCodeConfig.mockReset()
+    mockPatchConfigWithRecovery.mockReset()
     
     testDb = {} as any
-    settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any)
+    settingsApp = createSettingsRoutes(testDb, { getGitEnvironment: vi.fn().mockReturnValue({}) } as any, createStubOpenCodeClient())
 
     mockReloadConfig.mockResolvedValue(undefined)
     mockRestart.mockResolvedValue(undefined)
     mockClearStartupError.mockReturnValue(undefined)
-    mockPatchOpenCodeConfig.mockResolvedValue({ success: true, appliedConfig: { $schema: 'https://opencode.ai/config.json' } })
+    mockPatchConfigWithRecovery.mockResolvedValue({ success: true, appliedConfig: { $schema: 'https://opencode.ai/config.json' } } as any)
     mockWriteFileContent.mockResolvedValue(undefined)
     mockGetOpenCodeImportStatus.mockResolvedValue({
       configSourcePath: null,
@@ -229,7 +242,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         createdAt: 1,
         updatedAt: 1,
       })
-      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
         success: false,
         error: 'command.review: Invalid field',
         details: [{ path: 'command.review', message: 'Invalid field' }],
@@ -275,7 +288,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         createdAt: 1,
         updatedAt: 1,
       })
-      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
         success: true,
         appliedConfig: { theme: 'dark' },
         removedFields: ['command.review'],
@@ -331,7 +344,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         createdAt: 1,
         updatedAt: 1,
       })
-      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
         success: false,
         error: 'command.review: Invalid field',
         details: [{ path: 'command.review', message: 'Invalid field' }],
@@ -360,7 +373,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         createdAt: 1,
         updatedAt: 1,
       })
-      mockPatchOpenCodeConfig.mockResolvedValueOnce({
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
         success: true,
         appliedConfig: { theme: 'dark' },
         removedFields: ['command.review'],

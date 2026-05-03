@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { z } from 'zod'
-import { proxyRequest, OPENCODE_SERVER_URL } from '../services/proxy'
 import { logger } from '../utils/logger'
 import {
   OAuthAuthorizeRequestSchema,
@@ -19,7 +19,7 @@ async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Pr
   await opencodeServerManager.reloadConfig()
 }
 
-export function createOAuthRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
+export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
 
   app.post('/:id/oauth/authorize', async (c) => {
@@ -28,17 +28,12 @@ export function createOAuthRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
       const body = await c.req.json()
       const validated = OAuthAuthorizeRequestSchema.parse(body)
       
-      // Proxy to OpenCode server - only method and inputs are supported
-      const response = await proxyRequest(
-        new Request(
-          `${OPENCODE_SERVER_URL}/provider/${providerId}/oauth/authorize`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(validated)
-          }
-        )
-      )
+      const response = await openCodeClient.forward({
+        method: 'POST',
+        path: `/provider/${encodeURIComponent(providerId)}/oauth/authorize`,
+        body: JSON.stringify(validated),
+        headers: { 'Content-Type': 'application/json' },
+      })
 
       if (!response.ok) {
         const error = await response.text()
@@ -65,17 +60,12 @@ export function createOAuthRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
       const body = await c.req.json()
       const validated = OAuthCallbackRequestSchema.parse(body)
       
-      // Proxy to OpenCode server
-      const response = await proxyRequest(
-        new Request(
-          `${OPENCODE_SERVER_URL}/provider/${providerId}/oauth/callback`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(validated)
-          }
-        )
-      )
+      const response = await openCodeClient.forward({
+        method: 'POST',
+        path: `/provider/${encodeURIComponent(providerId)}/oauth/callback`,
+        body: JSON.stringify(validated),
+        headers: { 'Content-Type': 'application/json' },
+      })
 
       if (!response.ok) {
         const error = await response.text()
@@ -103,13 +93,10 @@ export function createOAuthRoutes(openCodeSupervisor?: OpenCodeSupervisor) {
 
   app.get('/auth-methods', async (c) => {
     try {
-      // Proxy to OpenCode server
-      const response = await proxyRequest(
-        new Request(`${OPENCODE_SERVER_URL}/provider/auth`, {
-          method: 'GET',
-          headers: { 'Content-Type': 'application/json' }
-        })
-      )
+      const response = await openCodeClient.forward({
+        method: 'GET',
+        path: '/provider/auth',
+      })
 
       if (!response.ok) {
         const error = await response.text()

@@ -47,7 +47,7 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
 
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
-const VOICE_SEND_SWIPE_THRESHOLD = 48
+const VOICE_SEND_SWIPE_THRESHOLD = 30
 type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
@@ -63,7 +63,6 @@ interface PromptInputProps {
   opcodeUrl: string
   directory?: string
   sessionID: string
-  repoId?: number
   disabled?: boolean
   showScrollButton?: boolean
   isSessionActive?: boolean
@@ -81,7 +80,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   opcodeUrl,
   directory,
   sessionID,
-  repoId,
   disabled,
   showScrollButton,
   isSessionActive = false,
@@ -177,7 +175,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
-  const abortSession = useAbortSession(opcodeUrl, directory, sessionID, repoId)
+  const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
     opcodeUrl,
@@ -241,7 +239,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         parts,
         model: currentModel,
         agent: agentUsed,
-        variant: currentVariant
+        variant: currentVariant,
+        queued: true
       })
       setStoredAgent(sessionID, agentUsed)
       if (model) {
@@ -1241,10 +1240,10 @@ return (
           
         </div>
 <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            {isMobile && showScrollButton ? (
+            {isMobile && showScrollButton && !showVoiceFeedback ? (
               <button
                 onClick={onScrollToBottom}
-                className="px-4 py-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 shadow-md flex items-center justify-center min-w-[52px] border border-border"
+                className="px-4 py-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 shadow-md flex items-center justify-center min-w-[52px] border border-zinc-700"
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-5 h-5" />
@@ -1252,7 +1251,7 @@ return (
             ) : !isMobile ? (
               <button
                 onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground transition-all duration-200 active:scale-95 hover:scale-105 shadow-md ${showScrollButton ? 'visible' : 'invisible'}`}
+                className={`p-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-zinc-700 ${showScrollButton ? 'visible' : 'invisible'}`}
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-6 h-6" />
@@ -1286,7 +1285,7 @@ return (
           {sttEnabled && sttSupported && (
             renderVoiceButton('desktop')
           )}
-          {isMobile && !showScrollButton && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
+          {isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession && (!showScrollButton || showVoiceFeedback) && (
             renderVoiceButton('mobile')
           )}
             <button

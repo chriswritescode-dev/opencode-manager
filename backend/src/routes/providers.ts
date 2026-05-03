@@ -4,7 +4,7 @@ import path from 'path'
 import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
-import { setOpenCodeAuth, deleteOpenCodeAuth } from '../services/proxy'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { Database } from 'bun:sqlite'
@@ -61,7 +61,7 @@ async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Pr
   await opencodeServerManager.reloadConfig()
 }
 
-export function createProvidersRoutes(db: Database, openCodeSupervisor?: OpenCodeSupervisor) {
+export function createProvidersRoutes(db: Database, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const authService = new AuthService()
 
@@ -129,7 +129,7 @@ export function createProvidersRoutes(db: Database, openCodeSupervisor?: OpenCod
       const body = await c.req.json()
       const validated = SetCredentialRequestSchema.parse(body)
       
-      const openCodeSuccess = await setOpenCodeAuth(providerId, validated.apiKey)
+      const openCodeSuccess = await openCodeClient.setProviderAuth(providerId, validated.apiKey)
       if (!openCodeSuccess) {
         logger.warn(`Failed to set OpenCode auth for ${providerId}, saving locally only`)
       }
@@ -156,7 +156,7 @@ export function createProvidersRoutes(db: Database, openCodeSupervisor?: OpenCod
     try {
       const providerId = c.req.param('id')
       
-      const openCodeSuccess = await deleteOpenCodeAuth(providerId)
+      const openCodeSuccess = await openCodeClient.deleteProviderAuth(providerId)
       if (!openCodeSuccess) {
         logger.warn(`Failed to delete OpenCode auth for ${providerId}, removing locally only`)
       }

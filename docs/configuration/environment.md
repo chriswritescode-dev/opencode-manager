@@ -94,6 +94,8 @@ When configured, users can enable push notifications in Settings → Notificatio
 |----------|-------------|---------|
 | `OPENCODE_SERVER_PORT` | Port for the OpenCode CLI server | `5551` |
 | `OPENCODE_HOST` | OpenCode server bind address | `127.0.0.1` |
+| `OPENCODE_SERVER_PASSWORD` | Basic Auth password required when binding OpenCode to a non-loopback host. Can also be set via UI (Settings → OpenCode → Server Auth). DB-stored passwords override this env var. | - |
+| `OPENCODE_SERVER_USERNAME` | Basic Auth username | `opencode` |
 
 ## Timeouts
 

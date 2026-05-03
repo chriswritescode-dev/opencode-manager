@@ -34,7 +34,7 @@ import {
   computeNextRunAtForJob,
 } from './schedule-config'
 import { resolveOpenCodeModel } from './opencode-models'
-import { proxyToOpenCodeWithDirectory } from './proxy'
+import type { OpenCodeClient } from './opencode/client'
 import { sseAggregator, type SSEEvent } from './sse-aggregator'
 import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
@@ -118,9 +118,13 @@ type SkillInfo = {
   content: string
 }
 
-async function fetchSkillContent(slugs: string[], repoPath: string): Promise<string[]> {
+async function fetchSkillContent(slugs: string[], repoPath: string, openCodeClient: OpenCodeClient): Promise<string[]> {
   try {
-    const response = await proxyToOpenCodeWithDirectory('/skill', 'GET', repoPath)
+    const response = await openCodeClient.forward({
+      method: 'GET',
+      path: '/skill',
+      directory: repoPath,
+    })
     if (!response.ok) {
       logger.warn(`Failed to fetch skills from OpenCode (${response.status}), falling back to name-only injection`)
       return []
@@ -159,11 +163,12 @@ async function fetchSkillContent(slugs: string[], repoPath: string): Promise<str
 async function buildPromptWithSkills(
   prompt: string,
   skillMetadata: ScheduleJob['skillMetadata'],
-  repoPath: string
+  repoPath: string,
+  openCodeClient: OpenCodeClient,
 ): Promise<string> {
   if (!skillMetadata || !skillMetadata.skillSlugs || skillMetadata.skillSlugs.length === 0) return prompt
 
-  const skillBlocks = await fetchSkillContent(skillMetadata.skillSlugs, repoPath)
+  const skillBlocks = await fetchSkillContent(skillMetadata.skillSlugs, repoPath, openCodeClient)
   const notesLine = skillMetadata.notes ? `\nSkill notes: ${skillMetadata.notes}` : ''
 
   if (skillBlocks.length === 0) {
@@ -310,11 +315,9 @@ function getSessionStatusType(event: SSEEvent): string | null {
 }
 
 function createSessionMonitor(directory: string, sessionId: string): SessionMonitor {
-  const clientId = `schedule-monitor-${sessionId}-${Date.now()}`
   let errorText: string | null = null
   let idle = false
 
-  const removeClient = sseAggregator.addClient(clientId, () => {}, [directory])
   const unsubscribe = sseAggregator.onEvent((eventDirectory, event) => {
     if (eventDirectory !== directory) {
       return
@@ -342,10 +345,7 @@ function createSessionMonitor(directory: string, sessionId: string): SessionMoni
   return {
     getErrorText: () => errorText,
     isIdle: () => idle,
-    dispose: () => {
-      unsubscribe()
-      removeClient()
-    },
+    dispose: unsubscribe,
   }
 }
 
@@ -353,7 +353,10 @@ export class ScheduleService {
   private static activeRuns = new Set<number>()
   private onJobChange: ((job: ScheduleJob | null, jobId: number) => void) | null = null
 
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly openCodeClient: OpenCodeClient,
+  ) {}
 
   setJobChangeHandler(handler: ((job: ScheduleJob | null, jobId: number) => void) | null): void {
     this.onJobChange = handler
@@ -479,19 +482,20 @@ export class ScheduleService {
     })
 
     try {
-      const model = await resolveOpenCodeModel(repo.fullPath, {
+      const model = await resolveOpenCodeModel(this.openCodeClient, repo.fullPath, {
         preferredModel: job.model,
       })
       const sessionTitle = buildSessionTitle(job)
-      const sessionResponse = await proxyToOpenCodeWithDirectory(
-        '/session',
-        'POST',
-        repo.fullPath,
-        JSON.stringify({
+      const sessionResponse = await this.openCodeClient.forward({
+        method: 'POST',
+        path: '/session',
+        directory: repo.fullPath,
+        body: JSON.stringify({
           title: sessionTitle,
           agent: job.agentSlug ?? undefined,
         }),
-      )
+        headers: { 'Content-Type': 'application/json' },
+      })
 
       if (!sessionResponse.ok) {
         throw new ScheduleServiceError('Failed to create OpenCode session', 502)
@@ -591,11 +595,11 @@ export class ScheduleService {
         return this.getRun(repoId, jobId, runId)
       }
 
-      const abortResponse = await proxyToOpenCodeWithDirectory(
-        `/session/${run.sessionId}/abort`,
-        'POST',
-        repo.fullPath,
-      )
+      const abortResponse = await this.openCodeClient.forward({
+        method: 'POST',
+        path: `/session/${run.sessionId}/abort`,
+        directory: repo.fullPath,
+      })
 
       if (!abortResponse.ok) {
         const errorText = await abortResponse.text()
@@ -650,15 +654,16 @@ export class ScheduleService {
     const repo = this.assertRepo(input.repoId)
 
     try {
-      const promptResponse = await proxyToOpenCodeWithDirectory(
-        `/session/${input.sessionId}/message`,
-        'POST',
-        repo.fullPath,
-        JSON.stringify({
-          parts: [{ type: 'text', text: await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, repo.fullPath) }],
+      const promptResponse = await this.openCodeClient.forward({
+        method: 'POST',
+        path: `/session/${input.sessionId}/message`,
+        directory: repo.fullPath,
+        body: JSON.stringify({
+          parts: [{ type: 'text', text: await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, repo.fullPath, this.openCodeClient) }],
           model: input.model,
         }),
-      )
+        headers: { 'Content-Type': 'application/json' },
+      })
 
       if (!promptResponse.ok) {
         const errorText = await promptResponse.text()
@@ -1020,11 +1025,11 @@ export class ScheduleService {
   }
 
   private async listSessionMessages(directory: string, sessionId: string): Promise<SessionMessage[]> {
-    const messagesResponse = await proxyToOpenCodeWithDirectory(
-      `/session/${sessionId}/message`,
-      'GET',
+    const messagesResponse = await this.openCodeClient.forward({
+      method: 'GET',
+      path: `/session/${sessionId}/message`,
       directory,
-    )
+    })
 
     if (!messagesResponse.ok) {
       const errorText = await messagesResponse.text()
@@ -1035,7 +1040,11 @@ export class ScheduleService {
   }
 
   private async getSessionStatuses(directory: string): Promise<Record<string, SessionStatus>> {
-    const response = await proxyToOpenCodeWithDirectory('/session/status', 'GET', directory)
+    const response = await this.openCodeClient.forward({
+      method: 'GET',
+      path: '/session/status',
+      directory,
+    })
 
     if (!response.ok) {
       const errorText = await response.text()

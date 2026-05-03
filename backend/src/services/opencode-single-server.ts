@@ -20,18 +20,15 @@ import { getWorkspacePath, getOpenCodeConfigFilePath, ENV } from '@opencode-mana
 import { parseJsonc } from '@opencode-manager/shared/utils'
 import type { Database } from 'bun:sqlite'
 import { compareVersions } from '../utils/version-utils'
-import { patchOpenCodeConfig } from './proxy'
+import { patchConfigWithRecovery } from './opencode/config-recovery'
+import type { OpenCodeClient } from './opencode/client'
+import { writeFileContent } from './file-operations'
 
-const OPENCODE_SERVER_PORT = ENV.OPENCODE.PORT
 const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
-const OPENCODE_SERVER_PUBLIC_URL = ENV.OPENCODE.PUBLIC_URL
-const OPENCODE_SERVER_PASSWORD = ENV.OPENCODE.SERVER_PASSWORD
-const OPENCODE_SERVER_USERNAME = ENV.OPENCODE.SERVER_USERNAME
-const OPENCODE_BASIC_AUTH = OPENCODE_SERVER_PASSWORD
-  ? `Basic ${Buffer.from(`${OPENCODE_SERVER_USERNAME}:${OPENCODE_SERVER_PASSWORD}`).toString('base64')}`
-  : ''
+export const OPENCODE_SERVER_CONNECT_HOST = OPENCODE_SERVER_HOST === '0.0.0.0' ? '127.0.0.1' : OPENCODE_SERVER_HOST
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
+const HEALTH_CHECK_TIMEOUT_MS = 3000
 
 type StartupValidationIssue = {
   path: string
@@ -91,6 +88,10 @@ function formatStartupError(stderrOutput: string, fallback: string): string {
 // This allows proper mocking in tests
 const getOpenCodeServerDirectory = () => getWorkspacePath()
 const getOpenCodeConfigPath = () => getOpenCodeConfigFilePath()
+const getOpenCodeServerPort = () => ENV.OPENCODE.PORT
+const getOpenCodeServerHost = () => ENV.OPENCODE.HOST
+const getOpenCodeServerPublicUrl = () => ENV.OPENCODE.PUBLIC_URL
+const getOpenCodeServerUsername = () => ENV.OPENCODE.SERVER_USERNAME
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
@@ -101,11 +102,37 @@ class OpenCodeServerManager {
   private version: string | null = null
   private lastStartupError: string | null = null
   private opInProgress: boolean = false
+  private openCodeClient: OpenCodeClient | null = null
 
   private constructor() {}
 
   setDatabase(db: Database) {
     this.db = db
+  }
+
+  setOpenCodeClient(client: OpenCodeClient) {
+    this.openCodeClient = client
+  }
+
+  async rebuildClient(): Promise<void> {
+    const password = this.getResolvedPassword()
+    const { createOpenCodeClient } = await import('./opencode/client')
+    this.openCodeClient = createOpenCodeClient(password)
+  }
+
+  private getResolvedPassword(): string {
+    if (this.db) {
+      const settingsService = new SettingsService(this.db)
+      return settingsService.getOpenCodeServerPassword()
+    }
+    return ENV.OPENCODE.SERVER_PASSWORD
+  }
+
+  private requireClient(): OpenCodeClient {
+    if (!this.openCodeClient) {
+      throw new Error('OpenCodeClient not configured on OpenCodeServerManager. Call setOpenCodeClient() during startup.')
+    }
+    return this.openCodeClient
   }
 
   static getInstance(): OpenCodeServerManager {
@@ -154,7 +181,18 @@ class OpenCodeServerManager {
         return
       }
 
+    await this.rebuildClient()
+
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
+    const password = this.getResolvedPassword()
+    const openCodeServerHost = getOpenCodeServerHost()
+    const isExposed = openCodeServerHost !== '127.0.0.1' && openCodeServerHost !== 'localhost'
+    if (isExposed && !password) {
+      const msg = `OPENCODE_HOST=${openCodeServerHost} exposes the OpenCode server externally but no password is configured. Set OPENCODE_SERVER_PASSWORD env var or configure a password via Settings → OpenCode → Server Auth.`
+      this.lastStartupError = msg
+      logger.error(msg)
+      throw new Error(msg)
+    }
 
     let gitCredentials: GitCredential[] = []
     let gitIdentityEnv: Record<string, string> = {}
@@ -174,9 +212,10 @@ class OpenCodeServerManager {
       }
     }
 
-    const existingProcesses = await this.findProcessesByPort(OPENCODE_SERVER_PORT)
+    const openCodeServerPort = getOpenCodeServerPort()
+    const existingProcesses = await this.findProcessesByPort(openCodeServerPort)
     if (existingProcesses.length > 0) {
-      logger.info(`OpenCode server already running on port ${OPENCODE_SERVER_PORT}`)
+      logger.info(`OpenCode server already running on port ${openCodeServerPort}`)
       const healthy = await this.checkHealth()
       if (healthy) {
         if (isDevelopment) {
@@ -276,7 +315,7 @@ class OpenCodeServerManager {
 
     this.serverProcess = spawn(
       'opencode',
-      ['serve', '--port', OPENCODE_SERVER_PORT.toString(), '--hostname', OPENCODE_SERVER_HOST],
+      ['serve', '--port', openCodeServerPort.toString(), '--hostname', openCodeServerHost],
       {
         cwd: openCodeServerDirectory,
         detached: !isDevelopment,
@@ -289,11 +328,11 @@ class OpenCodeServerManager {
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_CONFIG_HOME: path.join(openCodeServerDirectory, '.config'),
-          ...(OPENCODE_SERVER_PUBLIC_URL ? { OPENCODE_PUBLIC_URL: OPENCODE_SERVER_PUBLIC_URL } : {}),
-          ...(OPENCODE_SERVER_PASSWORD
+          ...(getOpenCodeServerPublicUrl() ? { OPENCODE_PUBLIC_URL: getOpenCodeServerPublicUrl() } : {}),
+          ...(password
             ? {
-              OPENCODE_SERVER_PASSWORD,
-              OPENCODE_SERVER_USERNAME,
+              OPENCODE_SERVER_PASSWORD: password,
+              OPENCODE_SERVER_USERNAME: getOpenCodeServerUsername(),
             }
             : {}),
           OPENCODE_CONFIG: openCodeConfigPath,
@@ -480,10 +519,10 @@ class OpenCodeServerManager {
       try {
         const configPath = getOpenCodeConfigFilePath()
         const fileContent = await fs.readFile(configPath, 'utf-8')
-        const fileConfig = JSON.parse(fileContent) as Record<string, unknown>
+        const fileConfig = parseJsonc(fileContent) as Record<string, unknown>
         logger.info(`Read config from file for reload: ${configPath}`)
 
-        const patchResult = await patchOpenCodeConfig(fileConfig)
+        const patchResult = await patchConfigWithRecovery(this.requireClient(), fileConfig)
         if (!patchResult.success) {
           const errorMessage = patchResult.error || 'Failed to reload config'
           const validationIssues = patchResult.details || []
@@ -496,6 +535,11 @@ class OpenCodeServerManager {
             logger.info(`Removed fields during config reload: ${removedFields.join(', ')}`)
           }
           throw new ConfigReloadError(errorMessage, validationIssues, removedFields)
+        }
+
+        if (patchResult.removedFields && patchResult.removedFields.length > 0 && patchResult.appliedConfig) {
+          await writeFileContent(configPath, JSON.stringify(patchResult.appliedConfig, null, 2))
+          logger.info(`Persisted cleaned config to ${configPath} after removing fields: ${patchResult.removedFields.join(', ')}`)
         }
 
         logger.info('OpenCode configuration reloaded successfully')
@@ -514,7 +558,7 @@ class OpenCodeServerManager {
   }
 
   getPort(): number {
-    return OPENCODE_SERVER_PORT
+    return getOpenCodeServerPort()
   }
 
   getVersion(): string | null {
@@ -544,14 +588,14 @@ class OpenCodeServerManager {
   }
 
   async checkHealth(): Promise<boolean> {
+    if (!this.openCodeClient) {
+      return false
+    }
     try {
-      const headers: Record<string, string> = {}
-      if (OPENCODE_BASIC_AUTH) {
-        headers.Authorization = OPENCODE_BASIC_AUTH
-      }
-      const response = await fetch(`http://${OPENCODE_SERVER_HOST}:${OPENCODE_SERVER_PORT}/doc`, {
-        signal: AbortSignal.timeout(3000),
-        headers
+      const response = await this.openCodeClient.forward({
+        method: 'GET',
+        path: '/doc',
+        signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
       })
       return response.ok
     } catch {

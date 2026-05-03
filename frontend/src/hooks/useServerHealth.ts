@@ -4,6 +4,13 @@ import { toast } from 'sonner'
 import { settingsApi } from '@/api/settings'
 import { invalidateConfigCaches, invalidateSettingsCaches } from '@/lib/queryInvalidation'
 import { fetchWrapper } from '@/api/fetchWrapper'
+import { useSettingsDialog } from '@/hooks/useSettingsDialog'
+
+const MISSING_PASSWORD_ERROR_PATTERN = /no password is configured|OPENCODE_SERVER_PASSWORD/i
+
+function isMissingPasswordError(error: string | undefined): boolean {
+  return !!error && MISSING_PASSWORD_ERROR_PATTERN.test(error)
+}
 
 interface HealthResponse {
   status: 'healthy' | 'degraded' | 'unhealthy'
@@ -24,8 +31,10 @@ async function fetchHealth(): Promise<HealthResponse> {
 
 export function useServerHealth(enabled = true) {
   const queryClient = useQueryClient()
+  const { isOpen: isSettingsOpen, setActiveTab } = useSettingsDialog()
   const lastHealthStatusRef = useRef<'healthy' | 'unhealthy'>('healthy')
   const prevHealthRef = useRef<string | null>(null)
+  const hasAutoOpenedSettingsRef = useRef(false)
 
   const restartMutation = useMutation({
     mutationFn: async () => {
@@ -76,8 +85,16 @@ export function useServerHealth(enabled = true) {
     const currentStatus = isUnhealthy ? 'unhealthy' : 'healthy'
     const previousStatus = lastHealthStatusRef.current
     const prevHealth = prevHealthRef.current
+    const missingPassword = isUnhealthy && isMissingPasswordError(health.error)
 
-    if (prevHealth && currentStatus !== prevHealth) {
+    if (isUnhealthy && missingPassword && !hasAutoOpenedSettingsRef.current && !isSettingsOpen) {
+      hasAutoOpenedSettingsRef.current = true
+      setActiveTab('opencode')
+      toast.error(health.error || 'OpenCode server requires a password', {
+        duration: Infinity,
+        description: 'Set a password under Settings → OpenCode to start the server.',
+      })
+    } else if (prevHealth && currentStatus !== prevHealth) {
       if (isUnhealthy && previousStatus === 'healthy') {
         toast.error(health.error || 'OpenCode server is currently unhealthy', {
           duration: Infinity,
@@ -88,12 +105,13 @@ export function useServerHealth(enabled = true) {
         })
       } else if (!isUnhealthy && previousStatus === 'unhealthy') {
         toast.success('Server is back online')
+        hasAutoOpenedSettingsRef.current = false
       }
     }
 
     lastHealthStatusRef.current = currentStatus
     prevHealthRef.current = currentStatus
-  }, [health, restartMutation])
+  }, [health, restartMutation, isSettingsOpen, setActiveTab])
 
   return {
     ...query,

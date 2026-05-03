@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
-import { useMemoryPluginStatus } from '@/hooks/useMemoryPluginStatus'
 import { useAuth } from '@/hooks/useAuth'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
@@ -19,7 +18,6 @@ export function DesktopSidebar() {
   const navigate = useNavigate()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
-  const { memoryPluginEnabled } = useMemoryPluginStatus()
   const { isAuthenticated, isLoading, logout } = useAuth()
 
   const isDesktop = useDesktop()
@@ -32,7 +30,7 @@ export function DesktopSidebar() {
     return null
   }
 
-  const { primary, items } = buildNavModel(location.pathname, { memoryPluginEnabled })
+  const { primary, items } = buildNavModel(location.pathname)
 
   const handlePrimaryClick = (item: NavPrimaryCta) => {
     if (item.to) {

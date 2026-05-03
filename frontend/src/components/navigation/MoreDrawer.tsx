@@ -1,15 +1,18 @@
-import { useNavigate, useLocation } from 'react-router-dom'
-import { useState } from 'react'
-import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X } from 'lucide-react'
+import { useNavigate, useLocation, useParams } from 'react-router-dom'
+import { useState, useRef, useEffect } from 'react'
+import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X, GitBranch } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useMemoryPluginStatus } from '@/hooks/useMemoryPluginStatus'
 import { useCommands } from '@/hooks/useCommands'
 import { useUIState } from '@/stores/uiStateStore'
+import { useQuery } from '@tanstack/react-query'
+import { getRepo } from '@/api/repos'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { buildMoreItems } from './moreDrawerItems'
+import { useSwipeBack } from '@/hooks/useMobile'
+import { getRepoDisplayName } from '@/lib/utils'
 import type { components } from '@/api/opencode-types'
 
 type CommandType = components['schemas']['Command']
@@ -22,16 +25,39 @@ interface MoreDrawerProps {
 export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const navigate = useNavigate()
   const location = useLocation()
+  const { id } = useParams<{ id: string }>()
+  const repoId = id ? Number(id) : null
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
+  const swipeRef = useRef<HTMLDivElement>(null)
+  const { bind } = useSwipeBack(onClose, { enabled: true, suspendsRouteSwipe: false })
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
-  const { memoryPluginEnabled } = useMemoryPluginStatus()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
+  const isAssistantRoute = /^\/repos\/\d+\/assistant$/.test(location.pathname)
+  const isAssistantSession = isSessionDetail && new URLSearchParams(location.search).get('assistant') === '1'
   const { filterCommands } = useCommands(isSessionDetail ? OPENCODE_API_ENDPOINT : null)
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
   const selectPromptFile = useUIState((state) => state.selectPromptFile)
+
+  useEffect(() => {
+    if (isOpen && swipeRef.current) {
+      const cleanup = bind(swipeRef.current)
+      return cleanup
+    }
+  }, [isOpen, bind])
+
+  const { data: repo } = useQuery({
+    queryKey: ['repo', repoId],
+    queryFn: () => repoId ? getRepo(repoId) : null,
+    enabled: !!repoId,
+  })
+
+  const currentBranch = repo?.currentBranch || repo?.branch
+  const repoDisplayName = isAssistantRoute || isAssistantSession
+    ? 'Assistant'
+    : repo ? getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath) : null
 
   const handleSettingsClick = () => {
     const newParams = new URLSearchParams(location.search)
@@ -83,7 +109,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     onClose()
   }
 
-  const items = buildMoreItems(location.pathname, { memoryPluginEnabled })
+  const items = buildMoreItems(location.pathname)
   const commands = filterCommands('')
 
   const opencodeVersion = health?.opencodeVersion
@@ -95,18 +121,34 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   return (
     <SideDrawer isOpen={isOpen} onClose={onClose} side="right" ariaLabel="More" widthClass="w-screen sm:w-[min(90vw,420px)]">
-      <div className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-border bg-background px-4 py-1.5">
-        {versionLabel && (
-          <span className="truncate text-xs leading-tight text-muted-foreground">{versionLabel}</span>
+      <div ref={swipeRef} className="flex flex-col flex-shrink-0 border-b border-border bg-background px-4 py-1.5">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          {versionLabel && (
+            <span className="truncate text-xs leading-tight text-muted-foreground">{versionLabel}</span>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label="Close"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+        {(repoDisplayName || currentBranch) && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {repoDisplayName && (
+              <span className="font-medium text-orange-600 dark:text-orange-400">{repoDisplayName}</span>
+            )}
+
+            {currentBranch && (
+              <>
+                <GitBranch className="h-3.5 w-3.5" />
+                <span>{currentBranch}</span>
+              </>
+            )}
+          </div>
         )}
-        <button
-          type="button"
-          onClick={onClose}
-          className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label="Close"
-        >
-          <X className="h-5 w-5" />
-        </button>
       </div>
       <SideDrawerContent className="flex flex-col gap-1">
         {isSessionDetail && (

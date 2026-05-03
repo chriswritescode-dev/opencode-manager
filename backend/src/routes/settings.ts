@@ -6,7 +6,8 @@ import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
 import { SettingsService } from '../services/settings'
 import { writeFileContent, readFileContent, fileExists } from '../services/file-operations'
-import { patchOpenCodeConfig, proxyToOpenCodeWithDirectory } from '../services/proxy'
+import { patchConfigWithRecovery } from '../services/opencode/config-recovery'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { getOpenCodeConfigFilePath, getAgentsMdPath } from '@opencode-manager/shared/config/env'
 import {
   UserPreferencesSchema,
@@ -20,6 +21,7 @@ import {
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
@@ -28,6 +30,7 @@ import { encryptSecret } from '../utils/crypto'
 import { compareVersions, isValidVersion } from '../utils/version-utils'
 import { getImportedSessionDirectories, getOpenCodeImportStatus, OpenCodeImportProtectionError, syncOpenCodeImport } from '../services/opencode-import'
 import { relinkReposFromSessionDirectories } from '../services/repo'
+import { ENV } from '@opencode-manager/shared/config/env'
 import {
   listManagedSkills,
   getSkill,
@@ -219,7 +222,7 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
     : defaultError
 }
 
-export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeSupervisor?: OpenCodeSupervisor) {
+export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
 
@@ -231,19 +234,6 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     } catch (error) {
       logger.error('Failed to get settings:', error)
       return c.json({ error: 'Failed to get settings' }, 500)
-    }
-  })
-
-  app.get('/memory-plugin-status', async (c) => {
-    try {
-      const userId = c.req.query('userId') || 'default'
-      const configs = settingsService.getOpenCodeConfigs(userId)
-      const defaultConfig = configs.configs.find((cfg: { isDefault: boolean }) => cfg.isDefault)
-      const isEnabled = ((defaultConfig?.content?.plugin as string[] | undefined) ?? []).includes('@opencode-manager/memory')
-      return c.json({ memoryPluginEnabled: isEnabled })
-    } catch (error) {
-      logger.error('Failed to get memory plugin status:', error)
-      return c.json({ error: 'Failed to get memory plugin status' }, 500)
     }
   })
 
@@ -371,7 +361,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           return c.json(config)
         }
 
-        const patchResult = await patchOpenCodeConfig(provisionalConfig.content)
+        const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
         if (!patchResult.success) {
           settingsService.deleteOpenCodeConfig(provisionalConfig.name, userId)
           return c.json({ 
@@ -448,7 +438,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           opencodeServerManager.clearStartupError()
           await restartOpenCode(openCodeSupervisor)
         } else {
-          const patchResult = await patchOpenCodeConfig(config.content)
+          const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
           if (!patchResult.success) {
             return c.json({ 
               error: 'Config saved but failed to apply', 
@@ -459,7 +449,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           }
           
           const contentToWrite = patchResult.removedFields && patchResult.removedFields.length > 0
-            ? JSON.stringify(config.content, null, 2)
+            ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
             : config.rawContent
           
           await writeFileContent(configPath, contentToWrite)
@@ -526,7 +516,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json(config)
       }
 
-      const patchResult = await patchOpenCodeConfig(existingConfig.content)
+      const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
       if (!patchResult.success) {
         return c.json({ 
           error: 'Config validation failed', 
@@ -1137,7 +1127,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Invalid repoId' }, 400)
       }
       
-      const skills = await listManagedSkills(db, repoId)
+      const skills = await listManagedSkills(db, openCodeClient, repoId)
       return c.json(skills)
     } catch (error) {
       logger.error('Failed to list skills:', error)
@@ -1159,7 +1149,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
-      const skill = await getSkill(db, name, scope, repoId)
+      const skill = await getSkill(db, openCodeClient, name, scope, repoId)
       return c.json(skill)
     } catch (error) {
       logger.error('Failed to get skill:', error)
@@ -1219,7 +1209,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
-      const skill = await updateSkill(db, name, scope, validated, repoId)
+      const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
       
       try {
         await restartOpenCode(openCodeSupervisor)
@@ -1406,11 +1396,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/connect`,
-        'POST',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/connect`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to connect MCP server')
@@ -1433,11 +1423,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/disconnect`,
-        'POST',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/disconnect`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to disconnect MCP server')
@@ -1460,11 +1450,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = McpAuthDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
-        'POST',
+      const response = await (openCodeClient).forward({
+        method: 'POST',
+        path: `/mcp/${encodeURIComponent(serverName)}/auth/authenticate`,
         directory,
-      )
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to authenticate MCP server')
@@ -1487,11 +1477,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const { directory } = ConnectMcpDirectorySchema.parse(body)
       
-      const response = await proxyToOpenCodeWithDirectory(
-        `/mcp/${encodeURIComponent(serverName)}/auth`,
-        'DELETE',
-        directory
-      )
+      const response = await (openCodeClient).forward({
+        method: 'DELETE',
+        path: `/mcp/${encodeURIComponent(serverName)}/auth`,
+        directory,
+      })
       
       if (!response.ok) {
         const errorMsg = await extractOpenCodeError(response, 'Failed to remove MCP auth')
@@ -1505,6 +1495,62 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to remove MCP auth' }, 500)
+    }
+  })
+
+  const OpenCodeServerAuthBodySchema = z.object({
+    password: z.union([z.string().min(8), z.null()]),
+  })
+
+  app.get('/opencode-server-auth', async (c) => {
+    try {
+      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
+      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
+      const isSet = source !== 'none'
+      return c.json({ isSet, source })
+    } catch (error) {
+      logger.error('Failed to get OpenCode server auth status:', error)
+      return c.json({ error: 'Failed to get OpenCode server auth status' }, 500)
+    }
+  })
+
+  app.patch('/opencode-server-auth', async (c) => {
+    try {
+      const body = await c.req.json()
+      const validated = OpenCodeServerAuthBodySchema.parse(body)
+      const previousPasswordState = settingsService.getStoredOpenCodeServerPasswordState()
+
+      if (validated.password === null) {
+        settingsService.clearOpenCodeServerPassword()
+      } else if (validated.password) {
+        settingsService.setOpenCodeServerPassword(validated.password)
+      }
+
+      try {
+        await opencodeServerManager.restart()
+      } catch (restartError) {
+        try {
+          settingsService.restoreOpenCodeServerPasswordState(previousPasswordState)
+          await opencodeServerManager.restart()
+          sseAggregator.reconnect()
+        } catch (restoreError) {
+          logger.error('Failed to restore OpenCode server auth runtime after restart failure:', restoreError)
+        }
+        throw restartError
+      }
+
+      sseAggregator.reconnect()
+
+      const hasStored = settingsService.hasStoredOpenCodeServerPassword()
+      const source = hasStored ? 'db' : ENV.OPENCODE.SERVER_PASSWORD ? 'env' : 'none'
+      const isSet = source !== 'none'
+      return c.json({ isSet, source })
+    } catch (error) {
+      logger.error('Failed to update OpenCode server auth:', error)
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      return c.json({ error: 'Failed to update OpenCode server auth' }, 500)
     }
   })
 

@@ -53,15 +53,37 @@ For local development setup, see the [Development Guide](https://chriswritescode
 
 ## Features
 
-- **Git** — Multi-repo support, SSH authentication, worktrees, unified diffs with line numbers, PR creation
+- **Repositories & Git** — Multi-repo management with local discovery, SSH auth, worktrees, unified diffs, branch/commit management
+- **Chat & Sessions** — Real-time SSE streaming, slash commands, `@file` mentions, Plan/Build modes, Mermaid diagrams
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download
-- **Chat** — Real-time streaming (SSE), slash commands, `@file` mentions, Plan/Build modes, Mermaid diagrams
-- **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, and markdown-rendered output
-- **Audio** — Text-to-speech (browser + OpenAI-compatible), speech-to-text (browser + OpenAI-compatible)
-- **AI** — Model selection, provider config, OAuth for Anthropic/GitHub Copilot, custom agents with system prompts
-- **MCP** — Local and remote MCP server support with pre-built templates
-- **Memory** — Persistent project knowledge with semantic search ([plugin repo](https://github.com/chriswritescode-dev/opencode-memory)) and compaction awareness
-- **Mobile** — Responsive UI, PWA installable, iOS-optimized with proper keyboard handling and swipe navigation
+- **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions, markdown-rendered output
+- **AI & OpenCode** — Model/provider configuration, OAuth for Anthropic/GitHub Copilot, custom agents, OpenCode server supervision and proxying
+- **Audio** — Text-to-speech and speech-to-text (browser + OpenAI-compatible)
+- **Mobile & Notifications** — Responsive PWA, mobile-first navigation, push notification support
+
+## Architecture
+
+OpenCode Manager is a pnpm workspace with three TypeScript packages:
+
+- `backend/` — Bun + Hono API server with Better Auth, SQLite migrations, OpenCode process management, SSE, schedules, and push notifications.
+- `frontend/` — React + Vite SPA using React Router, TanStack Query, Radix UI/Tailwind, service worker support, and mobile-first navigation.
+- `shared/` — shared Zod schemas, config helpers, types, and utilities consumed by both backend and frontend.
+
+A MkDocs Material site (`docs/`) provides guides, feature docs, configuration, and troubleshooting.
+
+## Development
+
+This repo uses pnpm workspaces for `shared`, `backend`, and `frontend`.
+
+```bash
+pnpm install
+pnpm dev
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+See the [Development Guide](https://chriswritescode-dev.github.io/opencode-manager/development/setup/) for local setup, scripts, database notes, and testing.
 
 ## Configuration
 

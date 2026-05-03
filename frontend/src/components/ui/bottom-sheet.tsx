@@ -25,7 +25,7 @@ export function BottomSheet({
 
   const { bind, swipeStyles } = useSwipeDismiss(onClose, {
     enabled: isOpen,
-    threshold: 80,
+    threshold: 60,
   })
 
   useEffect(() => {
@@ -63,7 +63,7 @@ export function BottomSheet({
 
   return (
     <div
-      className="fixed inset-0 z-50"
+      className="fixed inset-0 z-[60]"
       style={{
         opacity: isOpen ? 1 : 0,
         pointerEvents: isOpen ? 'auto' : 'none',

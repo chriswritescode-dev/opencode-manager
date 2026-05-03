@@ -263,12 +263,14 @@ export class NotificationService {
     });
   }
 
-  private async sendToUser(
+  async sendToUser(
     userId: string,
     payload: PushNotificationPayload
-  ): Promise<void> {
+  ): Promise<{ delivered: number; expired: number; failed: number; total: number }> {
     const subscriptions = this.getSubscriptions(userId);
     const expiredEndpoints: string[] = [];
+    let delivered = 0
+    let failed = 0
 
     await Promise.allSettled(
       subscriptions.map(async (sub) => {
@@ -286,6 +288,8 @@ export class NotificationService {
               "UPDATE push_subscriptions SET last_used_at = ? WHERE id = ?"
             )
             .run(Date.now(), sub.id);
+          
+          delivered++
         } catch (error) {
           const statusCode = (error as { statusCode?: number }).statusCode;
 
@@ -293,6 +297,7 @@ export class NotificationService {
             expiredEndpoints.push(sub.endpoint);
           } else {
             logger.error(`Push delivery failed for ${sub.endpoint.slice(0, 50)}:`, error);
+            failed++
           }
         }
       })
@@ -300,6 +305,13 @@ export class NotificationService {
 
     for (const endpoint of expiredEndpoints) {
       this.removeSubscription(endpoint);
+    }
+
+    return {
+      delivered,
+      expired: expiredEndpoints.length,
+      failed,
+      total: subscriptions.length,
     }
   }
 }

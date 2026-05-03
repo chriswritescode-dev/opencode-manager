@@ -8,31 +8,36 @@ interface VoiceStatusOverlayProps {
   state: VoiceStatusOverlayState | null
 }
 
+function WaveformBars() {
+  return (
+    <div className="flex items-end gap-[3px] h-8">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <div
+          key={i}
+          className="w-1.5 rounded-full bg-white"
+          style={{
+            height: '100%',
+            animation: `waveBar 0.9s ease-in-out infinite`,
+            animationDelay: `${i * 0.12}s`,
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes waveBar {
+          0%, 100% { transform: scaleY(0.2); }
+          50% { transform: scaleY(1); }
+        }
+      `}</style>
+    </div>
+  )
+}
+
 export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayProps) {
   if (!show || !label || !state) {
     return null
   }
 
   const isLoading = state === 'starting' || state === 'processing' || state === 'sending'
-  const showLoadingText = state !== 'starting'
-  const topLabel = state === 'readyToSend'
-    ? 'Release'
-    : state === 'starting'
-      ? 'Starting'
-      : state === 'processing'
-        ? 'Transcribe'
-        : state === 'sending'
-          ? 'Sending'
-          : 'Swipe'
-  const bottomLabel = state === 'starting'
-    ? 'Mic'
-    : state === 'processing'
-      ? 'Speech'
-      : state === 'sending'
-        ? 'Prompt'
-        : state === 'readyToSend'
-          ? 'Send'
-          : 'Send'
   const actionWords = state === 'readyToSend'
     ? ['Release', 'To', 'Send']
     : ['Swipe', 'To', 'Send']
@@ -47,12 +52,11 @@ export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayPro
         <div className="absolute inset-x-1 top-1 h-10 rounded-full bg-white/20 blur-sm" />
         <div className="relative flex flex-1 flex-col items-center justify-center gap-1">
           {isLoading ? (
-            <>
+            state === 'processing' ? (
+              <WaveformBars />
+            ) : (
               <LoaderCircle className="h-6 w-6 animate-spin" />
-              {showLoadingText && (
-                <span className="text-[10px] font-bold uppercase leading-none tracking-wide">{topLabel}</span>
-              )}
-            </>
+            )
           ) : (
             <>
               <ArrowUp className="h-8 w-8 animate-bounce" />
@@ -64,11 +68,9 @@ export function VoiceStatusOverlay({ show, label, state }: VoiceStatusOverlayPro
             </>
           )}
         </div>
-        {isLoading && showLoadingText ? (
-          <span className="relative text-[10px] font-bold uppercase leading-none tracking-wide">{bottomLabel}</span>
-        ) : !isLoading ? (
+        {!isLoading && (
           <X className="relative h-4 w-4" />
-        ) : null}
+        )}
       </div>
     </div>
   )

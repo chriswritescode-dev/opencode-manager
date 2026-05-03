@@ -41,7 +41,7 @@ import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
-import { usePermissions, useQuestions } from "@/contexts/EventContext";
+import { usePermissions, useQuestions, useSSEHealth } from "@/contexts/EventContext";
 import type { QuestionRequest } from "@/api/types";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
@@ -83,6 +83,8 @@ export function SessionDetail() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
   const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
+  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
+  const lastHeaderScrollTopRef = useRef(0);
 
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
@@ -126,7 +128,12 @@ export function SessionDetail() {
   const repoDirectory = isAssistantSession ? assistantMode?.directory : repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
-  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
+  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
+  const sseHealth = useSSEHealth();
+  const sessionStatus = useSessionStatusForSession(sessionId);
+  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
+
+  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory, { fallbackPoll: !sseHealth.isHealthy && isSessionActive });
   const { data: session, isLoading: sessionLoading } = useSession(
     opcodeUrl,
     sessionId,
@@ -151,8 +158,6 @@ export function SessionDetail() {
     contentVersion: messages?.reduce((sum, m) => sum + m.parts.length, 0) ?? 0,
     onScrollStateChange: setShowScrollButton
   });
-
-  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
@@ -164,8 +169,6 @@ export function SessionDetail() {
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
 
-  const sessionStatus = useSessionStatusForSession(sessionId);
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
   const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
@@ -207,6 +210,38 @@ export function SessionDetail() {
     }
   }, [sessionId, minimizedQuestion])
 
+  useEffect(() => {
+    const container = messageContainerRef.current
+    if (!container) return
+
+    lastHeaderScrollTopRef.current = container.scrollTop
+    setIsHeaderVisible(true)
+
+    const handleScroll = () => {
+      if (!isMobile) {
+        setIsHeaderVisible(true)
+        return
+      }
+      const currentScrollTop = container.scrollTop
+      const previousScrollTop = lastHeaderScrollTopRef.current
+      const maxScrollTop = container.scrollHeight - container.clientHeight
+      const isAtBottom = maxScrollTop - currentScrollTop < 24
+      const isScrollingDown = currentScrollTop > previousScrollTop + 4
+      const isScrollingUp = currentScrollTop < previousScrollTop - 4
+
+      if (isAtBottom || isScrollingDown) {
+        setIsHeaderVisible(true)
+      } else if (isScrollingUp) {
+        setIsHeaderVisible(false)
+      }
+
+      lastHeaderScrollTopRef.current = currentScrollTop
+    }
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [repoDirectory, sessionId, isMobile])
+
   const syncPendingActionsForSession = useCallback(async () => {
     if (!repoDirectory || !sessionId) return
     await Promise.all([
@@ -225,7 +260,7 @@ export function SessionDetail() {
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
-    refetchInterval: isSessionActive || hasIncompleteMessages ? PENDING_ACTION_SYNC_INTERVAL_MS : false,
+    refetchInterval: !sseHealth.isHealthy && (isSessionActive || hasIncompleteMessages) ? PENDING_ACTION_SYNC_INTERVAL_MS : false,
     retry: false,
   })
 
@@ -421,51 +456,61 @@ export function SessionDetail() {
     <div
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
-      <Header>
-        <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
-          {session?.parentID ? (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleParentSessionClick}
-                className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
-                title="Back to parent session"
-              >
-                <CornerUpLeft className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline text-xs">Parent</span>
-              </Button>
-              <div className="hidden sm:block">
-                <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-              </div>
-            </>
-          ) : (
-            <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
-          )}
+      <div
+        className={`flex-shrink-0 overflow-hidden bg-background transition-all duration-200 ease-out ${
+          isHeaderVisible
+            ? 'max-h-40 opacity-100 translate-y-0'
+            : 'max-h-0 opacity-0 -translate-y-2'
+        }`}
+      >
+        <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
+          <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
+            {session?.parentID ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleParentSessionClick}
+                  className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
+                  title="Back to parent session"
+                >
+                  <CornerUpLeft className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline text-xs">Parent</span>
+                </Button>
+                <div className="hidden sm:block">
+                  <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+                </div>
+              </>
+            ) : (
+              <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
+            )}
             <Header.EditableTitle
               value={session?.title || "Untitled Session"}
               onChange={handleSessionTitleUpdate}
               subtitle={<span className="text-orange-600 dark:text-orange-400">{workspaceDisplayName}</span>}
             />
-        </div>
-        <Header.Actions className="gap-2 sm:gap-4">
-          <div className="flex items-center gap-1">
-            <PendingActionsGroup />
           </div>
-          <ContextUsageIndicator
-            opcodeUrl={opcodeUrl}
-            sessionID={sessionId}
-            directory={repoDirectory}
-            isConnected={isConnected}
-            isReconnecting={isReconnecting}
-          />
-          <SessionMoreButton />
-        </Header.Actions>
-      </Header>
+          <Header.Actions className="gap-2 sm:gap-4">
+            <div className="flex items-center gap-1">
+              <PendingActionsGroup />
+            </div>
+            <ContextUsageIndicator
+              opcodeUrl={opcodeUrl}
+              sessionID={sessionId}
+              directory={repoDirectory}
+              isConnected={isConnected}
+              isReconnecting={isReconnecting}
+            />
+            <SessionMoreButton />
+          </Header.Actions>
+        </Header>
 
-      <SessionTodoDisplay sessionID={sessionId} />
+        <div className="px-3 sm:px-4">
+          <SessionTodoDisplay sessionID={sessionId} />
+        </div>
+      </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col relative">
+      <div className="flex-1 overflow-hidden flex flex-col">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
           {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
@@ -538,7 +583,6 @@ export function SessionDetail() {
                 opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 sessionID={sessionId}
-                repoId={repoId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton}
                 isSessionActive={isSessionActive}
@@ -599,11 +643,17 @@ export function SessionDetail() {
         directory={repoDirectory}
       />
 
-      <RepoSkillsDialog
-        open={skillsDialogOpen}
-        onOpenChange={setSkillsDialogOpen}
-        repoId={repoId}
-      />
+      {repoDirectory && opcodeUrl && sessionId && (
+        <RepoSkillsDialog
+          open={skillsDialogOpen}
+          onOpenChange={setSkillsDialogOpen}
+          repoId={repoId}
+          sessionId={sessionId}
+          opcodeUrl={opcodeUrl}
+          directory={repoDirectory}
+          onSkillLoaded={(skill) => showToast.success(`Loaded skill: ${skill.name}`)}
+        />
+      )}
 
       <RepoMcpDialog
         open={mcpDialogOpen}

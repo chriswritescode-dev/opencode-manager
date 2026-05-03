@@ -28,11 +28,12 @@ interface PushNotificationData {
   tag?: string;
   data?: {
     url?: string;
-    eventType: string;
+    eventType?: string;
     sessionId?: string;
     directory?: string;
     repoId?: number;
     repoName?: string;
+    priority?: 'normal' | 'high';
   };
 }
 
@@ -56,7 +57,7 @@ self.addEventListener("push", (event) => {
     badge: payload.badge ?? "/icons/icon-192x192.png",
     tag: payload.tag,
     data: payload.data,
-    requireInteraction: isHighPriority(payload.data?.eventType),
+    requireInteraction: isHighPriority(payload.data?.eventType, payload.data?.priority),
   };
 
   event.waitUntil(self.registration.showNotification(payload.title, options));
@@ -84,6 +85,6 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
-function isHighPriority(eventType?: string): boolean {
-  return eventType === "permission.asked" || eventType === "question.asked";
+function isHighPriority(eventType?: string, priority?: 'normal' | 'high'): boolean {
+  return eventType === "permission.asked" || eventType === "question.asked" || priority === 'high';
 }

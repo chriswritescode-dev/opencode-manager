@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { OpenCodeClient } from '../services/opencode/client'
 import { z } from 'zod'
 import crypto from 'crypto'
 import path from 'path'
@@ -6,7 +7,6 @@ import { readFile, writeFile, mkdir } from 'fs/promises'
 import { storeMcpOAuthFlow, consumeMcpOAuthFlow, deleteMcpOAuthFlow, markMcpOAuthFlowCompleted, markMcpOAuthFlowFailed, getMcpOAuthFlowResult } from '../services/mcp-oauth-state'
 import { logger } from '../utils/logger'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
-import { OPENCODE_SERVER_URL, withOpenCodeAuth } from '../services/proxy'
 
 const StartSchema = z.object({
   serverName: z.string(),
@@ -132,8 +132,10 @@ async function registerClient(
   return result
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createMcpOauthProxyRoutes(requireAuth?: any) {
+ 
+import type { MiddlewareHandler } from 'hono'
+
+export function createMcpOauthProxyRoutes(openCodeClient: OpenCodeClient, requireAuth?: MiddlewareHandler) {
   const app = new Hono()
 
   if (requireAuth) {
@@ -292,21 +294,15 @@ export function createMcpOauthProxyRoutes(requireAuth?: any) {
       markMcpOAuthFlowCompleted(state, flow.serverName)
 
       try {
-        let reconnectUrl = `${OPENCODE_SERVER_URL}/mcp/${encodeURIComponent(flow.serverName)}/connect`
-        if (flow.directory) {
-          const url = new URL(reconnectUrl)
-          url.searchParams.set('directory', flow.directory)
-          reconnectUrl = url.toString()
-        }
-        await fetch(reconnectUrl, {
+        await openCodeClient.forward({
           method: 'POST',
-          headers: withOpenCodeAuth(),
+          path: `/mcp/${encodeURIComponent(flow.serverName)}/connect`,
+          directory: flow.directory,
         })
         if (flow.directory) {
-          const globalReconnectUrl = `${OPENCODE_SERVER_URL}/mcp/${encodeURIComponent(flow.serverName)}/connect`
-          await fetch(globalReconnectUrl, {
+          await openCodeClient.forward({
             method: 'POST',
-            headers: withOpenCodeAuth(),
+            path: `/mcp/${encodeURIComponent(flow.serverName)}/connect`,
           })
         }
       } catch {

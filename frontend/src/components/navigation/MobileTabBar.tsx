@@ -48,7 +48,6 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
 
   switch (repoSection) {
     case undefined:
-    case 'memories':
     case 'assistant':
       return { mode: 'global', isInsideRepo: true, repoId }
     case 'schedules':

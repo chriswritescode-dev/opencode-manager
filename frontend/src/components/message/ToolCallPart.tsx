@@ -186,32 +186,6 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   }
 
   if (isTodoTool) {
-    if (part.state.status === 'pending') {
-      return (
-        <div className="my-2 text-sm text-muted-foreground flex items-center gap-2">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          <span>Preparing task list...</span>
-        </div>
-      )
-    }
-
-    if (part.state.status === 'running') {
-      return (
-        <div className="my-2 text-sm text-muted-foreground flex items-center gap-2">
-          <Loader2 className="w-3 h-3 animate-spin" />
-          <span>Updating task list...</span>
-        </div>
-      )
-    }
-
-    if (part.state.status === 'completed') {
-      return (
-        <div className="my-2 text-xs text-muted-foreground">
-          Task list updated
-        </div>
-      )
-    }
-
     if (part.state.status === 'error') {
       return (
         <div className="my-2 text-sm text-red-600 dark:text-red-400">

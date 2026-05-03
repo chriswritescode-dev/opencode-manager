@@ -52,13 +52,6 @@ describe('getSwipeBackTarget', () => {
     });
   });
 
-  describe('memories route', () => {
-    it('returns repo path', () => {
-      expect(getSwipeBackTarget('/repos/42/memories', '')).toBe('/repos/42');
-      expect(getSwipeBackTarget('/repos/123/memories', '?filter=all')).toBe('/repos/123');
-    });
-  });
-
   describe('schedules routes', () => {
     it('returns repo path for repo schedules', () => {
       expect(getSwipeBackTarget('/repos/42/schedules', '')).toBe('/repos/42');

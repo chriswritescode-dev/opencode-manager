@@ -229,10 +229,6 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/health/version`)
   },
 
-  getMemoryPluginStatus: async (): Promise<{ memoryPluginEnabled: boolean }> => {
-    return fetchWrapper(`${API_BASE_URL}/api/settings/memory-plugin-status`)
-  },
-
   listManagedSkills: async (repoId?: number): Promise<SkillFileInfo[]> => {
     const params = repoId ? `?repoId=${repoId}` : ''
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills${params}`)
@@ -277,4 +273,21 @@ export interface VersionInfo {
   updateAvailable: boolean
   releaseUrl: string | null
   releaseName: string | null
+}
+
+export interface OpenCodeServerAuthStatus {
+  isSet: boolean
+  source: 'db' | 'env' | 'none'
+}
+
+export async function getOpenCodeServerAuth(): Promise<OpenCodeServerAuthStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-server-auth`)
+}
+
+export async function updateOpenCodeServerAuth(password: string | null): Promise<OpenCodeServerAuthStatus> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-server-auth`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password }),
+  })
 }

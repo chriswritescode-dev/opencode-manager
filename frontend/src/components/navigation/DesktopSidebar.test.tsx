@@ -5,12 +5,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DesktopSidebar } from './DesktopSidebar'
 import * as useDesktopModule from '@/hooks/useDesktop'
 import * as useSidebarCollapsedModule from '@/hooks/useSidebarCollapsed'
-import * as useMemoryPluginStatusModule from '@/hooks/useMemoryPluginStatus'
 import * as useAuthModule from '@/hooks/useAuth'
 
 vi.mock('@/hooks/useDesktop')
 vi.mock('@/hooks/useSidebarCollapsed')
-vi.mock('@/hooks/useMemoryPluginStatus')
 vi.mock('@/hooks/useAuth')
 
 function LocationDisplay() {
@@ -44,7 +42,6 @@ describe('DesktopSidebar', () => {
   it('returns null when user is not authenticated', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(false)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: false,
       isLoading: false,
@@ -63,7 +60,6 @@ describe('DesktopSidebar', () => {
   it('returns null when auth state is loading', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(false)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: true,
@@ -82,7 +78,6 @@ describe('DesktopSidebar', () => {
   it('returns null when not desktop', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(false)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -101,7 +96,6 @@ describe('DesktopSidebar', () => {
   it('renders primary CTA for root path', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -117,7 +111,6 @@ describe('DesktopSidebar', () => {
   it('renders primary CTAs for repo detail', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -133,7 +126,6 @@ describe('DesktopSidebar', () => {
   it('renders primary CTAs for session detail', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -149,7 +141,6 @@ describe('DesktopSidebar', () => {
   it('renders primary CTA for schedules routes', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -166,7 +157,6 @@ describe('DesktopSidebar', () => {
     const dispatchEventSpy = vi.spyOn(window, 'dispatchEvent')
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -188,7 +178,6 @@ describe('DesktopSidebar', () => {
   it('opens dialog items by updating the dialog query param', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,
@@ -211,7 +200,6 @@ describe('DesktopSidebar', () => {
   it('opens settings by updating settings query params', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
-    vi.spyOn(useMemoryPluginStatusModule, 'useMemoryPluginStatus').mockReturnValue({ memoryPluginEnabled: false })
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
       isAuthenticated: true,
       isLoading: false,

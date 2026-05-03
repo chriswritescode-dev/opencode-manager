@@ -39,6 +39,12 @@ import {
   PushSubscriptionRecordSchema,
   PushNotificationPayloadSchema,
 } from '../schemas/notifications'
+import {
+  AssistantNotificationPrioritySchema,
+  AssistantNotificationRequestSchema,
+  AssistantNotificationResponseSchema,
+  AssistantSettingsPatchSchema,
+} from '../schemas/internal-assistant'
 
 export type UserPreferences = z.infer<typeof UserPreferencesSchema>
 export type SettingsResponse = z.infer<typeof SettingsResponseSchema>
@@ -75,6 +81,11 @@ export type PushSubscriptionRequest = z.infer<typeof PushSubscriptionRequestSche
 export type PushSubscriptionRecord = z.infer<typeof PushSubscriptionRecordSchema>
 export type PushNotificationPayload = z.infer<typeof PushNotificationPayloadSchema>
 
+export type AssistantNotificationPriority = z.infer<typeof AssistantNotificationPrioritySchema>
+export type AssistantNotificationRequest = z.infer<typeof AssistantNotificationRequestSchema>
+export type AssistantNotificationResponse = z.infer<typeof AssistantNotificationResponseSchema>
+export type AssistantSettingsPatch = z.infer<typeof AssistantSettingsPatchSchema>
+
 export { FetchError } from './errors'
 export type { ApiErrorResponse, ApiErrorCode, GitErrorCode } from './errors'
 
@@ -90,27 +101,6 @@ export type {
   ProviderConfig,
   ProviderSource,
 } from '../schemas/settings'
-
-export type {
-  Memory,
-  MemoryScope,
-  CreateMemoryRequest,
-  UpdateMemoryRequest,
-  MemoryStats,
-  EmbeddingProviderType,
-  EmbeddingConfig,
-  LoggingConfig,
-  CompactionConfig,
-  MemoryInjectionConfig,
-  MessagesTransformConfig,
-  PluginConfig,
-  KvEntry,
-  KvListQuery,
-  CreateKvEntryRequest,
-  UpdateKvEntryRequest,
-  LoopState,
-  LoopConfig,
-} from '../schemas/memory'
 
 export type {
   ScheduleMode,

@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionRequest, QuestionRequest } from '@/api/types'
-import { EventProvider, usePermissions, useQuestions } from './EventContext'
+import { EventProvider, usePermissions, useQuestions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
@@ -13,9 +13,8 @@ const mocks = vi.hoisted(() => ({
   listPendingQuestions: vi.fn(),
   replyToQuestion: vi.fn(),
   rejectQuestion: vi.fn(),
-  subscribeToSSE: vi.fn(),
-  addSSEDirectory: vi.fn(),
-  ensureSSEConnected: vi.fn(),
+  subscribeGlobalMonitor: vi.fn(),
+  getHealth: vi.fn(),
 }))
 
 vi.mock('@/api/repos', () => ({
@@ -31,10 +30,11 @@ vi.mock('@/api/opencode', () => ({
   })),
 }))
 
-vi.mock('@/lib/sseManager', () => ({
-  subscribeToSSE: mocks.subscribeToSSE,
-  addSSEDirectory: mocks.addSSEDirectory,
-  ensureSSEConnected: mocks.ensureSSEConnected,
+vi.mock('@/lib/opencode-event-stream', () => ({
+  openCodeEventStream: {
+    subscribeGlobalMonitor: mocks.subscribeGlobalMonitor,
+    getHealth: mocks.getHealth,
+  },
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -140,9 +140,13 @@ describe('EventProvider questions', () => {
     mocks.listPendingQuestions.mockResolvedValue([])
     mocks.replyToQuestion.mockResolvedValue(undefined)
     mocks.rejectQuestion.mockResolvedValue(undefined)
-    mocks.subscribeToSSE.mockReturnValue(() => {})
-    mocks.addSSEDirectory.mockReturnValue(() => {})
-    mocks.ensureSSEConnected.mockResolvedValue(true)
+    mocks.getHealth.mockReturnValue({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
+    mocks.subscribeGlobalMonitor.mockReturnValue({
+      dispose: vi.fn(),
+      updateDirectories: vi.fn(),
+      reconnect: vi.fn(),
+      reportVisibility: vi.fn(),
+    })
   })
 
   it('syncs missed pending questions for a session', async () => {
@@ -247,8 +251,8 @@ describe('EventProvider questions', () => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
     })
 
-    const lastSubscribeCall = mocks.subscribeToSSE.mock.calls[mocks.subscribeToSSE.mock.calls.length - 1]
-    const handleStatusChange = lastSubscribeCall[1] as (connected: boolean) => void
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const handleStatusChange = lastSubscribeCall[0].onStatusChange as (connected: boolean) => void
     handleStatusChange(true)
 
     await waitFor(() => {
@@ -311,6 +315,65 @@ describe('EventProvider questions', () => {
     await waitFor(() => {
       expect(screen.getByTestId('count')).toHaveTextContent('0')
       expect(screen.getByTestId('current')).toHaveTextContent('none')
+    })
+  })
+
+  it('adds a pending question received via the global monitor onEvent', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    act(() => {
+      onEvent({
+        type: 'question.asked',
+        properties: pendingQuestion,
+        directory: '/repo',
+      })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('1')
+      expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+    })
+  })
+
+
+
+  it('exposes sseHealth through context', async () => {
+    mocks.getHealth.mockReturnValue({ isConnected: true, isHealthy: true, lastEventAt: Date.now(), isStalled: false })
+    mocks.subscribeGlobalMonitor.mockImplementation(({ onHealthChange }) => {
+      onHealthChange({ isConnected: false, isHealthy: false, lastEventAt: null, isStalled: false })
+      return {
+        dispose: vi.fn(),
+        updateDirectories: vi.fn(),
+        reconnect: vi.fn(),
+        reportVisibility: vi.fn(),
+      }
+    })
+
+    const TestComponent = () => {
+      const { isConnected, isHealthy, isStalled } = useSSEHealth()
+      return (
+        <div>
+          <div data-testid="connected">{String(isConnected)}</div>
+          <div data-testid="healthy">{String(isHealthy)}</div>
+          <div data-testid="stalled">{String(isStalled)}</div>
+        </div>
+      )
+    }
+
+    render(<TestComponent />, { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('connected')).toHaveTextContent('false')
+      expect(screen.getByTestId('healthy')).toHaveTextContent('false')
     })
   })
 })

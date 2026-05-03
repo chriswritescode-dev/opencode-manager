@@ -2,6 +2,7 @@ import { useRef, useEffect, useCallback } from 'react'
 import type { Message } from '@/api/types'
 
 const SCROLL_LOCK_MS = 300
+const BOTTOM_THRESHOLD_PX = 48
 
 interface UseAutoScrollOptions {
   containerRef?: React.RefObject<HTMLDivElement | null>
@@ -52,6 +53,9 @@ export function useAutoScroll({
     
     const markDisengaged = () => {
       userScrolledAtRef.current = Date.now()
+      if (!userDisengagedRef.current) {
+        onScrollStateChangeRef.current?.(true)
+      }
       userDisengagedRef.current = true
     }
 
@@ -84,20 +88,18 @@ export function useAutoScroll({
 
     const handleScroll = () => {
       const { scrollTop, scrollHeight, clientHeight } = container
-      const isAtBottom = scrollHeight - scrollTop - clientHeight < 150
-      
+      const isAtBottom = scrollHeight - scrollTop - clientHeight < BOTTOM_THRESHOLD_PX
+
       if (isAtBottom) {
         if (userDisengagedRef.current) {
           userScrolledAtRef.current = 0
           userDisengagedRef.current = false
           onScrollStateChangeRef.current?.(false)
         }
-      } else {
-        if (!userDisengagedRef.current) {
-          userScrolledAtRef.current = Date.now()
-          userDisengagedRef.current = true
-          onScrollStateChangeRef.current?.(true)
-        }
+      } else if (!userDisengagedRef.current) {
+        userScrolledAtRef.current = Date.now()
+        userDisengagedRef.current = true
+        onScrollStateChangeRef.current?.(true)
       }
     }
     

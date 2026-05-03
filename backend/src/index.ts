@@ -29,17 +29,17 @@ import { createOAuthRoutes } from './routes/oauth'
 import { createSSERoutes } from './routes/sse'
 import { createSSHRoutes } from './routes/ssh'
 import { createNotificationRoutes } from './routes/notifications'
-import { createMemoryRoutes } from './routes/memory'
 import { createMcpOauthProxyRoutes } from './routes/mcp-oauth-proxy'
 import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './routes/auth'
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
+import { createInternalRoutes } from './routes/internal'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
 import { opencodeServerManager } from './services/opencode-single-server'
-import { proxyRequest, proxyMcpAuthStart, proxyMcpAuthAuthenticate } from './services/proxy'
+import { createOpenCodeClient } from './services/opencode/client'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { migrateGlobalSkills } from './services/skills'
@@ -85,6 +85,7 @@ app.use('/*', cors({
 const db = initializeDatabase(DB_PATH)
 const auth = createAuth(db)
 const requireAuth = createAuthMiddleware(auth)
+const openCodeClient = createOpenCodeClient(() => new SettingsService(db).getOpenCodeServerPassword())
 
 import { DEFAULT_AGENTS_MD } from './constants'
 
@@ -262,6 +263,8 @@ try {
   await gitAuthService.initialize(ipcServer, db)
   logger.info(`Git IPC server running at ${ipcServer.ipcHandlePath}`)
 
+  await syncAdminFromEnv(auth, db)
+
   opencodeServerManager.setDatabase(db)
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
@@ -270,12 +273,11 @@ try {
     logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
   }
 
-  await syncAdminFromEnv(auth, db)
 } catch (error) {
   logger.error('Failed to initialize workspace:', error)
 }
 
-const scheduleService = new ScheduleService(db)
+const scheduleService = new ScheduleService(db, openCodeClient)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
 const notificationService = new NotificationService(db)
@@ -299,28 +301,34 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
   })
 }
 
+sseAggregator.setPendingActionsFetcher(openCodeClient)
+sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
+sseAggregator.start()
+
 void scheduleRunnerInstance.start()
+
+const settingsService = new SettingsService(db)
 
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
-app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(requireAuth))
+app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
-protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeSupervisor))
-protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeSupervisor))
+protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, openCodeSupervisor))
+protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
 protectedApi.route('/files', createFileRoutes())
-protectedApi.route('/providers', createProvidersRoutes(db, openCodeSupervisor))
-protectedApi.route('/oauth', createOAuthRoutes(openCodeSupervisor))
+protectedApi.route('/providers', createProvidersRoutes(db, openCodeClient, openCodeSupervisor))
+protectedApi.route('/oauth', createOAuthRoutes(openCodeClient, openCodeSupervisor))
 protectedApi.route('/tts', createTTSRoutes(db))
 protectedApi.route('/stt', createSTTRoutes(db))
 protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
-protectedApi.route('/memory', createMemoryRoutes(db))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 
@@ -329,18 +337,17 @@ app.route('/api', protectedApi)
 app.post('/api/opencode/mcp/:name/auth', requireAuth, async (c) => {
   const serverName = c.req.param('name')
   const directory = c.req.query('directory')
-  return proxyMcpAuthStart(serverName, directory)
+  return openCodeClient.startMcpAuth(serverName, directory)
 })
 
 app.post('/api/opencode/mcp/:name/auth/authenticate', requireAuth, async (c) => {
   const serverName = c.req.param('name')
   const directory = c.req.query('directory')
-  return proxyMcpAuthAuthenticate(serverName, directory)
+  return openCodeClient.authenticateMcp(serverName, directory)
 })
 
 app.all('/api/opencode/*', requireAuth, async (c) => {
-  const request = c.req.raw
-  return proxyRequest(request)
+  return openCodeClient.forwardRaw(c.req.raw)
 })
 
 const isProduction = ENV.SERVER.NODE_ENV === 'production'
