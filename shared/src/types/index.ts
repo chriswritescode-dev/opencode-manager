@@ -103,27 +103,6 @@ export type {
 } from '../schemas/settings'
 
 export type {
-  Memory,
-  MemoryScope,
-  CreateMemoryRequest,
-  UpdateMemoryRequest,
-  MemoryStats,
-  EmbeddingProviderType,
-  EmbeddingConfig,
-  LoggingConfig,
-  CompactionConfig,
-  MemoryInjectionConfig,
-  MessagesTransformConfig,
-  PluginConfig,
-  KvEntry,
-  KvListQuery,
-  CreateKvEntryRequest,
-  UpdateKvEntryRequest,
-  LoopState,
-  LoopConfig,
-} from '../schemas/memory'
-
-export type {
   ScheduleMode,
   ScheduleRunTriggerSource,
   ScheduleRunStatus,

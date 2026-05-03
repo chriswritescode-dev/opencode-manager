@@ -63,7 +63,6 @@ export interface UserPreferences {
   notifications?: NotificationPreferences
   repoOrder?: number[]
   repoSortMode?: 'recent' | 'manual' | 'name'
-  memoryDedupThreshold?: number
 }
 
 export interface SettingsResponse {

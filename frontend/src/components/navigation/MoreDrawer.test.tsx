@@ -15,9 +15,6 @@ vi.mock('@/hooks/useCommands')
 vi.mock('@/api/repos', () => ({
   getRepo: vi.fn(),
 }))
-vi.mock('@/hooks/useMemoryPluginStatus', () => ({
-  useMemoryPluginStatus: () => ({ memoryPluginEnabled: false }),
-}))
 vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
   FileBrowserSheet: ({ isOpen, basePath, onFileSelect }: { isOpen: boolean; basePath: string; onFileSelect: (file: { path: string }) => void }) => (
     isOpen ? (

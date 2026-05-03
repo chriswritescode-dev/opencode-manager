@@ -33,7 +33,6 @@ nav:
     - Chat & Sessions: features/chat.md
     - Schedules & Recurring Jobs: features/schedules.md
     - AI Configuration: features/ai-config.md
-    - Memory Plugin: features/memory.md
     - Skills: features/skills.md
     - MCP Servers: features/mcp.md
     - Text-to-Speech: features/tts.md

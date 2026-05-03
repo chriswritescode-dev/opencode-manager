@@ -24,7 +24,7 @@ OpenCode Manager is a mobile-first web interface for [OpenCode](https://opencode
 - **Chat & sessions** — Real-time SSE streaming with slash commands, `@file` mentions, and Plan/Build modes
 - **Schedules** — Recurring repo jobs with reusable prompts, run history, and linked sessions
 - **AI configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents
-- **MCP, Skills, Memory** — MCP server management, skill support, optional memory plugin with semantic search
+- **MCP & Skills** — MCP server management and skill support
 - **Audio** — Text-to-speech and speech-to-text (browser + OpenAI-compatible)
 - **Mobile & notifications** — Installable PWA with push notifications and mobile-first navigation
 
@@ -46,15 +46,9 @@ OpenCode Manager runs as a pnpm workspace:
 - **AI Configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents — [Learn more](features/ai-config.md)
 - **MCP Servers** — Add local or remote MCP servers with OAuth support — [Learn more](features/mcp.md)
 - **Skills** — Skill support for extended agent capabilities — [Learn more](features/skills.md)
-- **Memory Plugin** — Persistent project knowledge with semantic search ([GitHub](https://github.com/chriswritescode-dev/opencode-memory)) — [Learn more](features/memory.md)
 - **Mobile & PWA** — Responsive UI, installable on any device, iOS-optimized — [Learn more](features/mobile.md)
 - **Push Notifications** — Background alerts for agent events — [Learn more](features/notifications.md)
 - **Audio** — Text-to-speech and speech-to-text (browser + OpenAI-compatible) — [Learn more](features/tts.md) | [Learn more](features/stt.md)
-
-!!! tip "Memory Plugin — Persistent Project Knowledge"
-    Store and retrieve project knowledge across sessions using vector embeddings and semantic search. Works as a standalone plugin with any OpenCode installation.
-
-    **[Learn more →](features/memory.md)** | **[GitHub →](https://github.com/chriswritescode-dev/opencode-memory)**
 
 ## Project Layout
 
@@ -72,5 +66,4 @@ OpenCode Manager runs as a pnpm workspace:
 - [Contributing](development/contributing.md) - How to contribute to OpenCode Manager
 - [Features Overview](features/overview.md) - Explore all features
 - [Schedules & Recurring Jobs](features/schedules.md) - Automate recurring repo reviews and follow-ups
-- [Memory Plugin](features/memory.md) - Persistent project knowledge with semantic search ([GitHub](https://github.com/chriswritescode-dev/opencode-memory))
 - [Configuration](configuration/environment.md) - Environment variables and setup
