@@ -177,7 +177,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
     case 'subtask': {
       const label = part.description || part.prompt || 'Sub-agent task'
       return (
-        <div className="my-1 w-full rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-left text-xs text-muted-foreground">
+        <div className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground shadow-sm shadow-blue-500/5">
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate">{label}</span>
             <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">sub-agent</span>

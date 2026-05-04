@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useMessages } from './useOpenCode'
 import { useQuery } from '@tanstack/react-query'
-import { useModelSelection } from './useModelSelection'
 import { fetchWrapper } from '@/api/fetchWrapper'
 
 interface ContextUsage {
@@ -39,8 +38,6 @@ async function fetchProviders(opcodeUrl: string): Promise<ProvidersResponse> {
 
 export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string): ContextUsage => {
   const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
-  const { modelString: globalModelString } = useModelSelection(opcodeUrl, directory)
-  const modelString = globalModelString
 
   const { data: providersData } = useQuery({
     queryKey: ['providers', opcodeUrl],
@@ -53,8 +50,6 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
   })
 
   return useMemo(() => {
-    const currentModel = modelString || null
-
     const assistantMessages = messages?.filter(msg => msg.info.role === 'assistant') || []
     let latestAssistantMessage = assistantMessages[assistantMessages.length - 1]
     
@@ -65,6 +60,17 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
         latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
       }
     }
+
+    const currentModel = (() => {
+      if (!latestAssistantMessage || latestAssistantMessage.info.role !== 'assistant') {
+        return null
+      }
+      const msg = latestAssistantMessage.info as { providerID?: string; modelID?: string }
+      if (msg.providerID && msg.modelID) {
+        return `${msg.providerID}/${msg.modelID}`
+      }
+      return null
+    })()
 
     let contextLimit: number | null = null
     if (currentModel && providersData) {
@@ -103,5 +109,5 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
       currentModel,
       isLoading: false
     }
-  }, [messages, messagesLoading, modelString, providersData])
+  }, [messages, messagesLoading, providersData])
 }

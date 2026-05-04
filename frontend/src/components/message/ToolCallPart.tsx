@@ -158,11 +158,15 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     const content = (
       <div className="flex items-center gap-2 min-w-0">
         {isRunning ? (
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+          <div className="flex gap-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
         ) : null}
         <span className="font-medium text-foreground truncate">{description}</span>
         <span className="text-[11px] text-muted-foreground ml-auto shrink-0">sub-agent</span>
-        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-purple-600 dark:text-purple-400" />}
+        {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
       </div>
     )
 
@@ -170,7 +174,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
       return (
         <button
           onClick={() => onChildSessionClick?.(sessionId)}
-          className="my-1 w-full rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-purple-500/10 transition-colors"
+          className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-blue-500/10 hover:border-blue-500/30 transition-all duration-200 shadow-sm shadow-blue-500/5"
           title="View subagent session"
         >
           {content}
@@ -179,7 +183,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     }
 
     return (
-      <div className="my-1 rounded border border-purple-500/20 bg-purple-500/5 px-2 py-1 text-xs text-muted-foreground">
+      <div className="my-1 rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-xs text-muted-foreground shadow-sm shadow-blue-500/5">
         {content}
       </div>
     )
@@ -278,7 +282,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 e.stopPropagation()
                 onChildSessionClick?.(sessionId)
               }}
-              className="text-purple-600 dark:text-purple-400 text-xs hover:text-purple-700 dark:hover:text-purple-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
+              className="text-blue-600 dark:text-blue-400 text-xs hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
               title="View subagent session"
             >
               <ExternalLink className="w-3 h-3" />

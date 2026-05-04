@@ -243,7 +243,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         queued: true
       })
       setStoredAgent(sessionID, agentUsed)
-      if (model) {
+      if (sessionModel) {
+        setStoredModel({ providerID: sessionModel.providerID, modelID: sessionModel.modelID })
+      } else if (model) {
         setStoredModel({ providerID: model.providerID, modelID: model.modelID })
       }
       setPrompt('')
@@ -297,7 +299,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     })
 
     setStoredAgent(sessionID, agentUsed)
-    if (model) {
+    if (sessionModel) {
+      setStoredModel({ providerID: sessionModel.providerID, modelID: sessionModel.modelID })
+    } else if (model) {
       setStoredModel({ providerID: model.providerID, modelID: model.modelID })
     }
     setPrompt('')
@@ -429,9 +433,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setMentionRange(null)
   }
 
-  const handleAgentChange = (agent: string) => {
-    setLocalMode(agent)
-    setStoredAgent(sessionID, agent)
+  const handleAgentChange = (agentName: string) => {
+    setLocalMode(agentName)
+    setStoredAgent(sessionID, agentName)
+    const agent = agents.find(a => a.name === agentName)
+    if (agent?.model) {
+      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.modelID })
+    }
   }
 
   const startVoiceRecording = async () => {
@@ -1013,17 +1021,20 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
   }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, setActiveModel, setStoreVariant])
 
-  const currentModel = modelString || ''
+  const sessionModel = sessionAgent.model
+  const sessionModelString = sessionModel ? `${sessionModel.providerID}/${sessionModel.modelID}` : null
+  const currentModel = sessionModelString || modelString || ''
   const displayModelName = useMemo(() => {
-    if (!model) {
+    const activeModel = sessionModel || model
+    if (!activeModel) {
       return currentModel
     }
 
-    const provider = providersData?.providers.find((item) => item.id === model.providerID)
-    const modelData = provider?.models?.[model.modelID]
+    const provider = providersData?.providers.find((item) => item.id === activeModel.providerID)
+    const modelData = provider?.models?.[activeModel.modelID]
 
-    return modelData ? formatModelName(modelData) : model.modelID || currentModel
-  }, [currentModel, model, providersData])
+    return modelData ? formatModelName(modelData) : activeModel.modelID || currentModel
+  }, [currentModel, sessionModel, model, providersData])
   const isMobile = useMobile()
   const { setShowDialog, hasForSession: hasPermissionsForSession } = usePermissions()
   const hasPendingPermissionForSession = hasPermissionsForSession(sessionID)
