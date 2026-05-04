@@ -41,7 +41,7 @@ export function AssistantRedirect() {
   const { data: repo } = useQuery({
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
-    enabled: showSessionList && !!repoId,
+    enabled: showSessionList && repoId !== undefined,
   })
 
   const handleNavigate = useCallback((sessionId: string) => {
@@ -61,7 +61,7 @@ export function AssistantRedirect() {
   const { data: assistantMode, isLoading: assistantModeLoading, error: assistantModeError } = useQuery({
     queryKey: ["repo", repoId, "assistant-mode"],
     queryFn: () => initializeAssistantMode(repoId),
-    enabled: showSessionList && !!repoId,
+    enabled: showSessionList && repoId !== undefined,
   })
 
   const assistantDirectory = assistantMode?.directory
@@ -84,7 +84,7 @@ export function AssistantRedirect() {
       try {
         if (showSessionList) return
         setStatus("preparing")
-        if (!repoId) {
+        if (!repoId || repoId < 0) {
           const repos = await listRepos()
           const fallbackRepo = repos.sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))[0]
           if (!fallbackRepo) throw new Error("No repository available to open Assistant")

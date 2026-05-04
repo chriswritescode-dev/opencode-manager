@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
+import type { Repo } from '@opencode-manager/shared/types'
 import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema } from '@opencode-manager/shared/schemas'
 import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName } from '../db/queries'
 import * as repoService from '../services/repo'
@@ -17,7 +18,7 @@ import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
-import { ensureAssistantMode, getAssistantModeStatus } from '../services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, getAssistantModeDirectory } from '../services/assistant-mode'
 import path from 'path'
 
 async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
@@ -155,13 +156,36 @@ app.get('/', async (c) => {
   app.get('/:id', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = getRepoById(database, id)
+      
+      let repo: Repo | null
+      let isAssistant = false
+      if (id === 0) {
+        isAssistant = true
+        repo = {
+          id: 0,
+          repoUrl: undefined,
+          localPath: 'assistant',
+          sourcePath: undefined,
+          fullPath: getAssistantModeDirectory(),
+          branch: undefined,
+          defaultBranch: 'main',
+          cloneStatus: 'ready',
+          clonedAt: Date.now(),
+          lastPulled: undefined,
+          lastAccessedAt: undefined,
+          openCodeConfigName: undefined,
+          isWorktree: false,
+          isLocal: false,
+        }
+      } else {
+        repo = getRepoById(database, id)
+      }
       
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const currentBranch = await repoService.getCurrentBranch(repo, gitAuthService.getGitEnvironment())
+      const currentBranch = isAssistant ? undefined : await repoService.getCurrentBranch(repo, gitAuthService.getGitEnvironment())
       
       return c.json({ ...repo, currentBranch })
     } catch (error: unknown) {
@@ -397,7 +421,28 @@ app.get('/', async (c) => {
   app.get('/:id/assistant-mode', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = getRepoById(database, id)
+
+      let repo: Repo | null
+      if (id === 0) {
+        repo = {
+          id: 0,
+          repoUrl: undefined,
+          localPath: 'assistant',
+          sourcePath: undefined,
+          fullPath: '',
+          branch: undefined,
+          defaultBranch: 'main',
+          cloneStatus: 'ready',
+          clonedAt: Date.now(),
+          lastPulled: undefined,
+          lastAccessedAt: undefined,
+          openCodeConfigName: undefined,
+          isWorktree: false,
+          isLocal: false,
+        }
+      } else {
+        repo = getRepoById(database, id)
+      }
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -414,7 +459,28 @@ app.get('/', async (c) => {
   app.post('/:id/assistant-mode', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      const repo = getRepoById(database, id)
+
+      let repo: Repo | null
+      if (id === 0) {
+        repo = {
+          id: 0,
+          repoUrl: undefined,
+          localPath: 'assistant',
+          sourcePath: undefined,
+          fullPath: '',
+          branch: undefined,
+          defaultBranch: 'main',
+          cloneStatus: 'ready',
+          clonedAt: Date.now(),
+          lastPulled: undefined,
+          lastAccessedAt: undefined,
+          openCodeConfigName: undefined,
+          isWorktree: false,
+          isLocal: false,
+        }
+      } else {
+        repo = getRepoById(database, id)
+      }
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
