@@ -67,10 +67,12 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     window.addEventListener('popstate', onPop)
     return () => {
       window.removeEventListener('popstate', onPop)
+      // Only go back if sentinel is still active AND we haven't navigated away
       if (sentinelActive) {
         sentinelActive = false
         const top = window.history.state as { moreDrawerSentinel?: boolean } | null
-        if (top?.moreDrawerSentinel) {
+        // Only go back if the current URL hasn't changed (i.e., no navigation occurred)
+        if (top?.moreDrawerSentinel && window.location.href === baseUrl) {
           window.history.back()
         }
       }
