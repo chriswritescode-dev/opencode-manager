@@ -69,7 +69,7 @@ export function SideDrawer({
       />
       <div
         className={cn(
-          'fixed top-0 bottom-0 bg-background border-l border-border pt-safe pb-safe flex flex-col',
+          'fixed top-0 bottom-0 bg-background border-l border-border pt-safe pb-safe flex flex-col z-50',
           side === 'right' ? 'right-0' : 'left-0',
           widthClass,
           className,

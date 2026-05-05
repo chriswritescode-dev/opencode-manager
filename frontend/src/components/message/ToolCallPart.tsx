@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
 import { useUserBash } from '@/stores/userBashStore'
+import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { usePermissions, useQuestions } from '@/contexts/EventContext'
 import { detectFileReferences } from '@/lib/fileReferences'
 import { ExternalLink, Loader2 } from 'lucide-react'
@@ -68,6 +69,8 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
+  const taskSessionId = part.tool === 'task' ? getTaskSessionId(part) : undefined
+  const taskSessionStatus = useSessionStatusForSession(taskSessionId)
   const { getForCallID: getPermissionForCallID } = usePermissions()
   const { getForCallID: getQuestionForCallID } = useQuestions()
   const outputRef = useRef<HTMLDivElement>(null)
@@ -152,20 +155,35 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
   const isFileTool = ['read', 'write', 'edit'].includes(part.tool)
 
   if (part.tool === 'task') {
-    const sessionId = getTaskSessionId(part)
+    const sessionId = taskSessionId
     const description = previewText || 'Sub-agent task'
-    const isRunning = part.state.status === 'running' || part.state.status === 'pending'
+    const status = part.state.status
+
+    const isPending = status === 'pending'
+    const isRunning = status === 'running' && taskSessionStatus.type !== 'idle'
+    const isCompleted = status === 'completed' || (status === 'running' && !!sessionId && taskSessionStatus.type === 'idle')
+    const isError = status === 'error'
+
     const content = (
       <div className="flex items-center gap-2 min-w-0">
-        {isRunning ? (
-          <div className="flex gap-0.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+        {isPending && (
+          <div className="flex gap-1">
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
+            <span className="w-2 h-2 rounded-full bg-muted-foreground" />
           </div>
-        ) : null}
+        )}
+        {isRunning && (
+          <div className="flex gap-1">
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
+          </div>
+        )}
+        {isCompleted && <span className="text-green-600 text-sm font-medium">✓</span>}
+        {isError && <span className="text-red-600 text-sm font-medium">✗</span>}
         <span className="font-medium text-foreground truncate">{description}</span>
-        <span className="text-[11px] text-muted-foreground ml-auto shrink-0">sub-agent</span>
+        <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">sub-agent</span>
         {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
       </div>
     )
