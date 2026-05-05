@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { readJsonSafe, writeJsonAtomic, withFileLock } from './atomic-json'
 import { join } from 'node:path'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 
 describe('atomic-json', () => {
@@ -24,7 +24,7 @@ describe('atomic-json', () => {
 
     it('returns fallback when file contains invalid JSON and logs a warning', async () => {
       const filePath = join(tmpDir, 'invalid.json')
-      await Bun.write(filePath, '{ invalid json }')
+      await writeFile(filePath, '{ invalid json }', 'utf8')
       const fallback = { foo: 'bar' }
       const result = await readJsonSafe(filePath, fallback)
       expect(result).toEqual(fallback)
@@ -33,7 +33,7 @@ describe('atomic-json', () => {
     it('returns parsed value when file contains valid JSON', async () => {
       const filePath = join(tmpDir, 'valid.json')
       const data = { foo: 'bar', nested: { value: 42 } }
-      await Bun.write(filePath, JSON.stringify(data))
+      await writeFile(filePath, JSON.stringify(data), 'utf8')
       const result = await readJsonSafe(filePath, { fallback: true })
       expect(result).toEqual(data)
     })
@@ -44,7 +44,7 @@ describe('atomic-json', () => {
       const filePath = join(tmpDir, 'output.json')
       const data = { test: 'value', number: 123 }
       await writeJsonAtomic(filePath, data)
-      const content = await Bun.file(filePath).text()
+      const content = await readFile(filePath, 'utf8')
       const parsed = JSON.parse(content)
       expect(parsed).toEqual(data)
     })
