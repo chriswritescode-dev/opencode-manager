@@ -30,6 +30,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
   const swipeRef = useRef<HTMLDivElement>(null)
+  const skipHistoryBackOnCloseRef = useRef(false)
   const { bind } = useSwipeBack(onClose, { enabled: isOpen, suspendsRouteSwipe: true })
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
@@ -55,6 +56,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   useEffect(() => {
     if (!isOpen) return
+    skipHistoryBackOnCloseRef.current = false
     let sentinelActive = true
     const baseState = window.history.state
     const baseUrl = window.location.href
@@ -68,10 +70,9 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     return () => {
       window.removeEventListener('popstate', onPop)
       // Only go back if sentinel is still active AND we haven't navigated away
-      if (sentinelActive) {
+      if (sentinelActive && !skipHistoryBackOnCloseRef.current) {
         sentinelActive = false
         const top = window.history.state as { moreDrawerSentinel?: boolean } | null
-        // Only go back if the current URL hasn't changed (i.e., no navigation occurred)
         if (top?.moreDrawerSentinel && window.location.href === baseUrl) {
           window.history.back()
         }
@@ -95,6 +96,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     newParams.delete('mobileTab')
     newParams.set('settings', 'open')
     newParams.set('tab', 'account')
+    skipHistoryBackOnCloseRef.current = true
     navigate({ search: newParams.toString() }, { replace: true })
     onClose()
   }
@@ -109,11 +111,13 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   const handleItemClick = (item: ReturnType<typeof buildMoreItems>[0]) => {
     if (item.to) {
+      skipHistoryBackOnCloseRef.current = true
       navigate(item.to)
     } else if (item.dialog) {
       const newParams = new URLSearchParams(location.search)
       newParams.set('dialog', item.dialog)
       newParams.delete('mobileTab')
+      skipHistoryBackOnCloseRef.current = true
       navigate({ search: newParams.toString() }, { replace: true })
     }
     onClose()

@@ -9,6 +9,7 @@ export interface ModelSelection {
 
 interface ModelStore {
   model: ModelSelection | null
+  agentModels: Record<string, ModelSelection>
   recentModels: ModelSelection[]
   favoriteModels: ModelSelection[]
   variants: Record<string, string | undefined>
@@ -16,6 +17,8 @@ interface ModelStore {
 
   setModel: (model: ModelSelection) => void
   setActiveModel: (model: ModelSelection) => void
+  setAgentModel: (agent: string, model: ModelSelection) => void
+  getAgentModel: (agent: string) => ModelSelection | null
   syncModelState: (state: { recent: ModelSelection[], favorite: ModelSelection[], variant: Record<string, string | undefined> }) => void
   toggleFavorite: (model: ModelSelection) => void
   syncFromConfig: (configModel: string | undefined, force?: boolean) => void
@@ -39,6 +42,7 @@ export const useModelStore = create<ModelStore>()(
   persist(
     (set, get) => ({
       model: null,
+      agentModels: {},
       recentModels: [],
       favoriteModels: [],
       variants: {},
@@ -62,6 +66,20 @@ export const useModelStore = create<ModelStore>()(
 
       setActiveModel: (model: ModelSelection) => {
         set({ model })
+      },
+
+      setAgentModel: (agent: string, model: ModelSelection) => {
+        set((state) => ({
+          agentModels: {
+            ...state.agentModels,
+            [agent]: model,
+          },
+        }))
+      },
+
+      getAgentModel: (agent: string) => {
+        const state = get()
+        return state.agentModels[agent] ?? null
       },
 
       syncModelState: (modelState) => {
@@ -182,6 +200,7 @@ export const useModelStore = create<ModelStore>()(
       name: 'opencode-model-selection',
       partialize: (state) => ({
         model: state.model,
+        agentModels: state.agentModels,
         recentModels: state.recentModels,
         favoriteModels: state.favoriteModels,
         variants: state.variants,

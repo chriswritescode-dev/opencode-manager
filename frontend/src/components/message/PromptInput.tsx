@@ -429,9 +429,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setMentionRange(null)
   }
 
-  const handleAgentChange = (agent: string) => {
-    setLocalMode(agent)
-    setStoredAgent(sessionID, agent)
+  const handleAgentChange = (agentName: string) => {
+    setLocalMode(agentName)
+    setStoredAgent(sessionID, agentName)
+    const agent = agents.find(a => a.name === agentName)
+    if (agent?.model) {
+      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.modelID })
+    }
   }
 
   const startVoiceRecording = async () => {
