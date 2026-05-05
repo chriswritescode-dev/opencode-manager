@@ -11,36 +11,36 @@ describe('SSE Routes', () => {
 
     it('should fire heartbeats at correct interval', async () => {
       vi.useFakeTimers()
-      
+
       const heartbeatSpy = vi.fn()
       const intervalId = setInterval(() => {
         heartbeatSpy()
       }, HEARTBEAT_INTERVAL_MS)
-      
+
       await vi.advanceTimersByTimeAsync(0)
+      expect(heartbeatSpy).toHaveBeenCalledTimes(0)
+
+      await vi.advanceTimersByTimeAsync(30000)
       expect(heartbeatSpy).toHaveBeenCalledTimes(1)
-      
+
       await vi.advanceTimersByTimeAsync(30000)
       expect(heartbeatSpy).toHaveBeenCalledTimes(2)
-      
-      await vi.advanceTimersByTimeAsync(40000)
-      expect(heartbeatSpy).toHaveBeenCalledTimes(3)
-      
+
       clearInterval(intervalId)
       vi.useRealTimers()
     })
 
     it('should fire two heartbeats within 70 seconds', async () => {
       vi.useFakeTimers()
-      
+
       const heartbeatSpy = vi.fn()
       const intervalId = setInterval(() => {
         heartbeatSpy()
       }, HEARTBEAT_INTERVAL_MS)
-      
+
       await vi.advanceTimersByTimeAsync(70000)
-      expect(heartbeatSpy).toHaveBeenCalledTimes(3)
-      
+      expect(heartbeatSpy).toHaveBeenCalledTimes(2)
+
       clearInterval(intervalId)
       vi.useRealTimers()
     })

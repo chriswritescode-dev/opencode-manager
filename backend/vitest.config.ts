@@ -15,6 +15,7 @@ export default defineConfig({
       'test/routes/internal-schedules.test.ts',
       'test/routes/internal-notifications.test.ts',
       'test/routes/internal-settings.test.ts',
+      'test/routes/internal-repos.test.ts',
       'src/db/model-state.test.ts',
       'src/routes/providers.test.ts',
     ],

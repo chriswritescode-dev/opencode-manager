@@ -7,6 +7,7 @@ import { createScheduleRoutes } from '../schedules'
 import { createInternalTokenMiddleware } from '../../auth/internal-token-middleware'
 import { createInternalNotificationRoutes } from './notifications'
 import { createInternalSettingsRoutes } from './settings'
+import { createInternalRepoRoutes } from './repos'
 
 export function createInternalRoutes(
   db: Database,
@@ -20,6 +21,7 @@ export function createInternalRoutes(
   app.route('/notifications', createInternalNotificationRoutes(notificationService))
   app.route('/settings', createInternalSettingsRoutes(settingsService))
   const repos = new Hono()
+  repos.route('/', createInternalRepoRoutes(db, settingsService))
   repos.route('/:id/schedules', createScheduleRoutes(scheduleService))
   app.route('/repos', repos)
   return app

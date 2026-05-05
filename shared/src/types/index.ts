@@ -12,6 +12,7 @@ import {
 } from '../schemas/settings'
 import {
   RepoSchema,
+  InternalRepoListResponseSchema,
   CreateRepoRequestSchema,
   DiscoverReposRequestSchema,
   DiscoverReposResponseSchema,
@@ -57,6 +58,7 @@ export type UpdateOpenCodeConfigRequest = z.infer<typeof UpdateOpenCodeConfigReq
 export type OpenCodeConfigResponse = z.infer<typeof OpenCodeConfigResponseSchema>
 
 export type Repo = z.infer<typeof RepoSchema>
+export type InternalRepoListResponse = z.infer<typeof InternalRepoListResponseSchema>
 export type CreateRepoRequest = z.infer<typeof CreateRepoRequestSchema>
 export type DiscoverReposRequest = z.infer<typeof DiscoverReposRequestSchema>
 export type DiscoverReposResponse = z.infer<typeof DiscoverReposResponseSchema>
