@@ -15,7 +15,7 @@ const todoSignature = (todos: Todo[]) =>
 
 export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
   const todos = useSessionTodosForSession(sessionID)
-  const [isCollapsed, setIsCollapsed] = useState(false)
+  const [isCollapsed, setIsCollapsed] = useState(true)
   const [isDismissed, setIsDismissed] = useState(false)
   const dismissedSignatureRef = useRef<string>('')
 
@@ -129,7 +129,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
-      <div className="max-h-[80px] sm:max-h-[160px] overflow-y-auto p-1.5 sm:p-2 bg-muted/30">
+      <div data-testid="todo-expanded-list" className="max-h-[80px] sm:max-h-[160px] overflow-y-auto p-1.5 sm:p-2 bg-muted/30">
         {renderGroup('In Progress', inProgress)}
         {renderGroup('Pending', pending)}
         {renderGroup('Completed', completedTodos)}

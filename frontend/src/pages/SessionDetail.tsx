@@ -457,9 +457,10 @@ export function SessionDetail() {
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
       <div
+        data-testid="session-header-region"
         className={`flex-shrink-0 overflow-hidden bg-background transition-all duration-200 ease-out ${
           isHeaderVisible
-            ? 'max-h-40 opacity-100 translate-y-0'
+            ? 'max-h-72 sm:max-h-80 opacity-100 translate-y-0'
             : 'max-h-0 opacity-0 -translate-y-2'
         }`}
       >
