@@ -10,13 +10,18 @@ const DEFAULT_OPTIONS: AudioRecorderOptions = {
   channelCount: 1,
 }
 
-let workletModulePromise: Promise<void> | null = null
+const workletModulePromises = new WeakMap<AudioContext, Promise<void>>()
 
 function ensureWorkletLoaded(ctx: AudioContext): Promise<void> {
-  if (!workletModulePromise) {
-    workletModulePromise = ctx.audioWorklet.addModule('/audio-worklet-processor.js')
+  const existingPromise = workletModulePromises.get(ctx)
+
+  if (existingPromise) {
+    return existingPromise
   }
-  return workletModulePromise
+
+  const promise = ctx.audioWorklet.addModule('/audio-worklet-processor.js')
+  workletModulePromises.set(ctx, promise)
+  return promise
 }
 
 export function downsampleAndConvert(input: Float32Array, inputRate: number, targetRate: number): Int16Array {
@@ -164,7 +169,6 @@ export class AudioRecorder {
           }
           this.source.connect(this.workletNode)
         } catch (error) {
-          workletModulePromise = null
           this.audioContext.close()
           this.audioContext = null
           throw new Error('Failed to load audio worklet processor', { cause: error })
