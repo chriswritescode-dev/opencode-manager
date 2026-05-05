@@ -84,7 +84,7 @@ export function AssistantRedirect() {
       try {
         if (showSessionList) return
         setStatus("preparing")
-        if (!repoId || repoId < 0) {
+        if (!id || isNaN(repoId) || repoId <= 0) {
           const repos = await listRepos()
           const fallbackRepo = repos.sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))[0]
           if (!fallbackRepo) throw new Error("No repository available to open Assistant")
@@ -108,7 +108,7 @@ export function AssistantRedirect() {
     return () => {
       cancelled = true
     }
-  }, [repoId, openAssistant, navigate, showSessionList])
+  }, [repoId, openAssistant, navigate, showSessionList, id])
 
   if (showSessionList) {
     return (

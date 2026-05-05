@@ -7,7 +7,7 @@ import { initializeAssistantMode } from '@/api/repos'
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
   createSession: vi.fn(),
-  sendPrompt: vi.fn(),
+  sendPromptAsync: vi.fn(),
   initializeAssistantMode: vi.fn(),
 }))
 
@@ -19,9 +19,13 @@ vi.mock('@/api/opencode', () => ({
   OpenCodeClient: vi.fn(() => ({
     listSessions: mocks.listSessions,
     createSession: mocks.createSession,
-    sendPrompt: mocks.sendPrompt,
+    sendPromptAsync: mocks.sendPromptAsync,
   })),
 }))
+
+beforeEach(() => {
+  mocks.sendPromptAsync.mockResolvedValue(undefined)
+})
 
 describe('useAssistantSessionLauncher', () => {
   beforeEach(() => {
@@ -70,7 +74,7 @@ describe('useAssistantSessionLauncher', () => {
     })
 
     expect(mocks.createSession).toHaveBeenCalledWith({ title: 'Assistant' })
-    expect(mocks.sendPrompt).toHaveBeenCalledWith('created', {
+    expect(mocks.sendPromptAsync).toHaveBeenCalledWith('created', {
       parts: [
         expect.objectContaining({
           type: 'text',
@@ -79,5 +83,62 @@ describe('useAssistantSessionLauncher', () => {
       ],
     })
     expect(onNavigate).toHaveBeenCalledWith('created')
+
+    const promptCall = mocks.sendPromptAsync.mock.calls[0]
+    const promptText = promptCall[1].parts[0].text as string
+    expect(promptText).toContain('.opencode/agents/assistant.md')
+    expect(promptText).toContain('AGENTS.md')
+    expect(promptText).toContain('.opencode/skills/')
+    expect(promptText).not.toContain('v file')
+  })
+
+  it('navigates after creating a session without waiting for the welcome prompt to complete', async () => {
+    mocks.listSessions.mockResolvedValue([])
+    let resolvePrompt: () => void
+    const promptPromise = new Promise<void>((resolve) => {
+      resolvePrompt = resolve
+    })
+    mocks.createSession.mockResolvedValue({ id: 'created' })
+    mocks.sendPromptAsync.mockImplementation(() => promptPromise)
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onNavigate).toHaveBeenCalledWith('created')
+    expect(mocks.sendPromptAsync).toHaveBeenCalledWith('created', {
+      parts: [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('Welcome to OpenCode Manager!'),
+        }),
+      ],
+    })
+    resolvePrompt!()
+  })
+
+  it('navigates even when welcome prompt fails', async () => {
+    mocks.listSessions.mockResolvedValue([])
+    mocks.createSession.mockResolvedValue({ id: 'created' })
+    mocks.sendPromptAsync.mockRejectedValueOnce(new Error('provider unavailable'))
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onNavigate).toHaveBeenCalledWith('created')
+    expect(mocks.sendPromptAsync).toHaveBeenCalled()
   })
 })

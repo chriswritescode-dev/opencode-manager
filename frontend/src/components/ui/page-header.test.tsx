@@ -52,16 +52,9 @@ describe("PageHeader", () => {
     expect(header).toHaveClass("z-10");
   });
 
-  it("applies background styling", () => {
+  it("applies transparent background", () => {
     render(<PageHeader data-testid="header">Content</PageHeader>);
     const header = screen.getByTestId("header");
-    expect(header).toHaveClass("bg-gradient-to-b");
-    expect(header).toHaveClass("from-background");
-  });
-
-  it("applies backdrop-blur-sm for frosted glass effect", () => {
-    render(<PageHeader data-testid="header">Content</PageHeader>);
-    const header = screen.getByTestId("header");
-    expect(header).toHaveClass("backdrop-blur-sm");
+    expect(header).toHaveClass("bg-transparent");
   });
 });

@@ -109,7 +109,7 @@ describe('BottomSheet', () => {
 
     expect(useSwipeDismiss).toHaveBeenCalledWith(expect.any(Function), {
       enabled: true,
-      threshold: 80,
+      threshold: 60,
     })
   })
 

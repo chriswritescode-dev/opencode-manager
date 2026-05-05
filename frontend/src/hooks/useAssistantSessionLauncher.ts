@@ -8,6 +8,35 @@ interface UseAssistantSessionLauncherOptions {
   onNavigate: (sessionId: string) => void
 }
 
+const ASSISTANT_WELCOME_PROMPT = `Welcome to OpenCode Manager! I'm your assistant and I'm here to help you work with your code.
+
+To get started, let's set up your assistant:
+
+**1. Name your assistant**
+What would you like to call me? This name will help personalize our interactions.
+
+**2. Review AGENTS.md**
+AGENTS.md contains workspace-level instructions, durable preferences, and self-editing rules.
+
+**3. Review the assistant agent**
+.opencode/agents/assistant.md defines the default Assistant Mode agent and can be customized later.
+
+**4. Use workspace skills**
+Skills for repos, schedules, notifications, and settings are available under .opencode/skills/.
+
+Take your time exploring and customizing these settings. Let me know when you're ready to start coding, or if you have any questions about getting set up!`
+
+async function sendAssistantWelcomePrompt(client: OpenCodeClient, sessionId: string): Promise<void> {
+  await client.sendPromptAsync(sessionId, {
+    parts: [
+      {
+        type: 'text',
+        text: ASSISTANT_WELCOME_PROMPT,
+      },
+    ],
+  }).catch(() => undefined)
+}
+
 export function useAssistantSessionLauncher({
   repoId,
   opcodeUrl,
@@ -36,28 +65,8 @@ export function useAssistantSessionLauncher({
       onNavigate(newest.id)
     } else {
       const session = await client.createSession({ title: 'Assistant' })
-      await client.sendPrompt(session.id, {
-        parts: [
-          {
-            type: 'text',
-            text: `Welcome to OpenCode Manager! I'm your assistant and I'm here to help you work with your code.
-
-To get started, let's set up your assistant:
-
-**1. Name your assistant**
-What would you like to call me? This name will help personalize our interactions.
-
-**2. Configure AGENTS.md**
-This file contains instructions that define my behavior, persona, and preferences. You can customize it to match your workflow. Take a moment to review and edit it - you can always adjust it later.
-
-**3. Set up your v file (optional)**
-The v file stores conversation state and context between sessions. This helps me maintain memory of our work together.
-
-Take your time exploring and customizing these settings. Let me know when you're ready to start coding, or if you have any questions about getting set up!`,
-          },
-        ],
-      })
       onNavigate(session.id)
+      void sendAssistantWelcomePrompt(client, session.id)
     }
   }, [repoId, opcodeUrl, onNavigate])
 
