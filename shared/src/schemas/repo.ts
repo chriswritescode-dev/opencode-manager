@@ -65,6 +65,11 @@ export const AssistantModeStatusSchema = z.object({
   repoId: z.number(),
   directory: z.string(),
   relativePath: z.literal('repos/assistant'),
+  warnings: z.array(z.object({
+    code: z.string(),
+    path: z.string(),
+    message: z.string(),
+  })).optional(),
   files: z.object({
     agentsMd: AssistantModeFileSchema,
     opencodeJson: AssistantModeFileSchema,

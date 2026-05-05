@@ -55,6 +55,45 @@ describe('useAssistantSessionLauncher', () => {
     expect(OpenCodeClient).toHaveBeenCalledWith('http://localhost:5551', '/assistant')
     expect(onNavigate).toHaveBeenCalledWith('newest')
     expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
+  })
+
+  it('notifies an existing assistant session when some generated updates were preserved', async () => {
+    mocks.initializeAssistantMode.mockResolvedValue({
+      directory: '/assistant',
+      warnings: [
+        {
+          code: 'assistant-agents-md-preserved',
+          path: '/assistant/AGENTS.md',
+          message: 'Some Assistant Mode instruction updates were not applied because AGENTS.md appears to contain customized legacy assistant instructions. To regenerate the default workspace explanation, manually delete AGENTS.md and initialize Assistant Mode again.',
+        },
+      ],
+    })
+    mocks.listSessions.mockResolvedValue([
+      { id: 'existing', directory: '/assistant', time: { updated: 10 } },
+    ])
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onNavigate).toHaveBeenCalledWith('existing')
+    expect(mocks.sendPromptAsync).toHaveBeenCalledWith('existing', {
+      parts: [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('some generated instruction changes were not applied'),
+        }),
+      ],
+    })
+    const promptText = mocks.sendPromptAsync.mock.calls[0][1].parts[0].text as string
+    expect(promptText).toContain('manually delete AGENTS.md')
   })
 
   it('creates a session when the assistant directory has no root sessions', async () => {
@@ -89,7 +128,11 @@ describe('useAssistantSessionLauncher', () => {
     expect(promptText).toContain('.opencode/agents/assistant.md')
     expect(promptText).toContain('AGENTS.md')
     expect(promptText).toContain('.opencode/skills/')
+    expect(promptText).toContain('directory')
+    expect(promptText).toContain('durable preferences')
+    expect(promptText).toContain('self-editing rules')
     expect(promptText).not.toContain('v file')
+    expect(promptText).not.toMatch(/AGENTS\.md contains workspace-level instructions, durable preferences, and self-editing rules/)
   })
 
   it('navigates after creating a session without waiting for the welcome prompt to complete', async () => {

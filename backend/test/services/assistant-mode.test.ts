@@ -97,8 +97,8 @@ describe('ensureAssistantMode', () => {
     const repoSkill = await readFile(path.join(ws.assistantDir, '.opencode/skills/repo-management/SKILL.md'), 'utf8')
     const assistantAgent = await readFile(path.join(ws.assistantDir, '.opencode/agents/assistant.md'), 'utf8')
 
-    expect(agentsMd).toContain('schedule-management')
-    expect(agentsMd).toContain('repo-management')
+    expect(agentsMd).toContain('.opencode/agents/assistant.md')
+    expect(agentsMd).not.toContain('Self-Editing Rules')
     const parsedConfig = JSON.parse(opencodeJson)
     expect(parsedConfig.default_agent).toBe('assistant')
     expect(parsedConfig).not.toHaveProperty('mcp')
@@ -164,6 +164,11 @@ describe('ensureAssistantMode', () => {
     expect(opencodeJson.agent?.assistant?.description).toBe('Default OpenCode Manager assistant workspace agent')
     expect(opencodeJson.agent?.assistant?.mode).toBe('primary')
     expect(opencodeJson.agent?.assistant?.prompt).toContain('This workspace is the shared assistant workspace')
+    expect(opencodeJson.agent?.assistant?.prompt).toContain('Self-Editing')
+    expect(opencodeJson.agent?.assistant?.prompt).toContain('repo-management')
+    expect(opencodeJson.agent?.assistant?.prompt).toContain('schedule-management')
+    expect(opencodeJson.agent?.assistant?.prompt).toContain('notifications')
+    expect(opencodeJson.agent?.assistant?.prompt).toContain('manager-settings')
     expect(opencodeJson.agent?.assistant?.permission).toEqual({
       read: 'allow',
       edit: 'allow',
@@ -175,12 +180,13 @@ describe('ensureAssistantMode', () => {
     })
 
     const agentsMdContent = await readFile(agentsMdPath, 'utf8')
-    expect(agentsMdContent).toContain('Assistant Mode Instructions')
-    expect(agentsMdContent).toContain('Self-Editing Rules')
-    expect(agentsMdContent).toContain('Schedule Management')
-    expect(agentsMdContent).toContain('Notifications')
-    expect(agentsMdContent).toContain('Settings Management')
-    expect(agentsMdContent).toContain('Repo Management')
+    expect(agentsMdContent).toContain('Assistant Mode Workspace')
+    expect(agentsMdContent).toContain('.opencode/agents/assistant.md')
+    expect(agentsMdContent).not.toContain('Self-Editing Rules')
+    expect(agentsMdContent).not.toContain('Schedule Management')
+    expect(agentsMdContent).not.toContain('Notifications')
+    expect(agentsMdContent).not.toContain('Settings Management')
+    expect(agentsMdContent).not.toContain('Repo Management')
 
     const schedulesSkillContent = await readFile(schedulesSkillPath, 'utf8')
     expect(schedulesSkillContent).toContain('name: schedule-management')
@@ -200,6 +206,11 @@ describe('ensureAssistantMode', () => {
 
     const assistantAgentContent = await readFile(assistantAgentPath, 'utf8')
     expect(assistantAgentContent).toContain('mode: primary')
+    expect(assistantAgentContent).toContain('Self-Editing')
+    expect(assistantAgentContent).toContain('repo-management')
+    expect(assistantAgentContent).toContain('schedule-management')
+    expect(assistantAgentContent).toContain('notifications')
+    expect(assistantAgentContent).toContain('manager-settings')
 
     expect(result.files.opencodeJson?.exists).toBe(true)
     expect(result.files.agentsMd?.exists).toBe(true)
@@ -283,6 +294,233 @@ describe('ensureAssistantMode', () => {
     expect(repaired.agent.assistant.mode).toBe('primary')
     expect(repaired.agent.assistant.disable).toBe(false)
     expect(result.files.opencodeJson?.created).toBe(true)
+  })
+
+  it('migrates generated legacy AGENTS.md and assistant.md to the new split', async () => {
+    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+
+    const legacyAgentsMd = `# Assistant Mode Instructions
+
+This folder is the shared Assistant mode workspace for OpenCode Manager.
+
+## Purpose
+
+Assistant mode provides an isolated space for:
+- Self-editing agent instructions and preferences
+- Customized workflows specific to this assistant workspace
+- Iterative improvement of assistant behavior
+
+## Self-Editing Rules
+
+The agent MAY self-edit the following files within this workspace:
+- \`AGENTS.md\` - Assistant instructions, persona, and durable preferences
+- \`opencode.json\` - OpenCode configuration for this workspace
+
+## Constraints
+
+- Changes outside this workspace require explicit user direction
+- Self-edits should be concise and auditable
+- Preserve user-customized content when modifying files
+- Always ask for confirmation before making significant changes
+
+## Guidelines
+
+1. Keep instructions clear and actionable
+2. Update AGENTS.md when learning durable preferences
+3. Maintain version control awareness
+4. Document significant changes in commit messages
+
+## Repo Management
+
+This workspace includes a skill at \`.opencode/skills/repo-management/SKILL.md\` for listing repos available to OpenCode Manager via the internal HTTP API. Load it before the schedule-management skill when you don't know the repo ID.
+
+## Schedule Management
+
+This workspace ships with a workspace-scoped skill at \`.opencode/skills/schedule-management/SKILL.md\` that documents how to list, create, update, delete, run, inspect, and cancel schedule jobs and runs across any repo via the internal HTTP API. Load it whenever the user asks about schedules.
+
+## Notifications
+
+This workspace includes a skill at \`.opencode/skills/notifications/SKILL.md\` for sending push notifications to the user's registered devices via the internal HTTP API. Load it when you need to notify the user about important events.
+
+## Settings Management
+
+This workspace includes a skill at \`.opencode/skills/manager-settings/SKILL.md\` for reading and safely modifying user preferences via the internal HTTP API. Load it when you need to inspect or update UI settings.
+`
+
+    const legacyAssistantAgent = `---
+description: Default OpenCode Manager assistant workspace agent
+mode: primary
+permission:
+  read: allow
+  edit: allow
+  glob: allow
+  grep: allow
+  list: allow
+  bash: allow
+  external_directory: ask
+---
+
+You are the default Assistant Mode agent for OpenCode Manager.
+
+This workspace is the shared assistant workspace. Help the user manage repos, schedules, notifications, settings, and assistant behavior safely.
+
+Use the workspace skills when relevant:
+- Load repo-management before schedule-management when you need a repo ID.
+- Load schedule-management for schedule jobs and runs.
+- Load notifications when the user should be notified about important events.
+- Load manager-settings when reading or safely updating UI preferences.
+
+Preserve user-customized workspace files unless the user explicitly asks you to change them.
+Ask before destructive operations or changes outside this assistant workspace.
+`
+
+    const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    const assistantAgentPath = path.join(ws.assistantDir, '.opencode/agents/assistant.md')
+    const legacyAssistantPrompt = legacyAssistantAgent.split('---\n\n')[1]?.trimEnd()
+
+    if (legacyAssistantPrompt === undefined) throw new Error('Legacy assistant prompt fixture is invalid')
+
+    await writeFile(agentsMdPath, legacyAgentsMd)
+    await writeFile(assistantAgentPath, legacyAssistantAgent)
+    await writeFile(opencodeJsonPath, JSON.stringify({
+      default_agent: 'assistant',
+      instructions: ['AGENTS.md'],
+      permission: {
+        read: 'allow',
+        edit: 'allow',
+        glob: 'allow',
+        grep: 'allow',
+        list: 'allow',
+        bash: 'allow',
+        external_directory: 'ask',
+      },
+      agent: {
+        assistant: {
+          description: 'Default OpenCode Manager assistant workspace agent',
+          mode: 'primary',
+          prompt: legacyAssistantPrompt,
+          permission: {
+            read: 'allow',
+            edit: 'allow',
+            glob: 'allow',
+            grep: 'allow',
+            list: 'allow',
+            bash: 'allow',
+            external_directory: 'ask',
+          },
+        },
+      },
+    }, null, 2))
+
+    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+
+    const updatedAgentsMd = await readFile(agentsMdPath, 'utf8')
+    const updatedAssistantAgent = await readFile(assistantAgentPath, 'utf8')
+    const updatedOpenCodeJson = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
+
+    expect(updatedAgentsMd).toContain('Assistant Mode Workspace')
+    expect(updatedAgentsMd).toContain('.opencode/agents/assistant.md')
+    expect(updatedAgentsMd).not.toContain('Self-Editing Rules')
+
+    expect(updatedAssistantAgent).toContain('Self-Editing')
+    expect(updatedAssistantAgent).toContain('repo-management')
+    expect(updatedAssistantAgent).toContain('schedule-management')
+    expect(updatedAssistantAgent).toContain('notifications')
+    expect(updatedAssistantAgent).toContain('manager-settings')
+
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('Self-Editing')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('.opencode/agents/assistant.md')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('repo-management')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('schedule-management')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('notifications')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('manager-settings')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).not.toContain('Update AGENTS.md')
+
+    expect(result.files.agentsMd?.created).toBe(true)
+    expect(result.files.opencodeJson?.created).toBe(true)
+    expect(result.defaultAgent?.created).toBe(true)
+  })
+
+  it('preserves custom AGENTS.md content on subsequent ensureAssistantMode calls', async () => {
+    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
+
+    const customContent = '# Custom Assistant Workspace\n\nThis is my custom AGENTS.md content.'
+    await writeFile(agentsMdPath, customContent)
+
+    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+
+    const preservedContent = await readFile(agentsMdPath, 'utf8')
+    expect(preservedContent).toBe(customContent)
+    expect(result.files.agentsMd?.created).toBe(false)
+  })
+
+  it('warns when managed updates apply but customized legacy AGENTS.md is preserved', async () => {
+    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
+    const assistantAgentPath = path.join(ws.assistantDir, '.opencode/agents/assistant.md')
+
+    await writeFile(agentsMdPath, `# Assistant Mode Instructions
+
+This folder is the shared Assistant mode workspace for OpenCode Manager.
+
+## Self-Editing Rules
+
+The agent MAY self-edit the following files within this workspace:
+- \`AGENTS.md\` - Assistant instructions, persona, and durable preferences
+`)
+    await writeFile(assistantAgentPath, `---
+description: Default OpenCode Manager assistant workspace agent
+mode: primary
+permission:
+  read: allow
+  edit: allow
+  glob: allow
+  grep: allow
+  list: allow
+  bash: allow
+  external_directory: ask
+---
+
+You are the default Assistant Mode agent for OpenCode Manager.
+
+This workspace is the shared assistant workspace. Help the user manage repos, schedules, notifications, settings, and assistant behavior safely.
+
+Use the workspace skills when relevant:
+- Load repo-management before schedule-management when you need a repo ID.
+- Load schedule-management for schedule jobs and runs.
+- Load notifications when the user should be notified about important events.
+- Load manager-settings when reading or safely updating UI preferences.
+
+Preserve user-customized workspace files unless the user explicitly asks you to change them.
+Ask before destructive operations or changes outside this assistant workspace.
+`)
+
+    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+
+    const preservedAgentsMd = await readFile(agentsMdPath, 'utf8')
+    expect(preservedAgentsMd).toContain('Self-Editing Rules')
+    expect(result.files.agentsMd?.created).toBe(false)
+    expect(result.defaultAgent?.created).toBe(true)
+    expect(result.warnings?.[0]?.code).toBe('assistant-agents-md-preserved')
+    expect(result.warnings?.[0]?.message).toContain('manually delete AGENTS.md')
+  })
+
+  it('overwrites custom AGENTS.md when overwriteAgentsMd is true', async () => {
+    await ensureAssistantMode(mockRepo, { db, apiBaseUrl })
+    const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
+
+    const customContent = '# Custom Assistant Workspace\n\nThis is my custom AGENTS.md content.'
+    await writeFile(agentsMdPath, customContent)
+
+    const result = await ensureAssistantMode(mockRepo, { db, apiBaseUrl }, { overwriteAgentsMd: true })
+
+    const updatedContent = await readFile(agentsMdPath, 'utf8')
+    expect(updatedContent).toContain('Assistant Mode Workspace')
+    expect(updatedContent).toContain('.opencode/agents/assistant.md')
+    expect(updatedContent).not.toBe(customContent)
+    expect(result.files.agentsMd?.created).toBe(true)
   })
 })
 

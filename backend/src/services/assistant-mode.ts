@@ -83,7 +83,7 @@ function hasSameContentHash(existingContent: string | undefined, generatedConten
   return existingContent !== undefined && hashContent(existingContent) === hashContent(generatedContent)
 }
 
-export function buildAssistantAgentsMd(): string {
+function buildLegacyAssistantAgentsMd(): string {
   return `# Assistant Mode Instructions
 
 This folder is the shared Assistant mode workspace for OpenCode Manager.
@@ -133,7 +133,7 @@ This workspace includes a skill at \`.opencode/skills/manager-settings/SKILL.md\
 `
 }
 
-function buildAssistantAgentPrompt(): string {
+function buildLegacyAssistantAgentPrompt(): string {
   return [
     'You are the default Assistant Mode agent for OpenCode Manager.',
     '',
@@ -147,6 +147,95 @@ function buildAssistantAgentPrompt(): string {
     '',
     'Preserve user-customized workspace files unless the user explicitly asks you to change them.',
     'Ask before destructive operations or changes outside this assistant workspace.',
+  ].join('\n')
+}
+
+function buildLegacyAssistantDefaultAgentMd(): string {
+  const prompt = buildLegacyAssistantAgentPrompt()
+  const permission = buildAssistantAgentPermission()
+
+  return `---
+description: Default OpenCode Manager assistant workspace agent
+mode: primary
+permission:
+  read: ${permission.read}
+  edit: ${permission.edit}
+  glob: ${permission.glob}
+  grep: ${permission.grep}
+  list: ${permission.list}
+  bash: ${permission.bash}
+  external_directory: ${permission.external_directory}
+---
+
+${prompt}
+`
+}
+
+function matchesGeneratedAssistantAgentsMd(content: string): boolean {
+  const currentHash = hashContent(buildAssistantAgentsMd())
+  const legacyHash = hashContent(buildLegacyAssistantAgentsMd())
+  const contentHash = hashContent(content)
+  return contentHash === currentHash || contentHash === legacyHash
+}
+
+function matchesGeneratedAssistantDefaultAgentMd(content: string): boolean {
+  const currentHash = hashContent(buildAssistantDefaultAgentMd())
+  const legacyHash = hashContent(buildLegacyAssistantDefaultAgentMd())
+  const contentHash = hashContent(content)
+  return contentHash === currentHash || contentHash === legacyHash
+}
+
+function matchesGeneratedAssistantAgentPrompt(content: unknown): content is string {
+  if (typeof content !== 'string') return false
+  const currentHash = hashContent(buildAssistantAgentPrompt())
+  const legacyHash = hashContent(buildLegacyAssistantAgentPrompt())
+  const contentHash = hashContent(content)
+  return contentHash === currentHash || contentHash === legacyHash
+}
+
+function containsLegacyAssistantAgentsGuidance(content: string): boolean {
+  return content.includes('## Self-Editing Rules') &&
+    content.includes('AGENTS.md') &&
+    content.includes('durable preferences')
+}
+
+export function buildAssistantAgentsMd(): string {
+  return `# Assistant Mode Workspace
+
+This directory is the shared Assistant Mode workspace for OpenCode Manager.
+
+## Directory Contents
+
+- \`opencode.json\` configures this workspace and selects the default assistant agent.
+- \`.opencode/agents/assistant.md\` contains the default assistant agent instructions, behavior, durable preferences, and self-editing rules.
+- \`.opencode/skills/\` contains managed workspace skills for repos, schedules, notifications, and settings.
+- \`.opencode/internal-token\` is managed by OpenCode Manager for internal API authentication.
+
+Assistant-specific instructions belong in \`.opencode/agents/assistant.md\`.
+`
+}
+
+function buildAssistantAgentPrompt(): string {
+  return [
+    'You are the default Assistant Mode agent for OpenCode Manager.',
+    '',
+    'This workspace is the shared assistant workspace for OpenCode Manager. Help the user manage repos, schedules, notifications, settings, and assistant behavior safely.',
+    '',
+    '## Self-Editing Rules',
+    '',
+    'Durable assistant instructions, behavior, and preferences belong in `.opencode/agents/assistant.md`. Edit that file when the user expresses lasting preferences or when you need to refine your behavior.',
+    '',
+    'The workspace directory explanation belongs in `AGENTS.md`. Keep that file focused on describing the directory contents and pointing to managed files.',
+    '',
+    'Preserve user-customized workspace files unless the user explicitly asks you to change them. Ask before making significant, destructive, or out-of-workspace changes.',
+    '',
+    '## Skill Usage',
+    '',
+    'Use the workspace skills when relevant:',
+    '- Load `repo-management` before `schedule-management` when you need a repo ID.',
+    '- Load `schedule-management` for schedule jobs and runs.',
+    '- Load `notifications` when the user should be notified about important events.',
+    '- Load `manager-settings` when reading or safely updating UI preferences.',
   ].join('\n')
 }
 
@@ -611,8 +700,24 @@ export async function ensureAssistantMode(
   const overwriteAgentsMd = options?.overwriteAgentsMd ?? false
   const agentsMdContent = buildAssistantAgentsMd()
   const existingAgentsMdContent = agentsMdExists ? await readFileContent(agentsMdPath) : undefined
-  const agentsMdCreated = !agentsMdExists || (overwriteAgentsMd && !hasSameContentHash(existingAgentsMdContent, agentsMdContent))
-  if (agentsMdCreated) {
+
+  const agentsMdShouldMigrate =
+    existingAgentsMdContent !== undefined &&
+    matchesGeneratedAssistantAgentsMd(existingAgentsMdContent) &&
+    !hasSameContentHash(existingAgentsMdContent, agentsMdContent)
+
+  const agentsMdHasPreservedLegacyGuidance =
+    existingAgentsMdContent !== undefined &&
+    !overwriteAgentsMd &&
+    !matchesGeneratedAssistantAgentsMd(existingAgentsMdContent) &&
+    containsLegacyAssistantAgentsGuidance(existingAgentsMdContent)
+
+  const agentsMdCreated =
+    !agentsMdExists ||
+    overwriteAgentsMd ||
+    agentsMdShouldMigrate
+
+  if (agentsMdCreated && !hasSameContentHash(existingAgentsMdContent, agentsMdContent)) {
     await writeFileContent(agentsMdPath, agentsMdContent)
   }
 
@@ -625,7 +730,10 @@ export async function ensureAssistantMode(
           try {
             const existingContent = await readFileContent(opencodeJsonPath)
             const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
-            return mergeAssistantOpenCodeConfig(existingConfig)
+            const mergedConfig = mergeAssistantOpenCodeConfig(existingConfig)
+            return assistantOpenCodeConfigPromptNeedsMigration(mergedConfig)
+              ? migrateGeneratedAssistantOpenCodePrompt(mergedConfig)
+              : mergedConfig
           } catch {
             return buildAssistantOpenCodeConfig()
           }
@@ -637,9 +745,15 @@ export async function ensureAssistantMode(
     try {
       const existingContent = await readFileContent(opencodeJsonPath)
       const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
-      if (assistantOpenCodeConfigNeedsRepair(existingConfig)) {
-        const mergedConfig = mergeAssistantOpenCodeConfig(existingConfig)
-        await writeFileContent(opencodeJsonPath, JSON.stringify(mergedConfig, null, 2))
+      const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingConfig)
+        ? mergeAssistantOpenCodeConfig(existingConfig)
+        : existingConfig
+      const updatedConfig = assistantOpenCodeConfigPromptNeedsMigration(repairedConfig)
+        ? migrateGeneratedAssistantOpenCodePrompt(repairedConfig)
+        : repairedConfig
+
+      if (updatedConfig !== existingConfig) {
+        await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
         opencodeJsonUpdated = true
       }
     } catch {
@@ -696,15 +810,37 @@ export async function ensureAssistantMode(
 
   const assistantAgentExists = await fileExists(assistantAgentPath)
   const assistantAgentContent = buildAssistantDefaultAgentMd()
-  const assistantAgentCreated = !assistantAgentExists
+  const existingAssistantAgentContent = assistantAgentExists
+    ? await readFileContent(assistantAgentPath)
+    : undefined
+
+  const assistantAgentShouldMigrate =
+    existingAssistantAgentContent !== undefined &&
+    matchesGeneratedAssistantDefaultAgentMd(existingAssistantAgentContent) &&
+    !hasSameContentHash(existingAssistantAgentContent, assistantAgentContent)
+
+  const assistantAgentCreated = !assistantAgentExists || assistantAgentShouldMigrate
+
   if (assistantAgentCreated) {
     await writeFileContent(assistantAgentPath, assistantAgentContent)
   }
+
+  const managedUpdatesApplied = agentsMdCreated || opencodeJsonUpdated || assistantAgentCreated
+  const warnings = managedUpdatesApplied && agentsMdHasPreservedLegacyGuidance
+    ? [
+        {
+          code: 'assistant-agents-md-preserved',
+          path: agentsMdPath,
+          message: 'Some Assistant Mode instruction updates were not applied because AGENTS.md appears to contain customized legacy assistant instructions. To regenerate the default workspace explanation, manually delete AGENTS.md and initialize Assistant Mode again.',
+        },
+      ]
+    : undefined
 
   return {
     repoId: repo.id,
     directory: assistantDir,
     relativePath: ASSISTANT_MODE_RELATIVE_PATH,
+    warnings,
     files: {
       agentsMd: {
         path: agentsMdPath,
@@ -755,6 +891,27 @@ function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInput): boolea
   if (mode !== 'primary' && mode !== 'all') return true
   if ((assistantAgent as { disable?: unknown }).disable === true) return true
   return false
+}
+
+function assistantOpenCodeConfigPromptNeedsMigration(config: OpenCodeConfigInput): boolean {
+  const prompt = (config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME] as { prompt?: unknown } | undefined)?.prompt
+  return matchesGeneratedAssistantAgentPrompt(prompt) && prompt !== buildAssistantAgentPrompt()
+}
+
+function migrateGeneratedAssistantOpenCodePrompt(config: OpenCodeConfigInput): OpenCodeConfigInput {
+  const existingAssistantAgent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+  if (typeof existingAssistantAgent !== 'object' || existingAssistantAgent === null) return config
+
+  return {
+    ...config,
+    agent: {
+      ...(config.agent ?? {}),
+      [ASSISTANT_DEFAULT_AGENT_NAME]: {
+        ...existingAssistantAgent,
+        prompt: buildAssistantAgentPrompt(),
+      },
+    },
+  }
 }
 
 function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInput): OpenCodeConfigInput {
