@@ -13,6 +13,7 @@ import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { buildMoreItems } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { getRepoDisplayName } from '@/lib/utils'
+import { isAssistantPath } from '@/lib/navigation'
 import type { components } from '@/api/opencode-types'
 
 type CommandType = components['schemas']['Command']
@@ -35,7 +36,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
-  const isAssistantRoute = /^\/repos\/\d+\/assistant$/.test(location.pathname)
+  const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && new URLSearchParams(location.search).get('assistant') === '1'
   const { filterCommands } = useCommands(isSessionDetail ? OPENCODE_API_ENDPOINT : null)
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)

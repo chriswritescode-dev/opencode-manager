@@ -1,5 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus } from 'lucide-react'
+import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
 export interface MoreDrawerItem {
   key: string
@@ -24,14 +25,12 @@ export interface NavModel {
   items: MoreDrawerItem[]
 }
 
-function getAssistantNavItem(pathname: string, variant: NavPrimaryCta['variant'] = 'secondary'): NavPrimaryCta {
-  const repoMatch = /^\/repos\/(\d+)/.exec(pathname)
-
+function getAssistantNavItem(_pathname: string, variant: NavPrimaryCta['variant'] = 'secondary'): NavPrimaryCta {
   return {
     key: 'assistant',
     label: 'Assistant',
     icon: Bot,
-    to: repoMatch ? `/repos/${repoMatch[1]}/assistant` : '/assistant',
+    to: getAssistantPath(),
     variant,
   }
 }
@@ -89,15 +88,13 @@ export function buildNavModel(pathname: string): NavModel {
     }
   }
 
-  const assistantMatch = /^\/repos\/(\d+)\/assistant$/.exec(pathname)
-  if (assistantMatch) {
-    const id = assistantMatch[1]
+  if (isAssistantPath(pathname)) {
     const items: MoreDrawerItem[] = [
       { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${id}/schedules` },
+      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: '/repos/0/schedules' },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]

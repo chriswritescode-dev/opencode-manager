@@ -134,7 +134,7 @@ describe('RepoQuickSwitchSheet', () => {
     expect(handleClose).toHaveBeenCalled()
   })
 
-  it('navigates directly to assistant when mobileTabAction is assistant', async () => {
+  it('navigates to assistant when mobileTabAction is assistant', async () => {
     vi.mocked(listRepos).mockResolvedValue([
       {
         id: 1,
@@ -172,11 +172,53 @@ describe('RepoQuickSwitchSheet', () => {
 
     fireEvent.click(screen.getByText('repo1'))
 
-    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1/assistant')
+    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
     expect(handleClose).not.toHaveBeenCalled()
   })
 
-  it('navigates from assistant to repo detail when clicking active repo', async () => {
+  it('navigates from assistant to repo detail when clicking repo on canonical assistant route', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    const handleClose = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/assistant?mobileTab=repos']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('repo1'))
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/repos/1')
+    expect(handleClose).not.toHaveBeenCalled()
+  })
+
+  it('navigates from legacy assistant route to repo detail when clicking repo', async () => {
     vi.mocked(listRepos).mockResolvedValue([
       {
         id: 1,
@@ -216,6 +258,106 @@ describe('RepoQuickSwitchSheet', () => {
 
     expect(screen.getByTestId('location')).toHaveTextContent('/repos/1')
     expect(handleClose).not.toHaveBeenCalled()
+  })
+
+  it('does not mark any repo active on /assistant', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 2,
+        repoUrl: 'https://github.com/test/repo2.git',
+        localPath: '/path/to/repo2',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    const handleClose = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/assistant?mobileTab=repos']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+      expect(screen.getByText('repo2')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('button', { current: 'page' })).toBeNull()
+  })
+
+  it('does not mark any repo active on legacy /repos/1/assistant', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 2,
+        repoUrl: 'https://github.com/test/repo2.git',
+        localPath: '/path/to/repo2',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    const handleClose = vi.fn()
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={['/repos/1/assistant?mobileTab=repos']}>
+          <Routes>
+            <Route
+              path="*"
+              element={
+                <>
+                  <RepoQuickSwitchSheet isOpen onClose={handleClose} />
+                  <LocationSpy />
+                </>
+              }
+            />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+      expect(screen.getByText('repo2')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByRole('button', { current: 'page' })).toBeNull()
   })
 
   it('switches repos from the mobile repos sheet without navigating back to the previous repo', async () => {

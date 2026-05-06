@@ -8,6 +8,7 @@ import { cn, getRepoDisplayName } from '@/lib/utils'
 import { listRepos } from '@/api/repos'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Check, Plus } from 'lucide-react'
+import { isAssistantPath, getAssistantPath } from '@/lib/navigation'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -20,10 +21,13 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   const [searchQuery, setSearchQuery] = useState('')
   const [addRepoOpen, setAddRepoOpen] = useState(false)
 
+  const isAssistantRoute = useMemo(() => isAssistantPath(location.pathname), [location.pathname])
+
   const activeRepoId = useMemo(() => {
+    if (isAssistantRoute) return null
     const match = location.pathname.match(/^\/repos\/(\d+)/)
     return match ? Number(match[1]) : null
-  }, [location.pathname])
+  }, [location.pathname, isAssistantRoute])
 
   const { data: repos, isLoading } = useQuery({
     queryKey: ['repos'],
@@ -52,18 +56,18 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
 
   const handleClick = (id: number) => {
     const pendingAction = new URLSearchParams(location.search).get('mobileTabAction')
-    if (pendingAction === 'assistant') {
-      navigateAndClose(`/repos/${id}/assistant`)
+
+    if (isAssistantRoute) {
+      navigateAndClose(`/repos/${id}`, { replace: true })
       return
     }
 
-    const isAssistantRoute = location.pathname === `/repos/${id}/assistant`
-    if (id === activeRepoId) {
-      if (isAssistantRoute) {
-        navigateAndClose(`/repos/${id}`, { replace: true })
-        return
-      }
+    if (pendingAction === 'assistant') {
+      navigateAndClose(getAssistantPath())
+      return
+    }
 
+    if (id === activeRepoId) {
       onClose()
       return
     }

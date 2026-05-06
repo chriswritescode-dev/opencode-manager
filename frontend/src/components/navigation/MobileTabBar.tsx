@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar, useScheduleTab, type ScheduleTabKey } from '@/hooks/useMobileTabBar'
 import { useUIState } from '@/stores/uiStateStore'
+import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
 interface TabDef {
   key: string
@@ -37,11 +38,15 @@ interface MobileTabRouteState {
 }
 
 function getMobileTabRouteState(pathname: string): MobileTabRouteState {
+  if (isAssistantPath(pathname)) {
+    return { mode: 'global', isInsideRepo: false, repoId: null }
+  }
+
   const repoMatch = pathname.match(/^\/repos\/(\d+)(?:\/([^/]+))?/)
   const repoId = repoMatch?.[1] ?? null
   const repoSection = repoMatch?.[2]
 
-  if (pathname === '/' || pathname === '/schedules' || pathname === '/assistant') {
+  if (pathname === '/' || pathname === '/schedules') {
     return { mode: 'global', isInsideRepo: false, repoId: null }
   }
 
@@ -51,7 +56,6 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
 
   switch (repoSection) {
     case undefined:
-    case 'assistant':
       return { mode: 'global', isInsideRepo: true, repoId }
     case 'schedules':
       return { mode: 'schedule', isInsideRepo: true, repoId }
@@ -77,14 +81,8 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
   }
 
   const handleAssistantClick = () => {
-    if (repoId) {
-      close()
-      navigate(`/repos/${repoId}/assistant`)
-      return
-    }
-
     close()
-    navigate('/assistant')
+    navigate(getAssistantPath())
   }
 
   return [
@@ -107,7 +105,7 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
       label: 'Assistant',
       icon: Bot,
       onClick: handleAssistantClick,
-      active: isInsideRepo && pathname === `/repos/${repoId}/assistant` && !openSheet,
+      active: isAssistantPath(pathname) && !openSheet,
     },
     {
       key: 'schedules',

@@ -67,7 +67,7 @@ describe('workspaceFromAssistant', () => {
       name: 'Assistant',
       subtitle: 'Assistant Workspace',
       fullPath: '/abs/assistant',
-      backHref: '/repos/0/assistant',
+      backHref: '/assistant',
     })
   })
 })

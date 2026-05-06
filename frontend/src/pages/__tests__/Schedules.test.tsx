@@ -110,7 +110,7 @@ describe('Schedules', () => {
           name: 'Assistant',
           subtitle: 'Assistant Workspace',
           fullPath: '/abs/assistant',
-          backHref: '/repos/0/assistant',
+          backHref: '/assistant',
         },
         isLoading: false,
         isError: false,
@@ -134,7 +134,7 @@ describe('Schedules', () => {
           name: 'Assistant',
           subtitle: 'Assistant Workspace',
           fullPath: '/abs/assistant',
-          backHref: '/repos/0/assistant',
+          backHref: '/assistant',
         },
         isLoading: false,
         isError: false,
@@ -159,7 +159,7 @@ describe('Schedules', () => {
           name: 'Assistant',
           subtitle: 'Assistant Workspace',
           fullPath: '/abs/assistant',
-          backHref: '/repos/0/assistant',
+          backHref: '/assistant',
         },
         isLoading: false,
         isError: false,
@@ -174,7 +174,7 @@ describe('Schedules', () => {
       const backButton = screen.getAllByRole('button')[0]
       expect(backButton).toBeInTheDocument()
       fireEvent.click(backButton)
-      expect(mockNavigate).toHaveBeenCalledWith('/repos/0/assistant')
+      expect(mockNavigate).toHaveBeenCalledWith('/assistant')
     })
 
     it('calls runMutation with repoId=0 when Run Now is clicked', () => {
@@ -186,7 +186,7 @@ describe('Schedules', () => {
           name: 'Assistant',
           subtitle: 'Assistant Workspace',
           fullPath: '/abs/assistant',
-          backHref: '/repos/0/assistant',
+          backHref: '/assistant',
         },
         isLoading: false,
         isError: false,

@@ -240,4 +240,14 @@ describe('MoreDrawer', () => {
     expect(screen.queryByText('wrong-repo')).not.toBeInTheDocument()
   })
 
+  it('shows Assistant instead of the source repo on canonical /assistant route', () => {
+    mockAuth()
+    mockServerHealth()
+    const handleClose = vi.fn()
+    renderMoreDrawer({ initialEntry: '/assistant', routePath: '/assistant', onClose: handleClose })
+
+    expect(screen.getByText('Assistant')).toBeInTheDocument()
+    expect(screen.queryByText('wrong-repo')).not.toBeInTheDocument()
+  })
+
 })

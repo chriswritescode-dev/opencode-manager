@@ -1,6 +1,7 @@
 import type { Repo } from '@/api/types'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
 import { getRepoDisplayName } from '@/lib/utils'
+import { getAssistantPath } from '@/lib/navigation'
 
 export interface Workspace {
   repoId: number
@@ -35,6 +36,6 @@ export function workspaceFromAssistant(status: AssistantModeStatus): Workspace {
     name: 'Assistant',
     subtitle: 'Assistant Workspace',
     fullPath: status.directory,
-    backHref: `/repos/${ASSISTANT_REPO_ID}/assistant`,
+    backHref: getAssistantPath(),
   }
 }

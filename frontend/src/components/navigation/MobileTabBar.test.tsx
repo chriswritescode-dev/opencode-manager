@@ -67,7 +67,7 @@ describe('MobileTabBar', () => {
     const queryClient = new QueryClient()
     render(
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={['/repos/123/assistant?view=sessions']}>
+        <MemoryRouter initialEntries={['/assistant?view=sessions']}>
           <MobileTabBar />
         </MemoryRouter>
       </QueryClientProvider>,
@@ -77,7 +77,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Schedules')).toBeInTheDocument()
   })
 
-  it('navigates to assistant route when repo id is present', async () => {
+  it('navigates to /assistant when assistant is clicked from repo context', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -96,7 +96,7 @@ describe('MobileTabBar', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/repos/123/assistant')
+    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
   })
 
   it('navigates to assistant route when assistant is clicked without repo id', async () => {

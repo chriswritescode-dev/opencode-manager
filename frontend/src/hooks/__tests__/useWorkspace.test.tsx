@@ -54,6 +54,7 @@ describe('useWorkspace', () => {
       expect(result.current.workspace?.kind).toBe('assistant')
       expect(result.current.workspace?.fullPath).toBe('/abs/assistant')
       expect(result.current.workspace?.repoId).toBe(0)
+      expect(result.current.workspace?.backHref).toBe('/assistant')
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isError).toBe(false)
     })
