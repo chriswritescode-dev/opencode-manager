@@ -227,7 +227,7 @@ export function SessionDetail() {
       const maxScrollTop = container.scrollHeight - container.clientHeight
       const isAtBottom = maxScrollTop - currentScrollTop < 24
       const isScrollingDown = currentScrollTop > previousScrollTop + 4
-      const isScrollingUp = currentScrollTop < previousScrollTop - 4
+      const isScrollingUp = currentScrollTop < previousScrollTop - 50
 
       if (isAtBottom || isScrollingDown) {
         setIsHeaderVisible(true)
