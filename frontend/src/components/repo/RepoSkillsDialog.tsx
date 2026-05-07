@@ -14,7 +14,7 @@ type RepoSkillsDialogBaseProps = {
 }
 
 type RepoSkillsDialogProps = RepoSkillsDialogBaseProps & (
-  | { sessionId: string; opcodeUrl: string; directory: string; onSkillLoaded?: (skill: SkillFileInfo) => void }
+  | { sessionId: string; opcodeUrl: string; directory?: string; onSkillLoaded?: (skill: SkillFileInfo) => void }
   | { sessionId?: undefined; opcodeUrl?: undefined; directory?: undefined; onSkillLoaded?: undefined }
 )
 
@@ -28,9 +28,9 @@ export function RepoSkillsDialog({
   onSkillLoaded,
 }: RepoSkillsDialogProps) {
   const { isLoading, data, error } = useQuery({
-    queryKey: ['settings', 'skills', repoId],
-    queryFn: () => settingsApi.listManagedSkills(repoId),
-    enabled: open && !!repoId,
+    queryKey: directory ? ['settings', 'skills', 'directory', directory] : ['settings', 'skills', repoId],
+    queryFn: () => settingsApi.listManagedSkills(repoId, directory),
+    enabled: open && (!!repoId || !!directory),
     staleTime: 30000,
   })
 
@@ -64,7 +64,7 @@ export function RepoSkillsDialog({
     onOpenChange(false)
   }
 
-  if (!repoId) {
+  if (!repoId && !sessionId) {
     return null
   }
 

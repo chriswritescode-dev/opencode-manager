@@ -118,14 +118,14 @@ export function SessionDetail() {
   const { data: assistantMode, isLoading: assistantModeLoading } = useQuery({
     queryKey: ["repo", repoId, "assistant-mode"],
     queryFn: () => initializeAssistantMode(repoId),
-    enabled: isAssistantSession && !!repoId,
+    enabled: isAssistantSession,
   });
 
   useRepoActivity(repoId, Boolean(repo));
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = isAssistantSession ? assistantMode?.directory : repo?.fullPath;
+  const repoDirectory = isAssistantSession ? (assistantMode?.directory || repo?.fullPath) : repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
@@ -438,7 +438,7 @@ export function SessionDetail() {
     return <Navigate to="/" replace />;
   }
 
-  if (!repo) {
+  if (!repo && !isAssistantSession) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
@@ -449,7 +449,9 @@ export function SessionDetail() {
     );
   }
 
-  const workspaceDisplayName = isAssistantSession ? 'Assistant' : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
+  const workspaceDisplayName = isAssistantSession || !repo
+    ? 'Assistant'
+    : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
   const sessionBackPath = getSessionListPath(repoId, isAssistantSession);
 
   return (
@@ -644,7 +646,7 @@ export function SessionDetail() {
         directory={repoDirectory}
       />
 
-      {repoDirectory && opcodeUrl && sessionId && (
+      {opcodeUrl && sessionId && (
         <RepoSkillsDialog
           open={skillsDialogOpen}
           onOpenChange={setSkillsDialogOpen}
@@ -666,7 +668,7 @@ export function SessionDetail() {
         repoId={repoId}
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
-        currentBranch={repo.currentBranch || repo.branch || "main"}
+        currentBranch={repo?.currentBranch || repo?.branch || "main"}
         repoName={workspaceDisplayName}
       />
 

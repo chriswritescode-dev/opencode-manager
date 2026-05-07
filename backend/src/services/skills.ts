@@ -128,9 +128,16 @@ function classifySkillLocation(
   location: string,
   globalPrefix: string,
   repos: Repo[],
+  customDirectory?: string,
 ): { scope: SkillScope; repo?: Repo } | null {
   if (location.startsWith(globalPrefix + path.sep)) {
     return { scope: 'global' }
+  }
+  if (customDirectory) {
+    const projectPrefix = path.join(customDirectory, '.opencode', 'skills')
+    if (location.startsWith(projectPrefix + path.sep)) {
+      return { scope: 'project' }
+    }
   }
   for (const repo of repos) {
     const projectPrefix = getProjectSkillsPath(repo)
@@ -160,33 +167,45 @@ export async function listManagedSkills(
   db: Database,
   openCodeClient: OpenCodeClient,
   repoId?: number,
+  directory?: string,
 ): Promise<SkillFileInfo[]> {
   const globalPrefix = getGlobalSkillsPath()
   const allRepos = listRepos(db)
 
-  const targetRepos = repoId
-    ? allRepos.filter(r => r.id === repoId)
-    : allRepos
-
-  if (repoId && targetRepos.length === 0) {
-    throw new Error(`Repository with id ${repoId} not found`)
-  }
-
-  const directories = targetRepos.length > 0
-    ? targetRepos.map(r => r.fullPath)
-    : [getWorkspacePath()]
-
   const seenLocations = new Set<string>()
   const result: SkillFileInfo[] = []
 
-  for (const directory of directories) {
+  if (directory) {
     const skills = await fetchOpenCodeSkills(openCodeClient, directory)
     for (const skill of skills) {
       if (seenLocations.has(skill.location)) continue
-      const classification = classifySkillLocation(skill.location, globalPrefix, allRepos)
+      const classification = classifySkillLocation(skill.location, globalPrefix, allRepos, directory)
       if (!classification) continue
       seenLocations.add(skill.location)
       result.push(toSkillFileInfo(skill, classification))
+    }
+  } else {
+    const targetRepos = repoId
+      ? allRepos.filter(r => r.id === repoId)
+      : allRepos
+
+    if (repoId && targetRepos.length === 0) {
+      throw new Error(`Repository with id ${repoId} not found`)
+    }
+
+    const directories = targetRepos.length > 0
+      ? targetRepos.map(r => r.fullPath)
+      : [getWorkspacePath()]
+
+    for (const dir of directories) {
+      const skills = await fetchOpenCodeSkills(openCodeClient, dir)
+      for (const skill of skills) {
+        if (seenLocations.has(skill.location)) continue
+        const classification = classifySkillLocation(skill.location, globalPrefix, allRepos)
+        if (!classification) continue
+        seenLocations.add(skill.location)
+        result.push(toSkillFileInfo(skill, classification))
+      }
     }
   }
 

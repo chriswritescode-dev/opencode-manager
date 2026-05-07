@@ -229,9 +229,12 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/health/version`)
   },
 
-  listManagedSkills: async (repoId?: number): Promise<SkillFileInfo[]> => {
-    const params = repoId ? `?repoId=${repoId}` : ''
-    return fetchWrapper(`${API_BASE_URL}/api/settings/skills${params}`)
+  listManagedSkills: async (repoId?: number, directory?: string): Promise<SkillFileInfo[]> => {
+    const searchParams = new URLSearchParams()
+    if (repoId) searchParams.set('repoId', String(repoId))
+    if (directory) searchParams.set('directory', directory)
+    const query = searchParams.toString() ? `?${searchParams.toString()}` : ''
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills${query}`)
   },
 
   getSkill: async (name: string, scope: SkillScope, repoId?: number): Promise<SkillFileInfo> => {
