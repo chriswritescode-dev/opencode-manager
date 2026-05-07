@@ -103,6 +103,8 @@ export function ModelQuickSelect({
     toggleFavorite(model)
   }
 
+  const currentModelDisplayName = model ? getDisplayName(model.providerID, model.modelID) : ''
+  const currentProviderName = model ? getProviderName(model.providerID) : ''
   const isCurrentFavorite = model
     ? favoriteModels.some((favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID)
     : false
@@ -116,13 +118,23 @@ export function ModelQuickSelect({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
         {model && (
-          <DropdownMenuItem
-            onClick={handleCurrentFavoriteToggle}
-            className="flex items-center justify-between"
-          >
-            <span>{isCurrentFavorite ? 'Remove from favorites' : 'Add to favorites'}</span>
-            <Star className={`h-4 w-4 ${isCurrentFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem className="flex items-center justify-between font-medium">
+              <span className="truncate">
+                {duplicateDisplayNames.has(currentModelDisplayName)
+                  ? `${currentProviderName}/${currentModelDisplayName}`
+                  : currentModelDisplayName}
+              </span>
+              <Check className="h-4 w-4" />
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={handleCurrentFavoriteToggle}
+              className="flex items-center justify-between"
+            >
+              <span>{isCurrentFavorite ? 'Remove from favorites' : 'Add to favorites'}</span>
+              <Star className={`h-4 w-4 ${isCurrentFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
+            </DropdownMenuItem>
+          </>
         )}
 
         {hasVariants && (
