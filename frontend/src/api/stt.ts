@@ -42,9 +42,12 @@ export const sttApi = {
   ): Promise<STTTranscribeResponse> => {
     const formData = new FormData()
 
-    const extension = audioBlob.type.includes('webm') ? 'webm' :
-                      audioBlob.type.includes('ogg') ? 'ogg' :
-                      audioBlob.type.includes('mp4') ? 'm4a' : 'webm'
+    const type = audioBlob.type
+    const extension =
+      type.includes('wav') ? 'wav' :
+      type.includes('webm') ? 'webm' :
+      type.includes('ogg') ? 'ogg' :
+      type.includes('mp4') ? 'm4a' : 'wav'
     formData.append('audio', audioBlob, `recording.${extension}`)
 
     const urlObj = new URL(`${API_BASE_URL}/api/stt/transcribe`, window.location.origin)

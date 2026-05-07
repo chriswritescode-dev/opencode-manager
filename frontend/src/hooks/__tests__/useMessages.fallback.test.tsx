@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useMessages } from '../useOpenCode'
 
@@ -43,10 +43,8 @@ describe('useMessages fallback poll', () => {
     expect(mocks.listMessages).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(5000)
-    
-    await waitFor(() => {
-      expect(mocks.listMessages).toHaveBeenCalledTimes(2)
-    })
+
+    expect(mocks.listMessages).toHaveBeenCalledTimes(2)
 
     vi.useRealTimers()
   })

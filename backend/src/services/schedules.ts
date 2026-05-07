@@ -38,6 +38,7 @@ import type { OpenCodeClient } from './opencode/client'
 import { sseAggregator, type SSEEvent } from './sse-aggregator'
 import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
+import { getAssistantModeDirectory } from './assistant-mode'
 
 class ScheduleServiceError extends Error {
   status: number
@@ -1055,6 +1056,24 @@ export class ScheduleService {
   }
 
   private assertRepo(repoId: number) {
+    if (repoId === 0) {
+      const assistantDir = getAssistantModeDirectory()
+      return {
+        id: 0,
+        repoUrl: undefined,
+        localPath: 'assistant',
+        fullPath: assistantDir,
+        sourcePath: undefined,
+        branch: undefined,
+        currentBranch: undefined,
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: Date.now(),
+        lastAccessedAt: Date.now(),
+        isWorktree: false,
+        isLocal: true,
+      }
+    }
     const repo = getRepoById(this.db, repoId)
     if (!repo) {
       throw new ScheduleServiceError('Repo not found', 404)

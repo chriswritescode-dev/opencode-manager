@@ -1,4 +1,5 @@
 import path from 'path'
+import { createHash } from 'node:crypto'
 import type { Repo } from '@opencode-manager/shared/types'
 import type {
   AssistantModeStatus,
@@ -26,7 +27,11 @@ const ASSISTANT_SKILLS_DIR = 'skills'
 const ASSISTANT_SCHEDULES_SKILL_DIR = 'schedule-management'
 const ASSISTANT_NOTIFICATIONS_SKILL_DIR = 'notifications'
 const ASSISTANT_SETTINGS_SKILL_DIR = 'manager-settings'
+const ASSISTANT_REPOS_SKILL_DIR = 'repo-management'
 const ASSISTANT_SKILL_FILENAME = 'SKILL.md'
+const ASSISTANT_AGENTS_DIR = 'agents'
+const ASSISTANT_DEFAULT_AGENT_NAME = 'assistant'
+const ASSISTANT_DEFAULT_AGENT_FILENAME = `${ASSISTANT_DEFAULT_AGENT_NAME}.md`
 
 export function getAssistantModeDirectory(): string {
   const reposPath = getReposPath()
@@ -57,7 +62,28 @@ function getSettingsSkillPath(assistantDir: string): string {
   return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SETTINGS_SKILL_DIR, ASSISTANT_SKILL_FILENAME)
 }
 
-export function buildAssistantAgentsMd(): string {
+function getReposSkillPath(assistantDir: string): string {
+  return path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_REPOS_SKILL_DIR, ASSISTANT_SKILL_FILENAME)
+}
+
+function getAssistantDefaultAgentPath(assistantDir: string): string {
+  return path.join(
+    assistantDir,
+    ASSISTANT_OPENCODE_DIR,
+    ASSISTANT_AGENTS_DIR,
+    ASSISTANT_DEFAULT_AGENT_FILENAME,
+  )
+}
+
+function hashContent(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+function hasSameContentHash(existingContent: string | undefined, generatedContent: string): boolean {
+  return existingContent !== undefined && hashContent(existingContent) === hashContent(generatedContent)
+}
+
+function buildLegacyAssistantAgentsMd(): string {
   return `# Assistant Mode Instructions
 
 This folder is the shared Assistant mode workspace for OpenCode Manager.
@@ -89,9 +115,13 @@ The agent MAY self-edit the following files within this workspace:
 3. Maintain version control awareness
 4. Document significant changes in commit messages
 
+## Repo Management
+
+This workspace includes a skill at \`.opencode/skills/repo-management/SKILL.md\` for listing repos available to OpenCode Manager via the internal HTTP API. Load it before the schedule-management skill when you don't know the repo ID.
+
 ## Schedule Management
 
-This workspace ships a workspace-scoped skill at \`.opencode/skills/schedule-management/SKILL.md\` that documents how to list, create, update, delete, run, inspect, and cancel schedule jobs and runs across any repo via the internal HTTP API. Load it whenever the user asks about schedules.
+This workspace ships with a workspace-scoped skill at \`.opencode/skills/schedule-management/SKILL.md\` that documents how to list, create, update, delete, run, inspect, and cancel schedule jobs and runs across any repo via the internal HTTP API. Load it whenever the user asks about schedules.
 
 ## Notifications
 
@@ -100,6 +130,154 @@ This workspace includes a skill at \`.opencode/skills/notifications/SKILL.md\` f
 ## Settings Management
 
 This workspace includes a skill at \`.opencode/skills/manager-settings/SKILL.md\` for reading and safely modifying user preferences via the internal HTTP API. Load it when you need to inspect or update UI settings.
+`
+}
+
+function buildLegacyAssistantAgentPrompt(): string {
+  return [
+    'You are the default Assistant Mode agent for OpenCode Manager.',
+    '',
+    'This workspace is the shared assistant workspace. Help the user manage repos, schedules, notifications, settings, and assistant behavior safely.',
+    '',
+    'Use the workspace skills when relevant:',
+    '- Load repo-management before schedule-management when you need a repo ID.',
+    '- Load schedule-management for schedule jobs and runs.',
+    '- Load notifications when the user should be notified about important events.',
+    '- Load manager-settings when reading or safely updating UI preferences.',
+    '',
+    'Preserve user-customized workspace files unless the user explicitly asks you to change them.',
+    'Ask before destructive operations or changes outside this assistant workspace.',
+  ].join('\n')
+}
+
+function buildLegacyAssistantDefaultAgentMd(): string {
+  const prompt = buildLegacyAssistantAgentPrompt()
+  const permission = buildAssistantAgentPermission()
+
+  return `---
+description: Default OpenCode Manager assistant workspace agent
+mode: primary
+permission:
+  read: ${permission.read}
+  edit: ${permission.edit}
+  glob: ${permission.glob}
+  grep: ${permission.grep}
+  list: ${permission.list}
+  bash: ${permission.bash}
+  external_directory: ${permission.external_directory}
+---
+
+${prompt}
+`
+}
+
+function matchesGeneratedAssistantAgentsMd(content: string): boolean {
+  const currentHash = hashContent(buildAssistantAgentsMd())
+  const legacyHash = hashContent(buildLegacyAssistantAgentsMd())
+  const contentHash = hashContent(content)
+  return contentHash === currentHash || contentHash === legacyHash
+}
+
+function matchesGeneratedAssistantDefaultAgentMd(content: string): boolean {
+  const currentHash = hashContent(buildAssistantDefaultAgentMd())
+  const legacyHash = hashContent(buildLegacyAssistantDefaultAgentMd())
+  const contentHash = hashContent(content)
+  return contentHash === currentHash || contentHash === legacyHash
+}
+
+function matchesGeneratedAssistantAgentPrompt(content: unknown): content is string {
+  if (typeof content !== 'string') return false
+  const currentHash = hashContent(buildAssistantAgentPrompt())
+  const legacyHash = hashContent(buildLegacyAssistantAgentPrompt())
+  const contentHash = hashContent(content)
+  return contentHash === currentHash || contentHash === legacyHash
+}
+
+function containsLegacyAssistantAgentsGuidance(content: string): boolean {
+  return content.includes('## Self-Editing Rules') &&
+    content.includes('AGENTS.md') &&
+    content.includes('durable preferences')
+}
+
+export function buildAssistantAgentsMd(): string {
+  return `# Assistant Mode Workspace
+
+This directory is the shared Assistant Mode workspace for OpenCode Manager.
+
+## Directory Contents
+
+- \`opencode.json\` configures this workspace and selects the default assistant agent.
+- \`.opencode/agents/assistant.md\` contains the default assistant agent instructions, behavior, durable preferences, and self-editing rules.
+- \`.opencode/skills/\` contains managed workspace skills for repos, schedules, notifications, and settings.
+- \`.opencode/internal-token\` is managed by OpenCode Manager for internal API authentication.
+
+Assistant-specific instructions belong in \`.opencode/agents/assistant.md\`.
+`
+}
+
+function buildAssistantAgentPrompt(): string {
+  return [
+    'You are the default Assistant Mode agent for OpenCode Manager.',
+    '',
+    'This workspace is the shared assistant workspace for OpenCode Manager. Help the user manage repos, schedules, notifications, settings, and assistant behavior safely.',
+    '',
+    '## Self-Editing Rules',
+    '',
+    'Durable assistant instructions, behavior, and preferences belong in `.opencode/agents/assistant.md`. Edit that file when the user expresses lasting preferences or when you need to refine your behavior.',
+    '',
+    'The workspace directory explanation belongs in `AGENTS.md`. Keep that file focused on describing the directory contents and pointing to managed files.',
+    '',
+    'Preserve user-customized workspace files unless the user explicitly asks you to change them. Ask before making significant, destructive, or out-of-workspace changes.',
+    '',
+    '## Skill Usage',
+    '',
+    'Use the workspace skills when relevant:',
+    '- Load `repo-management` before `schedule-management` when you need a repo ID.',
+    '- Load `schedule-management` for schedule jobs and runs.',
+    '- Load `notifications` when the user should be notified about important events.',
+    '- Load `manager-settings` when reading or safely updating UI preferences.',
+  ].join('\n')
+}
+
+function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; bash: 'allow'; external_directory: 'ask' } {
+  return {
+    read: 'allow',
+    edit: 'allow',
+    glob: 'allow',
+    grep: 'allow',
+    list: 'allow',
+    bash: 'allow',
+    external_directory: 'ask',
+  }
+}
+
+export function buildAssistantDefaultAgentConfig() {
+  return {
+    description: 'Default OpenCode Manager assistant workspace agent',
+    mode: 'primary',
+    prompt: buildAssistantAgentPrompt(),
+    permission: buildAssistantAgentPermission(),
+  }
+}
+
+export function buildAssistantDefaultAgentMd(): string {
+  const prompt = buildAssistantAgentPrompt()
+  const permission = buildAssistantAgentPermission()
+
+  return `---
+description: Default OpenCode Manager assistant workspace agent
+mode: primary
+permission:
+  read: ${permission.read}
+  edit: ${permission.edit}
+  glob: ${permission.glob}
+  grep: ${permission.grep}
+  list: ${permission.list}
+  bash: ${permission.bash}
+  external_directory: ${permission.external_directory}
+---
+
+${prompt}
 `
 }
 
@@ -412,19 +590,82 @@ Returns the updated settings object with the same structure as GET.
 `
 }
 
+export function buildReposSkill(baseUrl: string): string {
+  const internalBaseUrl = toLocalhostInternalBaseUrl(baseUrl)
+
+  return `---
+name: repo-management
+description: List repos available to OpenCode Manager via the internal HTTP API
+---
+
+## When to Load
+
+Load this skill when you need to discover repos, look up repo IDs, or need to reference repo information before managing schedules. Load it before the schedule-management skill if you don't know the repo ID.
+
+## Authentication
+
+All API calls require a bearer token. Read the token from \`.opencode/internal-token\` (relative to the assistant workspace cwd) and pass it as:
+
+\`\`\`
+Authorization: Bearer <token>
+\`\`\`
+
+## Base URL
+
+\`${internalBaseUrl}\`
+
+## Endpoints
+
+### GET /repos
+
+List all repos available to OpenCode Manager. The repos are returned in the order configured by the user (respecting \`repoOrder\` preference).
+
+**Example:**
+\`\`\`bash
+curl -H "Authorization: Bearer <token>" "${internalBaseUrl}/repos"
+\`\`\`
+
+**Response:**
+\`\`\`ts
+{
+  repos: Array<{
+    id: number          // Use as :repoId in other endpoints
+    repoUrl?: string   // Git remote URL if cloned
+    localPath: string  // Relative path under repos root
+    fullPath: string   // Absolute local path
+    sourcePath?: string // Source path for worktrees
+    branch?: string    // Current branch (not always available)
+    defaultBranch: string
+    cloneStatus: 'cloning' | 'ready' | 'error'
+    clonedAt: number   // Unix timestamp
+    lastPulled?: number
+    lastAccessedAt?: number
+    openCodeConfigName?: string
+    isWorktree?: boolean
+    isLocal?: boolean
+  }>
+}
+\`\`\`
+
+## Notes
+
+- Use \`id\` as \`:repoId\` in other API endpoints (e.g., \`/repos/:repoId/schedules\`)
+- \`fullPath\` is the absolute local path - use it for file operations
+- This endpoint is read-only - there are no POST/PUT/DELETE operations for repos
+- \`currentBranch\` is not included in the response - it requires git operations to determine
+- Repo order is controlled by the \`repoOrder\` preference in settings
+`
+}
+
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
   const config: OpenCodeConfigInput = {
+    default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
     instructions: [
       'AGENTS.md',
     ],
-    permission: {
-      read: 'allow',
-      edit: 'allow',
-      glob: 'allow',
-      grep: 'allow',
-      list: 'allow',
-      bash: 'allow',
-      external_directory: 'ask',
+    permission: buildAssistantAgentPermission(),
+    agent: {
+      [ASSISTANT_DEFAULT_AGENT_NAME]: buildAssistantDefaultAgentConfig(),
     },
   }
 
@@ -449,29 +690,85 @@ export async function ensureAssistantMode(
   const opencodeJsonPath = path.join(assistantDir, ASSISTANT_OPENCODE_CONFIG_FILENAME)
   const tokenPath = getInternalTokenPath(assistantDir)
   const skillPath = getSchedulesSkillPath(assistantDir)
+  const assistantAgentPath = getAssistantDefaultAgentPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
   const opencodeJsonExists = await fileExists(opencodeJsonPath)
 
-  const overwriteAgentsMd = options?.overwriteAgentsMd ?? false
   const overwriteOpenCodeConfig = options?.overwriteOpenCodeConfig ?? false
 
-  if (!agentsMdExists || overwriteAgentsMd) {
-    const content = buildAssistantAgentsMd()
-    await writeFileContent(agentsMdPath, content)
+  const overwriteAgentsMd = options?.overwriteAgentsMd ?? false
+  const agentsMdContent = buildAssistantAgentsMd()
+  const existingAgentsMdContent = agentsMdExists ? await readFileContent(agentsMdPath) : undefined
+
+  const agentsMdShouldMigrate =
+    existingAgentsMdContent !== undefined &&
+    matchesGeneratedAssistantAgentsMd(existingAgentsMdContent) &&
+    !hasSameContentHash(existingAgentsMdContent, agentsMdContent)
+
+  const agentsMdHasPreservedLegacyGuidance =
+    existingAgentsMdContent !== undefined &&
+    !overwriteAgentsMd &&
+    !matchesGeneratedAssistantAgentsMd(existingAgentsMdContent) &&
+    containsLegacyAssistantAgentsGuidance(existingAgentsMdContent)
+
+  const agentsMdCreated =
+    !agentsMdExists ||
+    overwriteAgentsMd ||
+    agentsMdShouldMigrate
+
+  if (agentsMdCreated && !hasSameContentHash(existingAgentsMdContent, agentsMdContent)) {
+    await writeFileContent(agentsMdPath, agentsMdContent)
   }
 
   const hasLegacyOpenCodeConfig = opencodeJsonExists && await isLegacyAssistantOpenCodeConfig(opencodeJsonPath)
 
+  let opencodeJsonUpdated = false
   if (!opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig) {
-    const config = buildAssistantOpenCodeConfig()
+    const config = hasLegacyOpenCodeConfig && opencodeJsonExists
+      ? await (async () => {
+          try {
+            const existingContent = await readFileContent(opencodeJsonPath)
+            const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
+            const mergedConfig = mergeAssistantOpenCodeConfig(existingConfig)
+            return assistantOpenCodeConfigPromptNeedsMigration(mergedConfig)
+              ? migrateGeneratedAssistantOpenCodePrompt(mergedConfig)
+              : mergedConfig
+          } catch {
+            return buildAssistantOpenCodeConfig()
+          }
+        })()
+      : buildAssistantOpenCodeConfig()
     await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
+    opencodeJsonUpdated = true
+  } else if (opencodeJsonExists) {
+    try {
+      const existingContent = await readFileContent(opencodeJsonPath)
+      const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
+      const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingConfig)
+        ? mergeAssistantOpenCodeConfig(existingConfig)
+        : existingConfig
+      const updatedConfig = assistantOpenCodeConfigPromptNeedsMigration(repairedConfig)
+        ? migrateGeneratedAssistantOpenCodePrompt(repairedConfig)
+        : repairedConfig
+
+      if (updatedConfig !== existingConfig) {
+        await writeFileContent(opencodeJsonPath, JSON.stringify(updatedConfig, null, 2))
+        opencodeJsonUpdated = true
+      }
+    } catch {
+      const config = buildAssistantOpenCodeConfig()
+      await writeFileContent(opencodeJsonPath, JSON.stringify(config, null, 2))
+      opencodeJsonUpdated = true
+    }
   }
 
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR))
+  await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_AGENTS_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SCHEDULES_SKILL_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_NOTIFICATIONS_SKILL_DIR))
   await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_SETTINGS_SKILL_DIR))
+  await ensureDirectoryExists(path.join(assistantDir, ASSISTANT_OPENCODE_DIR, ASSISTANT_SKILLS_DIR, ASSISTANT_REPOS_SKILL_DIR))
 
   const token = getOrCreateInternalToken(deps.db)
   const existingTokenContent = await fileExists(tokenPath) ? await readFileContent(tokenPath) : undefined
@@ -482,7 +779,7 @@ export async function ensureAssistantMode(
 
   const schedulesSkillContent = buildSchedulesSkill(deps.apiBaseUrl)
   const existingSchedulesSkillContent = await fileExists(skillPath) ? await readFileContent(skillPath) : undefined
-  const schedulesSkillCreated = !existingSchedulesSkillContent || existingSchedulesSkillContent !== schedulesSkillContent
+  const schedulesSkillCreated = !hasSameContentHash(existingSchedulesSkillContent, schedulesSkillContent)
   if (schedulesSkillCreated) {
     await writeFileContent(skillPath, schedulesSkillContent)
   }
@@ -490,7 +787,7 @@ export async function ensureAssistantMode(
   const notificationsSkillPath = getNotificationsSkillPath(assistantDir)
   const notificationsSkillContent = buildNotificationsSkill(deps.apiBaseUrl)
   const existingNotificationsSkillContent = await fileExists(notificationsSkillPath) ? await readFileContent(notificationsSkillPath) : undefined
-  const notificationsSkillCreated = !existingNotificationsSkillContent || existingNotificationsSkillContent !== notificationsSkillContent
+  const notificationsSkillCreated = !hasSameContentHash(existingNotificationsSkillContent, notificationsSkillContent)
   if (notificationsSkillCreated) {
     await writeFileContent(notificationsSkillPath, notificationsSkillContent)
   }
@@ -498,25 +795,62 @@ export async function ensureAssistantMode(
   const settingsSkillPath = getSettingsSkillPath(assistantDir)
   const settingsSkillContent = buildSettingsSkill(deps.apiBaseUrl)
   const existingSettingsSkillContent = await fileExists(settingsSkillPath) ? await readFileContent(settingsSkillPath) : undefined
-  const settingsSkillCreated = !existingSettingsSkillContent || existingSettingsSkillContent !== settingsSkillContent
+  const settingsSkillCreated = !hasSameContentHash(existingSettingsSkillContent, settingsSkillContent)
   if (settingsSkillCreated) {
     await writeFileContent(settingsSkillPath, settingsSkillContent)
   }
+
+  const reposSkillPath = getReposSkillPath(assistantDir)
+  const reposSkillContent = buildReposSkill(deps.apiBaseUrl)
+  const existingReposSkillContent = await fileExists(reposSkillPath) ? await readFileContent(reposSkillPath) : undefined
+  const reposSkillCreated = !hasSameContentHash(existingReposSkillContent, reposSkillContent)
+  if (reposSkillCreated) {
+    await writeFileContent(reposSkillPath, reposSkillContent)
+  }
+
+  const assistantAgentExists = await fileExists(assistantAgentPath)
+  const assistantAgentContent = buildAssistantDefaultAgentMd()
+  const existingAssistantAgentContent = assistantAgentExists
+    ? await readFileContent(assistantAgentPath)
+    : undefined
+
+  const assistantAgentShouldMigrate =
+    existingAssistantAgentContent !== undefined &&
+    matchesGeneratedAssistantDefaultAgentMd(existingAssistantAgentContent) &&
+    !hasSameContentHash(existingAssistantAgentContent, assistantAgentContent)
+
+  const assistantAgentCreated = !assistantAgentExists || assistantAgentShouldMigrate
+
+  if (assistantAgentCreated) {
+    await writeFileContent(assistantAgentPath, assistantAgentContent)
+  }
+
+  const managedUpdatesApplied = agentsMdCreated || opencodeJsonUpdated || assistantAgentCreated
+  const warnings = managedUpdatesApplied && agentsMdHasPreservedLegacyGuidance
+    ? [
+        {
+          code: 'assistant-agents-md-preserved',
+          path: agentsMdPath,
+          message: 'Some Assistant Mode instruction updates were not applied because AGENTS.md appears to contain customized legacy assistant instructions. To regenerate the default workspace explanation, manually delete AGENTS.md and initialize Assistant Mode again.',
+        },
+      ]
+    : undefined
 
   return {
     repoId: repo.id,
     directory: assistantDir,
     relativePath: ASSISTANT_MODE_RELATIVE_PATH,
+    warnings,
     files: {
       agentsMd: {
         path: agentsMdPath,
         exists: true,
-        created: !agentsMdExists || overwriteAgentsMd,
+        created: agentsMdCreated,
       },
       opencodeJson: {
         path: opencodeJsonPath,
         exists: true,
-        created: !opencodeJsonExists || overwriteOpenCodeConfig || hasLegacyOpenCodeConfig,
+        created: opencodeJsonUpdated,
       },
     },
     internalToken: {
@@ -534,6 +868,74 @@ export async function ensureAssistantMode(
     settingsSkill: {
       path: settingsSkillPath,
       created: settingsSkillCreated,
+    },
+    repoManagementSkill: {
+      path: reposSkillPath,
+      created: reposSkillCreated,
+    },
+    defaultAgent: {
+      name: ASSISTANT_DEFAULT_AGENT_NAME,
+      path: assistantAgentPath,
+      exists: true,
+      created: assistantAgentCreated,
+    },
+  }
+}
+
+function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInput): boolean {
+  if (config.default_agent !== ASSISTANT_DEFAULT_AGENT_NAME) return true
+  if (!config.agent || typeof config.agent !== 'object') return true
+  const assistantAgent = config.agent[ASSISTANT_DEFAULT_AGENT_NAME]
+  if (!assistantAgent || typeof assistantAgent !== 'object') return true
+  const mode = (assistantAgent as { mode?: unknown }).mode
+  if (mode !== 'primary' && mode !== 'all') return true
+  if ((assistantAgent as { disable?: unknown }).disable === true) return true
+  return false
+}
+
+function assistantOpenCodeConfigPromptNeedsMigration(config: OpenCodeConfigInput): boolean {
+  const prompt = (config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME] as { prompt?: unknown } | undefined)?.prompt
+  return matchesGeneratedAssistantAgentPrompt(prompt) && prompt !== buildAssistantAgentPrompt()
+}
+
+function migrateGeneratedAssistantOpenCodePrompt(config: OpenCodeConfigInput): OpenCodeConfigInput {
+  const existingAssistantAgent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+  if (typeof existingAssistantAgent !== 'object' || existingAssistantAgent === null) return config
+
+  return {
+    ...config,
+    agent: {
+      ...(config.agent ?? {}),
+      [ASSISTANT_DEFAULT_AGENT_NAME]: {
+        ...existingAssistantAgent,
+        prompt: buildAssistantAgentPrompt(),
+      },
+    },
+  }
+}
+
+function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInput): OpenCodeConfigInput {
+  const generated = buildAssistantOpenCodeConfig()
+  const existingAssistantAgent = existing?.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+  const existingMode = (existingAssistantAgent as { mode?: 'primary' | 'all' | unknown } | undefined)?.mode
+  const validMode = existingMode === 'primary' || existingMode === 'all' ? existingMode : 'primary'
+
+  const mergedAssistantAgent = {
+    ...generated.agent?.[ASSISTANT_DEFAULT_AGENT_NAME],
+    ...(typeof existingAssistantAgent === 'object' && existingAssistantAgent !== null ? existingAssistantAgent : {}),
+    mode: validMode,
+    disable: false,
+  }
+
+  return {
+    ...generated,
+    ...existing,
+    default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
+    instructions: existing?.instructions ?? generated.instructions,
+    permission: existing?.permission ?? generated.permission,
+    agent: {
+      ...(existing?.agent ?? {}),
+      [ASSISTANT_DEFAULT_AGENT_NAME]: mergedAssistantAgent,
     },
   }
 }
@@ -560,13 +962,12 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
   const skillPath = getSchedulesSkillPath(assistantDir)
   const notificationsSkillPath = getNotificationsSkillPath(assistantDir)
   const settingsSkillPath = getSettingsSkillPath(assistantDir)
+  const reposSkillPath = getReposSkillPath(assistantDir)
+  const assistantAgentPath = getAssistantDefaultAgentPath(assistantDir)
 
   const agentsMdExists = await fileExists(agentsMdPath)
   const opencodeJsonExists = await fileExists(opencodeJsonPath)
-  await fileExists(tokenPath)
-  await fileExists(skillPath)
-  await fileExists(notificationsSkillPath)
-  await fileExists(settingsSkillPath)
+  const assistantAgentExists = await fileExists(assistantAgentPath)
 
   return {
     repoId: repo.id,
@@ -598,6 +999,16 @@ export async function getAssistantModeStatus(repo: Repo): Promise<AssistantModeS
     },
     settingsSkill: {
       path: settingsSkillPath,
+      created: false,
+    },
+    repoManagementSkill: {
+      path: reposSkillPath,
+      created: false,
+    },
+    defaultAgent: {
+      name: ASSISTANT_DEFAULT_AGENT_NAME,
+      path: assistantAgentPath,
+      exists: assistantAgentExists,
       created: false,
     },
   }

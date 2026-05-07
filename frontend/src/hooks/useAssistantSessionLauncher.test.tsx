@@ -7,7 +7,7 @@ import { initializeAssistantMode } from '@/api/repos'
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
   createSession: vi.fn(),
-  sendPrompt: vi.fn(),
+  sendPromptAsync: vi.fn(),
   initializeAssistantMode: vi.fn(),
 }))
 
@@ -19,9 +19,13 @@ vi.mock('@/api/opencode', () => ({
   OpenCodeClient: vi.fn(() => ({
     listSessions: mocks.listSessions,
     createSession: mocks.createSession,
-    sendPrompt: mocks.sendPrompt,
+    sendPromptAsync: mocks.sendPromptAsync,
   })),
 }))
+
+beforeEach(() => {
+  mocks.sendPromptAsync.mockResolvedValue(undefined)
+})
 
 describe('useAssistantSessionLauncher', () => {
   beforeEach(() => {
@@ -51,6 +55,45 @@ describe('useAssistantSessionLauncher', () => {
     expect(OpenCodeClient).toHaveBeenCalledWith('http://localhost:5551', '/assistant')
     expect(onNavigate).toHaveBeenCalledWith('newest')
     expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
+  })
+
+  it('notifies an existing assistant session when some generated updates were preserved', async () => {
+    mocks.initializeAssistantMode.mockResolvedValue({
+      directory: '/assistant',
+      warnings: [
+        {
+          code: 'assistant-agents-md-preserved',
+          path: '/assistant/AGENTS.md',
+          message: 'Some Assistant Mode instruction updates were not applied because AGENTS.md appears to contain customized legacy assistant instructions. To regenerate the default workspace explanation, manually delete AGENTS.md and initialize Assistant Mode again.',
+        },
+      ],
+    })
+    mocks.listSessions.mockResolvedValue([
+      { id: 'existing', directory: '/assistant', time: { updated: 10 } },
+    ])
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onNavigate).toHaveBeenCalledWith('existing')
+    expect(mocks.sendPromptAsync).toHaveBeenCalledWith('existing', {
+      parts: [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('some generated instruction changes were not applied'),
+        }),
+      ],
+    })
+    const promptText = mocks.sendPromptAsync.mock.calls[0][1].parts[0].text as string
+    expect(promptText).toContain('manually delete AGENTS.md')
   })
 
   it('creates a session when the assistant directory has no root sessions', async () => {
@@ -70,7 +113,7 @@ describe('useAssistantSessionLauncher', () => {
     })
 
     expect(mocks.createSession).toHaveBeenCalledWith({ title: 'Assistant' })
-    expect(mocks.sendPrompt).toHaveBeenCalledWith('created', {
+    expect(mocks.sendPromptAsync).toHaveBeenCalledWith('created', {
       parts: [
         expect.objectContaining({
           type: 'text',
@@ -79,5 +122,66 @@ describe('useAssistantSessionLauncher', () => {
       ],
     })
     expect(onNavigate).toHaveBeenCalledWith('created')
+
+    const promptCall = mocks.sendPromptAsync.mock.calls[0]
+    const promptText = promptCall[1].parts[0].text as string
+    expect(promptText).toContain('.opencode/agents/assistant.md')
+    expect(promptText).toContain('AGENTS.md')
+    expect(promptText).toContain('.opencode/skills/')
+    expect(promptText).toContain('directory')
+    expect(promptText).toContain('durable preferences')
+    expect(promptText).toContain('self-editing rules')
+    expect(promptText).not.toContain('v file')
+    expect(promptText).not.toMatch(/AGENTS\.md contains workspace-level instructions, durable preferences, and self-editing rules/)
+  })
+
+  it('navigates after creating a session without waiting for the welcome prompt to complete', async () => {
+    mocks.listSessions.mockResolvedValue([])
+    let resolvePrompt: () => void
+    const promptPromise = new Promise<void>((resolve) => {
+      resolvePrompt = resolve
+    })
+    mocks.createSession.mockResolvedValue({ id: 'created' })
+    mocks.sendPromptAsync.mockImplementation(() => promptPromise)
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onNavigate).toHaveBeenCalledWith('created')
+    expect(mocks.sendPromptAsync).toHaveBeenCalledWith('created', {
+      parts: [
+        expect.objectContaining({
+          type: 'text',
+          text: expect.stringContaining('Welcome to OpenCode Manager!'),
+        }),
+      ],
+    })
+    resolvePrompt!()
+  })
+
+  it('navigates even when welcome prompt fails', async () => {
+    mocks.listSessions.mockResolvedValue([])
+    mocks.createSession.mockResolvedValue({ id: 'created' })
+    mocks.sendPromptAsync.mockRejectedValueOnce(new Error('provider unavailable'))
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onNavigate).toHaveBeenCalledWith('created')
+    expect(mocks.sendPromptAsync).toHaveBeenCalled()
   })
 })

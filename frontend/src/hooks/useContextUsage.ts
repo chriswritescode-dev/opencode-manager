@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
 import { useMessages } from './useOpenCode'
 import { useQuery } from '@tanstack/react-query'
-import { useModelSelection } from './useModelSelection'
 import { fetchWrapper } from '@/api/fetchWrapper'
 
 interface ContextUsage {
@@ -39,8 +38,6 @@ async function fetchProviders(opcodeUrl: string): Promise<ProvidersResponse> {
 
 export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string): ContextUsage => {
   const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
-  const { modelString: globalModelString } = useModelSelection(opcodeUrl, directory)
-  const modelString = globalModelString
 
   const { data: providersData } = useQuery({
     queryKey: ['providers', opcodeUrl],
@@ -53,18 +50,29 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
   })
 
   return useMemo(() => {
-    const currentModel = modelString || null
-
     const assistantMessages = messages?.filter(msg => msg.info.role === 'assistant') || []
     let latestAssistantMessage = assistantMessages[assistantMessages.length - 1]
-    
-    if (latestAssistantMessage?.info.role === 'assistant') {
-      const msgInfo = latestAssistantMessage.info as { tokens?: { input: number; output: number; reasoning: number; cache?: { read: number } } }
-      const tokens = (msgInfo.tokens?.input ?? 0) + (msgInfo.tokens?.output ?? 0) + (msgInfo.tokens?.reasoning ?? 0) + (msgInfo.tokens?.cache?.read ?? 0)
-      if (tokens === 0 && assistantMessages.length > 1) {
-        latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
-      }
+
+    const sumTokens = (msg: typeof latestAssistantMessage) => {
+      if (msg?.info.role !== 'assistant') return 0
+      const msgInfo = msg.info as { tokens?: { input: number; output: number; reasoning: number; cache?: { read: number } } }
+      return (msgInfo.tokens?.input ?? 0) + (msgInfo.tokens?.output ?? 0) + (msgInfo.tokens?.reasoning ?? 0) + (msgInfo.tokens?.cache?.read ?? 0)
     }
+
+    if (sumTokens(latestAssistantMessage) === 0 && assistantMessages.length > 1) {
+      latestAssistantMessage = assistantMessages[assistantMessages.length - 2]
+    }
+
+    const currentModel = (() => {
+      if (!latestAssistantMessage || latestAssistantMessage.info.role !== 'assistant') {
+        return null
+      }
+      const msg = latestAssistantMessage.info as { providerID?: string; modelID?: string }
+      if (msg.providerID && msg.modelID) {
+        return `${msg.providerID}/${msg.modelID}`
+      }
+      return null
+    })()
 
     let contextLimit: number | null = null
     if (currentModel && providersData) {
@@ -88,11 +96,7 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
       }
     }
     
-    let totalTokens = 0
-    if (latestAssistantMessage?.info.role === 'assistant') {
-      const msgInfo = latestAssistantMessage.info as { tokens?: { input: number; output: number; reasoning: number; cache?: { read: number } } }
-      totalTokens = (msgInfo.tokens?.input ?? 0) + (msgInfo.tokens?.output ?? 0) + (msgInfo.tokens?.reasoning ?? 0) + (msgInfo.tokens?.cache?.read ?? 0)
-    }
+    const totalTokens = sumTokens(latestAssistantMessage)
 
     const usagePercentage = contextLimit ? (totalTokens / contextLimit) * 100 : null
 
@@ -103,5 +107,5 @@ export const useContextUsage = (opcodeUrl: string | null | undefined, sessionID:
       currentModel,
       isLoading: false
     }
-  }, [messages, messagesLoading, modelString, providersData])
+  }, [messages, messagesLoading, providersData])
 }

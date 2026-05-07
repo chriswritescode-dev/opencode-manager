@@ -1126,8 +1126,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       if (repoId !== undefined && isNaN(repoId)) {
         return c.json({ error: 'Invalid repoId' }, 400)
       }
+      const directory = c.req.query('directory')
       
-      const skills = await listManagedSkills(db, openCodeClient, repoId)
+      const skills = await listManagedSkills(db, openCodeClient, repoId, directory)
       return c.json(skills)
     } catch (error) {
       logger.error('Failed to list skills:', error)

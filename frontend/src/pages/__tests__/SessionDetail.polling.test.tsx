@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 
@@ -51,10 +51,8 @@ describe('SessionDetail pending-actions polling', () => {
     expect(mocks.syncPendingActions).toHaveBeenCalledTimes(1)
 
     await vi.advanceTimersByTimeAsync(30000)
-    
-    await waitFor(() => {
-      expect(mocks.syncPendingActions).toHaveBeenCalledTimes(2)
-    })
+
+    expect(mocks.syncPendingActions).toHaveBeenCalledTimes(2)
 
     vi.useRealTimers()
   })

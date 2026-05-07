@@ -99,6 +99,12 @@ describe('resolveDefaultSessionAgent', () => {
     const result = resolveDefaultSessionAgent('missing-agent', agents, true)
     expect(result).toBe('build')
   })
+
+  it('returns assistant when assistant workspace config sets default_agent to assistant', () => {
+    const agents = [{ name: 'assistant', mode: 'primary' }]
+    const result = resolveDefaultSessionAgent('assistant', agents, true)
+    expect(result).toBe('assistant')
+  })
 })
 
 describe('useSessionAgent', () => {

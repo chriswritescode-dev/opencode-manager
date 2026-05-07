@@ -97,7 +97,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].key).toBe('new-session')
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/repos/5/assistant')
+    expect(model.primary[1].to).toBe('/assistant')
   })
 
   it('returns new-session and assistant primary CTAs for session detail', () => {
@@ -107,7 +107,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[0].variant).toBe('primary')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/repos/5/assistant')
+    expect(model.primary[1].to).toBe('/assistant')
     expect(model.primary[1].variant).toBe('secondary')
   })
 
@@ -118,7 +118,18 @@ describe('buildNavModel', () => {
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[0].variant).toBe('primary')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/repos/5/assistant')
+    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary[1].variant).toBe('secondary')
+  })
+
+  it('returns new-session and assistant primary CTAs for canonical /assistant', () => {
+    const model = buildNavModel('/assistant')
+    expect(model.primary).toHaveLength(2)
+    expect(model.primary[0].key).toBe('new-session')
+    expect(model.primary[0].onSelect).toBe('new-session')
+    expect(model.primary[0].variant).toBe('primary')
+    expect(model.primary[1].key).toBe('assistant')
+    expect(model.primary[1].to).toBe('/assistant')
     expect(model.primary[1].variant).toBe('secondary')
   })
 
@@ -135,7 +146,7 @@ describe('buildNavModel', () => {
     expect(model2.primary[0].key).toBe('new-schedule')
     expect(model2.primary[0].onSelect).toBe('new-schedule')
     expect(model2.primary[1].key).toBe('assistant')
-    expect(model2.primary[1].to).toBe('/repos/5/assistant')
+    expect(model2.primary[1].to).toBe('/assistant')
   })
 
   it('returns assistant primary for unknown routes', () => {

@@ -19,6 +19,10 @@ export const RepoSchema = z.object({
   isLocal: z.boolean().optional(),
 })
 
+export const InternalRepoListResponseSchema = z.object({
+  repos: z.array(RepoSchema),
+})
+
 export const CreateRepoRequestSchema = z.object({
   repoUrl: z.string().url().optional(),
   localPath: z.string().optional(),
@@ -61,6 +65,11 @@ export const AssistantModeStatusSchema = z.object({
   repoId: z.number(),
   directory: z.string(),
   relativePath: z.literal('repos/assistant'),
+  warnings: z.array(z.object({
+    code: z.string(),
+    path: z.string(),
+    message: z.string(),
+  })).optional(),
   files: z.object({
     agentsMd: AssistantModeFileSchema,
     opencodeJson: AssistantModeFileSchema,
@@ -68,22 +77,28 @@ export const AssistantModeStatusSchema = z.object({
   internalToken: z.object({
     path: z.string(),
     created: z.boolean(),
-    exists: z.boolean().optional(),
   }).optional(),
   schedulesSkill: z.object({
     path: z.string(),
     created: z.boolean(),
-    exists: z.boolean().optional(),
   }).optional(),
   notificationsSkill: z.object({
     path: z.string(),
     created: z.boolean(),
-    exists: z.boolean().optional(),
   }).optional(),
   settingsSkill: z.object({
     path: z.string(),
     created: z.boolean(),
-    exists: z.boolean().optional(),
+  }).optional(),
+  repoManagementSkill: z.object({
+    path: z.string(),
+    created: z.boolean(),
+  }).optional(),
+  defaultAgent: z.object({
+    name: z.literal('assistant'),
+    path: z.string(),
+    exists: z.boolean(),
+    created: z.boolean(),
   }).optional(),
 })
 

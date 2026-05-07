@@ -429,9 +429,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setMentionRange(null)
   }
 
-  const handleAgentChange = (agent: string) => {
-    setLocalMode(agent)
-    setStoredAgent(sessionID, agent)
+  const handleAgentChange = (agentName: string) => {
+    setLocalMode(agentName)
+    setStoredAgent(sessionID, agentName)
+    const agent = agents.find(a => a.name === agentName)
+    if (agent?.model) {
+      setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.modelID })
+    }
   }
 
   const startVoiceRecording = async () => {
@@ -1226,10 +1230,10 @@ return (
                    directory={directory}
                    onOpenFullDialog={() => onShowModelsDialog?.()}
                  >
-                   <button
-                     className="px-2.5 py-0.5 md:px-3 min-h-[36px] rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer max-w-[150px] md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center"
-                   >
-                     <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
+<button
+                      className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer w-full md:w-auto md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center overflow-hidden"
+                    >
+                      <span className="truncate w-full text-left">{displayModelName || 'Select model'}</span>
 {hasVariants && currentVariant && (
                         <span className="text-[10px] text-orange-500 truncate w-full text-center capitalize">{currentVariant}</span>
                       )}

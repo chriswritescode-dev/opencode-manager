@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { getRepo, initializeAssistantMode, listRepos } from "@/api/repos"
+import { getRepo, initializeAssistantMode } from "@/api/repos"
 import { useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
@@ -17,7 +17,7 @@ import { SourceControlPanel } from "@/components/source-control"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
 import { invalidateConfigCaches } from "@/lib/queryInvalidation"
-import { getSessionListPath } from "@/lib/navigation"
+import { getSessionListPath, getAssistantPath } from "@/lib/navigation"
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Loader2, Plus } from "lucide-react"
 
@@ -41,7 +41,7 @@ export function AssistantRedirect() {
   const { data: repo } = useQuery({
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
-    enabled: showSessionList && !!repoId,
+    enabled: showSessionList && repoId !== undefined,
   })
 
   const handleNavigate = useCallback((sessionId: string) => {
@@ -61,7 +61,7 @@ export function AssistantRedirect() {
   const { data: assistantMode, isLoading: assistantModeLoading, error: assistantModeError } = useQuery({
     queryKey: ["repo", repoId, "assistant-mode"],
     queryFn: () => initializeAssistantMode(repoId),
-    enabled: showSessionList && !!repoId,
+    enabled: showSessionList && repoId !== undefined,
   })
 
   const assistantDirectory = assistantMode?.directory
@@ -84,11 +84,10 @@ export function AssistantRedirect() {
       try {
         if (showSessionList) return
         setStatus("preparing")
-        if (!repoId) {
-          const repos = await listRepos()
-          const fallbackRepo = repos.sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))[0]
-          if (!fallbackRepo) throw new Error("No repository available to open Assistant")
-          navigate(`/repos/${fallbackRepo.id}/assistant`, { replace: true })
+        if (repoId <= 0) {
+          if (cancelled) return
+          setStatus("creating")
+          await openAssistant()
           return
         }
 
@@ -108,13 +107,13 @@ export function AssistantRedirect() {
     return () => {
       cancelled = true
     }
-  }, [repoId, openAssistant, navigate, showSessionList])
+  }, [repoId, openAssistant, navigate, showSessionList, id])
 
   if (showSessionList) {
     return (
       <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
         <Header>
-          <Header.BackButton to={`/repos/${repoId}`} />
+          <Header.BackButton to={getAssistantPath()} />
           <Header.Title>Assistant</Header.Title>
           <Header.Actions>
             <div className="flex items-center gap-1">
@@ -146,7 +145,22 @@ export function AssistantRedirect() {
           <>
             <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={assistantFileBasePath} repoName="Assistant" repoId={repoId} />
             <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
-            <RepoSkillsDialog open={skillsDialogOpen} onOpenChange={setSkillsDialogOpen} repoId={repoId} />
+            {assistantDirectory && opcodeUrl ? (
+              <RepoSkillsDialog
+                open={skillsDialogOpen}
+                onOpenChange={setSkillsDialogOpen}
+                repoId={repoId}
+                sessionId="assistant-session"
+                opcodeUrl={opcodeUrl}
+                directory={assistantDirectory}
+              />
+            ) : (
+              <RepoSkillsDialog
+                open={skillsDialogOpen}
+                onOpenChange={setSkillsDialogOpen}
+                repoId={repoId}
+              />
+            )}
             <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
             <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} repoDirectory={assistantDirectory} />
           </>
@@ -174,7 +188,7 @@ export function AssistantRedirect() {
           <>
             <p className="text-muted-foreground mb-4">{errorMessage}</p>
             <Button
-              onClick={() => navigate(`/repos/${repoId}`)}
+              onClick={() => navigate(getAssistantPath())}
               variant="outline"
             >
               Go Back

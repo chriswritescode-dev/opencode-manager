@@ -1,0 +1,136 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { renderHook, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useWorkspace } from '../useWorkspace'
+import type { AssistantModeStatus, Repo } from '@opencode-manager/shared/types'
+
+const mocks = vi.hoisted(() => ({
+  getRepo: vi.fn(),
+  getAssistantModeStatus: vi.fn(),
+}))
+
+vi.mock('@/api/repos', () => ({
+  getRepo: mocks.getRepo,
+  getAssistantModeStatus: mocks.getAssistantModeStatus,
+}))
+
+const createWrapper = () => {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+  return ({ children }: { children: React.ReactNode }) =>
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+}
+
+describe('useWorkspace', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  describe('repoId === 0 (assistant)', () => {
+    it('returns assistant workspace with correct properties', async () => {
+      const mockStatus: AssistantModeStatus = {
+        repoId: 0,
+        directory: '/abs/assistant',
+        relativePath: 'repos/assistant',
+        files: {
+          agentsMd: { path: '', exists: false, created: false },
+          opencodeJson: { path: '', exists: false, created: false },
+        },
+        schedulesSkill: { path: '', exists: false, created: false },
+      }
+
+      mocks.getAssistantModeStatus.mockResolvedValue(mockStatus)
+
+      const { result } = renderHook(() => useWorkspace(0), { wrapper: createWrapper() })
+
+      await waitFor(() => {
+        expect(result.current.workspace).toBeDefined()
+      })
+
+      expect(result.current.workspace?.kind).toBe('assistant')
+      expect(result.current.workspace?.fullPath).toBe('/abs/assistant')
+      expect(result.current.workspace?.repoId).toBe(0)
+      expect(result.current.workspace?.backHref).toBe('/assistant')
+      expect(result.current.isLoading).toBe(false)
+      expect(result.current.isError).toBe(false)
+    })
+
+    it('does not call getRepo for assistant', async () => {
+      mocks.getAssistantModeStatus.mockResolvedValue({
+        directory: '/abs/assistant',
+        relativePath: 'repos/assistant',
+        files: { agentsMd: { path: '', exists: false, created: false }, opencodeJson: { path: '', exists: false, created: false } },
+        schedulesSkill: { path: '', exists: false, created: false },
+        repoId: 0,
+      })
+
+      renderHook(() => useWorkspace(0), { wrapper: createWrapper() })
+
+      await vi.waitFor(() => {
+        expect(mocks.getRepo).not.toHaveBeenCalled()
+      })
+    })
+  })
+
+  describe('repoId === 5 (real repo)', () => {
+    it('returns repo workspace with correct properties', async () => {
+      const mockRepo: Repo = {
+        id: 5,
+        repoUrl: 'https://x/my-repo',
+        localPath: 'repos/my-repo',
+        fullPath: '/abs/repos/my-repo',
+        sourcePath: undefined,
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: 0,
+      }
+
+      mocks.getRepo.mockResolvedValue(mockRepo)
+
+      const { result } = renderHook(() => useWorkspace(5), { wrapper: createWrapper() })
+
+      await waitFor(() => {
+        expect(result.current.workspace).toBeDefined()
+      })
+
+      expect(result.current.workspace?.kind).toBe('repo')
+      expect(result.current.workspace?.repoId).toBe(5)
+      expect(result.current.workspace?.fullPath).toBe('/abs/repos/my-repo')
+      expect(result.current.workspace?.backHref).toBe('/repos/5')
+    })
+
+    it('does not call getAssistantModeStatus for repo', async () => {
+      const mockRepo: Repo = {
+        id: 5,
+        repoUrl: 'https://x/my-repo',
+        localPath: 'repos/my-repo',
+        fullPath: '/abs/repos/my-repo',
+        sourcePath: undefined,
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: 0,
+      }
+
+      mocks.getRepo.mockResolvedValue(mockRepo)
+
+      renderHook(() => useWorkspace(5), { wrapper: createWrapper() })
+
+      await vi.waitFor(() => {
+        expect(mocks.getAssistantModeStatus).not.toHaveBeenCalled()
+      })
+    })
+  })
+
+  describe('repoId === undefined', () => {
+    it('returns undefined workspace', () => {
+      const { result } = renderHook(() => useWorkspace(undefined), { wrapper: createWrapper() })
+
+      expect(result.current.workspace).toBeUndefined()
+      expect(result.current.isLoading).toBe(false)
+    })
+  })
+})

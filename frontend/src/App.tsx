@@ -24,13 +24,14 @@ import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { TTSProvider } from './contexts/TTSContext'
 import { AuthProvider } from './contexts/AuthContext'
 import { EventProvider, usePermissions, useEventContext } from '@/contexts/EventContext'
-import { SwipeNavigationProvider } from '@/contexts/SwipeNavigationContext'
+import { SwipeNavigationProvider, useSwipeNavigation } from '@/contexts/SwipeNavigationContext'
 import { PermissionRequestDialog } from './components/session/PermissionRequestDialog'
 import { SSHHostKeyDialog } from './components/ssh/SSHHostKeyDialog'
 import { loginLoader, setupLoader, registerLoader, protectedLoader } from './lib/auth-loaders'
 import { getSwipeBackTarget } from '@/lib/navigation'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useUIState } from '@/stores/uiStateStore'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -85,8 +86,10 @@ function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
   const rootRef = useRef<HTMLDivElement>(null)
-  const { open: openMobileSheet, openSheet } = useMobileTabBar()
+  const { openSheet } = useMobileTabBar()
   useTheme()
+
+  const swipeNav = useSwipeNavigation()
 
   const getRouteSwipeBackTarget = useCallback(
     () => getSwipeBackTarget(location.pathname, location.search),
@@ -94,8 +97,8 @@ function AppShell() {
   )
 
   const canSwipeBack = useCallback(
-    () => getRouteSwipeBackTarget() !== null,
-    [getRouteSwipeBackTarget]
+    () => !swipeNav?.isSuspended() && getRouteSwipeBackTarget() !== null,
+    [swipeNav, getRouteSwipeBackTarget]
   )
 
   const handleSwipeBack = useCallback(() => {
@@ -117,8 +120,9 @@ function AppShell() {
     return /^\/repos\/[^/]+\/sessions\/[^/]+$/.test(location.pathname) && !openSheet
   }
 
+  const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)
   const { bind: bindMoreSwipe } = useRightEdgeSwipe(
-    () => openMobileSheet('more'),
+    () => setMoreDrawerOpen(true),
     {
       enabled: canOpenMoreWithSwipe(),
       edgeWidth: 32,

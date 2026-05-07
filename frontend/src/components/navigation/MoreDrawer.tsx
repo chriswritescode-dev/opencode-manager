@@ -13,6 +13,7 @@ import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { buildMoreItems } from './moreDrawerItems'
 import { useSwipeBack } from '@/hooks/useMobile'
 import { getRepoDisplayName } from '@/lib/utils'
+import { isAssistantPath } from '@/lib/navigation'
 import type { components } from '@/api/opencode-types'
 
 type CommandType = components['schemas']['Command']
@@ -30,11 +31,12 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
   const swipeRef = useRef<HTMLDivElement>(null)
-  const { bind } = useSwipeBack(onClose, { enabled: true, suspendsRouteSwipe: true })
+  const skipHistoryBackOnCloseRef = useRef(false)
+  const { bind } = useSwipeBack(onClose, { enabled: isOpen, suspendsRouteSwipe: true })
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
-  const isAssistantRoute = /^\/repos\/\d+\/assistant$/.test(location.pathname)
+  const isAssistantRoute = isAssistantPath(location.pathname)
   const isAssistantSession = isSessionDetail && new URLSearchParams(location.search).get('assistant') === '1'
   const { filterCommands } = useCommands(isSessionDetail ? OPENCODE_API_ENDPOINT : null)
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
@@ -47,6 +49,37 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
       return cleanup
     }
   }, [isOpen, bind])
+
+  const onCloseRef = useRef(onClose)
+  useEffect(() => {
+    onCloseRef.current = onClose
+  }, [onClose])
+
+  useEffect(() => {
+    if (!isOpen) return
+    skipHistoryBackOnCloseRef.current = false
+    let sentinelActive = true
+    const baseState = window.history.state
+    const baseUrl = window.location.href
+    window.history.pushState({ ...(baseState ?? {}), moreDrawerSentinel: true }, '', baseUrl)
+    const onPop = () => {
+      if (!sentinelActive) return
+      sentinelActive = false
+      onCloseRef.current()
+    }
+    window.addEventListener('popstate', onPop)
+    return () => {
+      window.removeEventListener('popstate', onPop)
+      // Only go back if sentinel is still active AND we haven't navigated away
+      if (sentinelActive && !skipHistoryBackOnCloseRef.current) {
+        sentinelActive = false
+        const top = window.history.state as { moreDrawerSentinel?: boolean } | null
+        if (top?.moreDrawerSentinel && window.location.href === baseUrl) {
+          window.history.back()
+        }
+      }
+    }
+  }, [isOpen])
 
   const { data: repo } = useQuery({
     queryKey: ['repo', repoId],
@@ -64,7 +97,9 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     newParams.delete('mobileTab')
     newParams.set('settings', 'open')
     newParams.set('tab', 'account')
+    skipHistoryBackOnCloseRef.current = true
     navigate({ search: newParams.toString() }, { replace: true })
+    onClose()
   }
 
   const handleLogoutClick = async () => {
@@ -77,13 +112,16 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   const handleItemClick = (item: ReturnType<typeof buildMoreItems>[0]) => {
     if (item.to) {
+      skipHistoryBackOnCloseRef.current = true
       navigate(item.to)
     } else if (item.dialog) {
       const newParams = new URLSearchParams(location.search)
       newParams.set('dialog', item.dialog)
       newParams.delete('mobileTab')
+      skipHistoryBackOnCloseRef.current = true
       navigate({ search: newParams.toString() }, { replace: true })
     }
+    onClose()
   }
 
   const handleCommandClick = (command: CommandType) => {
@@ -121,100 +159,102 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   return (
     <SideDrawer isOpen={isOpen} onClose={onClose} side="right" ariaLabel="More" widthClass="w-screen sm:w-[min(90vw,420px)]">
-      <div ref={swipeRef} className="flex flex-col flex-shrink-0 border-b border-border bg-background px-4 py-1.5">
-        <div className="flex items-center justify-between gap-3 mb-2">
-          {versionLabel && (
-            <span className="truncate text-xs leading-tight text-muted-foreground">{versionLabel}</span>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-        {(repoDisplayName || currentBranch) && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            {repoDisplayName && (
-              <span className="font-medium text-orange-600 dark:text-orange-400">{repoDisplayName}</span>
+      <div ref={swipeRef} className="flex flex-col flex-1 min-h-0">
+        <div className="flex flex-col flex-shrink-0 border-b border-border bg-background px-4 py-1.5">
+          <div className="flex items-center justify-between gap-3 mb-2">
+            {versionLabel && (
+              <span className="truncate text-xs leading-tight text-muted-foreground">{versionLabel}</span>
             )}
-
-            {currentBranch && (
-              <>
-                <GitBranch className="h-3.5 w-3.5" />
-                <span>{currentBranch}</span>
-              </>
-            )}
-          </div>
-        )}
-      </div>
-      <SideDrawerContent className="flex flex-col gap-1">
-        {isSessionDetail && (
-          <div className="flex flex-col gap-1">
             <button
               type="button"
-              onClick={() => setCommandsOpen((open) => !open)}
-              className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
-              aria-expanded={commandsOpen}
+              onClick={onClose}
+              className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label="Close"
             >
-              <CommandIcon className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium text-foreground flex-1">Commands</span>
-              {commandsOpen ? (
-                <ChevronDown className="w-4 h-4 text-muted-foreground" />
-              ) : (
-                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          {(repoDisplayName || currentBranch) && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              {repoDisplayName && (
+                <span className="font-medium text-orange-600 dark:text-orange-400">{repoDisplayName}</span>
               )}
-            </button>
-            {commandsOpen && (
-              <div className="-mx-4 max-h-64 overflow-y-auto border-y border-border bg-muted/30 p-1 sm:mx-0 sm:rounded-lg sm:border">
-                {commands.map((command) => (
-                  <button
-                    key={command.name}
-                    type="button"
-                    onClick={() => handleCommandClick(command)}
-                    className="flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
-                  >
-                    <span className="font-mono text-sm font-medium text-blue-600 dark:text-blue-400">{command.name}</span>
-                    {command.description && (
-                      <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{command.description}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
+
+              {currentBranch && (
+                <>
+                  <GitBranch className="h-3.5 w-3.5" />
+                  <span>{currentBranch}</span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+        <SideDrawerContent className="flex flex-col gap-1">
+          {isSessionDetail && (
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                onClick={() => setCommandsOpen((open) => !open)}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
+                aria-expanded={commandsOpen}
+              >
+                <CommandIcon className="w-5 h-5 text-muted-foreground" />
+                <span className="font-medium text-foreground flex-1">Commands</span>
+                {commandsOpen ? (
+                  <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                )}
+              </button>
+              {commandsOpen && (
+                <div className="-mx-4 max-h-64 overflow-y-auto border-y border-border bg-muted/30 p-1 sm:mx-0 sm:rounded-lg sm:border">
+                  {commands.map((command) => (
+                    <button
+                      key={command.name}
+                      type="button"
+                      onClick={() => handleCommandClick(command)}
+                      className="flex w-full min-w-0 items-start gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-accent"
+                    >
+                      <span className="font-mono text-sm font-medium text-blue-600 dark:text-blue-400">{command.name}</span>
+                      {command.description && (
+                        <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{command.description}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setMentionFileBrowserOpen(true)}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
+              >
+                <FileText className="w-5 h-5 text-muted-foreground" />
+                <span className="font-medium text-foreground flex-1">Mention File</span>
+                <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              </button>
+            </div>
+          )}
+          {items.map((item) => (
             <button
+              key={item.key}
               type="button"
-              onClick={() => setMentionFileBrowserOpen(true)}
+              onClick={() => {
+                if (item.key === 'settings') {
+                  handleSettingsClick()
+                } else if (item.key === 'logout') {
+                  handleLogoutClick()
+                } else {
+                  handleItemClick(item)
+                }
+              }}
               className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
             >
-              <FileText className="w-5 h-5 text-muted-foreground" />
-              <span className="font-medium text-foreground flex-1">Mention File</span>
-              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+              <item.icon className="w-5 h-5 text-muted-foreground" />
+              <span className="font-medium text-foreground">{item.label}</span>
             </button>
-          </div>
-        )}
-        {items.map((item) => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => {
-              if (item.key === 'settings') {
-                handleSettingsClick()
-              } else if (item.key === 'logout') {
-                handleLogoutClick()
-              } else {
-                handleItemClick(item)
-              }
-            }}
-            className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
-          >
-            <item.icon className="w-5 h-5 text-muted-foreground" />
-            <span className="font-medium text-foreground">{item.label}</span>
-          </button>
-        ))}
-      </SideDrawerContent>
+          ))}
+        </SideDrawerContent>
+      </div>
       <FileBrowserSheet
         isOpen={mentionFileBrowserOpen}
         onClose={() => setMentionFileBrowserOpen(false)}

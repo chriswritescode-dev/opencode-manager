@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
-import { getRepo } from '@/api/repos'
 import {
   useCancelRepoScheduleRun,
   useCreateRepoSchedule,
@@ -15,6 +13,7 @@ import {
   useUpdateRepoSchedule,
 } from '@/hooks/useSchedules'
 import { useRepoActivity } from '@/hooks/useRepoActivity'
+import { useWorkspace } from '@/hooks/useWorkspace'
 import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
 import { useScheduleTab } from '@/hooks/useMobileTabBar'
 import { toUpdateScheduleRequest, getJobStatusTone } from '@/components/schedules/schedule-utils'
@@ -23,7 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { getRepoDisplayName, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
@@ -36,13 +35,9 @@ export function Schedules() {
   const [deleteJobId, setDeleteJobId] = useState<number | null>(null)
   const { scheduleTab: activeTab, setScheduleTab: setActiveTab } = useScheduleTab()
 
-  const { data: repo, isLoading: repoLoading } = useQuery({
-    queryKey: ['repo', repoId],
-    queryFn: () => getRepo(repoId!),
-    enabled: repoId !== undefined,
-  })
+  const { workspace, isLoading: workspaceLoading } = useWorkspace(repoId)
 
-  useRepoActivity(repoId ?? 0, Boolean(repo))
+  useRepoActivity(repoId ?? 0, Boolean(workspace) && workspace?.kind === 'repo')
 
   const { data: jobs, isLoading: jobsLoading } = useRepoSchedules(repoId)
   const { data: selectedJob, isFetching: isJobFetching } = useRepoSchedule(repoId, selectedJobId)
@@ -87,7 +82,7 @@ export function Schedules() {
   const activeRun = selectedRunDetails ?? activeRunSummary
   const runningRun = useMemo(() => runs?.find((run) => run.status === 'running') ?? null, [runs])
 
-  if (repoLoading || jobsLoading) {
+  if (workspaceLoading || jobsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -95,15 +90,15 @@ export function Schedules() {
     )
   }
 
-  if (!repo || repoId === undefined) {
+  if (!workspace || repoId === undefined) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
-        <p className="text-muted-foreground">Repository not found</p>
+        <p className="text-muted-foreground">
+          {repoId === 0 ? 'Workspace not found' : 'Repository not found'}
+        </p>
       </div>
     )
   }
-
-  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath)
   const enabledCount = jobs?.filter((job) => job.enabled).length ?? 0
   const hasJobs = (jobs?.length ?? 0) > 0
 
@@ -197,10 +192,10 @@ export function Schedules() {
   return (
     <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
-        <Header.BackButton to={`/repos/${repoId}`} />
+        <Header.BackButton to={workspace.backHref} />
         <div className="min-w-0 flex-1 px-3">
-          <Header.Title className="truncate">Schedules</Header.Title>
-          <p className="text-xs text-muted-foreground truncate">{repoName}</p>
+          <Header.Title className="truncate">{workspace.name}</Header.Title>
+          <p className="text-xs text-muted-foreground truncate">{workspace.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="h-6 rounded-full px-2 text-xs">{jobs?.length ?? 0} jobs</Badge>

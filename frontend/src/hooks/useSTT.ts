@@ -25,6 +25,9 @@ export function useSTT(userId = 'default') {
   const lastProcessedBlobRef = useRef<Blob | null>(null)
   const startupTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const startOpIdRef = useRef(0)
+  const recorderConfiguredRef = useRef(false)
+  const interimRafRef = useRef<number | null>(null)
+  const pendingInterimRef = useRef<string>('')
   
   useEffect(() => {
     userIdRef.current = userId
@@ -51,12 +54,21 @@ export function useSTT(userId = 'default') {
 
     rec.onResult((result: SpeechRecognitionResult) => {
       setIsProcessing(false)
-      setTranscript((prev) => prev + ' ' + result.transcript)
+      setTranscript((prev) => {
+        const prevTrimmed = prev.trim()
+        const next = result.transcript.trim()
+        return prevTrimmed ? `${prevTrimmed} ${next}` : next
+      })
       setIsRecording(false)
     })
 
     rec.onInterimResult((interim: string) => {
-      setInterimTranscript(interim.trim())
+      pendingInterimRef.current = interim.trim()
+      if (interimRafRef.current != null) return
+      interimRafRef.current = requestAnimationFrame(() => {
+        interimRafRef.current = null
+        setInterimTranscript(pendingInterimRef.current)
+      })
     })
 
     rec.onError((errorMessage: string) => {
@@ -88,6 +100,10 @@ export function useSTT(userId = 'default') {
 
     return () => {
       rec.clearCallbacks()
+      if (interimRafRef.current != null) {
+        cancelAnimationFrame(interimRafRef.current)
+        interimRafRef.current = null
+      }
     }
   }, [isEnabled, isExternalProvider])
 
@@ -178,7 +194,10 @@ export function useSTT(userId = 'default') {
       audioRecorder.current = new AudioRecorder()
     }
 
-    setupAudioRecorder(audioRecorder.current)
+    if (!recorderConfiguredRef.current) {
+      setupAudioRecorder(audioRecorder.current)
+      recorderConfiguredRef.current = true
+    }
 
     return () => {
       if (audioRecorder.current) {

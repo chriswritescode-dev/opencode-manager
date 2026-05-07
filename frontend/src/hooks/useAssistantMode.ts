@@ -5,21 +5,21 @@ import {
 } from '@/api/repos'
 import type { AssistantModeStatus, AssistantModeInitRequest } from '@opencode-manager/shared/types'
 
-export function useAssistantMode(repoId: number) {
+export function useAssistantMode(repoId?: number) {
   const queryClient = useQueryClient()
 
   const statusQuery = useQuery<AssistantModeStatus>({
-    queryKey: ['repo', repoId, 'assistant-mode'],
-    queryFn: () => getAssistantModeStatus(repoId),
-    enabled: !!repoId,
+    queryKey: ['assistant-mode'],
+    queryFn: () => getAssistantModeStatus(0),
+    enabled: repoId === 0,
   })
 
   const initializeMutation = useMutation({
     mutationFn: (options?: AssistantModeInitRequest) =>
-      initializeAssistantMode(repoId, options),
+      initializeAssistantMode(0, options),
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ['repo', repoId, 'assistant-mode'],
+        queryKey: ['assistant-mode'],
       })
     },
   })

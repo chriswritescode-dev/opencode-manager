@@ -4,6 +4,8 @@ import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar, useScheduleTab, type ScheduleTabKey } from '@/hooks/useMobileTabBar'
+import { useUIState } from '@/stores/uiStateStore'
+import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
 interface TabDef {
   key: string
@@ -23,6 +25,8 @@ interface GlobalTabsArgs {
   navigate: ReturnType<typeof useNavigate>
   isInsideRepo: boolean
   repoId: string | null
+  isMoreDrawerOpen: boolean
+  setMoreDrawerOpen: (open: boolean) => void
 }
 
 type TabBarMode = 'hidden' | 'global' | 'schedule'
@@ -34,11 +38,15 @@ interface MobileTabRouteState {
 }
 
 function getMobileTabRouteState(pathname: string): MobileTabRouteState {
+  if (isAssistantPath(pathname)) {
+    return { mode: 'global', isInsideRepo: false, repoId: null }
+  }
+
   const repoMatch = pathname.match(/^\/repos\/(\d+)(?:\/([^/]+))?/)
   const repoId = repoMatch?.[1] ?? null
   const repoSection = repoMatch?.[2]
 
-  if (pathname === '/' || pathname === '/schedules' || pathname === '/assistant') {
+  if (pathname === '/' || pathname === '/schedules') {
     return { mode: 'global', isInsideRepo: false, repoId: null }
   }
 
@@ -48,7 +56,6 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
 
   switch (repoSection) {
     case undefined:
-    case 'assistant':
       return { mode: 'global', isInsideRepo: true, repoId }
     case 'schedules':
       return { mode: 'schedule', isInsideRepo: true, repoId }
@@ -57,7 +64,7 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
   }
 }
 
-function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, isInsideRepo, repoId }: GlobalTabsArgs): TabDef[] {
+function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, isInsideRepo, repoId, isMoreDrawerOpen, setMoreDrawerOpen }: GlobalTabsArgs): TabDef[] {
   const navigateWithSearch = (params: URLSearchParams) => {
     const nextSearch = params.toString()
     navigate(nextSearch ? `${pathname}?${nextSearch}` : pathname, { replace: true })
@@ -74,14 +81,8 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
   }
 
   const handleAssistantClick = () => {
-    if (repoId) {
-      close()
-      navigate(`/repos/${repoId}/assistant`)
-      return
-    }
-
     close()
-    navigate('/assistant')
+    navigate(getAssistantPath())
   }
 
   return [
@@ -104,7 +105,7 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
       label: 'Assistant',
       icon: Bot,
       onClick: handleAssistantClick,
-      active: isInsideRepo && pathname === `/repos/${repoId}/assistant` && !openSheet,
+      active: isAssistantPath(pathname) && !openSheet,
     },
     {
       key: 'schedules',
@@ -117,8 +118,8 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
       key: 'more',
       label: 'More',
       icon: Menu,
-      onClick: () => open('more'),
-      active: openSheet === 'more',
+      onClick: () => setMoreDrawerOpen(true),
+      active: isMoreDrawerOpen,
     },
   ]
 }
@@ -190,6 +191,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
   const { openSheet, open, close } = useMobileTabBar()
   const { scheduleTab, setScheduleTab } = useScheduleTab()
   const isMobile = useMobile()
+  const isMoreDrawerOpen = useUIState((state) => state.isMoreDrawerOpen)
+  const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)
   const routeState = useMemo(() => getMobileTabRouteState(pathname), [pathname])
 
   const tabs = useMemo<TabDef[]>(
@@ -204,6 +207,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
         navigate,
         isInsideRepo: routeState.isInsideRepo,
         repoId: routeState.repoId,
+        isMoreDrawerOpen,
+        setMoreDrawerOpen,
       })),
     [
       routeState,
@@ -215,6 +220,8 @@ export const MobileTabBar = memo(function MobileTabBar() {
       open,
       close,
       navigate,
+      isMoreDrawerOpen,
+      setMoreDrawerOpen,
     ],
   )
 

@@ -60,10 +60,11 @@ export function RepoSkillsList({
         {data.map((skill) => (
           <div
             key={skill.name}
-            className="p-2 rounded-lg border border-border bg-card flex items-center justify-between gap-2"
+            onClick={() => onLoad?.(skill)}
+            className={`p-2 rounded-lg border border-border bg-card flex items-center justify-between gap-2 ${onLoad ? 'cursor-pointer hover:bg-accent transition-colors' : ''}`}
           >
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">
+              <p className="text-sm font-medium truncate text-orange-600 dark:text-orange-400">
                 {formatSkillName(skill.name)}
               </p>
               {skill.description && (
@@ -72,15 +73,6 @@ export function RepoSkillsList({
                 </p>
               )}
             </div>
-            {onLoad && (
-              <button
-                type="button"
-                onClick={() => onLoad(skill)}
-                className="shrink-0 text-xs font-medium text-primary hover:text-foreground transition-colors"
-              >
-                Load
-              </button>
-            )}
           </div>
         ))}
       </div>

@@ -118,14 +118,14 @@ export function SessionDetail() {
   const { data: assistantMode, isLoading: assistantModeLoading } = useQuery({
     queryKey: ["repo", repoId, "assistant-mode"],
     queryFn: () => initializeAssistantMode(repoId),
-    enabled: isAssistantSession && !!repoId,
+    enabled: isAssistantSession,
   });
 
   useRepoActivity(repoId, Boolean(repo));
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = isAssistantSession ? assistantMode?.directory : repo?.fullPath;
+  const repoDirectory = isAssistantSession ? (assistantMode?.directory || repo?.fullPath) : repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
@@ -227,7 +227,7 @@ export function SessionDetail() {
       const maxScrollTop = container.scrollHeight - container.clientHeight
       const isAtBottom = maxScrollTop - currentScrollTop < 24
       const isScrollingDown = currentScrollTop > previousScrollTop + 4
-      const isScrollingUp = currentScrollTop < previousScrollTop - 4
+      const isScrollingUp = currentScrollTop < previousScrollTop - 50
 
       if (isAtBottom || isScrollingDown) {
         setIsHeaderVisible(true)
@@ -438,7 +438,7 @@ export function SessionDetail() {
     return <Navigate to="/" replace />;
   }
 
-  if (!repo) {
+  if (!repo && !isAssistantSession) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
@@ -449,7 +449,9 @@ export function SessionDetail() {
     );
   }
 
-  const workspaceDisplayName = isAssistantSession ? 'Assistant' : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
+  const workspaceDisplayName = isAssistantSession || !repo
+    ? 'Assistant'
+    : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
   const sessionBackPath = getSessionListPath(repoId, isAssistantSession);
 
   return (
@@ -457,9 +459,10 @@ export function SessionDetail() {
       className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col"
     >
       <div
+        data-testid="session-header-region"
         className={`flex-shrink-0 overflow-hidden bg-background transition-all duration-200 ease-out ${
           isHeaderVisible
-            ? 'max-h-40 opacity-100 translate-y-0'
+            ? 'max-h-72 sm:max-h-80 opacity-100 translate-y-0'
             : 'max-h-0 opacity-0 -translate-y-2'
         }`}
       >
@@ -510,7 +513,7 @@ export function SessionDetail() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className="relative flex-1 overflow-hidden flex flex-col">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
           {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
@@ -643,7 +646,7 @@ export function SessionDetail() {
         directory={repoDirectory}
       />
 
-      {repoDirectory && opcodeUrl && sessionId && (
+      {opcodeUrl && sessionId && (
         <RepoSkillsDialog
           open={skillsDialogOpen}
           onOpenChange={setSkillsDialogOpen}
@@ -665,7 +668,7 @@ export function SessionDetail() {
         repoId={repoId}
         isOpen={sourceControlOpen}
         onClose={() => setSourceControlOpen(false)}
-        currentBranch={repo.currentBranch || repo.branch || "main"}
+        currentBranch={repo?.currentBranch || repo?.branch || "main"}
         repoName={workspaceDisplayName}
       />
 

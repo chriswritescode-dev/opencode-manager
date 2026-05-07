@@ -10,66 +10,73 @@ const DEFAULT_OPTIONS: AudioRecorderOptions = {
   channelCount: 1,
 }
 
-function encodeWAV(audioBuffer: AudioBuffer): Blob {
-  const numberOfChannels = audioBuffer.numberOfChannels
-  const sampleRate = audioBuffer.sampleRate
-  const format = 1
-  const bitDepth = 16
+const workletModulePromises = new WeakMap<AudioContext, Promise<void>>()
 
-  const channelData: Float32Array[] = []
+function ensureWorkletLoaded(ctx: AudioContext): Promise<void> {
+  const existingPromise = workletModulePromises.get(ctx)
 
-  for (let i = 0; i < numberOfChannels; i++) {
-    channelData.push(audioBuffer.getChannelData(i))
+  if (existingPromise) {
+    return existingPromise
   }
 
-  const interleaved = interleave(channelData)
-  const dataLength = interleaved.length * (bitDepth / 8)
-  const buffer = new ArrayBuffer(44 + dataLength)
-  const view = new DataView(buffer)
+  const promise = ctx.audioWorklet.addModule('/audio-worklet-processor.js')
+  workletModulePromises.set(ctx, promise)
+  return promise
+}
 
+export function downsampleAndConvert(input: Float32Array, inputRate: number, targetRate: number): Int16Array {
+  const ratio = inputRate / targetRate
+  const outputLength = Math.floor(input.length / ratio)
+  const output = new Int16Array(outputLength)
+  
+  for (let i = 0; i < outputLength; i++) {
+    const index = i * ratio
+    const prevIndex = Math.floor(index)
+    const nextIndex = prevIndex + 1
+    const t = index - prevIndex
+    
+    let sample: number
+    if (nextIndex >= input.length) {
+      sample = input[prevIndex]
+    } else {
+      sample = input[prevIndex] * (1 - t) + input[nextIndex] * t
+    }
+    
+    const clamped = Math.max(-1, Math.min(1, sample))
+    output[i] = clamped < 0 ? clamped * 32768 : clamped * 32767
+  }
+  
+  return output
+}
+
+export function encodeWavFromInt16(samples: Int16Array, sampleRate: number, channels: number): Blob {
+  const dataLength = samples.length * 2
+  const bufferSize = 44 + dataLength
+  const buffer = new ArrayBuffer(bufferSize)
+  const view = new DataView(buffer)
+  
   writeString(view, 0, 'RIFF')
   view.setUint32(4, 36 + dataLength, true)
   writeString(view, 8, 'WAVE')
   writeString(view, 12, 'fmt ')
   view.setUint32(16, 16, true)
-  view.setUint16(20, format, true)
-  view.setUint16(22, numberOfChannels, true)
+  view.setUint16(20, 1, true)
+  view.setUint16(22, channels, true)
   view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * numberOfChannels * (bitDepth / 8), true)
-  view.setUint16(32, numberOfChannels * (bitDepth / 8), true)
-  view.setUint16(34, bitDepth, true)
+  view.setUint32(28, sampleRate * channels * 2, true)
+  view.setUint16(32, channels * 2, true)
+  view.setUint16(34, 16, true)
   writeString(view, 36, 'data')
   view.setUint32(40, dataLength, true)
-
-  floatTo16BitPCM(view, 44, interleaved)
-
-  return new Blob([view], { type: 'audio/wav' })
-}
-
-function interleave(channelData: Float32Array[]): Float32Array {
-  const length = channelData[0].length * channelData.length
-  const result = new Float32Array(length)
-  let offset = 0
-
-  for (let i = 0; i < channelData[0].length; i++) {
-    for (let channel = 0; channel < channelData.length; channel++) {
-      result[offset++] = channelData[channel][i]
-    }
-  }
-
-  return result
+  
+  new Int16Array(buffer, 44).set(samples)
+  
+  return new Blob([buffer], { type: 'audio/wav' })
 }
 
 function writeString(view: DataView, offset: number, string: string): void {
   for (let i = 0; i < string.length; i++) {
     view.setUint8(offset + i, string.charCodeAt(i))
-  }
-}
-
-function floatTo16BitPCM(view: DataView, offset: number, input: Float32Array): void {
-  for (let i = 0; i < input.length; i++, offset += 2) {
-    const s = Math.max(-1, Math.min(1, input[i]))
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true)
   }
 }
 
@@ -79,7 +86,7 @@ export class AudioRecorder {
   private source: MediaStreamAudioSourceNode | null = null
   private processor: ScriptProcessorNode | null = null
   private workletNode: AudioWorkletNode | null = null
-  private chunks: Float32Array[] = []
+  private chunks: Int16Array[] = []
   private totalSamples: number = 0
   private state: AudioRecorderState = 'idle'
   private options: AudioRecorderOptions
@@ -152,29 +159,32 @@ export class AudioRecorder {
 
       if (this.audioContext.audioWorklet) {
         try {
-          await this.audioContext.audioWorklet.addModule('/audio-worklet-processor.js')
-          this.workletNode = new AudioWorkletNode(this.audioContext, 'recorder-processor')
-          this.workletNode.port.onmessage = (e: MessageEvent<Float32Array>) => {
+          await ensureWorkletLoaded(this.audioContext)
+          this.workletNode = new AudioWorkletNode(this.audioContext, 'recorder-processor', {
+            processorOptions: { targetSampleRate: this.options.sampleRate },
+          })
+          this.workletNode.port.onmessage = (e: MessageEvent<Int16Array>) => {
             this.chunks.push(e.data)
             this.totalSamples += e.data.length
           }
           this.source.connect(this.workletNode)
-          this.workletNode.connect(this.audioContext.destination)
-        } catch {
+        } catch (error) {
           this.audioContext.close()
           this.audioContext = null
-          throw new Error('Failed to load audio worklet processor')
+          throw new Error('Failed to load audio worklet processor', { cause: error })
         }
       } else if (this.audioContext) {
         const bufferSize = 4096
         this.processor = this.audioContext.createScriptProcessor(bufferSize, 1, 1)
+        const targetRate = this.options.sampleRate ?? 16000
+        const inputRate = this.audioContext.sampleRate
         this.processor.onaudioprocess = (e) => {
-          const inputData = new Float32Array(e.inputBuffer.getChannelData(0))
-          this.chunks.push(inputData)
-          this.totalSamples += inputData.length
+          const inputData = e.inputBuffer.getChannelData(0)
+          const int16Chunk = downsampleAndConvert(inputData, inputRate, targetRate)
+          this.chunks.push(int16Chunk)
+          this.totalSamples += int16Chunk.length
         }
         this.source.connect(this.processor)
-        this.processor.connect(this.audioContext.destination)
       }
 
       this.setState('recording')
@@ -220,21 +230,13 @@ export class AudioRecorder {
     }
 
     try {
-      const merged = new Float32Array(this.totalSamples)
+      const merged = new Int16Array(this.totalSamples)
       let offset = 0
       for (const chunk of this.chunks) {
         merged.set(chunk, offset)
         offset += chunk.length
       }
-
-      const audioBuffer = this.audioContext!.createBuffer(
-        1,
-        this.totalSamples,
-        this.audioContext!.sampleRate
-      )
-
-      audioBuffer.copyToChannel(merged, 0)
-      const wavBlob = encodeWAV(audioBuffer)
+      const wavBlob = encodeWavFromInt16(merged, this.options.sampleRate ?? 16000, 1)
       this.onDataAvailable?.(wavBlob)
     } catch {
       this.onError?.('Failed to process recording')
@@ -275,31 +277,5 @@ export class AudioRecorder {
   private resetRecordingState(): void {
     this.chunks = []
     this.totalSamples = 0
-  }
-
-  getRecordingBlob(): Blob | null {
-    if (!this.audioContext || this.chunks.length === 0 || this.totalSamples === 0) {
-      return null
-    }
-
-    try {
-      const merged = new Float32Array(this.totalSamples)
-      let offset = 0
-      for (const chunk of this.chunks) {
-        merged.set(chunk, offset)
-        offset += chunk.length
-      }
-
-      const audioBuffer = this.audioContext.createBuffer(
-        1,
-        this.totalSamples,
-        this.audioContext.sampleRate
-      )
-
-      audioBuffer.copyToChannel(merged, 0)
-      return encodeWAV(audioBuffer)
-    } catch {
-      return null
-    }
   }
 }

@@ -1,5 +1,39 @@
 import { describe, it, expect } from 'vitest';
-import { getSessionListPath, getSwipeBackTarget } from './navigation';
+import { getSessionListPath, getSwipeBackTarget, getAssistantPath, getAssistantSessionListPath, isAssistantPath } from './navigation';
+
+describe('getAssistantPath', () => {
+  it('returns /assistant', () => {
+    expect(getAssistantPath()).toBe('/assistant');
+  });
+});
+
+describe('getAssistantSessionListPath', () => {
+  it('returns /assistant?view=sessions', () => {
+    expect(getAssistantSessionListPath()).toBe('/assistant?view=sessions');
+  });
+});
+
+describe('isAssistantPath', () => {
+  it('returns true for /assistant', () => {
+    expect(isAssistantPath('/assistant')).toBe(true);
+  });
+
+  it('returns true for legacy /repos/0/assistant', () => {
+    expect(isAssistantPath('/repos/0/assistant')).toBe(true);
+  });
+
+  it('returns true for legacy /repos/5/assistant', () => {
+    expect(isAssistantPath('/repos/5/assistant')).toBe(true);
+  });
+
+  it('returns false for /repos/5', () => {
+    expect(isAssistantPath('/repos/5')).toBe(false);
+  });
+
+  it('returns false for /schedules', () => {
+    expect(isAssistantPath('/schedules')).toBe(false);
+  });
+});
 
 describe('getSessionListPath', () => {
   it('returns repo path for non-assistant sessions', () => {
@@ -7,9 +41,9 @@ describe('getSessionListPath', () => {
     expect(getSessionListPath('123', false)).toBe('/repos/123');
   });
 
-  it('returns assistant path with view=sessions for assistant sessions', () => {
-    expect(getSessionListPath(42, true)).toBe('/repos/42/assistant?view=sessions');
-    expect(getSessionListPath('123', true)).toBe('/repos/123/assistant?view=sessions');
+  it('returns assistant session list path for assistant sessions', () => {
+    expect(getSessionListPath(42, true)).toBe('/assistant?view=sessions');
+    expect(getSessionListPath('123', true)).toBe('/assistant?view=sessions');
   });
 });
 
@@ -20,12 +54,12 @@ describe('getSwipeBackTarget', () => {
       expect(getSwipeBackTarget('/repos/123/sessions/xyz-789', '')).toBe('/repos/123');
     });
 
-    it('returns assistant path for assistant session detail with assistant=1', () => {
+    it('returns assistant session list path for assistant session detail with assistant=1', () => {
       expect(getSwipeBackTarget('/repos/42/sessions/abc', '?assistant=1')).toBe(
-        '/repos/42/assistant?view=sessions'
+        '/assistant?view=sessions'
       );
       expect(getSwipeBackTarget('/repos/123/sessions/xyz', '?assistant=1')).toBe(
-        '/repos/123/assistant?view=sessions'
+        '/assistant?view=sessions'
       );
     });
 
@@ -36,12 +70,20 @@ describe('getSwipeBackTarget', () => {
   });
 
   describe('assistant route', () => {
-    it('returns assistant sessions path for assistant route', () => {
-      expect(getSwipeBackTarget('/repos/123/assistant', '')).toBe('/repos/123/assistant?view=sessions');
+    it('returns assistant session list path for canonical assistant route', () => {
+      expect(getSwipeBackTarget('/assistant', '')).toBe('/assistant?view=sessions');
     });
 
-    it('returns repo path for assistant session list route', () => {
-      expect(getSwipeBackTarget('/repos/42/assistant', '?view=sessions')).toBe('/repos/42');
+    it('returns root for assistant session list route', () => {
+      expect(getSwipeBackTarget('/assistant', '?view=sessions')).toBe('/');
+    });
+
+    it('returns assistant session list path for legacy assistant route', () => {
+      expect(getSwipeBackTarget('/repos/123/assistant', '')).toBe('/assistant?view=sessions');
+    });
+
+    it('returns root for legacy assistant session list route', () => {
+      expect(getSwipeBackTarget('/repos/42/assistant', '?view=sessions')).toBe('/');
     });
   });
 
@@ -53,6 +95,10 @@ describe('getSwipeBackTarget', () => {
   });
 
   describe('schedules routes', () => {
+    it('returns /assistant for assistant schedules', () => {
+      expect(getSwipeBackTarget('/repos/0/schedules', '')).toBe('/assistant');
+    });
+
     it('returns repo path for repo schedules', () => {
       expect(getSwipeBackTarget('/repos/42/schedules', '')).toBe('/repos/42');
     });
