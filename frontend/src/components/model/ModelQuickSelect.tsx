@@ -4,6 +4,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { useModelSelection } from '@/hooks/useModelSelection'
@@ -120,12 +121,12 @@ export function ModelQuickSelect({
         {model && (
           <>
             <DropdownMenuItem className="flex items-center justify-between font-medium">
-              <span className="truncate">
+              <span className="truncate text-orange-500">
                 {duplicateDisplayNames.has(currentModelDisplayName)
                   ? `${currentProviderName}/${currentModelDisplayName}`
                   : currentModelDisplayName}
               </span>
-              <Check className="h-4 w-4" />
+              <Check className="h-4 w-4 text-orange-500" />
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={handleCurrentFavoriteToggle}
@@ -134,6 +135,7 @@ export function ModelQuickSelect({
               <span>{isCurrentFavorite ? 'Remove from favorites' : 'Add to favorites'}</span>
               <Star className={`h-4 w-4 ${isCurrentFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
           </>
         )}
 
