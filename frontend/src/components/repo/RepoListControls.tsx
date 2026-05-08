@@ -1,7 +1,7 @@
-import { useState } from 'react'
-import { Search, SlidersHorizontal, Trash2, X } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { useState } from "react";
+import { Search, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -9,43 +9,43 @@ import {
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
   DropdownMenuSeparator,
-} from '@/components/ui/dropdown-menu'
-import { useMobile } from '@/hooks/useMobile'
-import type { RepoFilterMode, RepoSortMode } from './repo-list-state'
+} from "@/components/ui/dropdown-menu";
+import { useMobile } from "@/hooks/useMobile";
+import type { RepoFilterMode, RepoSortMode } from "./repo-list-state";
 
 interface RepoListControlsProps {
-  searchQuery: string
-  onSearchChange: (query: string) => void
-  filterMode: RepoFilterMode
-  onFilterModeChange: (mode: RepoFilterMode) => void
-  sortMode: RepoSortMode
-  onSortModeChange: (mode: RepoSortMode) => void
-  filteredCount: number
-  attentionCount: number
-  selectedCount: number
-  allVisibleSelected: boolean
-  onSelectAll: () => void
-  onClearSelection: () => void
-  onDelete: () => void
-  hasLocalRepos: boolean
-  hasClonedRepos: boolean
-  selectionMode: boolean
-  onSelectionModeChange: (enabled: boolean) => void
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  filterMode: RepoFilterMode;
+  onFilterModeChange: (mode: RepoFilterMode) => void;
+  sortMode: RepoSortMode;
+  onSortModeChange: (mode: RepoSortMode) => void;
+  filteredCount: number;
+  attentionCount: number;
+  selectedCount: number;
+  allVisibleSelected: boolean;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
+  onDelete: () => void;
+  hasLocalRepos: boolean;
+  hasClonedRepos: boolean;
+  selectionMode: boolean;
+  onSelectionModeChange: (enabled: boolean) => void;
 }
 
 const FILTER_OPTIONS: { value: RepoFilterMode; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'recent', label: 'Recent' },
-  { value: 'attention', label: 'Changes' },
-  { value: 'worktrees', label: 'Worktrees' },
-  { value: 'local', label: 'Local' },
-]
+  { value: "all", label: "All" },
+  { value: "recent", label: "Recent" },
+  { value: "attention", label: "Changes" },
+  { value: "worktrees", label: "Worktrees" },
+  { value: "local", label: "Local" },
+];
 
 const SORT_OPTIONS: { value: RepoSortMode; label: string }[] = [
-  { value: 'recent', label: 'Recent' },
-  { value: 'manual', label: 'Manual' },
-  { value: 'name', label: 'Name' },
-]
+  { value: "recent", label: "Recent" },
+  { value: "manual", label: "Manual" },
+  { value: "name", label: "Name" },
+];
 
 export function RepoListControls({
   searchQuery,
@@ -66,18 +66,19 @@ export function RepoListControls({
   selectionMode,
   onSelectionModeChange,
 }: RepoListControlsProps) {
-  const isMobile = useMobile()
-  const [showMenu, setShowMenu] = useState(false)
+  const isMobile = useMobile();
+  const [showMenu, setShowMenu] = useState(false);
 
-  const currentSortLabel = SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? 'Recent'
-  const inSelectionMode = selectedCount > 0
+  const currentSortLabel =
+    SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? "Recent";
+  const inSelectionMode = selectedCount > 0;
 
   const getDeleteLabel = () => {
     if (hasLocalRepos && !hasClonedRepos) {
-      return 'Unlink'
+      return "Unlink";
     }
-    return 'Delete'
-  }
+    return "Delete";
+  };
 
   if (inSelectionMode) {
     return (
@@ -92,7 +93,7 @@ export function RepoListControls({
             className="shrink-0 h-9 text-xs"
             size="sm"
           >
-            {allVisibleSelected ? 'Unselect All' : 'Select All'}
+            {allVisibleSelected ? "Unselect All" : "Select All"}
           </Button>
           <Button
             variant="ghost"
@@ -113,7 +114,7 @@ export function RepoListControls({
           </Button>
         </div>
       </div>
-    )
+    );
   }
 
   return (
@@ -126,6 +127,7 @@ export function RepoListControls({
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder="Search repositories..."
             className="pl-9 h-9"
+            autoComplete="off"
           />
         </div>
 
@@ -139,27 +141,29 @@ export function RepoListControls({
             <DropdownMenuContent align="end" className="w-48">
               <DropdownMenuCheckboxItem
                 checked={selectionMode}
-                onCheckedChange={(checked) => onSelectionModeChange(checked === true)}
+                onCheckedChange={(checked) =>
+                  onSelectionModeChange(checked === true)
+                }
               >
                 Select repositories
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               {FILTER_OPTIONS.map((option) => {
                 const count =
-                  option.value === 'attention'
+                  option.value === "attention"
                     ? attentionCount
-                    : option.value === 'all'
+                    : option.value === "all"
                       ? filteredCount
-                      : undefined
+                      : undefined;
 
                 return (
                   <DropdownMenuItem
                     key={option.value}
                     onClick={() => {
-                      onFilterModeChange(option.value)
-                      setShowMenu(false)
+                      onFilterModeChange(option.value);
+                      setShowMenu(false);
                     }}
-                    className={filterMode === option.value ? 'bg-accent' : ''}
+                    className={filterMode === option.value ? "bg-accent" : ""}
                   >
                     {option.label}
                     {count !== undefined && count > 0 && (
@@ -168,7 +172,7 @@ export function RepoListControls({
                       </span>
                     )}
                   </DropdownMenuItem>
-                )
+                );
               })}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -185,10 +189,10 @@ export function RepoListControls({
                 <DropdownMenuItem
                   key={option.value}
                   onClick={() => {
-                    onSortModeChange(option.value)
-                    setShowMenu(false)
+                    onSortModeChange(option.value);
+                    setShowMenu(false);
                   }}
-                  className={sortMode === option.value ? 'bg-accent' : ''}
+                  className={sortMode === option.value ? "bg-accent" : ""}
                 >
                   {option.label}
                 </DropdownMenuItem>
@@ -202,16 +206,16 @@ export function RepoListControls({
         <div className="flex items-center gap-2 overflow-x-auto pb-1 -mb-1">
           {FILTER_OPTIONS.map((option) => {
             const count =
-              option.value === 'attention'
+              option.value === "attention"
                 ? attentionCount
-                : option.value === 'all'
+                : option.value === "all"
                   ? filteredCount
-                  : undefined
+                  : undefined;
 
             return (
               <Button
                 key={option.value}
-                variant={filterMode === option.value ? 'default' : 'ghost'}
+                variant={filterMode === option.value ? "default" : "ghost"}
                 size="sm"
                 onClick={() => onFilterModeChange(option.value)}
                 className="shrink-0 gap-1.5"
@@ -219,13 +223,13 @@ export function RepoListControls({
                 {option.label}
                 {count !== undefined && count > 0 && (
                   <span
-                    className={`text-xs ${filterMode === option.value ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}
+                    className={`text-xs ${filterMode === option.value ? "text-primary-foreground/80" : "text-muted-foreground"}`}
                   >
                     {count}
                   </span>
                 )}
               </Button>
-            )
+            );
           })}
         </div>
       )}
@@ -233,16 +237,18 @@ export function RepoListControls({
       {!isMobile && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {filteredCount} {filteredCount === 1 ? 'repo' : 'repos'}
+            {filteredCount} {filteredCount === 1 ? "repo" : "repos"}
             {searchQuery && ` matching "${searchQuery}"`}
           </span>
-          {attentionCount > 0 && filterMode !== 'attention' && (
+          {attentionCount > 0 && filterMode !== "attention" && (
             <span>
-              {attentionCount} {attentionCount === 1 ? 'needs attention' : 'need attention'}
+              {attentionCount}{" "}
+              {attentionCount === 1 ? "needs attention" : "need attention"}
             </span>
           )}
         </div>
       )}
     </div>
-  )
+  );
 }
+
