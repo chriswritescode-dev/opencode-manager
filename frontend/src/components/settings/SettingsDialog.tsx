@@ -95,12 +95,12 @@ export function SettingsDialog() {
    return (
       <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && close()}>
         <DialogContent 
-          className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col"
+          className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col !gap-0"
           fullscreen
           canSwipeBack={() => mobileView !== 'menu'}
           onSwipeBack={handleSettingsBack}
         >
-         <div className="hidden sm:flex sm:flex-col sm:h-full">
+         <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
              <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
                Settings
@@ -164,7 +164,7 @@ export function SettingsDialog() {
           </Tabs>
         </div>
 
-        <div className="sm:hidden flex flex-col h-full min-h-0 pt-safe">
+        <div className="sm:hidden flex flex-col h-full min-h-0">
            <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-4 py-4 flex items-center justify-between">
              <div className="flex items-center gap-2 flex-1">
                 {mobileView !== 'menu' && (
