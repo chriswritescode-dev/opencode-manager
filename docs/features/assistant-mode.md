@@ -1,6 +1,6 @@
 # Assistant Mode
 
-Assistant Mode gives OpenCode Manager a dedicated AI workspace — an isolated directory (`repos/assistant/`) where a built-in assistant agent can manage scheduled jobs, send push notifications, and read or update settings via a secure internal API.
+Assistant Mode gives OpenCode Manager a dedicated AI workspace — an isolated directory (`workspace/repos/assistant/`) where a built-in assistant agent can manage scheduled jobs, send push notifications, and read or update settings via a secure internal API.
 
 ## What Is Assistant Mode?
 
