@@ -29,6 +29,7 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Slash Commands** - Built-in (`/help`, `/new`, `/compact`) and custom commands
 - **File Mentions** - Reference files with `@filename` autocomplete
 - **Plan/Build Modes** - Toggle between read-only and file-change modes
+- **Per-Agent Model Selection** — Each agent retains its own model selection independently
 - **Mermaid Diagrams** - Visual diagram rendering in chat
 
 [Learn more →](chat.md)
@@ -94,3 +95,11 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Customizable** - Control which events trigger notifications
 
 [Learn more →](notifications.md)
+
+### Assistant Mode
+
+- **Dedicated AI Workspace** — Isolated assistant directory with managed configuration and a built-in bearer-token API
+- **Auto-Provisioned Skills** — Schedule management, notifications, settings, and repo listing skills available out of the box
+- **Session Continuity** — Navigating to the assistant always resumes the most recent session or creates one automatically
+
+[Learn more →](assistant-mode.md)
