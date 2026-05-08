@@ -21,7 +21,7 @@ Open [http://localhost:5003](http://localhost:5003) and create your admin accoun
 OpenCode Manager is a mobile-first web interface for [OpenCode](https://opencode.ai) AI agents. It combines repository management, chat/session control, Git and file tools, schedules, AI configuration, MCP server management, push notifications, and full PWA support into a single responsive application.
 
 - **Repository management** — Clone, discover, and manage multiple Git repos with SSH authentication and worktree support
-- **Chat & sessions** — Real-time SSE streaming with slash commands, `@file` mentions, and Plan/Build modes
+- **Chat & sessions** — Real-time SSE streaming with slash commands, `@file` mentions, Plan/Build modes, and per-agent model selection
 - **Schedules** — Recurring repo jobs with reusable prompts, run history, and linked sessions
 - **AI configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents
 - **MCP & Skills** — MCP server management and skill support
@@ -43,6 +43,7 @@ OpenCode Manager runs as a pnpm workspace:
 - **Chat & Sessions** — Real-time SSE streaming, slash commands, `@file` mentions, Plan/Build modes, Mermaid diagrams — [Learn more](features/chat.md)
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download — [Learn more](features/files.md)
 - **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions — [Learn more](features/schedules.md)
+- **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedule management, notifications, settings, and repo listing — [Learn more](features/assistant-mode.md)
 - **AI Configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents — [Learn more](features/ai-config.md)
 - **MCP Servers** — Add local or remote MCP servers with OAuth support — [Learn more](features/mcp.md)
 - **Skills** — Skill support for extended agent capabilities — [Learn more](features/skills.md)

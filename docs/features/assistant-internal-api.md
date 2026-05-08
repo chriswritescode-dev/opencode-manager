@@ -2,6 +2,8 @@
 
 The Assistant Internal API provides capabilities for OpenCode agents to interact with the manager backend via a secure bearer-token API.
 
+> For a user-facing overview of how to use and set up assistant mode, see [Assistant Mode](assistant-mode.md).
+
 ## Authentication
 
 All endpoints require a bearer token. The token can be found at:
@@ -122,12 +124,46 @@ Returns the updated settings object.
 - `400`: Invalid request body or disallowed key
 - `401`: Missing or invalid bearer token
 
+### Repos
+
+**GET `/api/internal/repos`**
+
+Retrieve a list of all managed repositories, ordered by the user's repo preference order.
+
+**Response:**
+```ts
+{
+  repos: Array<{
+    id: number
+    repoUrl?: string              // Git remote URL (absent for local-only repos)
+    localPath: string             // Relative path under repos root
+    fullPath: string              // Absolute filesystem path
+    sourcePath?: string           // Source worktree path (for worktrees)
+    branch?: string               // Current branch name (for worktrees)
+    defaultBranch: string         // e.g. "main"
+    cloneStatus: 'cloning' | 'ready' | 'error'
+    clonedAt: number              // Timestamp when repo was cloned
+    lastPulled?: number           // Timestamp of last pull
+    lastAccessedAt?: number       // Timestamp of last access
+    openCodeConfigName?: string   // Associated OpenCode config name
+    isWorktree?: boolean          // Whether repo is a worktree
+    isLocal?: boolean             // Whether repo is local-only
+  }>
+}
+```
+
+**Status Codes:**
+- `200`: Repository list returned
+- `401`: Missing or invalid bearer token
+- `500`: Server error (database failure)
+
 ## Skills
 
-The assistant workspace includes three skills that document these capabilities:
+The assistant workspace includes four skills that document these capabilities:
 
 1. **Schedule Management** (`.opencode/skills/schedule-management/SKILL.md`)
 2. **Notifications** (`.opencode/skills/notifications/SKILL.md`)
 3. **Manager Settings** (`.opencode/skills/manager-settings/SKILL.md`)
+4. **Repo Management** (`.opencode/skills/repo-management/SKILL.md`)
 
 These skills are automatically provisioned when assistant mode is initialized and contain detailed examples and usage patterns.

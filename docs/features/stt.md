@@ -71,18 +71,26 @@ Any OpenAI-compatible transcription API works:
 
 ## Using Voice Input
 
-### Recording
+### Tap-to-Start / Tap-to-Stop
 
-1. Click the **microphone** button in the chat input
-2. Speak your message
-3. Click the **stop** button when finished
-4. Your speech is transcribed into the input field
+1. **Tap the microphone button** in the chat input to begin recording
+2. The button shows active recording status
+3. **Tap the stop button** when you have finished speaking
+4. The transcribed text is inserted into the input field
 5. Review and send
 
-### Recording Overlay
+### Recording States
 
-While recording, a visual overlay indicates active recording status.
+| State | Indicator | When it appears |
+|-------|-----------|-----------------|
+| Recording | "Recording…" | Microphone is active; audio is being captured |
+| Processing | "Processing…" | Audio sent to STT backend; waiting for transcript (external provider only) |
+| Interim text | Live partial transcript | Browser is streaming partial results in real time (built-in provider only) |
 
-### Aborting
+### Cancelling
 
-Click the **cancel** button during recording to discard without transcribing.
+Tap the **cancel (×) button** during recording to discard the recording without transcribing.
+
+### Errors
+
+If recording fails — microphone permission denied, startup timeout, or transcription error — a brief error message appears and auto-dismisses after 3 seconds. No text is inserted.

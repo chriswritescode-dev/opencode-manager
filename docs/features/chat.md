@@ -19,6 +19,17 @@ Messages stream in real-time using Server-Sent Events (SSE):
 - No waiting for complete responses
 - Can interrupt generation if needed
 
+## Model Selection
+
+Click the **model name** in the chat prompt area to open the quick model switcher. From there you can:
+
+- Switch to a favorite or recently used model without leaving the chat
+- Toggle favorites (star icon next to the active model)
+- Pick a model variant (highlighted in orange when available)
+- Open **All Models…** to browse the full model list
+
+Each agent retains its own model selection — switching agents restores the model last used with that agent. See [AI Configuration](ai-config.md#model-selection) for the full reference.
+
 ## Slash Commands
 
 Type `/` to see available commands:
