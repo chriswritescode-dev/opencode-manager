@@ -34,7 +34,7 @@ export function ContextUsageIndicator({ opcodeUrl, sessionID, directory, isConne
   }
 
   const tokenText = contextLimit
-    ? `${totalTokens.toLocaleString()} / ${contextLimit.toLocaleString()}`
+    ? `${totalTokens.toLocaleString()} (${Math.round(usagePercentage || 0)}%)`
     : totalTokens.toLocaleString()
 
   return (
