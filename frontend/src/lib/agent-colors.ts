@@ -30,7 +30,7 @@ function isValidHex(color: string | undefined): color is string {
   return /^#[0-9A-Fa-f]{6}$/.test(color)
 }
 
-export function getAgentColor(
+function getAgentColor(
   agentName: string,
   apiColor?: string
 ): { light: string; dark: string } {

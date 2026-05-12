@@ -24,8 +24,7 @@ import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import { writeFileContent } from './file-operations'
 
-const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
-export const OPENCODE_SERVER_CONNECT_HOST = OPENCODE_SERVER_HOST === '0.0.0.0' ? '127.0.0.1' : OPENCODE_SERVER_HOST
+
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 const HEALTH_CHECK_TIMEOUT_MS = 3000
