@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -248,13 +248,23 @@ export function OpenCodeModelDialog({
   const { isValid } = form.formState
   const createNewProvider = form.watch('createNewProvider')
   const newProviderType = form.watch('newProviderType')
+  const resetKeyRef = useRef<string | null>(null)
+  const resetKey = editingModel
+    ? `edit-${editingModel.providerId}-${editingModel.modelId}`
+    : `create-${selectedProviderId || availableProviders[0] || ''}`
 
   useEffect(() => {
-    if (open) {
+    if (!open) {
+      resetKeyRef.current = null
+      return
+    }
+
+    if (resetKeyRef.current !== resetKey) {
+      resetKeyRef.current = resetKey
       form.reset(getDefaultValues())
       void form.trigger()
     }
-  }, [open, form, getDefaultValues])
+  }, [open, resetKey, form, getDefaultValues])
 
   const handleSubmit = (values: ModelFormValues) => {
     const extra = parseOptionalJsonField(values.extraJson)

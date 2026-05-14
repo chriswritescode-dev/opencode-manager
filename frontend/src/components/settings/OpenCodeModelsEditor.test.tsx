@@ -172,6 +172,29 @@ describe('OpenCodeModelDialog', () => {
         expect(screen.getByText(/must use only letters, numbers/i)).toBeInTheDocument()
       })
     })
+
+    it('should preserve create form values when provider props refresh', async () => {
+      const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+      const props = {
+        ...defaultProps,
+        availableProviders: ['openai'],
+        existingProviders: { openai: { name: 'OpenAI' } },
+      }
+      const { rerender } = render(<OpenCodeModelDialog {...props} />)
+
+      const modelIdInput = document.querySelector('input[name="modelId"]') as HTMLInputElement
+      fireEvent.change(modelIdInput, { target: { value: 'gpt-5' } })
+
+      rerender(
+        <OpenCodeModelDialog
+          {...props}
+          availableProviders={['openai']}
+          existingProviders={{ openai: { name: 'OpenAI' } }}
+        />
+      )
+
+      expect(modelIdInput).toHaveValue('gpt-5')
+    })
   })
 
   describe('form submission', () => {
