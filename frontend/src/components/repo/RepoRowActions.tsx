@@ -10,6 +10,7 @@ import {
 import { SourceControlPanel } from '@/components/source-control/SourceControlPanel'
 import { DownloadDialog } from '@/components/ui/download-dialog'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { downloadRepo } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 import { getRepoDisplayName } from '@/lib/utils'
@@ -70,6 +71,7 @@ export function RepoRowActions({
   }
 
   const canCreateWorktree = isReady && !repo.isWorktree && Boolean(repo.repoUrl)
+  const deleteLabel = repo.isLocal ? 'Unlink Repository' : 'Delete Repository'
 
   const handleDownload = async (options: { includeGit?: boolean; includePaths?: string[] }) => {
     try {
@@ -86,9 +88,11 @@ export function RepoRowActions({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-label="Repository actions"
               size="sm"
               variant="ghost"
               className="h-8 w-8 p-0"
+              title="Repository actions"
               onClick={(e) => e.stopPropagation()}
             >
               <MoreVertical className="w-4 h-4" />
@@ -157,54 +161,82 @@ export function RepoRowActions({
 
   return (
     <>
-      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => handleSourceControlOpen(true)}
-          disabled={!isReady}
-          className="h-8 w-8 p-0"
-          title="Source Control"
-        >
-          <GitBranch className="w-4 h-4" />
-        </Button>
+      <TooltipProvider delayDuration={200}>
+        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label="Source Control"
+                size="sm"
+                variant="ghost"
+                onClick={() => handleSourceControlOpen(true)}
+                disabled={!isReady}
+                className="h-8 w-8 p-0"
+                title="Source Control"
+              >
+                <GitBranch className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Source Control</TooltipContent>
+          </Tooltip>
 
-        {canCreateWorktree && (
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => handleWorktreeDialogOpen(true)}
-            className="h-8 w-8 p-0"
-            title="Create Worktree"
-          >
-            <GitBranchPlus className="w-4 h-4" />
-          </Button>
-        )}
-
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => handleDownloadDialogOpen(true)}
-          disabled={!isReady}
-          className="h-8 w-8 p-0"
-        >
-          <Download className="w-4 h-4" />
-        </Button>
-
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => onDelete(repo.id)}
-          disabled={isDeleting}
-          className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-        >
-          {isDeleting ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Trash2 className="w-4 h-4" />
+          {canCreateWorktree && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  aria-label="Create Worktree"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => handleWorktreeDialogOpen(true)}
+                  className="h-8 w-8 p-0"
+                  title="Create Worktree"
+                >
+                  <GitBranchPlus className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Create Worktree</TooltipContent>
+            </Tooltip>
           )}
-        </Button>
-      </div>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label="Download Repository"
+                size="sm"
+                variant="ghost"
+                onClick={() => handleDownloadDialogOpen(true)}
+                disabled={!isReady}
+                className="h-8 w-8 p-0"
+                title="Download Repository"
+              >
+                <Download className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Download Repository</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label={deleteLabel}
+                size="sm"
+                variant="ghost"
+                onClick={() => onDelete(repo.id)}
+                disabled={isDeleting}
+                className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                title={deleteLabel}
+              >
+                {isDeleting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{deleteLabel}</TooltipContent>
+          </Tooltip>
+        </div>
+      </TooltipProvider>
 
       <SourceControlPanel
         repoId={repo.id}
