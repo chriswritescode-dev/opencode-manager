@@ -91,25 +91,6 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
   await opencodeServerManager.restart()
 }
 
-function didConfigFieldChange(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined,
-  field: string
-): boolean {
-  return JSON.stringify(previous?.[field]) !== JSON.stringify(next?.[field])
-}
-
-function needsOpenCodeRestart(
-  previous: Record<string, unknown> | undefined,
-  next: Record<string, unknown> | undefined
-): boolean {
-  return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
-}
-
-function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
-  return Array.isArray(config?.plugin) && config.plugin.length > 0
-}
-
 function execWithTimeout(
   command: string | [executable: string, ...args: string[]],
   timeoutMs: number,
@@ -225,6 +206,36 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
 export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
+
+  async function applyDefaultOpenCodeConfig(
+    content: Record<string, unknown>,
+    rawContent: string,
+  ): Promise<{ removedFields?: string[]; appliedConfig?: Record<string, unknown>; restarted: boolean }> {
+    const configPath = getOpenCodeConfigFilePath()
+
+    const patchResult = await patchConfigWithRecovery(openCodeClient, content)
+
+    if (!patchResult.success) {
+      await writeFileContent(configPath, rawContent)
+      logger.info(`Wrote raw default config to: ${configPath}`)
+      logger.warn('Patch failed, restarting OpenCode as fallback')
+
+      opencodeServerManager.clearStartupError()
+      await restartOpenCode(openCodeSupervisor)
+
+      return { restarted: true }
+    }
+
+    const contentToWrite = getOpenCodeConfigContentToWrite(rawContent, patchResult.appliedConfig, patchResult.removedFields)
+    await writeFileContent(configPath, contentToWrite)
+    logger.info(`Wrote default config to: ${configPath}`)
+
+    return {
+      removedFields: patchResult.removedFields,
+      appliedConfig: patchResult.appliedConfig,
+      restarted: false,
+    }
+  }
 
   app.get('/', async (c) => {
     try {
@@ -342,26 +353,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           { suppressAutoDefault: true }
         )
 
-        if (hasConfiguredPlugins(provisionalConfig.content)) {
-          const config = settingsService.updateOpenCodeConfig(provisionalConfig.name, {
-            content: provisionalConfig.rawContent,
-            isDefault: true,
-          }, userId)
-
-          if (!config) {
-            return c.json({ error: 'Failed to finalize OpenCode config creation' }, 500)
-          }
-
-          const configPath = getOpenCodeConfigFilePath()
-          await writeFileContent(configPath, provisionalConfig.rawContent)
-          logger.info(`Wrote default config to: ${configPath}`)
-          opencodeServerManager.clearStartupError()
-          await restartOpenCode(openCodeSupervisor)
-
-          return c.json(config)
-        }
-
         const patchResult = await patchConfigWithRecovery(openCodeClient, provisionalConfig.content)
+
         if (!patchResult.success) {
           settingsService.deleteOpenCodeConfig(provisionalConfig.name, userId)
           return c.json({ 
@@ -419,46 +412,21 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const body = await c.req.json()
       const validated = UpdateOpenCodeConfigSchema.parse(body)
       
-      const existingConfig = settingsService.getOpenCodeConfigByName(configName, userId)
-      const previousContent = existingConfig?.content
-      
       const config = settingsService.updateOpenCodeConfig(configName, validated, userId)
       if (!config) {
         return c.json({ error: 'Config not found' }, 404)
       }
       
       if (config.isDefault) {
-        const restartRequired = needsOpenCodeRestart(previousContent, config.content)
-        const configPath = getOpenCodeConfigFilePath()
+        const applyResult = await applyDefaultOpenCodeConfig(config.content, config.rawContent)
 
-        if (restartRequired) {
-          await writeFileContent(configPath, config.rawContent)
-          logger.info(`Wrote default config to: ${configPath}`)
-          logger.info('OpenCode configuration requires process restart')
-          opencodeServerManager.clearStartupError()
-          await restartOpenCode(openCodeSupervisor)
-        } else {
-          const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
-          if (!patchResult.success) {
-            return c.json({ 
-              error: 'Config saved but failed to apply', 
-              details: patchResult.error,
-              validationIssues: patchResult.details,
-              removedFields: patchResult.removedFields
-            }, 500)
-          }
-          
-          const contentToWrite = patchResult.removedFields && patchResult.removedFields.length > 0
-            ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
-            : config.rawContent
-          
-          await writeFileContent(configPath, contentToWrite)
-          logger.info(`Wrote default config to: ${configPath}`)
-          
-          if (patchResult.removedFields && patchResult.removedFields.length > 0) {
-            logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)
-            return c.json({ ...config, removedFields: patchResult.removedFields })
-          }
+        if (applyResult.restarted) {
+          return c.json(config)
+        }
+
+        if (applyResult.removedFields && applyResult.removedFields.length > 0) {
+          logger.info(`Config applied with auto-removed fields: ${applyResult.removedFields.join(', ')}`)
+          return c.json({ ...config, removedFields: applyResult.removedFields })
         }
       }
       
@@ -501,22 +469,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Config not found' }, 404)
       }
 
-      if (hasConfiguredPlugins(existingConfig.content)) {
-        const config = settingsService.setDefaultOpenCodeConfig(configName, userId)
-        if (!config) {
-          return c.json({ error: 'Config not found' }, 404)
-        }
-
-        const configPath = getOpenCodeConfigFilePath()
-        await writeFileContent(configPath, existingConfig.rawContent)
-        logger.info(`Wrote default config '${configName}' to: ${configPath}`)
-        opencodeServerManager.clearStartupError()
-        await restartOpenCode(openCodeSupervisor)
-
-        return c.json(config)
-      }
-
       const patchResult = await patchConfigWithRecovery(openCodeClient, existingConfig.content)
+
       if (!patchResult.success) {
         return c.json({ 
           error: 'Config validation failed', 

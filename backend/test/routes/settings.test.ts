@@ -423,6 +423,250 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       )
       expect(json.removedFields).toEqual(['command.review'])
     })
+
+    it('should try in-place patch before restarting when default config provider changes', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 1,
+        name: 'default',
+        content: { provider: { openai: { npm: '@openai/provider' } } },
+        rawContent: '{"provider":{"openai":{"npm":"@openai/provider"}}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'default',
+        content: { provider: { next: { npm: '@next/provider' } } },
+        rawContent: '{"provider":{"next":{"npm":"@next/provider"}}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { provider: { next: { npm: '@next/provider' } } },
+        removedFields: [],
+      })
+
+      const req = new Request('http://localhost/opencode-configs/default', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: { provider: { next: { npm: '@next/provider' } } },
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledTimes(1)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledWith(
+        expect.anything(),
+        { provider: { next: { npm: '@next/provider' } } }
+      )
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(mockClearStartupError).not.toHaveBeenCalled()
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{"provider":{"next":{"npm":"@next/provider"}}}'
+      )
+    })
+
+    it('should fall back to restart when in-place patch fails during default config update', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 1,
+        name: 'default',
+        content: { agent: { model: 'gpt-4' } },
+        rawContent: '{"agent":{"model":"gpt-4"}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'default',
+        content: { agent: { model: 'claude-3' } },
+        rawContent: '{"agent":{"model":"claude-3"}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
+        success: false,
+        error: 'patch failed',
+        details: [],
+      })
+
+      const req = new Request('http://localhost/opencode-configs/default', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: { agent: { model: 'claude-3' } },
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledBefore(mockRestart)
+      expect(mockWriteFileContent).toHaveBeenCalled()
+      expect(mockClearStartupError).toHaveBeenCalled()
+      expect(mockRestart).toHaveBeenCalled()
+    })
+
+    it('should return 500 when patchConfigWithRecovery throws unexpectedly during default config update', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 1,
+        name: 'default',
+        content: { agent: { model: 'gpt-4' } },
+        rawContent: '{"agent":{"model":"gpt-4"}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'default',
+        content: { agent: { model: 'claude-3' } },
+        rawContent: '{"agent":{"model":"claude-3"}}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+
+      mockPatchConfigWithRecovery.mockRejectedValueOnce(new Error('Unexpected internal error'))
+
+      const req = new Request('http://localhost/opencode-configs/default', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: { agent: { model: 'claude-3' } },
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(500)
+      expect(json.error).toBe('Failed to update OpenCode config')
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(mockClearStartupError).not.toHaveBeenCalled()
+      expect(mockWriteFileContent).not.toHaveBeenCalled()
+    })
+
+    it('should try in-place patch before setting default when existing config has plugins', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'my-plugin',
+        content: { plugin: ['file:///tmp/plugin.ts'] },
+        rawContent: '{"plugin":["file:///tmp/plugin.ts"]}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { plugin: ['file:///tmp/plugin.ts'] },
+        removedFields: [],
+      })
+
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'my-plugin',
+        content: { plugin: ['file:///tmp/plugin.ts'] },
+        rawContent: '{"plugin":["file:///tmp/plugin.ts"]}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+
+      mockSetDefaultOpenCodeConfig.mockReturnValue({
+        id: 2,
+        name: 'my-plugin',
+        content: { plugin: ['file:///tmp/plugin.ts'] },
+        rawContent: '{"plugin":["file:///tmp/plugin.ts"]}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 3,
+      })
+
+      const req = new Request('http://localhost/opencode-configs/my-plugin/set-default', {
+        method: 'POST',
+      })
+      const res = await settingsApp.fetch(req)
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalledTimes(1)
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(mockSetDefaultOpenCodeConfig).toHaveBeenCalledWith('my-plugin', 'default')
+
+      const patchOrder = mockPatchConfigWithRecovery.mock.invocationCallOrder[0]
+      const setDefaultOrder = mockSetDefaultOpenCodeConfig.mock.invocationCallOrder[0]
+      expect(patchOrder).toBeDefined()
+      expect(setDefaultOrder).toBeDefined()
+      expect(patchOrder ?? 0).toBeLessThan(setDefaultOrder ?? 0)
+    })
+
+    it('should try in-place patch before restarting when creating a default config with plugins', async () => {
+      mockCreateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'plugined',
+        content: { plugin: ['file:///tmp/plugin.ts'] },
+        rawContent: '{"plugin":["file:///tmp/plugin.ts"]}',
+        isValid: true,
+        isDefault: false,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { plugin: ['file:///tmp/plugin.ts'] },
+        removedFields: [],
+      })
+
+      mockUpdateOpenCodeConfig.mockReturnValue({
+        id: 1,
+        name: 'plugined',
+        content: { plugin: ['file:///tmp/plugin.ts'] },
+        rawContent: '{"plugin":["file:///tmp/plugin.ts"]}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      })
+
+      const req = new Request('http://localhost/opencode-configs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'plugined',
+          content: '{"plugin":["file:///tmp/plugin.ts"]}',
+          isDefault: true,
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(mockPatchConfigWithRecovery).toHaveBeenCalled()
+      expect(mockRestart).not.toHaveBeenCalled()
+      expect(json.isDefault).toBe(true)
+    })
+
   })
 
   describe('OpenCode import routes', () => {

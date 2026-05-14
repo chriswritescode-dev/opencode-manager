@@ -52,13 +52,26 @@ interface Agent {
   [key: string]: unknown
 }
 
+type PendingConfigAction =
+  | { type: 'create' }
+  | { type: 'edit'; configName: string }
+  | { type: 'set-default'; configName: string }
+  | { type: 'delete'; configName: string }
+  | { type: 'section-update'; configName: string }
+  | null
+
 export function OpenCodeConfigManager() {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [isUpdating, setIsUpdating] = useState(false)
+  const [pendingConfigAction, setPendingConfigAction] = useState<PendingConfigAction>(null)
   const [editingConfig, setEditingConfig] = useState<OpenCodeConfig | null>(null)
+
+  const isCreatingConfig = pendingConfigAction?.type === 'create'
+  const isEditingCurrentConfig = !!(pendingConfigAction?.type === 'edit' && editingConfig?.name === pendingConfigAction.configName)
+  const isDeletingConfig = (config: OpenCodeConfig) => pendingConfigAction?.type === 'delete' && pendingConfigAction.configName === config.name
+  const isSettingDefaultConfig = (config: OpenCodeConfig) => pendingConfigAction?.type === 'set-default' && pendingConfigAction.configName === config.name
   const [selectedConfig, setSelectedConfig] = useState<OpenCodeConfig | null>(null)
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     agentsMd: false,
@@ -107,7 +120,7 @@ export function OpenCodeConfigManager() {
       return await settingsApi.restartOpenCodeServer()
     },
     onSuccess: () => {
-      invalidateConfigCaches(queryClient)
+      void invalidateConfigCaches(queryClient)
     },
   })
 
@@ -122,7 +135,7 @@ export function OpenCodeConfigManager() {
           return { ...old, opencodeVersion: data.newVersion }
         })
       }
-      invalidateConfigCaches(queryClient)
+      void invalidateConfigCaches(queryClient)
       if (data.upgraded) {
         showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
       } else {
@@ -148,16 +161,19 @@ export function OpenCodeConfigManager() {
       } else {
         showToast.error(defaultMessage, { id: 'upgrade-opencode' })
       }
-      invalidateConfigCaches(queryClient)
+      void invalidateConfigCaches(queryClient)
     },
   })
 
   const syncOpenCodeImportMutation = useMutation({
     mutationFn: async () => settingsApi.syncOpenCodeImport(),
     onSuccess: async () => {
-      await fetchConfigs()
-      invalidateConfigCaches(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['opencode-import-status'] })
+      const refreshed = await refreshConfigs()
+      if (!refreshed) {
+        showToast.warning('Import completed but unable to refresh server state', { id: 'import-refresh' })
+      }
+      void invalidateConfigCaches(queryClient)
+      void queryClient.invalidateQueries({ queryKey: ['opencode-import-status'] })
     },
   })
 
@@ -214,11 +230,40 @@ export function OpenCodeConfigManager() {
     return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
   }
 
+  const refreshConfigs = async (preferredConfigName?: string): Promise<OpenCodeConfig[] | null> => {
+    try {
+      const data = await settingsApi.getOpenCodeConfigs()
+      setConfigs(data.configs)
+      setSelectedConfig(prev => {
+        if (preferredConfigName) {
+          const found = data.configs.find(c => c.name === preferredConfigName)
+          if (found) return found
+        }
+        if (prev) {
+          const found = data.configs.find(c => c.name === prev.name)
+          if (found) return found
+        }
+        const defaultConfig = data.configs.find(c => c.isDefault)
+        if (defaultConfig) return defaultConfig
+        if (data.configs.length > 0) return data.configs[0]
+        return null
+      })
+      return data.configs
+    } catch (error) {
+      console.error('Failed to refresh configs:', error)
+      return null
+    }
+  }
+
   const fetchConfigs = async () => {
     try {
       setIsLoading(true)
       const data = await settingsApi.getOpenCodeConfigs()
       setConfigs(data.configs)
+      setSelectedConfig(prev => {
+        if (!prev) return null
+        return data.configs.find(c => c.name === prev.name) || prev
+      })
     } catch (error) {
       console.error('Failed to fetch configs:', error)
     } finally {
@@ -228,7 +273,7 @@ export function OpenCodeConfigManager() {
 
   const updateConfigContent = async (configName: string, newContent: Record<string, unknown>, restartServer = false) => {
     try {
-      setIsUpdating(true)
+      setPendingConfigAction({ type: 'section-update', configName })
       const previousConfig = configs.find(c => c.name === configName)
       const previousContent = previousConfig?.content
 
@@ -262,7 +307,8 @@ export function OpenCodeConfigManager() {
           } else {
             showToast.success('Configuration updated and server applied', { id: 'update-restart' })
           }
-          invalidateConfigCaches(queryClient)
+          await refreshConfigs(configName)
+          void invalidateConfigCaches(queryClient)
         } catch (error) {
           showToast.error(getRestartErrorMessage(error), { id: 'update-restart' })
           throw error
@@ -273,13 +319,14 @@ export function OpenCodeConfigManager() {
         } else {
           showToast.success('Configuration updated')
         }
-        invalidateConfigCaches(queryClient)
+        await refreshConfigs(configName)
+        void invalidateConfigCaches(queryClient)
       }
     } catch (error) {
       console.error('Failed to update config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to update config'), { id: 'update-restart' })
     } finally {
-      setIsUpdating(false)
+      setPendingConfigAction(prev => prev?.type === 'section-update' && prev.configName === configName ? null : prev)
     }
   }
 
@@ -297,7 +344,7 @@ export function OpenCodeConfigManager() {
   const createConfig = async (name: string, rawContent: string, isDefault: boolean) => {
     showToast.loading('Creating configuration...', { id: 'create-config' })
     try {
-      setIsUpdating(true)
+      setPendingConfigAction({ type: 'create' })
       const parsedContent = parseJsonc<Record<string, unknown>>(rawContent)
 
       const forbiddenFields = ['id', 'createdAt', 'updatedAt']
@@ -313,7 +360,16 @@ export function OpenCodeConfigManager() {
       })
 
       setIsCreateDialogOpen(false)
-      await fetchConfigs()
+
+      const trimmedName = name.trim()
+      setConfigs(prev => {
+        let updated = prev.map(c => isDefault ? { ...c, isDefault: false } : c)
+        updated = [...updated, result]
+        return updated
+      })
+      setSelectedConfig(prev => prev?.name === trimmedName ? prev : result)
+
+      const refreshed = await refreshConfigs(trimmedName)
 
       if (isDefault) {
         if (result.removedFields && result.removedFields.length > 0) {
@@ -325,13 +381,17 @@ export function OpenCodeConfigManager() {
         showToast.success('Configuration created', { id: 'create-config' })
       }
 
-      invalidateConfigCaches(queryClient)
+      if (!refreshed) {
+        showToast.warning('Created but unable to refresh server state', { id: 'create-refresh' })
+      }
+
+      void invalidateConfigCaches(queryClient)
     } catch (error) {
       console.error('Failed to create config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to create configuration'), { id: 'create-config' })
       throw error
     } finally {
-      setIsUpdating(false)
+      setPendingConfigAction(prev => prev?.type === 'create' ? null : prev)
     }
   }
 
@@ -339,27 +399,54 @@ export function OpenCodeConfigManager() {
 
   const deleteConfig = async (config: OpenCodeConfig) => {
     try {
-      setIsUpdating(true)
+      setPendingConfigAction({ type: 'delete', configName: config.name })
       await settingsApi.deleteOpenCodeConfig(config.name)
       setDeleteConfirmConfig(null)
-      if (selectedConfig?.id === config.id) {
-        setSelectedConfig(null)
+
+      setConfigs(prev => {
+        const filtered = prev.filter(c => c.id !== config.id)
+        return filtered
+      })
+      setSelectedConfig(prev => {
+        if (prev?.id === config.id) {
+          return null
+        }
+        return prev
+      })
+
+      const refreshed = await refreshConfigs()
+      if (!refreshed) {
+        showToast.warning('Deleted but unable to refresh server state', { id: 'delete-refresh' })
       }
-      fetchConfigs()
-      invalidateConfigCaches(queryClient)
+
+      void invalidateConfigCaches(queryClient)
     } catch (error) {
       console.error('Failed to delete config:', error)
     } finally {
-      setIsUpdating(false)
+      setPendingConfigAction(prev => prev?.type === 'delete' && prev.configName === config.name ? null : prev)
     }
   }
 
   const setDefaultConfig = async (config: OpenCodeConfig) => {
     showToast.loading('Setting default config...', { id: 'set-default' })
     try {
-      setIsUpdating(true)
+      setPendingConfigAction({ type: 'set-default', configName: config.name })
       const result = await settingsApi.setDefaultOpenCodeConfig(config.name)
-      await fetchConfigs()
+
+      setConfigs(prev => prev.map(c => {
+        if (c.id === config.id) return result
+        if (c.isDefault) return { ...c, isDefault: false }
+        return c
+      }))
+      setSelectedConfig(prev => prev?.id === config.id ? result : (prev?.isDefault ? { ...prev, isDefault: false } : prev))
+
+      const refreshed = await refreshConfigs(config.name)
+      if (!refreshed) {
+        showToast.warning('Set as default but unable to refresh server state', { id: 'set-default-refresh' })
+      }
+
+      void invalidateConfigCaches(queryClient)
+
       if (result.removedFields && result.removedFields.length > 0) {
         showToast.info(`Default config updated after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'set-default' })
       } else {
@@ -369,7 +456,7 @@ export function OpenCodeConfigManager() {
       console.error('Failed to set default config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to set default config'), { id: 'set-default' })
     } finally {
-      setIsUpdating(false)
+      setPendingConfigAction(prev => prev?.type === 'set-default' && prev.configName === config.name ? null : prev)
     }
   }
 
@@ -602,7 +689,7 @@ export function OpenCodeConfigManager() {
         isOpen={isCreateDialogOpen}
         onOpenChange={setIsCreateDialogOpen}
         onCreate={createConfig}
-        isUpdating={isUpdating}
+        isUpdating={isCreatingConfig}
       />
 
       <VersionSelectDialog
@@ -646,6 +733,7 @@ export function OpenCodeConfigManager() {
                         variant="ghost"
                         size="sm"
                         onClick={() => downloadConfig(config)}
+                        aria-label={`Download config ${config.name}`}
                       >
                         <Download className="h-4 w-4" />
                       </Button>
@@ -653,6 +741,7 @@ export function OpenCodeConfigManager() {
                         variant="ghost"
                         size="sm"
                         onClick={() => startEdit(config)}
+                        aria-label={`Edit config ${config.name}`}
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
@@ -660,7 +749,8 @@ export function OpenCodeConfigManager() {
                         variant="ghost"
                         size="sm"
                         onClick={() => setDefaultConfig(config)}
-                        disabled={config.isDefault || isUpdating}
+                        disabled={config.isDefault || isSettingDefaultConfig(config)}
+                        aria-label={`Set ${config.name} as default`}
                       >
                         <StarOff className="h-4 w-4" />
                       </Button>
@@ -669,6 +759,7 @@ export function OpenCodeConfigManager() {
                         size="sm"
                         onClick={() => setDeleteConfirmConfig(config)}
                         className="text-red-500 hover:text-red-600"
+                        aria-label={`Delete config ${config.name}`}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
@@ -693,21 +784,32 @@ export function OpenCodeConfigManager() {
         onClose={() => setIsEditDialogOpen(false)}
         onUpdate={async (rawContent) => {
           if (!editingConfig) return
+          const editName = editingConfig.name
           showToast.loading('Saving configuration...', { id: 'edit-config' })
           try {
-            await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
-            await fetchConfigs()
+            setPendingConfigAction({ type: 'edit', configName: editName })
+            const updatedConfig = await settingsApi.updateOpenCodeConfig(editName, { content: rawContent })
+            setConfigs(prev => prev.map(config =>
+              config.name === editName ? updatedConfig : config
+            ))
+            setSelectedConfig(prev => prev?.name === editName ? updatedConfig : prev)
+            const refreshed = await refreshConfigs(editName)
+            if (!refreshed) {
+              showToast.warning('Saved but unable to refresh server state', { id: 'edit-refresh' })
+            }
             const successMsg = editingConfig.isDefault
               ? 'Configuration saved and server reloaded'
               : 'Configuration saved'
             showToast.success(successMsg, { id: 'edit-config' })
-            invalidateConfigCaches(queryClient)
+            void invalidateConfigCaches(queryClient)
           } catch (error) {
             showToast.error(getApiErrorMessage(error, 'Failed to save configuration'), { id: 'edit-config' })
             throw error
+          } finally {
+            setPendingConfigAction(prev => prev?.type === 'edit' && prev.configName === editName ? null : prev)
           }
         }}
-        isUpdating={isUpdating}
+        isUpdating={isEditingCurrentConfig}
       />
 
       {/* Global AGENTS.md Section */}
@@ -999,7 +1101,7 @@ export function OpenCodeConfigManager() {
         title="Delete Configuration"
         description="Any repositories using this configuration will continue to work but won't receive updates."
         itemName={deleteConfirmConfig?.name}
-        isDeleting={isUpdating}
+        isDeleting={deleteConfirmConfig ? isDeletingConfig(deleteConfirmConfig) : false}
       />
     </div>
   )
