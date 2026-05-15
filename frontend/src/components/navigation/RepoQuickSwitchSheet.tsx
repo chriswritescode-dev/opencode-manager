@@ -91,7 +91,10 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
             <Button
               type="button"
               size="sm"
-              onClick={() => setAddRepoOpen(true)}
+              onClick={() => {
+                onClose()
+                setAddRepoOpen(true)
+              }}
               className="flex-shrink-0"
             >
               <Plus className="h-4 w-4" /> Repo
