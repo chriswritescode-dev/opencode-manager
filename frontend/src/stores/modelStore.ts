@@ -156,7 +156,9 @@ export const useModelStore = create<ModelStore>()(
           set({ favoriteModels: cleanedFavoriteModels })
         }
 
-        if (!currentModelExists) {
+        const configModelChanged = state.lastConfigModel !== configModel
+
+        if (configModelChanged || !currentModelExists) {
           get().syncFromConfig(configModel, true)
         }
       },

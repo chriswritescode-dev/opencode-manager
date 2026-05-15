@@ -228,4 +228,54 @@ describe('useModelSelection', () => {
       expect(mockAddOpenCodeRecentModel.mock.calls[0][0]).toEqual(testModel)
     })
   })
+
+  it('syncs active model to config default when config model changes', async () => {
+    useModelStore.getState().setModel({ providerID: 'anthropic', modelID: 'claude-old' })
+
+    const providersData = {
+      providers: [
+        {
+          id: 'anthropic',
+          name: 'Anthropic',
+          models: {
+            'claude-old': { id: 'claude-old', name: 'Claude Old' },
+            'claude-new': { id: 'claude-new', name: 'Claude New' },
+          },
+          isConnected: true,
+          env: [],
+          options: {},
+        },
+      ],
+      connected: ['anthropic'],
+      default: {},
+    }
+
+    mockGetProviders.mockResolvedValue(providersData as any)
+
+    mockUseConfig.mockReturnValue({ data: { model: 'anthropic/claude-new' }, isLoading: false } as any)
+
+    mockGetOpenCodeModelState.mockResolvedValue({
+      recent: [{ providerID: 'anthropic', modelID: 'claude-new' }],
+      favorite: [],
+      variant: {},
+    })
+
+    const { result } = renderHookWithProviders()
+
+    await waitFor(() => {
+      expect(result.current.modelString).toBe('anthropic/claude-new')
+    })
+
+    await waitFor(() => {
+      expect(result.current.model).toEqual({ providerID: 'anthropic', modelID: 'claude-new' })
+    })
+
+    await waitFor(() => {
+      expect(useModelStore.getState().model).toEqual({ providerID: 'anthropic', modelID: 'claude-new' })
+    })
+
+    await waitFor(() => {
+      expect(result.current.recentModels[0]).toEqual({ providerID: 'anthropic', modelID: 'claude-new' })
+    })
+  })
 })

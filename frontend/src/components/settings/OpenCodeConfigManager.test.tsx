@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   deleteOpenCodeConfig: vi.fn(),
   listManagedSkills: vi.fn(),
   getOpenCodeImportStatus: vi.fn(),
+  invalidateConfigCaches: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock('@/api/settings', () => ({
@@ -62,7 +63,7 @@ vi.mock('@/lib/toast', () => ({
 }))
 
 vi.mock('@/lib/queryInvalidation', () => ({
-  invalidateConfigCaches: vi.fn(),
+  invalidateConfigCaches: mocks.invalidateConfigCaches,
 }))
 
 vi.mock('./CommandsEditor', () => ({
@@ -139,6 +140,7 @@ beforeEach(() => {
   )
   mocks.listManagedSkills.mockResolvedValue([])
   mocks.deleteOpenCodeConfig.mockResolvedValue({})
+  mocks.invalidateConfigCaches.mockResolvedValue(undefined)
   mocks.getOpenCodeImportStatus.mockResolvedValue({
     configSourcePath: null,
     stateSourcePath: null,
@@ -483,6 +485,11 @@ describe('OpenCodeConfigManager', () => {
         const agentCountEl = within(agentSection!).getByText(/configured/)
         expect(agentCountEl).toHaveTextContent('2 configured')
       }, { timeout: 3000 })
+
+      await waitFor(() => {
+        expect(mocks.invalidateConfigCaches).toHaveBeenCalled()
+      })
+      expect(mocks.invalidateConfigCaches.mock.calls.at(-1)?.[1]).toEqual({ clearModelData: true })
     })
   })
 
@@ -841,6 +848,11 @@ describe('OpenCodeConfigManager', () => {
           expect.objectContaining({ name: 'new-default', isDefault: true })
         )
       }, { timeout: 5000 })
+
+      await waitFor(() => {
+        expect(mocks.invalidateConfigCaches).toHaveBeenCalled()
+      })
+      expect(mocks.invalidateConfigCaches.mock.calls.at(-1)?.[1]).toEqual({ clearModelData: true })
     })
   })
 

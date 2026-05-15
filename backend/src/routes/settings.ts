@@ -383,6 +383,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         await writeFileContent(configPath, contentToWrite)
         logger.info(`Wrote default config to: ${configPath}`)
 
+        await reloadOpenCodeConfig(openCodeSupervisor)
+
         if (patchResult.removedFields && patchResult.removedFields.length > 0) {
           logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)
           return c.json({ ...config, removedFields: patchResult.removedFields })
@@ -501,6 +503,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const configPath = getOpenCodeConfigFilePath()
       await writeFileContent(configPath, contentToWrite)
       logger.info(`Wrote default config '${configName}' to: ${configPath}`)
+
+      await reloadOpenCodeConfig(openCodeSupervisor)
 
       if (patchResult.removedFields && patchResult.removedFields.length > 0) {
         logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)

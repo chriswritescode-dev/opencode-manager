@@ -385,7 +385,7 @@ export function OpenCodeConfigManager() {
         showToast.warning('Created but unable to refresh server state', { id: 'create-refresh' })
       }
 
-      void invalidateConfigCaches(queryClient)
+      await invalidateConfigCaches(queryClient, { clearModelData: isDefault })
     } catch (error) {
       console.error('Failed to create config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to create configuration'), { id: 'create-config' })
@@ -445,7 +445,7 @@ export function OpenCodeConfigManager() {
         showToast.warning('Set as default but unable to refresh server state', { id: 'set-default-refresh' })
       }
 
-      void invalidateConfigCaches(queryClient)
+      await invalidateConfigCaches(queryClient, { clearModelData: true })
 
       if (result.removedFields && result.removedFields.length > 0) {
         showToast.info(`Default config updated after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'set-default' })
