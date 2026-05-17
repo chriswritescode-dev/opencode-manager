@@ -131,6 +131,20 @@ export class AudioRecorder {
     this.onStateChange?.(newState)
   }
 
+  async prepare(): Promise<void> {
+    if (this.audioContext) {
+      return
+    }
+
+    this.audioContext = new AudioContext({
+      sampleRate: this.options.sampleRate,
+    })
+
+    if (this.audioContext.audioWorklet) {
+      await ensureWorkletLoaded(this.audioContext)
+    }
+  }
+
   async start(): Promise<void> {
     if (!AudioRecorder.isSupported()) {
       this.setState('error')
@@ -143,24 +157,29 @@ export class AudioRecorder {
       this.chunks = []
       this.totalSamples = 0
 
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
+      await this.prepare()
 
-      this.audioContext = new AudioContext({
-        sampleRate: this.options.sampleRate,
-      })
+      if (this.audioContext!.state === 'suspended') {
+        await this.audioContext!.resume()
+      }
 
-      this.source = this.audioContext.createMediaStreamSource(this.mediaStream)
+      if (!this.mediaStream) {
+        this.mediaStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        })
+      } else {
+        this.mediaStream.getTracks().forEach(track => track.enabled = true)
+      }
 
-      if (this.audioContext.audioWorklet) {
+      this.source = this.audioContext!.createMediaStreamSource(this.mediaStream)
+
+      if (this.audioContext!.audioWorklet) {
         try {
-          await ensureWorkletLoaded(this.audioContext)
-          this.workletNode = new AudioWorkletNode(this.audioContext, 'recorder-processor', {
+          this.workletNode = new AudioWorkletNode(this.audioContext!, 'recorder-processor', {
             processorOptions: { targetSampleRate: this.options.sampleRate },
           })
           this.workletNode.port.onmessage = (e: MessageEvent<Int16Array>) => {
@@ -169,8 +188,7 @@ export class AudioRecorder {
           }
           this.source.connect(this.workletNode)
         } catch (error) {
-          this.audioContext.close()
-          this.audioContext = null
+          this.dispose()
           throw new Error('Failed to load audio worklet processor', { cause: error })
         }
       } else if (this.audioContext) {
@@ -190,7 +208,7 @@ export class AudioRecorder {
       this.setState('recording')
     } catch (error) {
       this.setState('error')
-      this.cleanup()
+      this.dispose()
 
       if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
@@ -208,19 +226,51 @@ export class AudioRecorder {
     }
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     if (this.processor || this.workletNode) {
       this.processRecording()
     }
+    await this.partialCleanup()
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.enabled = false)
+    }
+    if (this.audioContext && this.audioContext.state === 'running') {
+      await this.audioContext.suspend()
+    }
     this.resetRecordingState()
-    this.cleanup()
     this.setState('stopped')
   }
 
-  abort(): void {
+  async abort(): Promise<void> {
     this.isAborted = true
+    await this.partialCleanup()
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.enabled = false)
+    }
+    if (this.audioContext && this.audioContext.state === 'running') {
+      await this.audioContext.suspend()
+    }
     this.resetRecordingState()
-    this.cleanup()
+    this.setState('idle')
+  }
+
+  releaseStream(): void {
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop())
+      this.mediaStream = null
+    }
+  }
+
+  dispose(): void {
+    this.partialCleanup()
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop())
+      this.mediaStream = null
+    }
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close()
+      this.audioContext = null
+    }
     this.setState('idle')
   }
 
@@ -244,7 +294,7 @@ export class AudioRecorder {
     }
   }
 
-  private cleanup(): void {
+  private async partialCleanup(): Promise<void> {
     if (this.workletNode) {
       this.workletNode.port.onmessage = null
       this.workletNode.port.postMessage('stop')
@@ -261,16 +311,6 @@ export class AudioRecorder {
     if (this.source) {
       this.source.disconnect()
       this.source = null
-    }
-
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close()
-      this.audioContext = null
-    }
-
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop())
-      this.mediaStream = null
     }
   }
 

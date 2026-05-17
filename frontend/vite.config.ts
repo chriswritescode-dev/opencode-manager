@@ -60,5 +60,8 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    optimizeDeps: {
+      include: ["zod", "@hookform/resolvers"],
+    },
   };
 });

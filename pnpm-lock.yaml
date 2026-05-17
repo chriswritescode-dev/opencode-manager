@@ -105,7 +105,7 @@ importers:
     dependencies:
       '@better-auth/passkey':
         specifier: ^1.4.17
-        version: 1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.2))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-auth@1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4))(better-call@1.1.8(zod@4.3.2))(nanostores@1.1.0)
+        version: 1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-auth@1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4))(better-call@1.1.8(zod@4.4.3))(nanostores@1.1.0)
       '@dnd-kit/core':
         specifier: ^6.3.1
         version: 6.3.1(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -221,8 +221,8 @@ importers:
         specifier: ^3.3.1
         version: 3.4.0
       zod:
-        specifier: ^4.1.12
-        version: 4.3.2
+        specifier: ^4.4.3
+        version: 4.4.3
       zustand:
         specifier: ^5.0.8
         version: 5.0.9(@types/react@19.2.7)(react@19.2.3)
@@ -4158,8 +4158,8 @@ packages:
   zod@4.3.2:
     resolution: {integrity: sha512-b8L8yn4rIVfiXyHAmnr52/ZEpDumlT0bmxiq3Ws1ybrinhflGpt12Hvv54kYnEsGPRs6o/Ka3/ppA2OWY21IVg==}
 
-  zod@4.3.5:
-    resolution: {integrity: sha512-k7Nwx6vuWx1IJ9Bjuf4Zt1PEllcwe7cls3VNzm4CQ1/hgtFUK2bRNG3rvnpPUhFjmqJKAKtjV576KnUkHocg/g==}
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
   zustand@5.0.9:
     resolution: {integrity: sha512-ALBtUj0AfjJt3uNRQoL1tL2tMvj6Gp/6e39dnfT6uzpelGru8v1tPOGBzayOWbPJvujM8JojDk3E1LxeFisBNg==}
@@ -4347,7 +4347,18 @@ snapshots:
       jose: 6.1.3
       kysely: 0.28.10
       nanostores: 1.1.0
-      zod: 4.3.5
+      zod: 4.4.3
+
+  '@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0)':
+    dependencies:
+      '@better-auth/utils': 0.3.0
+      '@better-fetch/fetch': 1.1.21
+      '@standard-schema/spec': 1.1.0
+      better-call: 1.1.8(zod@4.4.3)
+      jose: 6.1.3
+      kysely: 0.28.10
+      nanostores: 1.1.0
+      zod: 4.4.3
 
   '@better-auth/passkey@1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.2))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-auth@1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4))(better-call@1.1.8(zod@4.3.2))(nanostores@1.1.0)':
     dependencies:
@@ -4359,11 +4370,23 @@ snapshots:
       better-auth: 1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4)
       better-call: 1.1.8(zod@4.3.2)
       nanostores: 1.1.0
-      zod: 4.3.5
+      zod: 4.4.3
 
-  '@better-auth/telemetry@1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.2))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))':
+  '@better-auth/passkey@1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-auth@1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4))(better-call@1.1.8(zod@4.4.3))(nanostores@1.1.0)':
     dependencies:
-      '@better-auth/core': 1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.2))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0)
+      '@better-auth/core': 1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0)
+      '@better-auth/utils': 0.3.0
+      '@better-fetch/fetch': 1.1.21
+      '@simplewebauthn/browser': 13.2.2
+      '@simplewebauthn/server': 13.2.2
+      better-auth: 1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4)
+      better-call: 1.1.8(zod@4.4.3)
+      nanostores: 1.1.0
+      zod: 4.4.3
+
+  '@better-auth/telemetry@1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))':
+    dependencies:
+      '@better-auth/core': 1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0)
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.21
 
@@ -5911,18 +5934,18 @@ snapshots:
 
   better-auth@1.4.17(better-sqlite3@12.9.0)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vitest@3.2.4):
     dependencies:
-      '@better-auth/core': 1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.2))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0)
-      '@better-auth/telemetry': 1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.2))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))
+      '@better-auth/core': 1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0)
+      '@better-auth/telemetry': 1.4.17(@better-auth/core@1.4.17(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.4.3))(jose@6.1.3)(kysely@0.28.10)(nanostores@1.1.0))
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.21
       '@noble/ciphers': 2.1.1
       '@noble/hashes': 2.0.1
-      better-call: 1.1.8(zod@4.3.5)
+      better-call: 1.1.8(zod@4.4.3)
       defu: 6.1.4
       jose: 6.1.3
       kysely: 0.28.10
       nanostores: 1.1.0
-      zod: 4.3.5
+      zod: 4.4.3
     optionalDependencies:
       better-sqlite3: 12.9.0
       react: 19.2.3
@@ -5938,14 +5961,14 @@ snapshots:
     optionalDependencies:
       zod: 4.3.2
 
-  better-call@1.1.8(zod@4.3.5):
+  better-call@1.1.8(zod@4.4.3):
     dependencies:
       '@better-auth/utils': 0.3.0
       '@better-fetch/fetch': 1.1.21
       rou3: 0.7.12
       set-cookie-parser: 2.7.2
     optionalDependencies:
-      zod: 4.3.5
+      zod: 4.4.3
 
   better-sqlite3@12.9.0:
     dependencies:
@@ -8394,7 +8417,7 @@ snapshots:
 
   zod@4.3.2: {}
 
-  zod@4.3.5: {}
+  zod@4.4.3: {}
 
   zustand@5.0.9(@types/react@19.2.7)(react@19.2.3):
     optionalDependencies:

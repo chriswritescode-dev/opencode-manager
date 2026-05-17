@@ -186,25 +186,38 @@ export function useSTT(userId = 'default') {
   }, [])
 
   useEffect(() => {
-    if (!isEnabled || !isExternalProvider) {
-      return
-    }
-
     if (!audioRecorder.current) {
       audioRecorder.current = new AudioRecorder()
-    }
-
-    if (!recorderConfiguredRef.current) {
       setupAudioRecorder(audioRecorder.current)
       recorderConfiguredRef.current = true
     }
-
     return () => {
-      if (audioRecorder.current) {
-        audioRecorder.current.abort()
+      audioRecorder.current?.dispose()
+      audioRecorder.current = null
+      recorderConfiguredRef.current = false
+    }
+  }, [setupAudioRecorder])
+
+  useEffect(() => {
+    const recorder = audioRecorder.current
+    if (!recorder) return
+    if (isEnabled && isExternalProvider) {
+      void recorder.prepare()
+    } else {
+      recorder.releaseStream()
+    }
+  }, [isEnabled, isExternalProvider])
+
+  useEffect(() => {
+    if (!isEnabled || !isExternalProvider) return
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') {
+        audioRecorder.current?.releaseStream()
       }
     }
-  }, [isEnabled, isExternalProvider, setupAudioRecorder])
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => document.removeEventListener('visibilitychange', handleVisibility)
+  }, [isEnabled, isExternalProvider])
 
   const clearStartupTimeout = useCallback(() => {
     if (startupTimeoutRef.current) {
@@ -250,8 +263,9 @@ export function useSTT(userId = 'default') {
 
     if (isExternalProvider) {
       if (!audioRecorder.current) {
-        audioRecorder.current = new AudioRecorder()
-        setupAudioRecorder(audioRecorder.current)
+        setIsError(true)
+        setError('Recorder not initialized')
+        return false
       }
 
       try {
@@ -321,7 +335,7 @@ export function useSTT(userId = 'default') {
         return false
       }
     }
-  }, [isSupported, isEnabled, isExternalProvider, config.language, setupAudioRecorder, clearStartupTimeout, abortAndResetOnTimeout])
+  }, [isSupported, isEnabled, isExternalProvider, config.language, clearStartupTimeout, abortAndResetOnTimeout])
 
   const stopRecording = useCallback(() => {
     if (isExternalProvider && audioRecorder.current) {
