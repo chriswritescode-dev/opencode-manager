@@ -16,7 +16,7 @@ export function MobileSheetHost() {
 
   return (
     <>
-      {openSheet === 'repos' && <RepoQuickSwitchSheet isOpen onClose={close} />}
+      <RepoQuickSwitchSheet isOpen={openSheet === 'repos'} onClose={close} />
       {openSheet === 'files' && (
         <FileBrowserSheet
           isOpen
