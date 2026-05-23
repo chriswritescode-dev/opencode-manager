@@ -2,4 +2,5 @@ packages:
   - 'shared'
   - 'backend'
   - 'frontend'
+  - 'opencode-workspace-plugin'
   - '!workspace/**'

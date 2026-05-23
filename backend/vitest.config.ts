@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config'
+import path from 'path'
 
 export default defineConfig({
   test: {
@@ -33,7 +34,7 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      'bun:sqlite': './test/mocks/bun-sqlite.ts',
+      'bun:sqlite': path.resolve(__dirname, './test/mocks/bun-sqlite.ts'),
     },
   },
 })

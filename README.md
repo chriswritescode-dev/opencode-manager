@@ -102,6 +102,12 @@ AUTH_SECURE_COOKIES=false  # Set to true when using HTTPS
 
 For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see the [Configuration Guide](https://chriswritescode-dev.github.io/opencode-manager/configuration/environment/).
 
+## Workspace Plugin (Repo Targets)
+
+OpenCode Manager supports connecting to remote repo OpenCode targets from a local OpenCode instance via the workspace plugin. The plugin discovers repos on the Manager, starts a dedicated OpenCode process per repo, and proxies API calls. Idle sessions sync back to the Manager web UI.
+
+See the [Workspace Plugin Guide](docs/opencode-manager-workspaces.md) for setup, lifecycle, and limitations.
+
 ## Documentation
 
 - [Getting Started](https://chriswritescode-dev.github.io/opencode-manager/getting-started/installation/) — Installation and first-run setup
@@ -109,6 +115,7 @@ For OAuth, Passkeys, Push Notifications (VAPID), and advanced configuration, see
 - [Configuration](https://chriswritescode-dev.github.io/opencode-manager/configuration/environment/) — Environment variables and advanced setup
 - [Troubleshooting](https://chriswritescode-dev.github.io/opencode-manager/troubleshooting/) — Common issues and solutions
 - [Development](https://chriswritescode-dev.github.io/opencode-manager/development/setup/) — Contributing and local development
+- [Workspaces](docs/opencode-manager-workspaces.md) — Workspace plugin for repo targets
 
 ## License
 
