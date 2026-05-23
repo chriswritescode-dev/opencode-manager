@@ -36,38 +36,12 @@ describe('createManagerWorkspaceAdapter', () => {
     expect(adapter.name).toBe('manager')
   })
 
-  it('list maps Manager workspaces to OpenCode listed workspaces', async () => {
-    vi.mocked(mockClient.listWorkspaces).mockResolvedValue([
-      {
-        repoId: 1,
-        name: 'repo-1',
-        branch: 'main',
-        cloneStatus: 'ready',
-        directory: '/path/to/repo',
-        extra: {
-          repoId: 1,
-          localPath: 'local/path',
-          fullPath: '/full/path',
-        },
-      },
-    ])
-
+  it('list returns empty array to defer discovery to the TUI', async () => {
     const adapter = createManagerWorkspaceAdapter(mockInput, config, mockClient)
     const result = await adapter.list!()
 
-    expect(result).toHaveLength(1)
-    expect(result[0].type).toBe('manager')
-    expect(result[0].name).toBe('manager:default:1:local/path')
-    expect(result[0].branch).toBe('main')
-    expect(result[0].directory).toBeNull()
-    expect(result[0].projectID).toBe('project-1')
-    expect(result[0].extra).toEqual({
-      repoId: 1,
-      managerUrl: 'http://localhost:5003',
-      connectionId: 'default',
-      localPath: 'local/path',
-      fullPath: '/full/path',
-    })
+    expect(result).toEqual([])
+    expect(mockClient.listWorkspaces).not.toHaveBeenCalled()
   })
 
   it('configure validates metadata', async () => {

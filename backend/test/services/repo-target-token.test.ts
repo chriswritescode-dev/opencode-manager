@@ -16,13 +16,18 @@ describe('repo-target-token', () => {
     verifyRepoTargetToken = mod.verifyRepoTargetToken
   })
 
-  it('creates a token with three colon-separated parts', () => {
+  it('creates a token with three dot-separated parts', () => {
     const token = createRepoTargetToken(42)
-    const parts = token.split(':')
+    const parts = token.split('.')
     expect(parts).toHaveLength(3)
     expect(parts[0]).toBe('42')
     expect(parts[1]).toMatch(/^[0-9a-f]{32}$/)
     expect(parts[2]).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  it('contains no colons so Basic auth parsing succeeds', () => {
+    const token = createRepoTargetToken(42)
+    expect(token).not.toContain(':')
   })
 
   it('verifies a valid token and returns the repoId', () => {
@@ -38,16 +43,16 @@ describe('repo-target-token', () => {
 
   it('rejects a token for a different repoId', () => {
     const token = createRepoTargetToken(42)
-    const parts = token.split(':')
-    const tamperedToken = `99:${parts[1]}:${parts[2]}`
+    const parts = token.split('.')
+    const tamperedToken = `99.${parts[1]}.${parts[2]}`
     const result = verifyRepoTargetToken(tamperedToken)
     expect(result).toBeNull()
   })
 
   it('rejects a token with a forged signature', () => {
     const token = createRepoTargetToken(42)
-    const parts = token.split(':')
-    const forgedToken = `${parts[0]}:${parts[1]}:${'a'.repeat(64)}`
+    const parts = token.split('.')
+    const forgedToken = `${parts[0]}.${parts[1]}.${'a'.repeat(64)}`
     const result = verifyRepoTargetToken(forgedToken)
     expect(result).toBeNull()
   })

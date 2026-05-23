@@ -57,11 +57,12 @@ function createMockTargetManager(): RepoOpenCodeTargetManager {
   return {
     ensureTarget: vi.fn().mockResolvedValue({
       repoId: 1,
-      state: 'healthy',
+      state: 'starting',
       openCodeUrl: '/api/opencode-targets/repo/1',
       headers: { Authorization: 'Bearer test-token' },
       reused: false,
     } as EnsureOpenCodeTargetResponse),
+    awaitReady: vi.fn().mockResolvedValue(false),
     getTarget: vi.fn().mockReturnValue(null),
     stopTarget: vi.fn().mockResolvedValue(undefined),
   } as unknown as RepoOpenCodeTargetManager
@@ -118,7 +119,7 @@ describe('internal-opencode-target routes', () => {
 
     const body = await res.json() as { repoId: number; state: string; openCodeUrl: string }
     expect(body.repoId).toBe(1)
-    expect(body.state).toBe('healthy')
+    expect(body.state).toBe('starting')
     expect(body.openCodeUrl).toBe('/api/opencode-targets/repo/1')
   })
 })
@@ -151,17 +152,58 @@ describe('opencode-target proxy routes', () => {
     expect(res.status).toBe(400)
   })
 
-  it('returns 503 when target is not available', async () => {
+  it('returns 503 when target has not been started', async () => {
     const app = new Hono()
     app.route('/api/opencode-targets', createOpenCodeTargetProxyRoutes(db, targetManager))
 
-    // Generate a valid token for repoId 1
     const token = createRepoTargetToken(1)
     const res = await app.request('/api/opencode-targets/repo/1/test', {
       headers: { Authorization: `Bearer ${token}` },
     })
     expect(res.status).toBe(503)
     expect(targetManager.getTarget).toHaveBeenCalledWith(1)
+  })
+
+  it('awaits readiness when target is starting and proxies when ready', async () => {
+    const startingRuntime = { state: 'starting', process: {} } as ReturnType<RepoOpenCodeTargetManager['getTarget']>
+    const healthyRuntime = { state: 'healthy', process: {}, port: 50001, token: 'tgt-token' } as ReturnType<RepoOpenCodeTargetManager['getTarget']>
+    let call = 0
+    targetManager.getTarget = vi.fn().mockImplementation(() => (call++ === 0 ? startingRuntime : healthyRuntime))
+    targetManager.awaitReady = vi.fn().mockResolvedValue(true)
+    const upstreamFetch = vi.fn().mockResolvedValue(new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }))
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = upstreamFetch as unknown as typeof fetch
+
+    const app = new Hono()
+    app.route('/api/opencode-targets', createOpenCodeTargetProxyRoutes(db, targetManager))
+
+    const token = createRepoTargetToken(1)
+    const res = await app.request('/api/opencode-targets/repo/1/anything', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    expect(targetManager.awaitReady).toHaveBeenCalledWith(1)
+    expect(res.status).toBe(200)
+    expect(upstreamFetch).toHaveBeenCalled()
+
+    globalThis.fetch = originalFetch
+  })
+
+  it('returns 503 when target never becomes ready', async () => {
+    const startingRuntime = { state: 'starting', process: {} } as ReturnType<RepoOpenCodeTargetManager['getTarget']>
+    targetManager.getTarget = vi.fn().mockReturnValue(startingRuntime)
+    targetManager.awaitReady = vi.fn().mockResolvedValue(false)
+
+    const app = new Hono()
+    app.route('/api/opencode-targets', createOpenCodeTargetProxyRoutes(db, targetManager))
+
+    const token = createRepoTargetToken(1)
+    const res = await app.request('/api/opencode-targets/repo/1/test', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+    expect(res.status).toBe(503)
+    expect(targetManager.awaitReady).toHaveBeenCalledWith(1)
   })
 
   it('returns 401 when token repo ID does not match path repo ID', async () => {

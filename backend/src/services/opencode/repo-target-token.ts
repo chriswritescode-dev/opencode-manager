@@ -11,23 +11,25 @@ function deriveKey(): Buffer {
   return createHmac('sha256', Buffer.from(secret, 'utf8')).update(HMAC_SECRET_SALT).digest()
 }
 
+const TOKEN_SEPARATOR = '.'
+
 export function createRepoTargetToken(repoId: number): string {
   const nonce = randomBytes(16).toString('hex')
-  const payload = `${repoId}:${nonce}`
+  const payload = `${repoId}${TOKEN_SEPARATOR}${nonce}`
   const key = deriveKey()
   const signature = createHmac('sha256', key).update(payload).digest('hex')
-  return `${repoId}:${nonce}:${signature}`
+  return `${payload}${TOKEN_SEPARATOR}${signature}`
 }
 
 export function verifyRepoTargetToken(token: string): { repoId: number } | null {
-  const parts = token.split(':')
+  const parts = token.split(TOKEN_SEPARATOR)
   if (parts.length !== 3) return null
 
   const [repoIdStr, nonce, signature] = parts
   const repoId = parseInt(repoIdStr!, 10)
   if (isNaN(repoId)) return null
 
-  const payload = `${repoId}:${nonce}`
+  const payload = `${repoId}${TOKEN_SEPARATOR}${nonce}`
   const key = deriveKey()
   const expectedSignature = createHmac('sha256', key).update(payload).digest('hex')
 

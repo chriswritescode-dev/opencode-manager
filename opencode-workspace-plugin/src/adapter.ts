@@ -2,6 +2,10 @@ import type { PluginConfig } from './config.js'
 import type { ManagerClient } from './manager-client.js'
 import type { WorkspaceAdapterWithList, WorkspaceListedInfo, PluginInput } from './opencode-plugin-types.js'
 
+export function buildWorkspaceName(connectionId: string, repoId: number, localPath: string): string {
+  return `manager:${connectionId}:${repoId}:${localPath}`
+}
+
 export function createManagerWorkspaceAdapter(
   input: PluginInput,
   config: PluginConfig,
@@ -12,21 +16,7 @@ export function createManagerWorkspaceAdapter(
     description: 'Connect to OpenCode Manager repos as workspaces',
 
     async list(): Promise<WorkspaceListedInfo[]> {
-      const workspaces = await client.listWorkspaces()
-      return workspaces.map((ws) => ({
-        type: 'manager',
-        name: `manager:${config.connectionId}:${ws.repoId}:${ws.extra.localPath}`,
-        branch: ws.branch,
-        directory: null,
-        projectID: input.project.id,
-        extra: {
-          repoId: ws.repoId,
-          managerUrl: config.managerUrl,
-          connectionId: config.connectionId,
-          localPath: ws.extra.localPath,
-          fullPath: ws.extra.fullPath,
-        },
-      }))
+      return []
     },
 
     async configure(info) {
@@ -64,3 +54,5 @@ export function createManagerWorkspaceAdapter(
     },
   }
 }
+
+export type { ManagerClient } from './manager-client.js'

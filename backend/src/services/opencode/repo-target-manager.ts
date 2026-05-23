@@ -9,6 +9,8 @@ import type { Repo } from '../../types/repo'
 
 const HEALTH_CHECK_TIMEOUT_MS = 3000
 const HEALTH_CHECK_INTERVAL_MS = 500
+const HEALTH_CHECK_MAX_WAIT_MS = 30_000
+const READINESS_WAIT_TIMEOUT_MS = 60_000
 const TARGET_BASE_DIR = 'opencode-targets'
 const PROXY_PATH_PREFIX = '/api/opencode-targets/repo'
 
@@ -22,6 +24,7 @@ interface RepoOpenCodeTargetRuntime {
   startedAt: number
   lastUsedAt: number
   lastError?: string
+  readyPromise: Promise<boolean>
 }
 
 async function allocateFreePort(): Promise<number> {
@@ -42,7 +45,11 @@ async function allocateFreePort(): Promise<number> {
   })
 }
 
-async function healthCheck(url: string, timeoutMs: number, credentials?: { username: string; password: string }): Promise<boolean> {
+async function healthCheckDetailed(
+  url: string,
+  timeoutMs: number,
+  credentials?: { username: string; password: string },
+): Promise<{ ok: boolean; detail: string }> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -53,9 +60,11 @@ async function healthCheck(url: string, timeoutMs: number, credentials?: { usern
     }
     const response = await fetch(`${url}/doc`, { signal: controller.signal, headers })
     clearTimeout(timer)
-    return response.ok
-  } catch {
-    return false
+    if (response.ok) return { ok: true, detail: `${response.status}` }
+    return { ok: false, detail: `http ${response.status}` }
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}:${err.message}` : String(err)
+    return { ok: false, detail: msg }
   }
 }
 
@@ -64,90 +73,47 @@ export class RepoOpenCodeTargetManager {
   private inFlight: Map<number, Promise<EnsureOpenCodeTargetResponse>> = new Map()
 
   async ensureTarget(repo: Repo): Promise<EnsureOpenCodeTargetResponse> {
-    const existingInFlight = this.inFlight.get(repo.id)
-    if (existingInFlight) {
-      return existingInFlight
-    }
+    const pending = this.inFlight.get(repo.id)
+    if (pending) return pending
 
     const existing = this.targets.get(repo.id)
 
-    if (existing && existing.state === 'healthy' && existing.process) {
+    if (existing && existing.process && (existing.state === 'healthy' || existing.state === 'starting')) {
       existing.lastUsedAt = Date.now()
-      const openCodeUrl = `http://127.0.0.1:${existing.port}`
-      const healthy = await healthCheck(openCodeUrl, HEALTH_CHECK_TIMEOUT_MS, { username: 'opencode', password: existing.token })
-      if (healthy) {
-        return {
-          repoId: repo.id,
-          state: 'healthy',
-          openCodeUrl: `${PROXY_PATH_PREFIX}/${repo.id}`,
-          headers: { Authorization: `Bearer ${existing.token}` },
-          reused: true,
-        }
-      }
-      logger.warn(`Target for repo ${repo.id} failed health check, restarting`)
-      await this.killProcess(existing)
-      existing.process = null
-      existing.state = 'failed'
+      return this.responseFor(existing, true)
     }
 
-    if (existing && (existing.state === 'starting' || existing.state === 'unhealthy')) {
-      const openCodeUrl = `http://127.0.0.1:${existing.port}`
-      const healthy = await healthCheck(openCodeUrl, HEALTH_CHECK_TIMEOUT_MS, { username: 'opencode', password: existing.token })
-      if (healthy) {
-        existing.state = 'healthy'
-        existing.lastUsedAt = Date.now()
-        return {
-          repoId: repo.id,
-          state: 'healthy',
-          openCodeUrl: `${PROXY_PATH_PREFIX}/${repo.id}`,
-          headers: { Authorization: `Bearer ${existing.token}` },
-          reused: true,
-        }
+    const promise = (async () => {
+      if (existing) {
+        await this.killProcess(existing)
+        existing.process = null
       }
-    }
+      const runtime = await this.spawnTarget(repo, existing)
+      return this.responseFor(runtime, false)
+    })()
 
-    const startPromise = this.startTarget(repo, existing)
-
+    this.inFlight.set(repo.id, promise)
     try {
-      this.inFlight.set(repo.id, startPromise)
-      const result = await startPromise
-      return result
+      return await promise
     } finally {
       this.inFlight.delete(repo.id)
     }
   }
 
-  private async startTarget(repo: Repo, existing: RepoOpenCodeTargetRuntime | undefined): Promise<EnsureOpenCodeTargetResponse> {
-    const directory = path.join(getWorkspacePath(), TARGET_BASE_DIR, `repo-${repo.id}`)
-    await fs.mkdir(path.join(directory, 'state'), { recursive: true })
-    await fs.mkdir(path.join(directory, 'config'), { recursive: true })
+  /**
+   * Wait until the target's child opencode process is healthy and ready to
+   * proxy traffic. Resolves true when ready, false on failure or timeout.
+   */
+  async awaitReady(repoId: number, timeoutMs: number = READINESS_WAIT_TIMEOUT_MS): Promise<boolean> {
+    const runtime = this.targets.get(repoId)
+    if (!runtime) return false
+    if (runtime.state === 'healthy') return true
+    if (runtime.state === 'failed' || runtime.state === 'stopped') return false
 
-    const port = existing?.port ?? await allocateFreePort()
-    const token = existing?.token ?? createRepoTargetToken(repo.id)
-
-    const runtime: RepoOpenCodeTargetRuntime = {
-      repoId: repo.id,
-      directory,
-      port,
-      process: null,
-      state: 'starting',
-      token,
-      startedAt: Date.now(),
-      lastUsedAt: Date.now(),
-      lastError: undefined,
-    }
-
-    this.targets.set(repo.id, runtime)
-
-    await this.startProcess(runtime, repo.fullPath)
-
-    return {
-      repoId: repo.id,
-      state: runtime.state,
-      openCodeUrl: `${PROXY_PATH_PREFIX}/${repo.id}`,
-      headers: { Authorization: `Bearer ${token}` },
-      reused: false,
-    }
+    return Promise.race([
+      runtime.readyPromise,
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+    ])
   }
 
   getTarget(repoId: number): RepoOpenCodeTargetRuntime | null {
@@ -168,7 +134,45 @@ export class RepoOpenCodeTargetManager {
     }
   }
 
-  private async startProcess(runtime: RepoOpenCodeTargetRuntime, cwd: string): Promise<void> {
+  private responseFor(runtime: RepoOpenCodeTargetRuntime, reused: boolean): EnsureOpenCodeTargetResponse {
+    return {
+      repoId: runtime.repoId,
+      state: runtime.state,
+      openCodeUrl: `${PROXY_PATH_PREFIX}/${runtime.repoId}`,
+      headers: { Authorization: `Bearer ${runtime.token}` },
+      reused,
+    }
+  }
+
+  private async spawnTarget(repo: Repo, existing: RepoOpenCodeTargetRuntime | undefined): Promise<RepoOpenCodeTargetRuntime> {
+    const directory = path.join(getWorkspacePath(), TARGET_BASE_DIR, `repo-${repo.id}`)
+    await fs.mkdir(path.join(directory, 'state'), { recursive: true })
+    await fs.mkdir(path.join(directory, 'config'), { recursive: true })
+
+    const port = existing?.port ?? await allocateFreePort()
+    const token = existing?.token ?? createRepoTargetToken(repo.id)
+
+    const runtime: RepoOpenCodeTargetRuntime = {
+      repoId: repo.id,
+      directory,
+      port,
+      process: null,
+      state: 'starting',
+      token,
+      startedAt: Date.now(),
+      lastUsedAt: Date.now(),
+      lastError: undefined,
+      readyPromise: Promise.resolve(false),
+    }
+
+    this.targets.set(repo.id, runtime)
+    this.startProcess(runtime, repo.fullPath)
+    runtime.readyPromise = this.monitorHealth(runtime)
+
+    return runtime
+  }
+
+  private startProcess(runtime: RepoOpenCodeTargetRuntime, cwd: string): void {
     const isDevelopment = ENV.SERVER.NODE_ENV !== 'production'
     const password = runtime.token
     const openCodeConfigPath = getOpenCodeConfigFilePath()
@@ -224,32 +228,35 @@ export class RepoOpenCodeTargetManager {
     })
 
     runtime.process = child
-
     logger.info(`Target for repo ${runtime.repoId} started on port ${runtime.port}`)
-
-    const healthy = await this.waitForHealth(runtime, 30000)
-    if (!healthy) {
-      runtime.state = 'failed'
-      runtime.lastError = runtime.lastError || 'Failed to become healthy within timeout'
-      logger.error(`Target for repo ${runtime.repoId} failed health check`)
-      await this.killProcess(runtime)
-      runtime.process = null
-      return
-    }
-
-    runtime.state = 'healthy'
-    logger.info(`Target for repo ${runtime.repoId} is healthy`)
   }
 
-  private async waitForHealth(runtime: RepoOpenCodeTargetRuntime, timeoutMs: number): Promise<boolean> {
-    const start = Date.now()
+  private async monitorHealth(runtime: RepoOpenCodeTargetRuntime): Promise<boolean> {
     const openCodeUrl = `http://127.0.0.1:${runtime.port}`
-    while (Date.now() - start < timeoutMs) {
-      if (await healthCheck(openCodeUrl, HEALTH_CHECK_TIMEOUT_MS, { username: 'opencode', password: runtime.token })) {
+    const start = Date.now()
+    let attempts = 0
+    let lastFailure = ''
+    while (Date.now() - start < HEALTH_CHECK_MAX_WAIT_MS) {
+      if (!runtime.process) {
+        runtime.state = 'failed'
+        runtime.lastError = runtime.lastError ?? 'Process exited before becoming healthy'
+        return false
+      }
+      attempts++
+      const result = await healthCheckDetailed(openCodeUrl, HEALTH_CHECK_TIMEOUT_MS, { username: 'opencode', password: runtime.token })
+      if (result.ok) {
+        runtime.state = 'healthy'
+        logger.info(`Target for repo ${runtime.repoId} is healthy after ${attempts} attempts (${Date.now() - start}ms)`)
         return true
       }
-      await new Promise(r => setTimeout(r, HEALTH_CHECK_INTERVAL_MS))
+      lastFailure = result.detail
+      await new Promise((r) => setTimeout(r, HEALTH_CHECK_INTERVAL_MS))
     }
+    runtime.state = 'failed'
+    runtime.lastError = runtime.lastError ?? `Failed to become healthy within timeout (last failure: ${lastFailure})`
+    logger.error(`Target for repo ${runtime.repoId} failed health check after ${attempts} attempts: ${lastFailure}`)
+    await this.killProcess(runtime)
+    runtime.process = null
     return false
   }
 

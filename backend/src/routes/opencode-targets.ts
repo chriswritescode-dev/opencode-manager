@@ -45,9 +45,20 @@ export function createOpenCodeTargetProxyRoutes(db: Database, targetManager: Rep
       return c.json({ error: 'WebSocket proxying is not supported' }, 501)
     }
 
-    const target = targetManager.getTarget(repoId)
-    if (!target || target.state !== 'healthy' || !target.process) {
-      return c.json({ error: 'Target not available' }, 503)
+    let target = targetManager.getTarget(repoId)
+    if (!target) {
+      return c.json({ error: 'Target not started' }, 503)
+    }
+
+    if (target.state !== 'healthy') {
+      const ready = await targetManager.awaitReady(repoId)
+      if (!ready) {
+        return c.json({ error: 'Target not available' }, 503)
+      }
+      target = targetManager.getTarget(repoId)
+      if (!target || target.state !== 'healthy' || !target.process) {
+        return c.json({ error: 'Target not available' }, 503)
+      }
     }
 
     const url = new URL(c.req.url)

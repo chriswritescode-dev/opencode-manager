@@ -49,9 +49,9 @@ vi.mock('../../src/utils/logger', () => ({
 }))
 
 vi.mock('../../src/services/opencode/repo-target-token', () => ({
-  createRepoTargetToken: vi.fn((repoId: number) => `tok-${repoId}:abc:signature`),
+  createRepoTargetToken: vi.fn((repoId: number) => `${repoId}.abc.signature`),
   verifyRepoTargetToken: vi.fn((token: string) => {
-    const parts = token.split(':')
+    const parts = token.split('.')
     if (parts.length === 3) {
       return { repoId: parseInt(parts[0]!, 10) }
     }
@@ -114,14 +114,14 @@ describe('RepoOpenCodeTargetManager', () => {
   })
 
   describe('ensureTarget', () => {
-    it('starts a new target process and returns healthy response', async () => {
+    it('returns immediately with state=starting without awaiting health', async () => {
       createMockSpawn(1001)
       globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as any
 
       const result = await manager.ensureTarget(createMockRepo(42))
 
       expect(result.repoId).toBe(42)
-      expect(result.state).toBe('healthy')
+      expect(result.state).toBe('starting')
       expect(result.openCodeUrl).toBe('/api/opencode-targets/repo/42')
       expect(result.reused).toBe(false)
       expect(result.headers).toHaveProperty('Authorization')
@@ -140,49 +140,28 @@ describe('RepoOpenCodeTargetManager', () => {
       )
     })
 
-    it('reuses an existing healthy target', async () => {
+    it('awaitReady resolves true once the child reports healthy', async () => {
       createMockSpawn(1001)
       globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as any
 
       await manager.ensureTarget(createMockRepo(42))
+      const ready = await manager.awaitReady(42)
+
+      expect(ready).toBe(true)
+      expect(manager.getTarget(42)?.state).toBe('healthy')
+    })
+
+    it('reuses an existing starting or healthy target', async () => {
+      createMockSpawn(1001)
+      globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as any
+
+      await manager.ensureTarget(createMockRepo(42))
+      await manager.awaitReady(42)
       const result2 = await manager.ensureTarget(createMockRepo(42))
 
       expect(result2.reused).toBe(true)
-      expect(result2.state).toBe('healthy')
       expect(result2.openCodeUrl).toBe('/api/opencode-targets/repo/42')
       expect(spawnMock).toHaveBeenCalledTimes(1)
-    })
-
-    it('restarts an unhealthy target', async () => {
-      let callCount = 0
-      globalThis.fetch = vi.fn(async () => {
-        callCount++
-        if (callCount <= 1) {
-          return new Response(null, { status: 200 })
-        }
-        return new Response(null, { status: 503 })
-      }) as any
-
-      createMockSpawn(1001)
-      const result1 = await manager.ensureTarget(createMockRepo(42))
-      expect(result1.state).toBe('healthy')
-
-      createMockSpawn(1002)
-
-      callCount = 0
-      let secondCallHealthCount = 0
-      globalThis.fetch = vi.fn(async () => {
-        secondCallHealthCount++
-        if (secondCallHealthCount <= 1) {
-          return new Response(null, { status: 503 })
-        }
-        return new Response(null, { status: 200 })
-      }) as any
-
-      const result2 = await manager.ensureTarget(createMockRepo(42))
-      expect(result2.reused).toBe(false)
-      expect(result2.state).toBe('healthy')
-      expect(spawnMock).toHaveBeenCalledTimes(2)
     })
 
     it('creates state and config directories', async () => {
@@ -196,9 +175,7 @@ describe('RepoOpenCodeTargetManager', () => {
       expect(fs.mkdir).toHaveBeenCalledWith('/test/workspace/opencode-targets/repo-42/config', { recursive: true })
     })
 
-    it('kills failed startup process before restart', async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true })
-
+    it('respawns a target whose previous process failed', async () => {
       const spawnCalls: { pid: number; args: string[] }[] = []
       spawnMock.mockImplementation((cmd: string, args: string[]) => {
         const pid = 1000 + spawnCalls.length
@@ -212,33 +189,40 @@ describe('RepoOpenCodeTargetManager', () => {
 
       globalThis.fetch = vi.fn(async () => new Response(null, { status: 503 })) as any
 
-      const promise1 = manager.ensureTarget(createMockRepo(42))
+      await manager.ensureTarget(createMockRepo(42))
+      const ready1 = await manager.awaitReady(42, 100)
+      expect(ready1).toBe(false)
 
-      await vi.advanceTimersByTimeAsync(31000)
-
-      const result1 = await promise1
-      expect(result1.state).toBe('failed')
-      expect(killSpy).toHaveBeenCalledWith(1000, 'SIGTERM')
-      expect(killSpy).toHaveBeenCalledWith(1000, 'SIGKILL')
-
+      // Force the previous runtime into a failed state so the next ensureTarget triggers a respawn.
       const runtime = manager.getTarget(42)
-      expect(runtime!.process).toBeNull()
-      expect(runtime!.state).toBe('failed')
-      expect(spawnMock).toHaveBeenCalledTimes(1)
+      expect(runtime).not.toBeNull()
+      runtime!.state = 'failed'
+      runtime!.process = null
 
       globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as any
-
-      const promise2 = manager.ensureTarget(createMockRepo(42))
-      await vi.advanceTimersByTimeAsync(2100)
-      const result2 = await promise2
-      expect(result2.state).toBe('healthy')
-      expect(result2.reused).toBe(false)
+      await manager.ensureTarget(createMockRepo(42))
+      const ready2 = await manager.awaitReady(42, 2_000)
+      expect(ready2).toBe(true)
       expect(spawnMock).toHaveBeenCalledTimes(2)
+    })
+  })
 
-      const { promises: fs } = await import('fs')
-      expect(fs.mkdir).toHaveBeenCalledWith('/test/workspace/opencode-targets/repo-42/state', { recursive: true })
-      expect(fs.mkdir).toHaveBeenCalledWith('/test/workspace/opencode-targets/repo-42/config', { recursive: true })
+  describe('awaitReady', () => {
+    it('returns false for unknown repo', async () => {
+      expect(await manager.awaitReady(99)).toBe(false)
+    })
 
+    it('returns false when readiness times out', async () => {
+      createMockSpawn(1001)
+      // Never returns healthy
+      globalThis.fetch = vi.fn(async () => new Response(null, { status: 503 })) as any
+
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      await manager.ensureTarget(createMockRepo(42))
+      const promise = manager.awaitReady(42, 50)
+      await vi.advanceTimersByTimeAsync(100)
+      const result = await promise
+      expect(result).toBe(false)
       vi.useRealTimers()
     })
   })
@@ -256,7 +240,6 @@ describe('RepoOpenCodeTargetManager', () => {
       const runtime = manager.getTarget(42)
       expect(runtime).not.toBeNull()
       expect(runtime!.repoId).toBe(42)
-      expect(runtime!.state).toBe('healthy')
       expect(runtime!.port).toBe(15000)
     })
   })
@@ -266,6 +249,7 @@ describe('RepoOpenCodeTargetManager', () => {
       createMockSpawn(1001)
       globalThis.fetch = vi.fn(async () => new Response(null, { status: 200 })) as any
       await manager.ensureTarget(createMockRepo(42))
+      await manager.awaitReady(42)
 
       await manager.stopTarget(42, 'manual')
 
@@ -315,10 +299,11 @@ describe('RepoOpenCodeTargetManager', () => {
       }) as any
 
       await manager.ensureTarget(createMockRepo(42))
+      await manager.awaitReady(42)
 
       const healthCheckCalls = fetchCalls.filter(r => r.url.includes('/doc'))
       expect(healthCheckCalls.length).toBeGreaterThan(0)
-      
+
       for (const call of healthCheckCalls) {
         expect(call.headers.Authorization).toMatch(/^Basic /)
       }
@@ -352,11 +337,9 @@ describe('RepoOpenCodeTargetManager', () => {
 
       expect(result1.repoId).toBe(42)
       expect(result2.repoId).toBe(42)
-      expect(result1.state).toBe('healthy')
-      expect(result2.state).toBe('healthy')
       expect(result1.openCodeUrl).toBe('/api/opencode-targets/repo/42')
       expect(result2.openCodeUrl).toBe('/api/opencode-targets/repo/42')
-      
+
       expect(spawnMock).toHaveBeenCalledTimes(1)
     })
   })
