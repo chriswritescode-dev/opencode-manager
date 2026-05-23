@@ -30,10 +30,10 @@ export class ManagerApi {
       headers: {
         ...this.headers(),
         'Content-Type': 'application/x-tar',
-        'duplex': 'half',
       },
       body,
-    })
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
 
     if (!res.ok) throw new Error(`mirror ${res.status}: ${await res.text()}`)
     return (await res.json()) as { repoId: number; branch: string; head: string; created: boolean }

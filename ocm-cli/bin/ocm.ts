@@ -306,7 +306,7 @@ export async function cmdPush(args: string[]): Promise<void> {
     const branch = getBranchName(plan.repoRoot)
 
     if (process.stdin.isTTY && !yes) {
-      process.stderr.write(`Create Manager repo "${name}" from ${plan.localOrigin}? [y/N] `)
+      process.stderr.write(`Create Manager repo "${name}" by uploading ${plan.repoRoot} (origin: ${plan.localOrigin})? [y/N] `)
       const res = spawnSync('bash', ['-c', 'read LINE && printf "%s" "$LINE"'], {
         stdio: ['inherit', 'pipe', 'inherit'],
         encoding: 'utf-8',

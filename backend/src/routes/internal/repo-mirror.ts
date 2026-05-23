@@ -69,15 +69,21 @@ export function createInternalRepoMirrorRoutes(db: Database) {
       if (isGzip) tarArgs.unshift('-z')
       const child = spawn('tar', tarArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
 
+      const stderrChunks: Buffer[] = []
+      child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+
       const tarDone = new Promise<void>((resolve, reject) => {
         child.on('close', (code) => {
           if (code === 0) resolve()
-          else reject(new Error(`tar exited with code ${code}`))
+          else {
+            const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
+            reject(new Error(`tar exited with code ${code}${stderr ? `: ${stderr}` : ''}`))
+          }
         })
         child.on('error', reject)
       })
 
-      const body = Readable.fromWeb(rawBody)
+      const body = Readable.fromWeb(rawBody as unknown as Parameters<typeof Readable.fromWeb>[0])
       await pipeline(body, child.stdin)
       await tarDone
 

@@ -1,6 +1,7 @@
 import { spawnSync, spawn } from 'child_process'
 import { existsSync } from 'fs'
 import * as fsp from 'fs/promises'
+import { Readable } from 'stream'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { getRepoRoot, getOriginUrl, getDirtyPaths, urlsEqual } from './local-repo.js'
@@ -75,23 +76,32 @@ export async function mirrorUp(
 
   const child = spawn('tar', tarArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
 
-  const body = new ReadableStream({
-    start(controller) {
-      child.stdout.on('data', (chunk: Buffer) => {
-        controller.enqueue(new Uint8Array(chunk))
-      })
-      child.stdout.on('end', () => controller.close())
-      child.stdout.on('error', (err: Error) => controller.error(err))
-    },
+  const stderrChunks: Buffer[] = []
+  child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+
+  const tarExit = new Promise<void>((resolve, reject) => {
+    child.on('close', (code) => {
+      if (code === 0) resolve()
+      else {
+        const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
+        reject(new Error(`tar exited with code ${code}${stderr ? `: ${stderr}` : ''}`))
+      }
+    })
+    child.on('error', reject)
   })
 
+  const body = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>
   const repoId = opts.create ? 0 : plan.matched[0]!.repoId
 
   try {
-    return await opts.api.mirrorUp(repoId, body, {
-      force: opts.force,
-      create: opts.create,
-    })
+    const [result] = await Promise.all([
+      opts.api.mirrorUp(repoId, body, {
+        force: opts.force,
+        create: opts.create,
+      }),
+      tarExit,
+    ])
+    return result
   } finally {
     if (excludeFile) {
       await fsp.rm(excludeFile, { force: true }).catch(() => {})
@@ -117,30 +127,22 @@ export async function mirrorDown(
 
     const child = spawn('tar', ['-x', '-f', '-', '-C', staging], { stdio: ['pipe', 'pipe', 'pipe'] })
 
+    const stderrChunks: Buffer[] = []
+    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+
     const tarDone = new Promise<void>((resolve, reject) => {
       child.on('close', (code) => {
         if (code === 0) resolve()
-        else reject(new Error(`tar exited with code ${code}`))
+        else {
+          const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
+          reject(new Error(`tar exited with code ${code}${stderr ? `: ${stderr}` : ''}`))
+        }
       })
       child.on('error', reject)
     })
 
-    await new Promise<void>((resolve, reject) => {
-      const reader = tarball.getReader()
-
-      function pump() {
-        reader.read().then((result: ReadableStreamReadResult<Uint8Array>) => {
-          if (result.done) {
-            child.stdin.end()
-            resolve()
-            return
-          }
-          child.stdin.write(result.value!)
-          pump()
-        }).catch(reject)
-      }
-      pump()
-    })
+    const stdinWritable = Readable.fromWeb(tarball as unknown as Parameters<typeof Readable.fromWeb>[0])
+    stdinWritable.pipe(child.stdin)
 
     await tarDone
 
