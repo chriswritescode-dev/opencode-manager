@@ -28,11 +28,11 @@ describe('internal-token-middleware', () => {
     expect(body).toEqual({ error: 'Unauthorized' })
   })
 
-  it('returns 401 when authorization header is not bearer scheme', async () => {
+  it('returns 401 when authorization header is not bearer or basic scheme', async () => {
     const db = createTestDb()
     const app = createTestApp(db)
     const res = await app.request('/test', {
-      headers: { authorization: 'Basic abc123' },
+      headers: { authorization: 'Digest abc123' },
     })
     expect(res.status).toBe(401)
   })
@@ -56,12 +56,33 @@ describe('internal-token-middleware', () => {
     expect(res.status).toBe(401)
   })
 
-  it('returns 200 when token matches', async () => {
+  it('returns 200 when bearer token matches', async () => {
     const db = createTestDb()
     const token = getOrCreateInternalToken(db)
     const app = createTestApp(db)
     const res = await app.request('/test', {
       headers: { authorization: `Bearer ${token}` },
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body).toEqual({ ok: true })
+  })
+
+  it('returns 401 when basic auth password is wrong', async () => {
+    const db = createTestDb()
+    const app = createTestApp(db)
+    const res = await app.request('/test', {
+      headers: { authorization: 'Basic ' + Buffer.from('opencode:wrong-password').toString('base64') },
+    })
+    expect(res.status).toBe(401)
+  })
+
+  it('returns 200 when basic auth password matches internal token', async () => {
+    const db = createTestDb()
+    const token = getOrCreateInternalToken(db)
+    const app = createTestApp(db)
+    const res = await app.request('/test', {
+      headers: { authorization: 'Basic ' + Buffer.from(`opencode:${token}`).toString('base64') },
     })
     expect(res.status).toBe(200)
     const body = await res.json()

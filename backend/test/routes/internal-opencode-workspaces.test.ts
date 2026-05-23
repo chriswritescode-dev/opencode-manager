@@ -6,8 +6,6 @@ import type { ScheduleService } from '../../src/services/schedules'
 import type { NotificationService } from '../../src/services/notification'
 import type { SettingsService } from '../../src/services/settings'
 import type { Repo } from '../../src/types/repo'
-import type { RepoOpenCodeTargetManager } from '../../src/services/opencode/repo-target-manager'
-import type { EnsureOpenCodeTargetResponse } from '@opencode-manager/shared/types'
 
 const mockDb = {
   prepare: vi.fn().mockReturnValue({
@@ -25,10 +23,8 @@ vi.mock('bun:sqlite', () => ({
 }))
 
 const mockListRepos = vi.fn()
-const mockGetRepoById = vi.fn()
 vi.mock('../../src/db/queries', () => ({
   listRepos: (...args: unknown[]) => mockListRepos(...args),
-  getRepoById: (...args: unknown[]) => mockGetRepoById(...args),
 }))
 
 vi.mock('../../src/db/migration-runner', () => ({
@@ -53,12 +49,6 @@ vi.mock('../../src/services/settings', () => ({
 
 vi.mock('../../src/services/opencode/client', () => ({
   createOpenCodeClient: vi.fn(),
-}))
-
-vi.mock('../../src/services/opencode/repo-session-sync', () => ({
-  RepoSessionSyncService: vi.fn().mockImplementation(() => ({
-    syncSession: vi.fn().mockResolvedValue({ replayedEvents: 5 }),
-  })),
 }))
 
 function makeRepo(overrides: Partial<Repo>): Repo {
@@ -141,126 +131,5 @@ describe('internal-opencode-workspaces routes', () => {
     expect(workspace.extra).toHaveProperty('repoId')
     expect(workspace.extra).toHaveProperty('localPath')
     expect(workspace.extra).toHaveProperty('fullPath')
-  })
-})
-
-function createMockTargetManager(): RepoOpenCodeTargetManager {
-  return {
-    ensureTarget: vi.fn().mockResolvedValue({
-      repoId: 1,
-      state: 'healthy',
-      openCodeUrl: '/api/opencode-targets/repo/1',
-      headers: { Authorization: 'Bearer test-token' },
-      reused: false,
-    } as EnsureOpenCodeTargetResponse),
-    getTarget: vi.fn().mockReturnValue(null),
-    stopTarget: vi.fn().mockResolvedValue(undefined),
-  } as unknown as RepoOpenCodeTargetManager
-}
-
-describe('POST /api/internal/repos/:repoId/sessions/:sessionId/sync', () => {
-  let app: Hono
-  let token: string
-  let targetManager: RepoOpenCodeTargetManager
-
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mockGetRepoById.mockReset()
-    mockListRepos.mockReturnValue([])
-    targetManager = createMockTargetManager()
-    const scheduleService = {} as ScheduleService
-    const notificationService = {} as NotificationService
-    const settingsService = {} as SettingsService
-    app = new Hono()
-    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, targetManager))
-    token = 'test-internal-token'
-  })
-
-  it('returns 401 without bearer token', async () => {
-    const res = await app.request('/api/internal/repos/1/sessions/session-123/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'manual' }),
-    })
-    expect(res.status).toBe(401)
-  })
-
-  it('returns 400 for invalid repoId', async () => {
-    const res = await app.request('/api/internal/repos/invalid/sessions/session-123/sync', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'manual' }),
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 400 for empty sessionId', async () => {
-    const res = await app.request('/api/internal/repos/1/sessions//sync', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'manual' }),
-    })
-    expect(res.status).toBe(404)
-  })
-
-  it('returns 400 for invalid reason', async () => {
-    const res = await app.request('/api/internal/repos/1/sessions/session-123/sync', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'invalid' }),
-    })
-    expect(res.status).toBe(400)
-  })
-
-  it('returns 404 for non-existent repo', async () => {
-    mockGetRepoById.mockReturnValue(null)
-
-    const res = await app.request('/api/internal/repos/999/sessions/session-123/sync', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'manual' }),
-    })
-    expect(res.status).toBe(404)
-  })
-
-  it('returns 503 when target is not healthy', async () => {
-    const repo = makeRepo({ id: 1, fullPath: '/tmp/test-repo' })
-    mockGetRepoById.mockReturnValue(repo)
-    targetManager.getTarget = vi.fn().mockReturnValue(null)
-
-    const res = await app.request('/api/internal/repos/1/sessions/session-123/sync', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'manual' }),
-    })
-    expect(res.status).toBe(503)
-  })
-
-  it('returns 200 with valid request and healthy target', async () => {
-    const repo = makeRepo({ id: 1, fullPath: '/tmp/test-repo' })
-    mockGetRepoById.mockReturnValue(repo)
-    
-    const mockRuntime = {
-      repoId: 1,
-      port: 3000,
-      token: 'test-token',
-      state: 'healthy',
-      process: null,
-      startedAt: Date.now(),
-      lastUsedAt: Date.now(),
-    }
-    targetManager.getTarget = vi.fn().mockReturnValue(mockRuntime)
-
-    const res = await app.request('/api/internal/repos/1/sessions/session-123/sync', {
-      method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ reason: 'manual' }),
-    })
-
-    expect(res.status).toBe(200)
-    const body = await res.json() as { repoId: number; sessionId: string; replayedEvents: number }
-    expect(body.repoId).toBe(1)
-    expect(body.sessionId).toBe('session-123')
-    expect(body.replayedEvents).toBe(5)
   })
 })

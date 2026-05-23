@@ -4,20 +4,11 @@
   "private": true,
   "type": "module",
   "oc-plugin": [
-    "server",
     "tui"
   ],
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/tui.js",
+  "types": "./dist/tui.d.ts",
   "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./server": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
     "./tui": {
       "import": "./dist/tui.js",
       "types": "./dist/tui.d.ts"

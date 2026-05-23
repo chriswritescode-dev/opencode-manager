@@ -9,16 +9,12 @@ import { createInternalNotificationRoutes } from './notifications'
 import { createInternalSettingsRoutes } from './settings'
 import { createInternalRepoRoutes } from './repos'
 import { createInternalOpenCodeWorkspacesRoutes } from './opencode-workspaces'
-import { createInternalOpenCodeTargetRoutes } from './opencode-target'
-import { createInternalRepoSessionRoutes } from './repo-sessions'
-import type { RepoOpenCodeTargetManager } from '../../services/opencode/repo-target-manager'
 
 export function createInternalRoutes(
   db: Database,
   scheduleService: ScheduleService,
   notificationService: NotificationService,
   settingsService: SettingsService,
-  targetManager?: RepoOpenCodeTargetManager,
 ) {
   const app = new Hono()
   app.use('/*', createInternalTokenMiddleware(db))
@@ -28,10 +24,6 @@ export function createInternalRoutes(
   const repos = new Hono()
   repos.route('/', createInternalRepoRoutes(db, settingsService))
   repos.route('/:id/schedules', createScheduleRoutes(scheduleService))
-  if (targetManager) {
-    repos.route('/:id/opencode-target', createInternalOpenCodeTargetRoutes(db, targetManager))
-    repos.route('/:id/sessions', createInternalRepoSessionRoutes(db, targetManager))
-  }
   app.route('/repos', repos)
   app.route('/opencode-workspaces', createInternalOpenCodeWorkspacesRoutes(db))
   return app

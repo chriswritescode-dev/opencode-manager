@@ -1,36 +1,48 @@
-# OpenCode Workspaces (Repo Targets)
+# OpenCode Workspaces (Attach Launcher)
 
-OpenCode Manager can run a dedicated OpenCode target process per repo on the Manager server. The workspace plugin on your laptop discovers those repos and connects to their targets, so you write code against a remote repo's OpenCode server while your local OpenCode session stays on your laptop.
+OpenCode Manager lets you open remote repos from your laptop's OpenCode TUI. The workspace plugin lists Manager repos in a picker, then replaces your local TUI with an `opencode attach` session bound to the Manager's proxy — so prompts execute on the Manager's filesystem while the local laptop TUI exits cleanly.
 
 ## Architecture Overview
 
 | Component | Where it runs | Role |
 |---|---|---|
-| **Workspace plugin** | Laptop / local OpenCode | Discovers repos, resolves targets, opens sessions |
-| **Manager backend** | Manager server | Hosts repo-scoped OpenCode target processes, proxies API traffic, syncs idle sessions back |
-| **Manager web UI** | Manager server | Reads from the main OpenCode server; sees repo sessions after sync-back |
+| **Workspace plugin** | Laptop / local OpenCode TUI | Lists repos, spawns `opencode attach` against Manager proxy |
+| **Manager backend** | Manager server | Exposes repo metadata + token-protected OpenCode proxy (accepts Bearer or Basic with manager token) |
+| **Manager web UI** | Manager server | Reads from the main OpenCode server; sessions created via `opencode attach` appear normally |
+
+The old per-repo target process architecture has been removed. All sessions share a single OpenCode server on the Manager, with file-level isolation via `--dir`.
 
 ---
 
 ## 1. Install the plugin
 
-Add the plugin to your local OpenCode configuration. Point it at your Manager instance.
+### TUI plugin registration (`tui.json`)
+
+The plugin is a **TUI-only** plugin — it registers in `tui.json`, not `opencode.jsonc`.
 
 ```jsonc
-// ~/.config/opencode/opencode.json
+// ~/dotfiles/opencode/tui.json
 {
   "plugin": [
     [
-      "file:///path/to/oc-manager/opencode-workspace-plugin/src/index.ts",
+      "file:///path/to/oc-manager/opencode-workspace-plugin/dist/tui.js",
       {
-        "managerUrl": "https://manager.example.com"
+        "managerUrl": "https://manager.example.com",
+        "managerToken": "your-manager-internal-token"
       }
     ]
   ]
 }
 ```
 
-You can also pass `managerToken` and `connectionId` in the options object.
+### Server plugin (remove from `opencode.jsonc`)
+
+If you previously had a server-side plugin entry in `opencode.jsonc`, remove it. The server plugin no longer exists — the plugin is TUI-only.
+
+```jsonc
+// ~/dotfiles/opencode/opencode.jsonc
+// Remove any "plugin" entries that point to opencode-workspace-plugin.
+```
 
 ### Environment variables
 
@@ -47,76 +59,42 @@ Both values must be set either in the plugin options or as environment variables
 
 ## 2. How it works
 
-### Lifecycle of a repo target
+### Flow
 
-1. The plugin asks the Manager for a list of workspaces (`GET /api/internal/opencode-workspaces`). The Manager returns all ready repos.
-2. When you select a repo workspace, the plugin calls `POST /api/internal/repos/:repoId/opencode-target` to ensure a target is running.
-3. The Manager allocates a free port and starts `opencode serve` bound to `127.0.0.1` with:
-   - Repo-specific state directory: `<workspace>/opencode-targets/repo-<id>/state`
-   - Repo-specific config directory: `<workspace>/opencode-targets/repo-<id>/config`
-   - A generated HMAC token for authentication.
-4. The Manager performs health checks until the target is healthy, then returns a proxy URL and auth headers.
-5. All subsequent requests are proxied through the Manager's reverse proxy (`/api/opencode-targets/repo/:repoId/*`), which rewrites the Authorization header to the target's internal credentials.
+1. User types `/manager` (or presses `<leader>w`) in the local OpenCode TUI.
+2. Plugin calls `GET {managerUrl}/api/internal/opencode-workspaces` (Bearer token) to list ready repos.
+3. A dialog shows repos with name, branch, and clone status.
+4. User picks a repo.
+5. Plugin spawns `opencode attach` with:
+   - **Proxy URL**: `{managerUrl}/api/opencode-proxy`
+   - **Directory**: the repo's filesystem path on the Manager
+   - **Auth**: Basic auth with username `opencode` and password = manager token
+6. The child `opencode attach` takes over the terminal (`stdio: 'inherit'`).
+7. On child close, the parent TUI process exits (`process.exit(0)`).
 
-### Target states
-
-Targets transition through these states:
+### Command equivalent
 
 ```
-starting → healthy → stopped
-                  → failed → starting (retry)
-         → unhealthy → starting (retry)
+opencode attach https://manager.example.com/api/opencode-proxy \
+  --dir /path/to/repo/on/manager \
+  --password <manager-token> \
+  --username opencode
 ```
 
-- **starting**: Process spawned, waiting for health check.
-- **healthy**: Process responds to health checks.
-- **unhealthy**: Health check failed but process still running.
-- **failed**: Health check timeout or process exited with error.
-- **stopped**: Process terminated intentionally (idle stop, manual stop, shutdown).
+### Manager proxy route
 
-### Idle stop
-
-When a target is stopped for `'idle'`, its process is killed but the state directory persists. On next request, the target restarts with the same port and token, picking up where it left off.
-
-### Session sync-back
-
-Completed or idle sessions are synced back to the main OpenCode server so they appear in the Manager web UI:
-
-1. When a repo target session becomes idle or completes, the Manager fetches the full event history from the repo target (`/sync/history`).
-2. It replays events into the main OpenCode server (`/sync/replay`).
-3. The directory path is rewritten to the repo's full path so the session appears under the correct repo in the UI.
-
-This means remote repo sessions appear in the Manager web UI after they are synced back. Live streaming of sessions from the repo target through the web UI is not yet supported.
+All requests from `opencode attach` are routed through `GET|POST|... {managerUrl}/api/opencode-proxy/*` which forwards to the Manager's single OpenCode server. The proxy accepts either Bearer token or Basic auth (password = manager token) for client authentication, then strips hop-by-hop headers and injects Basic auth with the upstream OpenCode server credentials.
 
 ---
 
-## 3. Manager web UI behavior
+## 3. Acceptance criteria checklist
 
-The Manager web UI reads exclusively from the main OpenCode server. It does not connect directly to repo targets.
-
-- **After sync-back**: Remote repo target sessions appear in the session list.
-- **Live viewing**: Not supported unless the web UI is routed directly to the repo target. This is future work.
-- **Session creation**: New sessions are created through the plugin's `target()` method, which returns the repo target's URL and auth headers.
-
----
-
-## 4. Limitations
-
-| Limitation | Notes |
-|---|---|
-| No one-server-per-session design | Each repo gets one shared target; all sessions for that repo share the same target process. |
-| No direct exposure of repo OpenCode ports | Repo target ports are only accessible via the Manager reverse proxy, not directly. |
-| No local directory-scoping proxy | The plugin cannot scope a local directory to a specific target. Directory scoping is handled by the Manager. |
-| Continuous live sync is out of MVP | Only idle/completed sessions are synced. Real-time live sync between targets is not implemented. |
-| WebSocket proxy support depends on backend proxy support | The current HTTP reverse proxy returns `501` for WebSocket upgrade requests. WebSocket proxying requires additional work. |
-
----
-
-## 5. Acceptance criteria checklist
-
-- [x] Plugin runs on laptop/local OpenCode.
-- [x] Execution runs on Manager repo target.
-- [x] Manager web UI sees sessions after sync-back.
+- [x] Plugin runs on laptop/local OpenCode TUI.
+- [x] `/manager` shows repos from Manager.
+- [x] Selecting a repo spawns `opencode attach` bound to Manager proxy.
+- [x] Prompts execute on Manager's filesystem (not laptop).
+- [x] Closing the laptop TUI does not terminate the Manager's session.
+- [x] Backend logs show only `/api/opencode-proxy/*` traffic; no `/api/opencode-targets/*`; no spawned child opencodes.
 
 ---
 
@@ -124,6 +102,5 @@ The Manager web UI reads exclusively from the main OpenCode server. It does not 
 
 | Endpoint | Method | Purpose |
 |---|---|---|
-| `/api/internal/opencode-workspaces` | GET | List available repo workspaces |
-| `/api/internal/repos/:repoId/opencode-target` | POST | Ensure a target is running for a repo |
-| `/api/opencode-targets/repo/:repoId/*` | ALL | Reverse proxy to repo target |
+| `/api/internal/opencode-workspaces` | GET | List ready repos with directory info |
+| `/api/opencode-proxy/*` | ALL | Token-protected proxy from Manager to single OpenCode server (accepts Bearer or Basic) |

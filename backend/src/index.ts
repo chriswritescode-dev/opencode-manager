@@ -35,8 +35,7 @@ import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createInternalRoutes } from './routes/internal'
-import { createOpenCodeTargetProxyRoutes } from './routes/opencode-targets'
-import { RepoOpenCodeTargetManager } from './services/opencode/repo-target-manager'
+import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -310,15 +309,14 @@ sseAggregator.start()
 void scheduleRunnerInstance.start()
 
 const settingsService = new SettingsService(db)
-const targetManager = new RepoOpenCodeTargetManager()
 
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
 
 app.route('/api/mcp-oauth-proxy', createMcpOauthProxyRoutes(openCodeClient, requireAuth))
-app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, targetManager))
-app.route('/api/opencode-targets', createOpenCodeTargetProxyRoutes(db, targetManager))
+app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService))
+app.route('/api/opencode-proxy', createOpenCodeProxyRoutes(db, settingsService))
 
 const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)

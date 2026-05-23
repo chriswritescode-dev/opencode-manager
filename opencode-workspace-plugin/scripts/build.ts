@@ -1,18 +1,11 @@
 import { writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { execSync } from 'child_process'
 import solidPlugin from '@opentui/solid/bun-plugin'
 
 const root = join(import.meta.dir, '..')
 const dist = join(root, 'dist')
 
 rmSync(dist, { recursive: true, force: true })
-
-console.log('Compiling server plugin (tsc)...')
-execSync('tsc -p tsconfig.build.json', {
-  cwd: root,
-  stdio: 'inherit',
-})
 
 console.log('Bundling TUI plugin (bun build)...')
 const result = await Bun.build({
