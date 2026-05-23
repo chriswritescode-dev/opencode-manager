@@ -47,6 +47,7 @@ import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup";
 import { SourceControlPanel } from "@/components/source-control";
+import { SessionSendErrorBanner } from "@/components/session/SessionSendErrorBanner";
 import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
@@ -581,6 +582,7 @@ export function SessionDetail() {
                   onMinimize={() => handleMinimizeQuestion(currentQuestion)}
                 />
               )}
+              <SessionSendErrorBanner sessionId={sessionId} />
               <PromptInput
                 ref={promptInputRef}
                 opcodeUrl={opcodeUrl}

@@ -12,6 +12,7 @@ import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
+import { useSendErrorStore } from "../stores/sendErrorStore";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -300,6 +301,22 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       if (model) {
         const parsedModel = parseModelString(model);
         if (parsedModel) {
+          const cachedProviders = queryClient.getQueryData<{
+            providers: Array<{ id: string; models: Record<string, unknown> }>;
+          }>(['opencode', 'providers', opcodeUrl, directory]);
+          if (cachedProviders?.providers) {
+            const provider = cachedProviders.providers.find(
+              (p) => p.id === parsedModel.providerID,
+            );
+            if (!provider || !(parsedModel.modelID in provider.models)) {
+              throw new FetchError(
+                'Selected model is no longer available. Pick a different model.',
+                409,
+                'MODEL_UNAVAILABLE',
+              );
+            }
+          }
+
           requestData.model = {
             providerID: parsedModel.providerID,
             modelID: parsedModel.modelID,
@@ -342,15 +359,19 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       }
 
       const parsed = parseNetworkError(error);
-      showToast.error(parsed.title, {
-        description: parsed.message,
-        duration: 5000,
+      useSendErrorStore.getState().setError({
+        sessionID,
+        title: parsed.title,
+        message: parsed.message,
+        detail: error instanceof FetchError ? error.detail : undefined,
       });
     },
     onSuccess: async (data, variables) => {
       const { sessionID } = variables;
       const { response } = data;
       const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+
+      useSendErrorStore.getState().clearError(sessionID);
 
       if (data.queued || !response) {
         queryClient.invalidateQueries({ queryKey: messagesQueryKey });

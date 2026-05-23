@@ -129,14 +129,14 @@ export const useModelStore = create<ModelStore>()(
       },
 
       validateAndSyncModel: (configModel: string | undefined, providers?: Provider[]) => {
-        if (!configModel) return
-
-        const state = get()
-
         if (!providers) {
-          get().syncFromConfig(configModel)
+          if (configModel) {
+            get().syncFromConfig(configModel)
+          }
           return
         }
+
+        const state = get()
 
         const modelExists = (model: ModelSelection) =>
           providers.some(
@@ -157,7 +157,16 @@ export const useModelStore = create<ModelStore>()(
         }
 
         if (!currentModelExists) {
-          get().syncFromConfig(configModel, true)
+          const parsedConfig = configModel ? parseModelString(configModel) : null
+          const configIsValid = parsedConfig
+            ? providers.some(p => p.id === parsedConfig.providerID && p.models && parsedConfig.modelID in p.models)
+            : false
+
+          if (configIsValid && configModel) {
+            get().syncFromConfig(configModel, true)
+          } else {
+            set({ model: null, lastConfigModel: configModel })
+          }
         }
       },
 
