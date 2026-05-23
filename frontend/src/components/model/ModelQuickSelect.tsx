@@ -51,31 +51,31 @@ export function ModelQuickSelect({
      return provider ? formatProviderName(provider) : providerID
    }, [providersData])
 
-   const favoriteModelsWithNames = useMemo(() => {
-     return favoriteModels
-       .filter(favorite => `${favorite.providerID}/${favorite.modelID}` !== modelString)
-       .slice(0, 5)
-       .map(favorite => ({
-          ...favorite,
-          displayName: getDisplayName(favorite.providerID, favorite.modelID),
-          providerName: getProviderName(favorite.providerID),
-          key: `${favorite.providerID}/${favorite.modelID}`,
-        }))
+    const favoriteModelsWithNames = useMemo(() => {
+      return favoriteModels
+        .filter(favorite => `${favorite.providerID}/${favorite.modelID}` !== modelString)
+        .slice(0, 5)
+        .map(favorite => ({
+           ...favorite,
+           displayName: getDisplayName(favorite.providerID, favorite.modelID),
+           providerName: getProviderName(favorite.providerID),
+           key: `${favorite.providerID}/${favorite.modelID}`,
+         }))
     }, [favoriteModels, getDisplayName, getProviderName, modelString])
 
-   const recentModelsWithNames = useMemo(() => {
-     return recentModels
-       .filter(recent => {
-         const key = `${recent.providerID}/${recent.modelID}`
-         return key !== modelString && !favoriteModels.some(favorite => favorite.providerID === recent.providerID && favorite.modelID === recent.modelID)
-       })
-       .slice(0, 5)
-       .map(recent => ({
-          ...recent,
-          displayName: getDisplayName(recent.providerID, recent.modelID),
-          providerName: getProviderName(recent.providerID),
-          key: `${recent.providerID}/${recent.modelID}`,
-        }))
+    const recentModelsWithNames = useMemo(() => {
+      return recentModels
+        .filter(recent => {
+          const key = `${recent.providerID}/${recent.modelID}`
+          return key !== modelString && !favoriteModels.some(favorite => favorite.providerID === recent.providerID && favorite.modelID === recent.modelID)
+        })
+        .slice(0, 5)
+        .map(recent => ({
+           ...recent,
+           displayName: getDisplayName(recent.providerID, recent.modelID),
+           providerName: getProviderName(recent.providerID),
+           key: `${recent.providerID}/${recent.modelID}`,
+         }))
     }, [recentModels, favoriteModels, getDisplayName, getProviderName, modelString])
 
   const duplicateDisplayNames = useMemo(() => {
@@ -85,6 +85,15 @@ export function ModelQuickSelect({
     }, {})
 
     return new Set(Object.entries(counts).filter(([, count]) => count > 1).map(([name]) => name))
+  }, [favoriteModelsWithNames, recentModelsWithNames])
+
+  const duplicateModelIds = useMemo(() => {
+    const counts = [...favoriteModelsWithNames, ...recentModelsWithNames].reduce<Record<string, number>>((acc, item) => {
+      acc[item.modelID] = (acc[item.modelID] || 0) + 1
+      return acc
+    }, {})
+
+    return new Set(Object.entries(counts).filter(([, count]) => count > 1).map(([id]) => id))
   }, [favoriteModelsWithNames, recentModelsWithNames])
 
   const handleVariantSelect = (variant: string | undefined) => {
@@ -122,7 +131,7 @@ export function ModelQuickSelect({
           <>
             <DropdownMenuItem className="flex items-center justify-between font-medium">
               <span className="truncate text-orange-500">
-                {duplicateDisplayNames.has(currentModelDisplayName)
+                {duplicateModelIds.has(model.modelID) || duplicateDisplayNames.has(currentModelDisplayName)
                   ? `${currentProviderName}/${currentModelDisplayName}`
                   : currentModelDisplayName}
               </span>
@@ -170,7 +179,7 @@ export function ModelQuickSelect({
                 className="flex items-center justify-between"
               >
                 <span className="truncate">
-                  {duplicateDisplayNames.has(favorite.displayName)
+                  {duplicateModelIds.has(favorite.modelID) || duplicateDisplayNames.has(favorite.displayName)
                     ? `${favorite.providerName}/${favorite.displayName}`
                     : favorite.displayName}
                 </span>
@@ -189,7 +198,7 @@ export function ModelQuickSelect({
                 className="flex items-center justify-between"
               >
                 <span className="truncate">
-                  {duplicateDisplayNames.has(recent.displayName)
+                  {duplicateModelIds.has(recent.modelID) || duplicateDisplayNames.has(recent.displayName)
                     ? `${recent.providerName}/${recent.displayName}`
                     : recent.displayName}
                 </span>
