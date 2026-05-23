@@ -39,6 +39,10 @@ function normalizeUrl(url: string): string {
     .toLowerCase()
 }
 
+export function getBranchName(dir: string): string | null {
+  return git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+}
+
 export function urlsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false
   return normalizeUrl(a) === normalizeUrl(b)

@@ -24,7 +24,7 @@
     "build": "bun scripts/build.ts",
     "postinstall": "bun scripts/postinstall.ts || true",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "bun scripts/build.ts && vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {

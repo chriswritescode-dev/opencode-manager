@@ -12,6 +12,7 @@ import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
 import path from 'path'
 import { parseSSHHost } from '../utils/ssh-key-manager'
 import { getErrorMessage } from '../utils/error-utils'
+import { sseAggregator } from './sse-aggregator'
 
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
@@ -1027,4 +1028,63 @@ async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, 
     }
     await executeCommand(addArgs, { env })
   }
+}
+
+export function ensureMirrorTargetPath(name: string): { fullPath: string; localPath: string } {
+  const slugified = name
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+/, '')
+    .replace(/-+$/, '')
+    || 'repo'
+
+  const reposRoot = getReposPath()
+
+  let candidate = slugified
+  let suffix = 2
+  while (existsSync(path.join(reposRoot, candidate))) {
+    candidate = `${slugified}-${suffix}`
+    suffix += 1
+  }
+
+  return {
+    fullPath: path.join(reposRoot, candidate),
+    localPath: candidate,
+  }
+}
+
+export function createRepoRow(
+  database: Database,
+  params: { name: string; originUrl?: string; localPath: string; fullPath: string; branch?: string }
+): { repo: Repo; created: boolean } {
+  const { originUrl, localPath, branch } = params
+
+  const existing = originUrl
+    ? getRepoByUrlAndBranch(database, originUrl, branch)
+    : getRepoByLocalPath(database, localPath)
+
+  if (existing) {
+    return { repo: existing, created: false }
+  }
+
+  const repo = createRepo(database, {
+    repoUrl: originUrl,
+    localPath,
+    branch,
+    defaultBranch: branch || 'main',
+    cloneStatus: 'ready',
+    clonedAt: Date.now(),
+    isLocal: !originUrl,
+  } as CreateRepoInput)
+
+  return { repo, created: true }
+}
+
+export function isRepoInUse(db: Database, repoId: number): boolean {
+  const repo = getRepoById(db, repoId)
+  if (!repo) {
+    return false
+  }
+
+  return sseAggregator.getActiveDirectories().includes(repo.fullPath)
 }

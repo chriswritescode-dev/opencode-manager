@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 import { spawn, spawnSync } from 'child_process'
+import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
 import { getToken, setToken, deleteToken, KeychainError } from '../src/keychain.js'
 import { ManagerApi } from '../src/manager-api.js'
-import { applyPull, preparePull, PullAbort, type RemoteRepoSummary } from '../src/pull.js'
-import { executePush, preparePush, PushAbort } from '../src/push.js'
+import { mirrorUp, mirrorDown, prepareMirror } from '../src/mirror.js'
+import type { RemoteRepoSummary } from '../src/mirror.js'
+import { getBranchName } from '../src/local-repo.js'
 
 const USAGE = `ocm - OpenCode Manager workspace launcher
 
@@ -15,10 +17,8 @@ Usage:
   ocm status                Show current manager URL, repo, and whether token is set
   ocm list                  List ready repos from the manager
   ocm use <repoId|name>     Attach to a specific repo and remember it as last
-  ocm pull [--force]        Pull working-tree changes from the matching remote repo into $PWD
-                            [--dry-run]
-  ocm push [--force]        Push $PWD's working-tree changes to the matching remote repo
-                            [--dry-run] [--no-delete]
+  ocm push [--force] [--create] [--yes]   Mirror $PWD to the matching Manager repo (or create one)
+  ocm pull [--force]                      Mirror the matching Manager repo over $PWD
   ocm --help                Show this help
 `
 
@@ -205,138 +205,6 @@ async function cmdUse(args: string[]): Promise<void> {
   attach(state.managerUrl, token, repo)
 }
 
-async function cmdPull(args: string[]): Promise<void> {
-  const flags = new Set(args.filter((a) => a.startsWith('--')))
-  const positional = args.filter((a) => !a.startsWith('--'))
-  const force = flags.has('--force')
-  const dryRun = flags.has('--dry-run')
-  const explicit = positional[0]
-
-  const state = requireState()
-  const token = requireToken(state)
-  const api = new ManagerApi(state.managerUrl, token)
-
-  const repos = await fetchRepos(state.managerUrl, token)
-  let remotes: RemoteRepoSummary[] = repos.map((r) => ({
-    repoId: r.repoId,
-    name: r.name,
-    originUrl: r.originUrl ?? null,
-    directory: r.directory,
-  }))
-
-  if (explicit) {
-    const filtered = remotes.filter((r) =>
-      String(r.repoId) === explicit || r.name === explicit || r.name.toLowerCase() === explicit.toLowerCase(),
-    )
-    if (filtered.length === 0) die(`no Manager repo matches ${explicit}`)
-    remotes = filtered
-  }
-
-  let plan
-  try {
-    plan = await preparePull({ cwd: process.cwd(), remotes, api, force })
-  } catch (err) {
-    if (err instanceof PullAbort) die(err.message)
-    throw err
-  }
-
-  info(`remote: ${plan.remoteRepo.name} (repoId=${plan.remoteRepo.repoId}, dir=${plan.remoteRepo.directory})`)
-  info(`local:  ${plan.repoRoot}`)
-  info(`HEAD:   ${plan.headMatches ? 'aligned' : 'DIVERGED'} (local=${plan.headLocal ?? 'n/a'}, manager=${plan.diff.head ?? 'n/a'})`)
-  info(`files:  ${plan.diff.files.length} change(s)`)
-  for (const f of plan.diff.files) {
-    const tag =
-      f.status === 'modified' ? 'M' :
-      f.status === 'added' ? 'A' :
-      f.status === 'untracked' ? 'U' :
-      f.status === 'deleted' ? 'D' :
-      f.status === 'renamed' ? 'R' :
-      f.status === 'typechange' ? 'T' :
-      f.status === 'unmerged' ? '!' : '?'
-    info(`  ${tag}  ${f.path}${f.oldPath ? ` (from ${f.oldPath})` : ''}`)
-  }
-  if (dryRun) {
-    info('dry-run: no files written.')
-    return
-  }
-  const result = await applyPull(plan, api)
-  info(`applied ${result.applied} change(s)${result.skipped.length ? `, skipped ${result.skipped.length}` : ''}.`)
-  if (result.skipped.length > 0) {
-    for (const s of result.skipped) info(`  skipped ${s.status}: ${s.path}`)
-  }
-}
-
-async function cmdPush(args: string[]): Promise<void> {
-  const flags = new Set(args.filter((a) => a.startsWith('--')))
-  const positional = args.filter((a) => !a.startsWith('--'))
-  const force = flags.has('--force')
-  const dryRun = flags.has('--dry-run')
-  const includeDeletions = !flags.has('--no-delete')
-  const explicit = positional[0]
-
-  const state = requireState()
-  const token = requireToken(state)
-  const api = new ManagerApi(state.managerUrl, token)
-
-  const repos = await fetchRepos(state.managerUrl, token)
-  let remotes: RemoteRepoSummary[] = repos.map((r) => ({
-    repoId: r.repoId,
-    name: r.name,
-    originUrl: r.originUrl ?? null,
-    directory: r.directory,
-  }))
-
-  if (explicit) {
-    const filtered = remotes.filter((r) =>
-      String(r.repoId) === explicit || r.name === explicit || r.name.toLowerCase() === explicit.toLowerCase(),
-    )
-    if (filtered.length === 0) die(`no Manager repo matches ${explicit}`)
-    remotes = filtered
-  }
-
-  let plan
-  try {
-    plan = preparePush({ cwd: process.cwd(), remotes, api, force, includeDeletions })
-  } catch (err) {
-    if (err instanceof PushAbort) die(err.message)
-    throw err
-  }
-
-  info(`remote: ${plan.remoteRepo.name} (repoId=${plan.remoteRepo.repoId}, dir=${plan.remoteRepo.directory})`)
-  info(`local:  ${plan.repoRoot}`)
-  info(`HEAD:   ${plan.localHead ?? '(none)'}`)
-  info(`files:  ${plan.manifest.length} change(s)`)
-  for (const f of plan.manifest) {
-    const tag =
-      f.status === 'modified' ? 'M' :
-      f.status === 'added' ? 'A' :
-      f.status === 'untracked' ? 'U' :
-      f.status === 'deleted' ? 'D' :
-      f.status === 'renamed' ? 'R' : '?'
-    info(`  ${tag}  ${f.path}${f.oldPath ? ` (from ${f.oldPath})` : ''}`)
-  }
-  if (plan.skipped.length > 0) {
-    info(`skipped ${plan.skipped.length} entr${plan.skipped.length === 1 ? 'y' : 'ies'}:`)
-    for (const s of plan.skipped) info(`  ${s.status}: ${s.path}`)
-  }
-  if (dryRun) {
-    info('dry-run: nothing uploaded.')
-    return
-  }
-  if (plan.manifest.length === 0) {
-    info('nothing to push.')
-    return
-  }
-
-  try {
-    const result = await executePush(plan, api, { force })
-    info(`uploaded ${result.uploaded} file(s); manager applied ${result.applied} change(s).`)
-  } catch (err) {
-    if (err instanceof PushAbort) die(err.message)
-    throw err
-  }
-}
-
 async function cmdDefault(): Promise<void> {
   const state = requireState()
   if (state.lastRepoId === undefined || !state.lastRepoDir) {
@@ -354,6 +222,103 @@ async function cmdDefault(): Promise<void> {
   }
 
   attach(state.managerUrl, token, fakeRepo)
+}
+
+export async function cmdPush(args: string[]): Promise<void> {
+  let force = false
+  let create = false
+  let yes = false
+
+  for (const arg of args) {
+    if (arg === '--force') force = true
+    else if (arg === '--create') create = true
+    else if (arg === '--yes') yes = true
+  }
+
+  const state = requireState()
+  const token = requireToken(state)
+  const api = new ManagerApi(state.managerUrl, token)
+  const repos = await fetchRepos(state.managerUrl, token)
+
+  const remotes: RemoteRepoSummary[] = repos.map((r) => ({
+    repoId: r.repoId,
+    name: r.name,
+    originUrl: r.originUrl ?? null,
+    branch: r.branch,
+  }))
+
+  const plan = prepareMirror(process.cwd(), remotes)
+
+  if (plan.matched.length === 0) {
+    if (!create) {
+      die(`no matching Manager repo for origin ${plan.localOrigin}. Re-run with --create to create one.`)
+    }
+
+    const name = basename(plan.repoRoot)
+    const branch = getBranchName(plan.repoRoot)
+
+    if (process.stdin.isTTY && !yes) {
+      process.stderr.write(`Create Manager repo "${name}" from ${plan.localOrigin}? [y/N] `)
+      const res = spawnSync('bash', ['-c', 'read LINE && printf "%s" "$LINE"'], {
+        stdio: ['inherit', 'pipe', 'inherit'],
+        encoding: 'utf-8',
+      })
+      const answer = (res.stdout ?? '').trim().toLowerCase()
+      if (answer !== 'y' && answer !== 'yes') {
+        die('aborted')
+      }
+    } else if (!process.stdin.isTTY && !yes) {
+      die('stdin is not a TTY; pass --yes to confirm creation')
+    }
+
+    const result = await mirrorUp(plan, {
+      api,
+      force,
+      create: { name, originUrl: plan.localOrigin, branch },
+    })
+
+    info(`pushed ${plan.repoRoot} -> ${result.created ? 'created' : 'updated'} (repoId=${result.repoId}, branch=${result.branch})`)
+  } else if (plan.matched.length === 1) {
+    const result = await mirrorUp(plan, { api, force })
+    info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} (repoId=${result.repoId}, branch=${result.branch})`)
+  } else {
+    const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
+    die(`multiple Manager repos match origin ${plan.localOrigin}: ${names}; disambiguate with \`ocm push <repoId>\``)
+  }
+}
+
+export async function cmdPull(args: string[]): Promise<void> {
+  let force = false
+
+  for (const arg of args) {
+    if (arg === '--force') force = true
+  }
+
+  const state = requireState()
+  const token = requireToken(state)
+  const api = new ManagerApi(state.managerUrl, token)
+  const repos = await fetchRepos(state.managerUrl, token)
+
+  const remotes: RemoteRepoSummary[] = repos.map((r) => ({
+    repoId: r.repoId,
+    name: r.name,
+    originUrl: r.originUrl ?? null,
+    branch: r.branch,
+  }))
+
+  const plan = prepareMirror(process.cwd(), remotes)
+
+  if (plan.matched.length === 0) {
+    die(`no matching Manager repo for origin ${plan.localOrigin}.`)
+  }
+
+  if (plan.matched.length > 1) {
+    const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
+    die(`multiple Manager repos match origin ${plan.localOrigin}: ${names}; disambiguate with \`ocm pull <repoId>\``)
+  }
+
+  await mirrorDown(plan.matched[0]!.repoId, plan.repoRoot, api, { force })
+  info(`pulled ${plan.matched[0]!.name} -> ${plan.repoRoot}`)
 }
 
 async function main(): Promise<void> {
@@ -386,11 +351,11 @@ async function main(): Promise<void> {
       case 'attach':
         await cmdUse(rest)
         break
-      case 'pull':
-        await cmdPull(rest)
-        break
       case 'push':
         await cmdPush(rest)
+        break
+      case 'pull':
+        await cmdPull(rest)
         break
       default:
         die(`unknown command: ${cmd}. run \`ocm --help\``)
@@ -400,4 +365,8 @@ async function main(): Promise<void> {
   }
 }
 
-void main()
+// Only run main when executed as a script (not imported)
+const argv1 = process.argv[1]
+if (argv1 && argv1.includes('ocm') && argv1.includes('/')) {
+  void main()
+}
