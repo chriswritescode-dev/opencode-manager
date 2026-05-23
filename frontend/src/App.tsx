@@ -1,7 +1,9 @@
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Outlet, useNavigate, useLocation, useNavigation } from 'react-router-dom'
 import { useEffect, useRef, useCallback } from 'react'
+import { AppLoadingSkeleton } from '@/components/ui/AppLoadingSkeleton'
+import { RouteErrorBoundary } from '@/components/ui/RouteErrorBoundary'
 import { Toaster } from 'sonner'
 import { Repos } from './pages/Repos'
 import { RepoDetail } from './pages/RepoDetail'
@@ -85,6 +87,7 @@ function PermissionDialogWrapper() {
 function AppShell() {
   const navigate = useNavigate()
   const location = useLocation()
+  const navigation = useNavigation()
   const rootRef = useRef<HTMLDivElement>(null)
   const { openSheet } = useMobileTabBar()
   useTheme()
@@ -155,6 +158,10 @@ function AppShell() {
     return () => channel.close()
   }, [navigate])
 
+  if (navigation.state === 'loading') {
+    return <AppLoadingSkeleton />
+  }
+
   return (
     <AuthProvider>
       <EventProvider>
@@ -187,6 +194,8 @@ function AppShell() {
 const router = createBrowserRouter([
   {
     element: <AppShell />,
+    errorElement: <RouteErrorBoundary />,
+    HydrateFallback: AppLoadingSkeleton,
     children: [
       {
         path: '/login',

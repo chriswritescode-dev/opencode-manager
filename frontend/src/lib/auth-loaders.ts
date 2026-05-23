@@ -1,6 +1,17 @@
 import { redirect } from 'react-router-dom'
 import { getSession } from './auth-client'
 
+function isNetworkError(error: unknown): boolean {
+  return error instanceof TypeError && (error.message === 'Failed to fetch' || error.message.includes('network'))
+}
+
+const defaultAuthConfig: AuthConfig = {
+  enabledProviders: ['credentials'],
+  registrationEnabled: true,
+  isFirstUser: false,
+  adminConfigured: false,
+}
+
 export interface AuthConfig {
   enabledProviders: string[]
   registrationEnabled: boolean
@@ -27,66 +38,84 @@ async function fetchAuthConfig(): Promise<AuthConfig> {
 }
 
 export async function loginLoader() {
-  const [config, session] = await Promise.all([
-    fetchAuthConfig(),
-    getSession(),
-  ])
+  try {
+    const [config, session] = await Promise.all([
+      fetchAuthConfig(),
+      getSession(),
+    ])
 
-  if (session.data?.user) {
-    return redirect('/')
+    if (session.data?.user) {
+      return redirect('/')
+    }
+
+    if (config.isFirstUser && !config.adminConfigured) {
+      return redirect('/setup')
+    }
+
+    return { config }
+  } catch (error) {
+    if (isNetworkError(error)) return { config: defaultAuthConfig }
+    throw error
   }
-
-  if (config.isFirstUser && !config.adminConfigured) {
-    return redirect('/setup')
-  }
-
-  return { config }
 }
 
 export async function setupLoader() {
-  const [config, session] = await Promise.all([
-    fetchAuthConfig(),
-    getSession(),
-  ])
+  try {
+    const [config, session] = await Promise.all([
+      fetchAuthConfig(),
+      getSession(),
+    ])
 
-  if (session.data?.user) {
-    return redirect('/')
+    if (session.data?.user) {
+      return redirect('/')
+    }
+
+    if (!config.isFirstUser || config.adminConfigured) {
+      return redirect('/login')
+    }
+
+    return { config }
+  } catch (error) {
+    if (isNetworkError(error)) return { config: defaultAuthConfig }
+    throw error
   }
-
-  if (!config.isFirstUser || config.adminConfigured) {
-    return redirect('/login')
-  }
-
-  return { config }
 }
 
 export async function registerLoader() {
-  const [config, session] = await Promise.all([
-    fetchAuthConfig(),
-    getSession(),
-  ])
+  try {
+    const [config, session] = await Promise.all([
+      fetchAuthConfig(),
+      getSession(),
+    ])
 
-  if (session.data?.user) {
-    return redirect('/')
+    if (session.data?.user) {
+      return redirect('/')
+    }
+
+    if (!config.registrationEnabled) {
+      return redirect('/login')
+    }
+
+    if (config.isFirstUser && !config.adminConfigured) {
+      return redirect('/setup')
+    }
+
+    return { config }
+  } catch (error) {
+    if (isNetworkError(error)) return { config: defaultAuthConfig }
+    throw error
   }
-
-  if (!config.registrationEnabled) {
-    return redirect('/login')
-  }
-
-  if (config.isFirstUser && !config.adminConfigured) {
-    return redirect('/setup')
-  }
-
-  return { config }
 }
 
 export async function protectedLoader() {
-  const session = await getSession()
-
-  if (!session.data?.user) {
-    return redirect('/login')
+  try {
+    const session = await getSession()
+    if (!session.data?.user) {
+      return redirect('/login')
+    }
+    return null
+  } catch (error) {
+    if (isNetworkError(error)) return null
+    throw error
   }
-
-  return null
 }
