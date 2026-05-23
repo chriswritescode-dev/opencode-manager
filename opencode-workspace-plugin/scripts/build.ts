@@ -1,4 +1,4 @@
-import { writeFileSync, rmSync } from 'fs'
+import { chmodSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import solidPlugin from '@opentui/solid/bun-plugin'
 
@@ -39,5 +39,28 @@ declare const plugin: TuiPluginModule & { id: string }
 export default plugin
 `
 writeFileSync(join(dist, 'tui.d.ts'), tuiDts, 'utf-8')
+
+console.log('Bundling ocm CLI (bun build)...')
+const cliResult = await Bun.build({
+  entrypoints: [join(root, 'bin', 'ocm.ts')],
+  outdir: dist,
+  target: 'bun',
+  naming: { entry: 'ocm.js' },
+})
+
+if (!cliResult.success) {
+  for (const log of cliResult.logs) {
+    console.error(log)
+  }
+  process.exit(1)
+}
+
+const ocmShim = `#!/usr/bin/env bun
+import './ocm.js'
+`
+const ocmPath = join(dist, 'ocm')
+writeFileSync(ocmPath, ocmShim, 'utf-8')
+chmodSync(ocmPath, 0o755)
+chmodSync(join(dist, 'ocm.js'), 0o755)
 
 console.log('Build complete')

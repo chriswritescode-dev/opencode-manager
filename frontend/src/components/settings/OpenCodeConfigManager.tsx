@@ -52,7 +52,11 @@ interface Agent {
   [key: string]: unknown
 }
 
-export function OpenCodeConfigManager() {
+interface OpenCodeConfigManagerProps {
+  hideHealthStatus?: boolean
+}
+
+export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConfigManagerProps) {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
@@ -407,7 +411,7 @@ export function OpenCodeConfigManager() {
 
   return (
     <div className="space-y-6 overflow-y-auto">
-      {health && (
+      {!hideHealthStatus && health && (
         <Card className={cn('bg-transparent border-transparent', isUnhealthy && 'border-destructive')}>
           <CardContent className="p-3">
             <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">

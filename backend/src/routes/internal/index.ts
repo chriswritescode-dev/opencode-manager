@@ -8,6 +8,7 @@ import { createInternalTokenMiddleware } from '../../auth/internal-token-middlew
 import { createInternalNotificationRoutes } from './notifications'
 import { createInternalSettingsRoutes } from './settings'
 import { createInternalRepoRoutes } from './repos'
+import { createInternalRepoSyncRoutes } from './repo-sync'
 import { createInternalOpenCodeWorkspacesRoutes } from './opencode-workspaces'
 
 export function createInternalRoutes(
@@ -24,6 +25,7 @@ export function createInternalRoutes(
   const repos = new Hono()
   repos.route('/', createInternalRepoRoutes(db, settingsService))
   repos.route('/:id/schedules', createScheduleRoutes(scheduleService))
+  repos.route('/', createInternalRepoSyncRoutes(db))
   app.route('/repos', repos)
   app.route('/opencode-workspaces', createInternalOpenCodeWorkspacesRoutes(db))
   return app

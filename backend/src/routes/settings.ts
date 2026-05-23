@@ -21,6 +21,7 @@ import {
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
+import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { GitAuthService } from '../services/git-auth'
@@ -1552,6 +1553,26 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
       }
       return c.json({ error: 'Failed to update OpenCode server auth' }, 500)
+    }
+  })
+
+  app.get('/manager-token', async (c) => {
+    try {
+      const token = getOrCreateInternalToken(db)
+      return c.json({ token })
+    } catch (error) {
+      logger.error('Failed to get manager token:', error)
+      return c.json({ error: 'Failed to get manager token' }, 500)
+    }
+  })
+
+  app.post('/manager-token/rotate', async (c) => {
+    try {
+      const token = rotateInternalToken(db)
+      return c.json({ token })
+    } catch (error) {
+      logger.error('Failed to rotate manager token:', error)
+      return c.json({ error: 'Failed to rotate manager token' }, 500)
     }
   })
 

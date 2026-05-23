@@ -294,3 +294,17 @@ export async function updateOpenCodeServerAuth(password: string | null): Promise
     body: JSON.stringify({ password }),
   })
 }
+
+export interface ManagerTokenResponse {
+  token: string
+}
+
+export async function getManagerToken(): Promise<ManagerTokenResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/manager-token`)
+}
+
+export async function rotateManagerToken(): Promise<ManagerTokenResponse> {
+  return fetchWrapper(`${API_BASE_URL}/api/settings/manager-token/rotate`, {
+    method: 'POST',
+  })
+}

@@ -4,10 +4,7 @@ import { resolveConfig, type PluginConfig } from './config.js'
 import { ManagerClient } from './manager-client.js'
 import { PLUGIN_ID } from './index.js'
 import type { ManagerWorkspace } from './opencode-plugin-types.js'
-import { spawn } from 'child_process'
-import { writeFileSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
+import { readState, writeState } from './state.js'
 
 const COMMAND_VALUE = 'manager.workspace.open'
 const DEFAULT_KEYBIND = '<leader>w'
@@ -62,20 +59,27 @@ async function openManagerPicker(
         const repo = repos.find((entry) => entry.repoId === repoId)
         if (!repo || !repo.directory) return
 
-        const proxyUrl = `${config.managerUrl}/api/opencode-proxy`
-        const cmd = `opencode attach ${proxyUrl} --dir ${repo.directory} --password ${config.managerToken} --username opencode`
-
-        const sentinelPath = join(tmpdir(), 'opencode-manager-attach.sh')
         try {
-          writeFileSync(sentinelPath, `#!/bin/sh\n${cmd}\n`, { mode: 0o700 })
-        } catch {}
-
-        const pbcopy = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] })
-        pbcopy.on('error', () => {})
-        pbcopy.stdin.end(cmd)
+          const existing = readState()
+          writeState({
+            ...existing,
+            managerUrl: config.managerUrl,
+            lastRepoId: repo.repoId,
+            lastRepoName: repo.name,
+            lastRepoDir: repo.directory,
+            lastRepoBranch: repo.branch ?? null,
+          })
+        } catch (err) {
+          api.ui.toast({
+            message: `Failed to save state: ${err instanceof Error ? err.message : String(err)}`,
+            variant: 'error',
+            duration: 5000,
+          })
+          return
+        }
 
         api.ui.toast({
-          message: `Command copied to clipboard. Also saved to ${sentinelPath}. Exiting...`,
+          message: `Selected ${repo.name}. Exiting \u2014 run \`ocm\` to attach.`,
           variant: 'success',
           duration: 4000,
         })

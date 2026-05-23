@@ -4,6 +4,8 @@ import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
+import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
+import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
@@ -154,8 +156,12 @@ export function SettingsDialog() {
                 <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
                 <TabsContent key="opencode" value="opencode" className="mt-0">
                   <div className="space-y-6">
-                    <OpenCodeServerAuthSettings />
-                    <OpenCodeConfigManager />
+                    <ServerHealthStatus />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <OpenCodeServerAuthSettings />
+                      <ManagerTokenSettings />
+                    </div>
+                    <OpenCodeConfigManager hideHealthStatus />
                   </div>
                 </TabsContent>
                 <TabsContent key="providers" value="providers" className="mt-0"><ProviderSettings /></TabsContent>
@@ -220,12 +226,14 @@ export function SettingsDialog() {
              {mobileView === 'voice' && <div key="voice"><VoiceSettings /></div>}
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
-              {mobileView === 'opencode' && (
-                <div key="opencode" className="space-y-6">
-                  <OpenCodeServerAuthSettings />
-                  <OpenCodeConfigManager />
-                </div>
-              )}
+               {mobileView === 'opencode' && (
+                 <div key="opencode" className="space-y-6">
+                   <ServerHealthStatus />
+                   <OpenCodeServerAuthSettings />
+                   <ManagerTokenSettings />
+                   <OpenCodeConfigManager hideHealthStatus />
+                 </div>
+               )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
            </div>
         </div>

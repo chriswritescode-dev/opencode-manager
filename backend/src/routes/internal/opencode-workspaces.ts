@@ -23,6 +23,7 @@ export function createInternalOpenCodeWorkspacesRoutes(db: Database) {
           branch: repo.branch ?? null,
           cloneStatus: repo.cloneStatus,
           directory: repo.fullPath,
+          originUrl: repo.repoUrl ?? null,
           extra: {
             repoId: repo.id,
             localPath: repo.localPath,
