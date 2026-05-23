@@ -2,5 +2,5 @@ packages:
   - 'shared'
   - 'backend'
   - 'frontend'
-  - 'opencode-workspace-plugin'
+  - 'ocm-cli'
   - '!workspace/**'

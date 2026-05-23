@@ -1,13 +1,3 @@
-export interface GitInfo {
-  repoId: number
-  repoName: string | null
-  directory: string
-  originUrl: string | null
-  head: string | null
-  branch: string | null
-  dirty: boolean
-}
-
 export class ManagerApi {
   constructor(
     private baseUrl: string,
@@ -16,12 +6,6 @@ export class ManagerApi {
 
   private headers(extra: Record<string, string> = {}): Record<string, string> {
     return { Authorization: `Bearer ${this.token}`, ...extra }
-  }
-
-  async getGitInfo(repoId: number): Promise<GitInfo> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/git-info`, { headers: this.headers() })
-    if (!res.ok) throw new Error(`git-info ${res.status}: ${await res.text()}`)
-    return (await res.json()) as GitInfo
   }
 
   async mirrorUp(

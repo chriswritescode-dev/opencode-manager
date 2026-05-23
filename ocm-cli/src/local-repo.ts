@@ -14,10 +14,6 @@ export function getOriginUrl(dir: string): string | null {
   return git(dir, ['remote', 'get-url', 'origin'])
 }
 
-export function getHead(dir: string): string | null {
-  return git(dir, ['rev-parse', 'HEAD'])
-}
-
 export function getDirtyPaths(dir: string): Set<string> {
   const out = git(dir, ['status', '--porcelain', '-z', '--untracked-files=all'])
   if (!out) return new Set()

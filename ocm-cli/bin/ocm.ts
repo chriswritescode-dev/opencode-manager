@@ -1,4 +1,3 @@
-#!/usr/bin/env bun
 import { spawn, spawnSync } from 'child_process'
 import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
@@ -7,11 +6,14 @@ import { ManagerApi } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, prepareMirror } from '../src/mirror.js'
 import type { RemoteRepoSummary } from '../src/mirror.js'
 import { getBranchName } from '../src/local-repo.js'
+import { resolveTarget } from '../src/resolve-target.js'
 
 const USAGE = `ocm - OpenCode Manager workspace launcher
 
 Usage:
-  ocm                       Re-attach to the last selected repo
+  ocm                       Attach to the Manager repo matching $PWD's git origin,
+                            fall back to the last selected repo, or launch local
+                            opencode when no Manager target applies
   ocm login <url> [token]   Save manager URL + token (token via stdin if omitted)
   ocm logout                Forget saved token (Keychain) and state
   ocm status                Show current manager URL, repo, and whether token is set
@@ -207,21 +209,67 @@ async function cmdUse(args: string[]): Promise<void> {
 
 async function cmdDefault(): Promise<void> {
   const state = requireState()
-  if (state.lastRepoId === undefined || !state.lastRepoDir) {
-    die('no last repo. run: ocm list  then  ocm use <repoId>')
-  }
   const token = requireToken(state)
 
-  const fakeRepo: ManagerRepo = {
-    repoId: state.lastRepoId,
-    name: state.lastRepoName ?? `repo-${state.lastRepoId}`,
-    branch: state.lastRepoBranch ?? null,
-    cloneStatus: 'ready',
-    directory: state.lastRepoDir,
-    extra: { repoId: state.lastRepoId, localPath: '', fullPath: state.lastRepoDir },
-  }
+  const last = state.lastRepoId !== undefined && state.lastRepoDir
+    ? {
+        repoId: state.lastRepoId,
+        name: state.lastRepoName ?? `repo-${state.lastRepoId}`,
+        directory: state.lastRepoDir,
+        branch: state.lastRepoBranch ?? null,
+      }
+    : undefined
 
-  attach(state.managerUrl, token, fakeRepo)
+  const repos = await fetchRepos(state.managerUrl, token)
+  const result = resolveTarget({ cwd: process.cwd(), repos, last })
+
+  switch (result.kind) {
+    case 'cwd-match': {
+      const repo = result.repo
+      info(`attaching to ${repo.name} (matched $PWD origin)`)
+      writeState({
+        ...state,
+        lastRepoId: repo.repoId,
+        lastRepoName: repo.name,
+        lastRepoDir: repo.directory,
+        lastRepoBranch: repo.branch,
+      })
+      attach(state.managerUrl, token, toManagerRepo(repo))
+      return
+    }
+    case 'last':
+      attach(state.managerUrl, token, toManagerRepo(result.repo))
+      return
+    case 'cwd-ambiguous': {
+      const names = result.matches.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
+      die(`multiple Manager repos match origin ${result.localOrigin}: ${names}; disambiguate with \`ocm use <repoId>\``)
+    }
+    case 'local':
+      runLocalOpencode(result.reason)
+      return
+  }
+}
+
+function runLocalOpencode(reason: 'no-match' | 'no-target'): never {
+  const message = reason === 'no-match'
+    ? 'no Manager repo matches $PWD; launching local opencode'
+    : 'no last repo; launching local opencode'
+  process.stderr.write(`ocm: ${message}\n`)
+  const child = spawn('opencode', [], { stdio: 'inherit' })
+  child.on('close', (code) => process.exit(code ?? 0))
+  child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
+  return undefined as never
+}
+
+function toManagerRepo(repo: { repoId: number; name: string; branch: string | null; directory: string }): ManagerRepo {
+  return {
+    repoId: repo.repoId,
+    name: repo.name,
+    branch: repo.branch,
+    cloneStatus: 'ready',
+    directory: repo.directory,
+    extra: { repoId: repo.repoId, localPath: '', fullPath: repo.directory },
+  }
 }
 
 export async function cmdPush(args: string[]): Promise<void> {
@@ -287,7 +335,7 @@ export async function cmdPush(args: string[]): Promise<void> {
   }
 }
 
-export async function cmdPull(args: string[]): Promise<void> {
+async function cmdPull(args: string[]): Promise<void> {
   let force = false
 
   for (const arg of args) {
@@ -365,8 +413,8 @@ async function main(): Promise<void> {
   }
 }
 
-// Only run main when executed as a script (not imported)
-const argv1 = process.argv[1]
-if (argv1 && argv1.includes('ocm') && argv1.includes('/')) {
+// Only run main when executed directly (not imported by tests).
+const entryUrl = process.argv[1] ? `file://${process.argv[1]}` : ''
+if (entryUrl === import.meta.url || process.argv[1]?.endsWith('/ocm.js') || process.argv[1]?.endsWith('/ocm')) {
   void main()
 }

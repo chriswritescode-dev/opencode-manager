@@ -1,0 +1,39 @@
+{
+  "name": "@opencode-manager/ocm-cli",
+  "version": "0.1.0",
+  "description": "OpenCode Manager CLI: attach a local OpenCode TUI to a Manager-hosted repo.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/chriswritescode-dev/opencode-manager.git",
+    "directory": "ocm-cli"
+  },
+  "type": "module",
+  "main": "./dist/plugin.js",
+  "exports": {
+    ".": {
+      "import": "./dist/plugin.js"
+    }
+  },
+  "bin": {
+    "ocm": "./dist/ocm.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "postinstall": "node scripts/postinstall.mjs || true",
+    "typecheck": "tsc --noEmit",
+    "test": "bun scripts/build.ts && vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "bun scripts/build.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0",
+    "vitest": "^3.1.0"
+  }
+}
