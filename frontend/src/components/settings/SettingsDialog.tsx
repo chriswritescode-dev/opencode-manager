@@ -22,6 +22,8 @@ export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
+  const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
+  const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -158,8 +160,8 @@ export function SettingsDialog() {
                   <div className="space-y-6">
                     <ServerHealthStatus />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <OpenCodeServerAuthSettings />
-                      <ManagerTokenSettings />
+                      <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
+                      <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                     </div>
                     <OpenCodeConfigManager hideHealthStatus />
                   </div>

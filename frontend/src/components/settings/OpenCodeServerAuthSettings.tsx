@@ -6,11 +6,18 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertTriangle, CheckCircle2, ChevronDown, Eye, EyeOff, XCircle } from 'lucide-react'
 
-export function OpenCodeServerAuthSettings() {
+interface OpenCodeServerAuthSettingsProps {
+  isOpen?: boolean
+  onToggle?: () => void
+}
+
+export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }: OpenCodeServerAuthSettingsProps = {}) {
   const { status, setPassword, clearPassword } = useOpenCodeServerAuth()
   const [password, setPasswordValue] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [isOpen, setIsOpen] = useState(true)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(true)
+  const isOpen = controlledOpen ?? uncontrolledOpen
+  const handleToggle = onToggle ?? (() => setUncontrolledOpen((open) => !open))
 
   const handleSave = () => {
     if (password.length >= 8) {
@@ -38,7 +45,7 @@ export function OpenCodeServerAuthSettings() {
     <div className="rounded-lg border bg-card overflow-hidden">
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-2">

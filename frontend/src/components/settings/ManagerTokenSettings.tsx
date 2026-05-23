@@ -6,12 +6,19 @@ import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
 
-export function ManagerTokenSettings() {
+interface ManagerTokenSettingsProps {
+  isOpen?: boolean
+  onToggle?: () => void
+}
+
+export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: ManagerTokenSettingsProps = {}) {
   const { token, isLoading, rotate } = useManagerToken()
   const [showToken, setShowToken] = useState(false)
   const [copied, setCopied] = useState(false)
   const [confirmRotate, setConfirmRotate] = useState(false)
-  const [isOpen, setIsOpen] = useState(true)
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(true)
+  const isOpen = controlledOpen ?? uncontrolledOpen
+  const handleToggle = onToggle ?? (() => setUncontrolledOpen((open) => !open))
 
   const handleCopy = async () => {
     if (!token) return
@@ -38,7 +45,7 @@ export function ManagerTokenSettings() {
     <div className="rounded-lg border bg-card overflow-hidden">
       <button
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={handleToggle}
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-3 min-w-0">
