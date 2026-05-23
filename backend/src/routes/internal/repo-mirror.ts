@@ -3,10 +3,10 @@ import type { Database } from 'bun:sqlite'
 import { spawn } from 'child_process'
 import { pipeline } from 'stream/promises'
 import { Readable } from 'stream'
-import { mkdtempSync, readdirSync, statSync, existsSync, writeFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, readdirSync, statSync, existsSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { tmpdir } from 'os'
 import * as fsp from 'fs/promises'
+import { getReposPath } from '@opencode-manager/shared/config/env'
 import { getRepoById, updateLastPulled, updateRepoBranch, deleteRepo } from '../../db/queries'
 import { ensureMirrorTargetPath, createRepoRow, isRepoInUse } from '../../services/repo'
 import { logger } from '../../utils/logger'
@@ -62,7 +62,9 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     let staging: string | undefined
     let oldDirMoved = false
     try {
-      staging = mkdtempSync(join(tmpdir(), 'ocm-mirror-recv-'))
+      const stagingParent = join(getReposPath(), '.ocm-staging')
+      mkdirSync(stagingParent, { recursive: true })
+      staging = mkdtempSync(join(stagingParent, 'recv-'))
 
       const isGzip = c.req.header('Content-Encoding') === 'gzip'
       const tarArgs = ['-x', '-f', '-', '-C', staging]
@@ -172,7 +174,9 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     try {
       const ignored = await gitOut(fullPath, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])
       if (ignored.trim()) {
-        ignoreFile = mkdtempSync(join(tmpdir(), 'ocm-mirror-exclude-'))
+        const excludeParent = join(getReposPath(), '.ocm-staging')
+        mkdirSync(excludeParent, { recursive: true })
+        ignoreFile = mkdtempSync(join(excludeParent, 'exclude-'))
         writeFileSync(join(ignoreFile, '.gitignore'), ignored)
         excludeArgs.push('--exclude-from', join(ignoreFile, '.gitignore'))
       }
