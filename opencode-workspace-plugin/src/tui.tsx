@@ -5,6 +5,9 @@ import { ManagerClient } from './manager-client.js'
 import { PLUGIN_ID } from './index.js'
 import type { ManagerWorkspace } from './opencode-plugin-types.js'
 import { spawn } from 'child_process'
+import { writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 const COMMAND_VALUE = 'manager.workspace.open'
 const DEFAULT_KEYBIND = '<leader>w'
@@ -60,36 +63,26 @@ async function openManagerPicker(
         if (!repo || !repo.directory) return
 
         const proxyUrl = `${config.managerUrl}/api/opencode-proxy`
+        const cmd = `opencode attach ${proxyUrl} --dir ${repo.directory} --password ${config.managerToken} --username opencode`
+
+        const sentinelPath = join(tmpdir(), 'opencode-manager-attach.sh')
+        try {
+          writeFileSync(sentinelPath, `#!/bin/sh\n${cmd}\n`, { mode: 0o700 })
+        } catch {}
+
+        const pbcopy = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] })
+        pbcopy.on('error', () => {})
+        pbcopy.stdin.end(cmd)
 
         api.ui.toast({
-          message: `Attaching to ${repo.name}...`,
-          variant: 'info',
-          duration: 2000,
+          message: `Command copied to clipboard. Also saved to ${sentinelPath}. Exiting...`,
+          variant: 'success',
+          duration: 4000,
         })
 
-        const child = spawn('opencode', [
-          'attach',
-          proxyUrl,
-          '--dir', repo.directory,
-          '--password', config.managerToken,
-          '--username', 'opencode',
-        ], {
-          stdio: 'inherit',
-          detached: false,
-        })
-
-        child.on('close', () => {
-          process.exit(0)
-        })
-
-        child.on('error', () => {
-          const cmd = `opencode attach ${proxyUrl} --dir ${repo.directory} --password ${config.managerToken} --username opencode`
-          api.ui.toast({
-            message: `Failed to launch opencode attach. Run: ${cmd}`,
-            variant: 'error',
-            duration: 10000,
-          })
-        })
+        setTimeout(() => {
+          api.command?.trigger('app_exit')
+        }, 400)
       }}
     />
   ))
