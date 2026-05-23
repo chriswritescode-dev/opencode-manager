@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useOpenCodeServerAuth } from '@/hooks/useOpenCodeServerAuth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertTriangle, CheckCircle2, ChevronDown, Eye, EyeOff, XCircle } from 'lucide-react'
 
@@ -61,14 +60,6 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
       {isOpen && (
         <div className="px-4 pb-4 pt-1 border-t border-border">
           <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Status:</span>
-              <span className="flex items-center gap-2 font-medium">
-                {getStatusIcon()}
-                {getStatusText()}
-              </span>
-            </div>
-
             {status?.source === 'none' && (
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
@@ -78,44 +69,43 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
               </Alert>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="password">Password (min 8 characters)</Label>
-              <div className="flex gap-2">
+            <div className="flex gap-2 items-center pt-2">
+              <div className="relative flex-1">
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPasswordValue(e.target.value)}
                   placeholder="Enter new password"
-                  className="flex-1"
+                  className="pr-9"
                 />
-                <Button
-                  variant="outline"
-                  size="icon"
+                <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
+                </button>
               </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={handleSave}
-                  disabled={password.length < 8 || setPassword.isPending}
-                >
-                  {setPassword.isPending ? 'Saving...' : 'Save'}
-                </Button>
-                {status?.source === 'db' && (
-                  <Button
-                    variant="outline"
-                    onClick={() => clearPassword.mutate()}
-                    disabled={clearPassword.isPending}
-                  >
-                    {clearPassword.isPending ? 'Clearing...' : 'Clear stored password'}
-                  </Button>
-                )}
-              </div>
+              <Button
+                onClick={handleSave}
+                disabled={password.length < 8 || setPassword.isPending}
+              >
+                {setPassword.isPending ? 'Saving...' : 'Save'}
+              </Button>
             </div>
+            {password.length > 0 && password.length < 8 && (
+              <p className="text-xs text-destructive">Password must be at least 8 characters</p>
+            )}
+            {status?.source === 'db' && (
+              <Button
+                variant="outline"
+                onClick={() => clearPassword.mutate()}
+                disabled={clearPassword.isPending}
+              >
+                {clearPassword.isPending ? 'Clearing...' : 'Clear stored password'}
+              </Button>
+            )}
           </div>
         </div>
       )}

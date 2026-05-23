@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useManagerToken } from '@/hooks/useManagerToken'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, RefreshCw } from 'lucide-react'
 
@@ -60,35 +59,42 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
       {isOpen && (
         <div className="px-4 pb-4 pt-1 border-t border-border">
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="manager-token">Token</Label>
-              <div className="flex gap-2">
+            <div className="flex gap-2 items-center pt-2">
+              <div className="relative flex-1">
                 <Input
                   id="manager-token"
                   type={showToken ? 'text' : 'password'}
                   value={isLoading ? 'Loading...' : token ?? ''}
                   readOnly
-                  className="flex-1 font-mono text-xs"
+                  className="flex-1 font-mono text-xs pr-9"
                 />
-                <Button
-                  variant="outline"
-                  size="icon"
+                <button
                   type="button"
                   onClick={() => setShowToken(!showToken)}
                   disabled={!token}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
                 >
                   {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  type="button"
-                  onClick={handleCopy}
-                  disabled={!token}
-                >
-                  {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
-                </Button>
+                </button>
               </div>
+              <Button
+                variant="outline"
+                size="icon"
+                type="button"
+                onClick={handleCopy}
+                disabled={!token}
+              >
+                {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+              </Button>
+              <Button
+                variant={confirmRotate ? 'destructive' : 'outline'}
+                size="icon"
+                type="button"
+                onClick={handleRotate}
+                disabled={rotate.isPending || isLoading}
+              >
+                <RefreshCw className={`h-4 w-4 ${rotate.isPending ? 'animate-spin' : ''}`} />
+              </Button>
             </div>
 
             {confirmRotate && (
@@ -99,17 +105,6 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
                 </AlertDescription>
               </Alert>
             )}
-
-            <div>
-              <Button
-                variant={confirmRotate ? 'destructive' : 'outline'}
-                onClick={handleRotate}
-                disabled={rotate.isPending || isLoading}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${rotate.isPending ? 'animate-spin' : ''}`} />
-                {rotate.isPending ? 'Rotating...' : confirmRotate ? 'Confirm rotate' : 'Rotate token'}
-              </Button>
-            </div>
           </div>
         </div>
       )}
