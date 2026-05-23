@@ -78,6 +78,8 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
                   onChange={(e) => setPasswordValue(e.target.value)}
                   placeholder="Enter new password"
                   className="pr-9"
+                  autoComplete="new-password"
+                  name="opencode-server-password"
                 />
                 <button
                   type="button"

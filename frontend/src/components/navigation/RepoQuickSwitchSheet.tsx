@@ -87,6 +87,8 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
               onChange={(e) => setSearchQuery(e.target.value)}
               autoFocus
               className="flex-1"
+              autoComplete="off"
+              name="repo-quick-switch"
             />
             <Button
               type="button"

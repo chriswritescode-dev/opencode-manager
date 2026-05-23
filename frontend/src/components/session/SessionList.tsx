@@ -176,6 +176,8 @@ export const SessionList = ({
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 h-9"
+                autoComplete="off"
+                name="session-search"
               />
             </div>
             <Button

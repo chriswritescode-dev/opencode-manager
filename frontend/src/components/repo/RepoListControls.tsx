@@ -128,6 +128,7 @@ export function RepoListControls({
             placeholder="Search repositories..."
             className="pl-9 h-9"
             autoComplete="off"
+            name="repo-search"
           />
         </div>
 
