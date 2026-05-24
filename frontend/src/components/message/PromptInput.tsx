@@ -69,7 +69,6 @@ interface PromptInputProps {
   isStreamingResponse?: boolean
   onScrollToBottom: () => void
   onShowSessionsDialog?: () => void
-  onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
   onToggleDetails?: () => boolean
   onExportSession?: () => void
@@ -86,7 +85,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   isStreamingResponse = false,
   onScrollToBottom,
   onShowSessionsDialog,
-  onShowModelsDialog,
   onShowHelpDialog,
   onToggleDetails,
   onExportSession,
@@ -182,7 +180,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     sessionID,
     directory,
     onShowSessionsDialog,
-    onShowModelsDialog,
+    onShowModelsDialog: undefined,
     onShowHelpDialog,
     onToggleDetails,
     onExportSession,
@@ -1239,11 +1237,10 @@ return (
               </div>
             ) : (
                !hideSecondaryButtons && !showMobileScrollButton && (
-                 <ModelQuickSelect
-                   opcodeUrl={opcodeUrl}
-                   directory={directory}
-                   onOpenFullDialog={() => onShowModelsDialog?.()}
-                 >
+                  <ModelQuickSelect
+                    opcodeUrl={opcodeUrl}
+                    directory={directory}
+                  >
 <button
                       className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer w-full md:w-auto md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center overflow-hidden"
                     >

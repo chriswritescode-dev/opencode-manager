@@ -6,7 +6,6 @@ import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
 import { X, CornerUpLeft } from "lucide-react";
-import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
 import { getSessionListPath } from '@/lib/navigation'
@@ -72,7 +71,6 @@ export function SessionDetail() {
   const { open: openSettings } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
-  const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
   const [lspDialogOpen, setLspDialogOpen] = useDialogParam('lsp');
@@ -191,7 +189,6 @@ export function SessionDetail() {
     isStreamingResponse,
   });
 
-  const handleShowModelsDialog = useCallback(() => setModelDialogOpen(true), []);
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowHelpDialog = useCallback(() => openSettings(), [openSettings]);
 
@@ -304,7 +301,12 @@ export function SessionDetail() {
   }, [navigate, repoId, isAssistantSession])
 
   const { leaderActive } = useKeyboardShortcuts({
-    openModelDialog: () => setModelDialogOpen(true),
+    openModelDialog: () => {
+      const modelSelectTrigger = document.querySelector(
+        "[data-model-select-trigger]",
+      ) as HTMLElement;
+      modelSelectTrigger?.click();
+    },
     openSessions: () => setSessionsDialogOpen(true),
     openSettings,
     newSession: handleNewSession,
@@ -555,7 +557,6 @@ export function SessionDetail() {
                 isSessionActive={isSessionActive}
                 isStreamingResponse={isStreamingResponse}
                 onScrollToBottom={scrollToBottom}
-                onShowModelsDialog={handleShowModelsDialog}
                 onShowSessionsDialog={handleShowSessionsDialog}
                 onShowHelpDialog={handleShowHelpDialog}
                 onToggleDetails={handleToggleDetails}
@@ -566,13 +567,6 @@ export function SessionDetail() {
           </div>
         )}
       </div>
-
-      <ModelSelectDialog
-        open={modelDialogOpen}
-        onOpenChange={setModelDialogOpen}
-        opcodeUrl={opcodeUrl}
-        directory={repoDirectory}
-      />
 
       {/* Sessions Dialog */}
       <Dialog open={sessionsDialogOpen} onOpenChange={setSessionsDialogOpen}>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '@/lib/utils'
 import { MODAL_TRANSITION_MS } from '@/lib/utils'
 import { useSwipeDismiss } from '@/hooks/useMobile'
@@ -61,9 +62,9 @@ export function BottomSheet({
 
   if (!isOpen && !shouldRender) return null
 
-  return (
+  const sheet = (
     <div
-      className="fixed inset-0 z-[60]"
+      className="fixed inset-0 z-[250]"
       style={{
         opacity: isOpen ? 1 : 0,
         pointerEvents: isOpen ? 'auto' : 'none',
@@ -94,6 +95,10 @@ export function BottomSheet({
       </div>
     </div>
   )
+
+  if (typeof document === 'undefined') return sheet
+
+  return createPortal(sheet, document.body)
 }
 
 export interface BottomSheetHeaderProps {

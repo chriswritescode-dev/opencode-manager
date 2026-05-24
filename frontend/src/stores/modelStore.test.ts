@@ -104,6 +104,37 @@ describe('validateAndSyncModel', () => {
     ])
   })
 
+  it('invalidates stale hydrated model selections from providers on load', () => {
+    const providers = [
+      makeProvider({
+        id: 'openrouter',
+        models: { 'qwen/qwen3-235b-a22b': { id: 'qwen/qwen3-235b-a22b', name: 'Qwen3 235B' } },
+      }),
+    ]
+
+    useModelStore.setState({
+      model: { providerID: 'openrouter', modelID: 'qwen/qwen3-35b' },
+      recentModels: [
+        { providerID: 'openrouter', modelID: 'qwen/qwen3-35b' },
+        { providerID: 'openrouter', modelID: 'qwen/qwen3-235b-a22b' },
+      ],
+      favoriteModels: [
+        { providerID: 'openrouter', modelID: 'qwen/qwen3-35b' },
+        { providerID: 'openrouter', modelID: 'qwen/qwen3-235b-a22b' },
+      ],
+    })
+
+    useModelStore.getState().validateAndSyncModel(undefined, providers)
+
+    expect(useModelStore.getState().model).toBeNull()
+    expect(useModelStore.getState().recentModels).toEqual([
+      { providerID: 'openrouter', modelID: 'qwen/qwen3-235b-a22b' },
+    ])
+    expect(useModelStore.getState().favoriteModels).toEqual([
+      { providerID: 'openrouter', modelID: 'qwen/qwen3-235b-a22b' },
+    ])
+  })
+
   it('is idempotent when re-running with same valid state', () => {
     const providers = [
       makeProvider({
