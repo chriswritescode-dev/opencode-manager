@@ -5,7 +5,7 @@ import { getRepo, initializeAssistantMode } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft } from "lucide-react";
+import { X, CornerUpLeft, ArrowDown } from "lucide-react";
 import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
@@ -27,6 +27,7 @@ import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
+import { useTallScrollContent } from "@/hooks/useTallScrollContent";
 import { useTTS } from "@/hooks/useTTS";
 import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from "@/hooks/useAutoPlayLastResponse";
 import { useEffect, useRef, useCallback, useMemo } from "react";
@@ -86,12 +87,14 @@ export function SessionDetail() {
   const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
   const lastHeaderScrollTopRef = useRef(0);
+  const lastHeaderScrollHeightRef = useRef(0);
 
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayRef = useRef<HTMLDivElement>(null);
   const [promptOverlayHeight, setPromptOverlayHeight] = useState(112);
+  const isContentTall = useTallScrollContent(messageContainerRef, 1.5);
 
   useEffect(() => {
     const el = promptOverlayRef.current;
@@ -216,7 +219,10 @@ export function SessionDetail() {
     if (!container) return
 
     lastHeaderScrollTopRef.current = container.scrollTop
+    lastHeaderScrollHeightRef.current = container.scrollHeight
     setIsHeaderVisible(true)
+
+    const SCROLL_DELTA_THRESHOLD = 8
 
     const handleScroll = () => {
       if (!isMobile) {
@@ -225,18 +231,29 @@ export function SessionDetail() {
       }
       const currentScrollTop = container.scrollTop
       const previousScrollTop = lastHeaderScrollTopRef.current
-      const maxScrollTop = container.scrollHeight - container.clientHeight
-      const isAtBottom = maxScrollTop - currentScrollTop < 24
-      const isScrollingDown = currentScrollTop > previousScrollTop + 4
-      const isScrollingUp = currentScrollTop < previousScrollTop - 50
-
-      if (isAtBottom || isScrollingDown) {
-        setIsHeaderVisible(true)
-      } else if (isScrollingUp) {
-        setIsHeaderVisible(false)
-      }
+      const currentScrollHeight = container.scrollHeight
+      const previousScrollHeight = lastHeaderScrollHeightRef.current
 
       lastHeaderScrollTopRef.current = currentScrollTop
+      lastHeaderScrollHeightRef.current = currentScrollHeight
+
+      if (currentScrollHeight !== previousScrollHeight) return
+
+      const delta = currentScrollTop - previousScrollTop
+      if (Math.abs(delta) < SCROLL_DELTA_THRESHOLD) return
+
+      const isAtTop = currentScrollTop < 24
+
+      if (isAtTop) {
+        setIsHeaderVisible(true)
+        return
+      }
+
+      if (delta > 0) {
+        setIsHeaderVisible(true)
+      } else {
+        setIsHeaderVisible(false)
+      }
     }
 
     container.addEventListener('scroll', handleScroll, { passive: true })
@@ -538,7 +555,7 @@ export function SessionDetail() {
             style={{ bottom: inputBottomOffset }}
           >
             <div className="relative w-[94%] md:max-w-4xl">
-              <div className="absolute -top-5 right-0 md:right-4 z-50 flex flex-col items-end gap-2">
+              <div className="absolute -top-9 right-0 z-50 flex flex-col items-end gap-2">
                 {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
                   <FloatingTTSButton
                     messageId={latestPlayableAssistant.message.info.id}
@@ -561,6 +578,18 @@ export function SessionDetail() {
                   </button>
                 )}
               </div>
+              {isMobile && showScrollButton && isContentTall && (
+                <div className="absolute -top-9 left-0 z-50 flex flex-col items-start gap-2">
+                  <button
+                    onClick={scrollToBottom}
+                    className="flex items-center justify-center px-3 py-1.5 rounded-lg bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 border border-blue-400/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-blue-400/15"
+                    aria-label="Scroll to bottom"
+                    title="Scroll to bottom"
+                  >
+                    <ArrowDown className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
               {leaderActive && (
                 <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-primary/90 text-primary-foreground border border-primary shadow-lg backdrop-blur-md animate-pulse">
                   <span className="text-sm font-medium">Waiting for shortcut key...</span>

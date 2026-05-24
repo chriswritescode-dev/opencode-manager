@@ -28,6 +28,7 @@ export function useAutoScroll({
   const userScrolledAtRef = useRef(0)
   const userDisengagedRef = useRef(false)
   const pointerStartYRef = useRef<number | null>(null)
+  const pointerActiveRef = useRef(false)
   const onScrollStateChangeRef = useRef(onScrollStateChange)
   
   onScrollStateChangeRef.current = onScrollStateChange
@@ -61,17 +62,19 @@ export function useAutoScroll({
 
     const handlePointerDown = (e: PointerEvent) => {
       pointerStartYRef.current = e.clientY
+      pointerActiveRef.current = true
     }
 
     const handlePointerMove = (e: PointerEvent) => {
       if (pointerStartYRef.current === null) return
-      if (e.clientY > pointerStartYRef.current) {
+      if (e.clientY > pointerStartYRef.current + 4) {
         markDisengaged()
       }
     }
 
     const handlePointerUp = () => {
       pointerStartYRef.current = null
+      pointerActiveRef.current = false
     }
 
     const handleWheel = (e: WheelEvent) => {
@@ -87,6 +90,7 @@ export function useAutoScroll({
     }
 
     const handleScroll = () => {
+      if (!hasInitialScrolledRef.current) return
       const { scrollTop, scrollHeight, clientHeight } = container
       const isAtBottom = scrollHeight - scrollTop - clientHeight < BOTTOM_THRESHOLD_PX
 
@@ -96,7 +100,7 @@ export function useAutoScroll({
           userDisengagedRef.current = false
           onScrollStateChangeRef.current?.(false)
         }
-      } else if (!userDisengagedRef.current) {
+      } else if (pointerActiveRef.current && !userDisengagedRef.current) {
         userScrolledAtRef.current = Date.now()
         userDisengagedRef.current = true
         onScrollStateChangeRef.current?.(true)
@@ -146,7 +150,7 @@ export function useAutoScroll({
     const timeSinceUserScroll = Date.now() - userScrolledAtRef.current
     const recentlyScrolled = timeSinceUserScroll < SCROLL_LOCK_MS
     
-    if (recentlyScrolled || userDisengagedRef.current) {
+    if (recentlyScrolled || userDisengagedRef.current || pointerActiveRef.current) {
       return
     }
 

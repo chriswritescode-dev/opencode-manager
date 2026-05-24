@@ -92,7 +92,7 @@ export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
-        className={`absolute -top-5 right-0 md:right-4 z-50 flex items-center transition-all duration-200 shadow-md backdrop-blur-md ring-1 ${buttonToneClasses} ${isLongPressVisual ? 'scale-95 opacity-80' : 'active:scale-95 hover:scale-105'} ${!hasContent && !autoPlay ? 'opacity-50 cursor-not-allowed' : ''}`}
+        className={`flex items-center transition-all duration-200 shadow-md backdrop-blur-md ring-1 ${buttonToneClasses} ${isLongPressVisual ? 'scale-95 opacity-80' : 'active:scale-95 hover:scale-105'} ${!hasContent && !autoPlay ? 'opacity-50 cursor-not-allowed' : ''}`}
         title={pillTitle}
         aria-label={pillAriaLabel}
         disabled={!hasContent && !autoPlay}

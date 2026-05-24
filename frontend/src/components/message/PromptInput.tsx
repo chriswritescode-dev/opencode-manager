@@ -1244,23 +1244,15 @@ return (
           
         </div>
 <div className="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
-            {isMobile && showScrollButton && !showVoiceFeedback ? (
+            {!isMobile && (
               <button
                 onClick={onScrollToBottom}
-                className="px-4 py-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 shadow-md flex items-center justify-center min-w-[52px] border border-zinc-700"
-                title="Scroll to bottom"
-              >
-                <ArrowDown className="w-5 h-5" />
-              </button>
-            ) : !isMobile ? (
-              <button
-                onClick={onScrollToBottom}
-                className={`p-2 rounded-lg bg-black hover:bg-zinc-900 text-white transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-zinc-700 ${showScrollButton ? 'visible' : 'invisible'}`}
+                className={`p-2 rounded-lg bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 transition-all duration-200 active:scale-95 hover:scale-105 shadow-md border border-blue-400/20 backdrop-blur-md ring-1 ring-blue-400/15 ${showScrollButton ? 'visible' : 'invisible'}`}
                 title="Scroll to bottom"
               >
                 <ArrowDown className="w-6 h-6" />
               </button>
-            ) : null}
+            )}
 {showStopButton && (
             <button
               onClick={handleStop}
@@ -1289,7 +1281,7 @@ return (
           {sttEnabled && sttSupported && (
             renderVoiceButton('desktop')
           )}
-          {isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession && (!showScrollButton || showVoiceFeedback) && (
+          {isMobile && sttEnabled && sttSupported && !hasPendingPermissionForSession && (
             renderVoiceButton('mobile')
           )}
             <button

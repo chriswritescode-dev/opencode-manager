@@ -380,5 +380,35 @@ describe('PromptInput STT Gesture Tests', () => {
         expect(mockStartRecording).toHaveBeenCalledTimes(1)
       })
     })
+
+    it('renders mobile mic even when showScrollButton is true and no voice feedback is active', async () => {
+      mocks.useMobile.mockReturnValue(true)
+
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <PromptInput {...defaultProps} showScrollButton={true} />
+        </QueryClientProvider>
+      )
+
+      const allButtons = screen.getAllByRole('button')
+      const voiceButtons = allButtons.filter((btn) => {
+        const title = (btn.getAttribute('title') || '').toLowerCase()
+        return title.includes('tap to speak') || title.includes('tap to transcribe') || title.includes('hold to speak')
+      })
+
+      expect(voiceButtons.length).toBeGreaterThan(0)
+    })
+
+    it('does NOT render mobile in-row ArrowDown button', async () => {
+      mocks.useMobile.mockReturnValue(true)
+
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <PromptInput {...defaultProps} showScrollButton={true} />
+        </QueryClientProvider>
+      )
+
+      expect(screen.queryByTitle('Scroll to bottom')).not.toBeInTheDocument()
+    })
   })
 })
