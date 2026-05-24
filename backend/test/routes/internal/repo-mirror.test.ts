@@ -156,6 +156,30 @@ describe('internal-repo-mirror routes', () => {
       expect(mockCreateRepoRow).toHaveBeenCalled()
     })
 
+    it('creates the mirror target parent before final rename', async () => {
+      const targetPath = join(getTmpRoot(), 'nested', 'test-repo')
+      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'nested/test-repo', fullPath: targetPath })
+      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+
+      const sourceDir = join(getTmpRoot(), 'source-nested')
+      mkdirSync(sourceDir, { recursive: true })
+      writeFileSync(join(sourceDir, 'payload.txt'), 'payload data')
+
+      const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
+      const tarball = result.stdout as Buffer
+
+      const res = await app.request('/api/internal/repos/0/mirror?create=1&name=test-repo', {
+        method: 'POST',
+        body: tarball,
+        headers: { 'content-type': 'application/x-tar' },
+      })
+
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { fullPath: string }
+      expect(json.fullPath).toBe(targetPath)
+      expect(existsSync(join(targetPath, 'payload.txt'))).toBe(true)
+    })
+
     it('returns 409 when repo is in use and force not set', async () => {
       const repoDir = join(getTmpRoot(), 'test-repo')
       mkdirSync(repoDir, { recursive: true })
