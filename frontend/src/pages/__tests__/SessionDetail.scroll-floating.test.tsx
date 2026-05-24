@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { useEffect } from 'react'
 import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
@@ -22,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   useAutoScroll: vi.fn(),
   useDialogParam: vi.fn(),
   useSidebarAction: vi.fn(),
-  useTallScrollContent: vi.fn(),
+  PromptInput: vi.fn(),
 }))
 
 vi.mock('@/config', () => ({
@@ -51,10 +52,6 @@ vi.mock('@/hooks/useOpenCode', () => ({
 
 vi.mock('@/hooks/useModelSelection', () => ({
   useModelSelection: vi.fn(() => ({ model: null, modelString: null })),
-}))
-
-vi.mock('@/hooks/useOpenCodeClient', () => ({
-  useOpenCodeClient: mocks.useOpenCodeClient,
 }))
 
 vi.mock('@/hooks/useTTS', () => ({
@@ -95,10 +92,6 @@ vi.mock('@/hooks/useDialogParam', () => ({
 
 vi.mock('@/hooks/useSidebarAction', () => ({
   useSidebarAction: vi.fn(() => {}),
-}))
-
-vi.mock('@/hooks/useTallScrollContent', () => ({
-  useTallScrollContent: mocks.useTallScrollContent,
 }))
 
 vi.mock('@/hooks/useAutoPlayLastResponse', () => ({
@@ -198,7 +191,7 @@ vi.mock('@/components/notifications/PendingActionsGroup', () => ({
 }))
 
 vi.mock('@/components/message/PromptInput', () => ({
-  PromptInput: vi.fn(() => <div>MockedPromptInput</div>),
+  PromptInput: mocks.PromptInput,
 }))
 
 describe('SessionDetail scroll floating button', () => {
@@ -233,6 +226,7 @@ describe('SessionDetail scroll floating button', () => {
     mocks.useKeyboardShortcuts.mockReturnValue({ leaderActive: false })
     mocks.useDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSidebarAction.mockReturnValue(undefined)
+    mocks.PromptInput.mockImplementation(() => <div>MockedPromptInput</div>)
   })
 
   const createQueryClient = () =>
@@ -240,11 +234,11 @@ describe('SessionDetail scroll floating button', () => {
 
   const renderWith = (opts: {
     mobile: boolean
-    tallContent: boolean
     showScrollButton: boolean
+    promptContent?: boolean
+    sessionActive?: boolean
   }) => {
     mocks.useMobile.mockReturnValue(opts.mobile)
-    mocks.useTallScrollContent.mockReturnValue(opts.tallContent)
     mocks.useAutoScroll.mockImplementation(
       ({ onScrollStateChange }: { onScrollStateChange?: (v: boolean) => void }) => {
         if (opts.showScrollButton) {
@@ -253,6 +247,24 @@ describe('SessionDetail scroll floating button', () => {
         return { scrollToBottom: mockScrollToBottom }
       }
     )
+
+    mocks.PromptInput.mockImplementation((props: { onPromptChange?: (hasContent: boolean) => void; showScrollButton?: boolean; onScrollToBottom: () => void }) => {
+      const { onPromptChange } = props
+      useEffect(() => {
+        onPromptChange?.(opts.promptContent ?? false)
+      }, [onPromptChange])
+
+      return (
+        <div>
+          <span>MockedPromptInput</span>
+          {props.showScrollButton && (
+            <button type="button" title="Scroll to bottom" aria-label="Scroll to bottom" onClick={props.onScrollToBottom}>
+              Latest
+            </button>
+          )}
+        </div>
+      )
+    })
 
     return render(
       <MemoryRouter initialEntries={['/repos/1/sessions/test-session']}>
@@ -265,8 +277,8 @@ describe('SessionDetail scroll floating button', () => {
     )
   }
 
-  it('renders floating ArrowDown when mobile + showScrollButton + isContentTall', async () => {
-    renderWith({ mobile: true, tallContent: true, showScrollButton: true })
+  it('passes scroll button state to PromptInput when showScrollButton is true', async () => {
+    renderWith({ mobile: true, showScrollButton: true })
 
     await waitFor(() => {
       expect(screen.getByTitle('Scroll to bottom')).toBeInTheDocument()
@@ -274,29 +286,38 @@ describe('SessionDetail scroll floating button', () => {
     expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
   })
 
-  it('does NOT render floating ArrowDown when mobile + showScrollButton but not tall content', async () => {
-    renderWith({ mobile: true, tallContent: false, showScrollButton: true })
+  it('still passes scroll button state when content height is below tall threshold', async () => {
+    renderWith({ mobile: true, showScrollButton: true })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
+    })
+  })
+
+  it('does NOT pass scroll button state when mobile + tall content but no showScrollButton', async () => {
+    renderWith({ mobile: true, showScrollButton: false })
 
     await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
     expect(screen.queryByLabelText('Scroll to bottom')).not.toBeInTheDocument()
   })
 
-  it('does NOT render floating ArrowDown when mobile + tall content but no showScrollButton', async () => {
-    renderWith({ mobile: true, tallContent: true, showScrollButton: false })
+  it('passes scroll button state on desktop for PromptInput desktop handling', async () => {
+    renderWith({ mobile: false, showScrollButton: true })
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()
+    })
+  })
+
+  it('does NOT pass scroll button state when prompt has content', async () => {
+    renderWith({ mobile: true, showScrollButton: true, promptContent: true })
 
     await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
     expect(screen.queryByLabelText('Scroll to bottom')).not.toBeInTheDocument()
   })
 
-  it('does NOT render floating ArrowDown on desktop even with showScrollButton and tall content', async () => {
-    renderWith({ mobile: false, tallContent: true, showScrollButton: true })
-
-    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
-    expect(screen.queryByLabelText('Scroll to bottom')).not.toBeInTheDocument()
-  })
-
-  it('clicking floating ArrowDown calls scrollToBottom from useAutoScroll', async () => {
-    renderWith({ mobile: true, tallContent: true, showScrollButton: true })
+  it('clicking PromptInput scroll button calls scrollToBottom from useAutoScroll', async () => {
+    renderWith({ mobile: true, showScrollButton: true })
 
     await waitFor(() => {
       expect(screen.getByLabelText('Scroll to bottom')).toBeInTheDocument()

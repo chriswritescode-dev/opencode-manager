@@ -67,7 +67,7 @@ interface PromptInputProps {
   showScrollButton?: boolean
   isSessionActive?: boolean
   isStreamingResponse?: boolean
-  onScrollToBottom?: () => void
+  onScrollToBottom: () => void
   onShowSessionsDialog?: () => void
   onShowModelsDialog?: () => void
   onShowHelpDialog?: () => void
@@ -1034,6 +1034,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const { hasVariants, currentVariant, cycleVariant } = useVariants(opcodeUrl, directory)
   const showStopButton = isSessionActive
   const hideSecondaryButtons = isMobile && isSessionActive
+  const showMobileScrollButton = isMobile && showScrollButton
   const voiceFeedbackState: VoiceStatusOverlayState | null = isTogglingRecording
     ? 'starting'
     : isProcessing
@@ -1211,20 +1212,33 @@ return (
 
       <div className="flex gap-1.5 md:gap-2 items-center justify-between">
         <div className="flex gap-1.5 md:gap-2 items-center min-w-0">
-          <AgentQuickSelect
-            opcodeUrl={opcodeUrl}
-            directory={directory}
-            currentAgent={currentMode}
-            onAgentChange={handleAgentChange}
-            isBashMode={isBashMode}
-            disabled={disabled}
-          />
+          {showMobileScrollButton ? (
+            <button
+              type="button"
+              onClick={onScrollToBottom}
+              className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg text-xs font-medium border bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 border-blue-400/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 ring-1 ring-blue-400/15"
+              title="Scroll to bottom"
+              aria-label="Scroll to bottom"
+            >
+              <ArrowDown className="w-4 h-4" />
+              <span>Latest</span>
+            </button>
+          ) : (
+            <AgentQuickSelect
+              opcodeUrl={opcodeUrl}
+              directory={directory}
+              currentAgent={currentMode}
+              onAgentChange={handleAgentChange}
+              isBashMode={isBashMode}
+              disabled={disabled}
+            />
+          )}
           {isSessionActive ? (
               <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
                 <SessionStatusIndicator sessionID={sessionID} showLabel />
               </div>
             ) : (
-               !hideSecondaryButtons && (
+               !hideSecondaryButtons && !showMobileScrollButton && (
                  <ModelQuickSelect
                    opcodeUrl={opcodeUrl}
                    directory={directory}

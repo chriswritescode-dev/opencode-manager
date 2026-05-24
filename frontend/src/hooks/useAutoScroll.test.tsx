@@ -50,6 +50,7 @@ describe('useAutoScroll', () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0))
   })
 
   afterEach(() => {
@@ -58,6 +59,7 @@ describe('useAutoScroll', () => {
       containerHarness = null
     }
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     vi.clearAllTimers()
   })
 
@@ -165,11 +167,100 @@ describe('useAutoScroll', () => {
     expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
   })
 
+  it('scrolls to bottom again after layout frames', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness } = setupHook(messages)
+
+    act(() => {
+      renderResult.result.current.scrollToBottom()
+    })
+
+    containerHarness.setScrollHeight(containerHarness.div.scrollHeight + 300)
+
+    act(() => {
+      vi.runOnlyPendingTimers()
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
+  })
+
+  it('does not keep forcing bottom after user scrolls up', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages)
+
+    act(() => {
+      renderResult.result.current.scrollToBottom()
+    })
+
+    const userPosition = 100
+    act(() => {
+      containerHarness.setScrollTop(userPosition)
+      containerHarness.div.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -50,
+          bubbles: true,
+        })
+      )
+      vi.runOnlyPendingTimers()
+    })
+
+    expect(onScrollStateChange).toHaveBeenCalledWith(true)
+    expect(containerHarness.getScrollTop()).toBe(userPosition)
+  })
+
+  it('cancels pending bottom scroll as soon as user touches the list', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness } = setupHook(messages)
+
+    act(() => {
+      renderResult.result.current.scrollToBottom()
+    })
+
+    const userPosition = 120
+    act(() => {
+      containerHarness.div.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          clientY: 200,
+          bubbles: true,
+        })
+      )
+      containerHarness.setScrollTop(userPosition)
+      vi.runOnlyPendingTimers()
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(userPosition)
+  })
+
+  it('does not show scroll button on tiny upward drag from bottom', () => {
+    const messages = [createMessage('1', 'user')]
+    const { containerHarness, onScrollStateChange } = setupHook(messages)
+    const bottomPosition = containerHarness.div.scrollHeight - containerHarness.div.clientHeight
+
+    act(() => {
+      containerHarness.setScrollTop(bottomPosition - 20)
+      containerHarness.div.dispatchEvent(
+        new PointerEvent('pointerdown', {
+          clientY: 200,
+          bubbles: true,
+        })
+      )
+      containerHarness.div.dispatchEvent(
+        new PointerEvent('pointermove', {
+          clientY: 260,
+          bubbles: true,
+        })
+      )
+    })
+
+    expect(onScrollStateChange).not.toHaveBeenCalledWith(true)
+  })
+
   it('disengages when user fires a wheel-up event', () => {
     const messages = [createMessage('1', 'user')]
     const { containerHarness, onScrollStateChange } = setupHook(messages)
 
     act(() => {
+      containerHarness.setScrollTop(100)
       containerHarness.div.dispatchEvent(
         new WheelEvent('wheel', {
           deltaY: -50,
@@ -192,6 +283,7 @@ describe('useAutoScroll', () => {
     const { containerHarness, onScrollStateChange } = setupHook(messages)
 
     act(() => {
+      containerHarness.setScrollTop(100)
       containerHarness.div.dispatchEvent(
         new PointerEvent('pointerdown', {
           clientY: 200,
@@ -220,6 +312,7 @@ describe('useAutoScroll', () => {
     const { containerHarness, onScrollStateChange } = setupHook(messages)
 
     act(() => {
+      containerHarness.setScrollTop(100)
       containerHarness.div.dispatchEvent(
         new WheelEvent('wheel', {
           deltaY: -50,
@@ -246,6 +339,7 @@ describe('useAutoScroll', () => {
     const { renderResult, containerHarness, onScrollStateChange } = setupHook(messages)
 
     act(() => {
+      containerHarness.setScrollTop(100)
       containerHarness.div.dispatchEvent(
         new WheelEvent('wheel', {
           deltaY: -50,

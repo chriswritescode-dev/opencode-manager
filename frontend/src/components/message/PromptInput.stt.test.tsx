@@ -77,10 +77,6 @@ vi.mock('@/stores/sessionAgentStore', () => ({
   useSessionAgentStore: mocks.useSessionAgentStore,
 }))
 
-vi.mock('@/hooks/useAgents', () => ({
-  useAgents: mocks.useAgents,
-}))
-
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => ({
     hasForSession: vi.fn().mockReturnValue(false),
@@ -399,7 +395,7 @@ describe('PromptInput STT Gesture Tests', () => {
       expect(voiceButtons.length).toBeGreaterThan(0)
     })
 
-    it('does NOT render mobile in-row ArrowDown button', async () => {
+    it('renders mobile in-row Latest button when showScrollButton is true', async () => {
       mocks.useMobile.mockReturnValue(true)
 
       render(
@@ -408,7 +404,8 @@ describe('PromptInput STT Gesture Tests', () => {
         </QueryClientProvider>
       )
 
-      expect(screen.queryByTitle('Scroll to bottom')).not.toBeInTheDocument()
+      expect(screen.getByTitle('Scroll to bottom')).toBeInTheDocument()
+      expect(screen.getByText('Latest')).toBeInTheDocument()
     })
   })
 })
