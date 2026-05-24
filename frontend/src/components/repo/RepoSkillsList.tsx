@@ -1,5 +1,4 @@
 import { AlertCircle, Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import type { SkillFileInfo } from '@opencode-manager/shared'
 
 interface RepoSkillsListProps {
@@ -61,7 +60,8 @@ export function RepoSkillsList({
         {data.map((skill) => (
           <div
             key={skill.name}
-            className={`p-2 rounded-lg border border-border bg-card flex items-center justify-between gap-2 ${onLoad ? 'cursor-pointer hover:bg-accent transition-colors' : ''}`}
+            onClick={onLoad ? () => onLoad(skill) : undefined}
+            className={`p-2 rounded-lg border border-border bg-card flex items-center gap-2 ${onLoad ? 'cursor-pointer hover:bg-accent transition-colors' : ''}`}
           >
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate text-orange-600 dark:text-orange-400">
@@ -73,11 +73,6 @@ export function RepoSkillsList({
                 </p>
               )}
             </div>
-            {onLoad && (
-              <Button size="sm" onClick={() => onLoad(skill)}>
-                Load
-              </Button>
-            )}
           </div>
         ))}
       </div>

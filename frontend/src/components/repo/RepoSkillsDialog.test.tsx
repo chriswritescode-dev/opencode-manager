@@ -149,7 +149,7 @@ describe('RepoSkillsDialog', () => {
   })
 
   describe('load functionality', () => {
-    it('shows Load button when sessionId and opcodeUrl are provided', async () => {
+    it('makes skill cards clickable when sessionId and opcodeUrl are provided', async () => {
       mocks.listManagedSkills.mockResolvedValue(mockSkills)
       mocks.sendCommand.mockResolvedValue(undefined)
 
@@ -173,10 +173,11 @@ describe('RepoSkillsDialog', () => {
         expect(screen.getByText('Test skill')).toBeInTheDocument()
       })
 
-      expect(screen.getByText('Load')).toBeInTheDocument()
+      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')
+      expect(card).toBeTruthy()
     })
 
-    it('does not show Load button when sessionId is not provided', async () => {
+    it('does not make skill cards clickable when sessionId is not provided', async () => {
       mocks.listManagedSkills.mockResolvedValue(mockSkills)
 
       render(
@@ -192,10 +193,11 @@ describe('RepoSkillsDialog', () => {
         expect(screen.getByText('Test skill')).toBeInTheDocument()
       })
 
-      expect(screen.queryByText('Load')).not.toBeInTheDocument()
+      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')
+      expect(card).toBeNull()
     })
 
-    it('calls sendCommand and closes dialog on Load click', async () => {
+    it('calls sendCommand and closes dialog on card click', async () => {
       mocks.listManagedSkills.mockResolvedValue(mockSkills)
       mocks.sendCommand.mockReturnValue(new Promise(() => {}))
 
@@ -220,8 +222,8 @@ describe('RepoSkillsDialog', () => {
         expect(screen.getByText('Test skill')).toBeInTheDocument()
       })
 
-      const loadButton = screen.getByText('Load')
-      await user.click(loadButton)
+      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')!
+      await user.click(card)
 
       expect(onOpenChange).toHaveBeenCalledWith(false)
       expect(onSkillLoaded).toHaveBeenCalledWith(mockSkills[0])
@@ -255,8 +257,8 @@ describe('RepoSkillsDialog', () => {
         expect(screen.getByText('Test skill')).toBeInTheDocument()
       })
 
-      const loadButton = screen.getByText('Load')
-      await user.click(loadButton)
+      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')!
+      await user.click(card)
 
       await waitFor(() => {
         expect(showToast.error).toHaveBeenCalledWith('Failed to load')
