@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { cn, getRepoDisplayName } from '@/lib/utils'
 import { listRepos } from '@/api/repos'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
-import { FolderGit2, Check, Plus } from 'lucide-react'
+import { FolderGit2, Check, Plus, House } from 'lucide-react'
 import { isAssistantPath, getAssistantPath } from '@/lib/navigation'
 
 interface RepoQuickSwitchSheetProps {
@@ -75,6 +75,10 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     navigateAndClose(`/repos/${id}`, { replace: true })
   }
 
+  const handleHomeClick = () => {
+    navigateAndClose('/')
+  }
+
   return (
     <>
       <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
@@ -92,6 +96,15 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
             />
             <Button
               type="button"
+              size="icon-sm"
+              variant="outline"
+              onClick={handleHomeClick}
+            >
+              <House className="h-4 w-4" />
+              <span className="sr-only">Home</span>
+            </Button>
+            <Button
+              type="button"
               size="sm"
               onClick={() => {
                 onClose()
@@ -99,7 +112,8 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
               }}
               className="flex-shrink-0"
             >
-              <Plus className="h-4 w-4" /> Repo
+              <Plus className="h-4 w-4" />
+              <span className="hidden sm:inline">Repo</span>
               <span className="sr-only">Add repository</span>
             </Button>
           </div>
