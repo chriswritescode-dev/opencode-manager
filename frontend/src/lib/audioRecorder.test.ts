@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { AudioRecorder, downsampleAndConvert, encodeWavFromInt16 } from './audioRecorder'
 
+const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as ArrayBuffer)
+    reader.onerror = () => reject(reader.error)
+    reader.readAsArrayBuffer(blob)
+  })
+
 describe('downsampleAndConvert', () => {
   it('should produce correct output length for 48kHz to 16kHz', () => {
     const inputLength = 4800
@@ -61,7 +69,7 @@ describe('encodeWavFromInt16', () => {
   it('should have RIFF header at offset 0', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     const view = new DataView(arrayBuffer)
     
     const riff = String.fromCharCode(
@@ -76,7 +84,7 @@ describe('encodeWavFromInt16', () => {
   it('should have WAVE identifier at offset 8', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     const view = new DataView(arrayBuffer)
     
     const wave = String.fromCharCode(
@@ -91,7 +99,7 @@ describe('encodeWavFromInt16', () => {
   it('should have sample rate at offset 24', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     const view = new DataView(arrayBuffer)
     
     const sampleRate = view.getUint32(24, true)
@@ -101,7 +109,7 @@ describe('encodeWavFromInt16', () => {
   it('should have data identifier at offset 36', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     const view = new DataView(arrayBuffer)
     
     const data = String.fromCharCode(
@@ -116,7 +124,7 @@ describe('encodeWavFromInt16', () => {
   it('should have correct file size for 1000 samples', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     
     expect(arrayBuffer.byteLength).toBe(44 + 1000 * 2)
   })
@@ -124,7 +132,7 @@ describe('encodeWavFromInt16', () => {
   it('should handle different sample rates', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 44100, 1)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     const view = new DataView(arrayBuffer)
     
     const sampleRate = view.getUint32(24, true)
@@ -134,7 +142,7 @@ describe('encodeWavFromInt16', () => {
   it('should handle stereo channels', async () => {
     const samples = new Int16Array(1000)
     const blob = encodeWavFromInt16(samples, 16000, 2)
-    const arrayBuffer = await blob.arrayBuffer()
+    const arrayBuffer = await blobToArrayBuffer(blob)
     const view = new DataView(arrayBuffer)
     
     const channels = view.getUint16(22, true)
