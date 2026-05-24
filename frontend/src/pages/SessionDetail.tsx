@@ -26,7 +26,6 @@ import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
-import { useHeaderScrollVisibility } from "@/hooks/useHeaderScrollVisibility";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
 import { useTTS } from "@/hooks/useTTS";
 import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from "@/hooks/useAutoPlayLastResponse";
@@ -157,11 +156,6 @@ export function SessionDetail() {
     sessionId,
     contentVersion: messages?.reduce((sum, m) => sum + m.parts.length, 0) ?? 0,
     onScrollStateChange: setShowScrollButton
-  });
-  const { isHeaderVisible } = useHeaderScrollVisibility({
-    containerRef: messageContainerRef,
-    enabled: isMobile,
-    resetKey: `${repoDirectory ?? ''}:${sessionId ?? ''}`,
   });
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
@@ -433,11 +427,7 @@ export function SessionDetail() {
     >
       <div
         data-testid="session-header-region"
-        className={`flex-shrink-0 overflow-hidden bg-background transition-all duration-200 ease-out ${
-          isHeaderVisible
-            ? 'max-h-72 sm:max-h-80 opacity-100 translate-y-0'
-            : 'max-h-0 opacity-0 -translate-y-2'
-        }`}
+        className="flex-shrink-0 overflow-hidden bg-background max-h-72 sm:max-h-80"
       >
         <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
