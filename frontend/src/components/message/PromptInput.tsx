@@ -992,7 +992,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     staleTime: 30000,
   })
 
-  const { model, modelString, setModel: setStoredModel, setActiveModel } = useModelSelection(opcodeUrl, directory)
+  const { model, modelString, setModel: setStoredModel, restoreSessionModel } = useModelSelection(opcodeUrl, directory)
   const setStoreVariant = useModelStore((state) => state.setVariant)
   const clearStoreVariant = useModelStore((state) => state.clearVariant)
 
@@ -1003,8 +1003,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     if (syncedSessionModelRef.current === sessionModelSyncKey) return
     if (!sessionAgent.model) return
 
-    const restored = setActiveModel(sessionAgent.model)
-    if (!restored) return
+    restoreSessionModel(sessionAgent.model)
 
     syncedSessionModelRef.current = sessionModelSyncKey
 
@@ -1013,7 +1012,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     } else {
       clearStoreVariant(sessionAgent.model)
     }
-  }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, setActiveModel, setStoreVariant])
+  }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, restoreSessionModel, setStoreVariant])
 
   const currentModel = modelString || ''
   const displayModelName = useMemo(() => {

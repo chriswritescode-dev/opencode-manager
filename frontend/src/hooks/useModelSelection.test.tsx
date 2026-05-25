@@ -228,4 +228,15 @@ describe('useModelSelection', () => {
       expect(mockAddOpenCodeRecentModel.mock.calls[0][0]).toEqual(testModel)
     })
   })
+
+  it('restoreSessionModel sets model without requiring providers', async () => {
+    mockGetProviders.mockImplementation(() => new Promise(() => {}))
+
+    const { result } = renderHookWithProviders()
+
+    const sessionModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
+    result.current.restoreSessionModel(sessionModel)
+
+    expect(useModelStore.getState().model).toEqual(sessionModel)
+  })
 })

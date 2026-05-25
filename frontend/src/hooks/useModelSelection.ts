@@ -12,6 +12,7 @@ interface UseModelSelectionResult {
   favoriteModels: ModelSelection[]
   setModel: (model: ModelSelection) => void
   setActiveModel: (model: ModelSelection) => boolean
+  restoreSessionModel: (model: ModelSelection) => void
   toggleFavorite: (model: ModelSelection) => void
   isModelStateLoading: boolean
 }
@@ -113,6 +114,10 @@ export function useModelSelection(
     return true
   }
 
+  const restoreSessionModel = (sessionModel: ModelSelection): void => {
+    setStoreActiveModel(sessionModel)
+  }
+
   const toggleFavorite = (nextModel: ModelSelection) => {
     toggleStoreFavorite(nextModel)
     updateFavoriteModel.mutate(nextModel)
@@ -125,6 +130,7 @@ export function useModelSelection(
     favoriteModels,
     setModel,
     setActiveModel,
+    restoreSessionModel,
     toggleFavorite,
     isModelStateLoading,
   }

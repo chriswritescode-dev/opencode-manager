@@ -83,10 +83,15 @@ function useSwipeHandlers(
   const [swipeProgress, setSwipeProgress] = useState(0)
   const [swipeDeltaPx, setSwipeDeltaPx] = useState(0)
   const [dismissing, setDismissing] = useState(false)
+  const dismissingRef = useRef(false)
+  dismissingRef.current = dismissing
 
   useEffect(() => {
-    if (!enabled) {
+    if (enabled) {
       setDismissing(false)
+      setSwipeDeltaPx(0)
+      setSwipeProgress(0)
+    } else if (!dismissingRef.current) {
       setSwipeDeltaPx(0)
       setSwipeProgress(0)
     }
