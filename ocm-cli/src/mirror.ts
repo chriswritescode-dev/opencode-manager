@@ -8,7 +8,7 @@ import { getRepoRoot, getOriginUrl, getDirtyPaths, urlsEqual } from './local-rep
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
 
-const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo']
+const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo', '.DS_Store', '._*']
 const PART_RETRIES = 3
 const PART_BACKOFF_MS = [500, 2000, 8000]
 
@@ -160,7 +160,10 @@ export async function mirrorUp(
 
   tarArgs.push('.')
 
-  const child = spawn('tar', tarArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
+  const child = spawn('tar', tarArgs, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, COPYFILE_DISABLE: '1' },
+  })
 
   const stderrChunks: Buffer[] = []
   child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
