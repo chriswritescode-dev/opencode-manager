@@ -503,7 +503,7 @@ export function ModelQuickSelect({
                           <>
                             <p className="px-1 pb-1 text-xs font-medium text-white/45">Connected</p>
                             {connectedProviderItems.map(renderProviderOption)}
-                            {availableProviderItems.length > 0 && <div className="mx-1 my-2 h-px bg-white/10" />}
+                            {availableProviderItems.length > 0 && <div className="-mx-4 my-2 h-px bg-white/10" />}
                           </>
                         )}
                         {availableProviderItems.length > 0 && (
@@ -525,8 +525,8 @@ export function ModelQuickSelect({
             </div>
           </div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-safe pt-0">
-            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pb-3">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden pb-safe pt-0">
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 pb-3">
               {quickSections.map(section => (
                 <section key={section.title}>
                   <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-white/45">
@@ -539,11 +539,11 @@ export function ModelQuickSelect({
                 </section>
               ))}
             </div>
-            <div className="flex-shrink-0 border-t border-white/10 bg-zinc-950 px-4 py-3">
+            <div className="flex-shrink-0 border-t border-white/10">
               <button
                 type="button"
                 onClick={() => setShowAllModels(true)}
-                className="flex w-full items-center justify-between rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-left text-sm font-medium text-white transition-colors hover:border-white/20 hover:bg-white/10"
+                className="flex w-full items-center justify-between bg-card px-6 py-4 text-left text-sm font-semibold text-white transition-colors hover:bg-accent active:bg-card"
               >
                 <span>More models</span>
                 <ChevronRight className="h-5 w-5 text-white/50" />
