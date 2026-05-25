@@ -4,7 +4,7 @@ import { spawn } from 'child_process'
 import { pipeline } from 'stream/promises'
 import { Readable } from 'stream'
 import { mkdtempSync, mkdirSync, readdirSync, statSync, existsSync, writeFileSync } from 'fs'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import * as fsp from 'fs/promises'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { getRepoById, updateLastPulled, updateRepoBranch, deleteRepo } from '../../db/queries'
@@ -60,7 +60,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     }
 
     let staging: string | undefined
-    let oldDirMoved = false
+    let backupDir: string | undefined
     try {
       const stagingParent = join(getReposPath(), '.ocm-staging')
       mkdirSync(stagingParent, { recursive: true })
@@ -100,17 +100,19 @@ export function createInternalRepoMirrorRoutes(db: Database) {
         } catch { /* ignore stat errors */ }
       }
 
+      await fsp.mkdir(dirname(fullPath), { recursive: true })
+
       if (existsSync(fullPath)) {
-        try {
-          await fsp.rename(fullPath, fullPath + '.ocm-old')
-          oldDirMoved = true
-        } catch { /* ignore rename errors */ }
+        backupDir = `${fullPath}.ocm-old-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        await fsp.rename(fullPath, backupDir)
       }
 
       await fsp.rename(extractedRoot, fullPath)
 
-      const oldDir = fullPath + '.ocm-old'
-      await fsp.rm(oldDir, { recursive: true, force: true }).catch(() => {})
+      if (backupDir) {
+        await fsp.rm(backupDir, { recursive: true, force: true }).catch(() => {})
+        backupDir = undefined
+      }
 
       const branchName = await safeGitOut(fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
       const head = await safeGitOut(fullPath, ['rev-parse', 'HEAD'])
@@ -132,11 +134,14 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     } catch (error) {
       logger.error('mirror POST failed:', error)
 
-      if (oldDirMoved) {
+      if (backupDir) {
         try {
-          await fsp.rename(fullPath + '.ocm-old', fullPath)
+          if (existsSync(fullPath)) {
+            await fsp.rm(fullPath, { recursive: true, force: true })
+          }
+          await fsp.rename(backupDir, fullPath)
         } catch {
-          logger.error('failed to restore old repo from .ocm-old')
+          logger.error('failed to restore old repo from backup')
         }
       }
 

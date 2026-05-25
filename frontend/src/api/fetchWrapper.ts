@@ -102,14 +102,6 @@ async function fetchWrapper<T = unknown>(
   }
 }
 
-async function fetchWrapperText(
-  url: string,
-  options: FetchWrapperOptions = {}
-): Promise<string> {
-  const response = await fetchWithTimeout(url, options)
-  return response.text()
-}
-
 async function fetchWrapperVoid(
   url: string,
   options: FetchWrapperOptions = {}
@@ -125,4 +117,4 @@ async function fetchWrapperBlob(
   return response.blob()
 }
 
-export { fetchWrapper, fetchWrapperText, fetchWrapperVoid, fetchWrapperBlob }
+export { fetchWrapper, fetchWrapperVoid, fetchWrapperBlob }

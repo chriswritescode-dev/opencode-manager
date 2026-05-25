@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -78,7 +78,7 @@ function jsonObjectField(label: string) {
     if (!value.trim()) return
     if (!parseJsonObject(value)) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         message: `${label} must be a valid JSON object`,
       })
     }
@@ -114,19 +114,19 @@ const modelFormSchema = z.object({
 }).superRefine((data, ctx) => {
   if (data.createNewProvider) {
     if (!data.newProviderId?.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provider ID is required when creating a new provider', path: ['newProviderId'] })
+      ctx.addIssue({ code: 'custom', message: 'Provider ID is required when creating a new provider', path: ['newProviderId'] })
     } else if (!/^[a-z0-9-]+$/.test(data.newProviderId)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Must be lowercase letters, numbers, and hyphens only', path: ['newProviderId'] })
+      ctx.addIssue({ code: 'custom', message: 'Must be lowercase letters, numbers, and hyphens only', path: ['newProviderId'] })
     }
     if (data.newProviderType === 'api' && !data.newProviderBaseUrl?.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Base URL is required for API providers', path: ['newProviderBaseUrl'] })
+      ctx.addIssue({ code: 'custom', message: 'Base URL is required for API providers', path: ['newProviderBaseUrl'] })
     }
     if (data.newProviderType === 'npm' && !data.newProviderNpm?.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'NPM package is required for npm providers', path: ['newProviderNpm'] })
+      ctx.addIssue({ code: 'custom', message: 'NPM package is required for npm providers', path: ['newProviderNpm'] })
     }
   } else {
     if (!data.providerId?.trim()) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Provider is required', path: ['providerId'] })
+      ctx.addIssue({ code: 'custom', message: 'Provider is required', path: ['providerId'] })
     }
   }
 
@@ -137,7 +137,7 @@ const modelFormSchema = z.object({
   ] as const) {
     const value = data[field]
     if (value.trim() && parseOptionalNumber(value) === undefined) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${label} must be a number`, path: [field] })
+      ctx.addIssue({ code: 'custom', message: `${label} must be a number`, path: [field] })
     }
   }
 })
@@ -248,13 +248,23 @@ export function OpenCodeModelDialog({
   const { isValid } = form.formState
   const createNewProvider = form.watch('createNewProvider')
   const newProviderType = form.watch('newProviderType')
+  const resetKeyRef = useRef<string | null>(null)
+  const resetKey = editingModel
+    ? `edit-${editingModel.providerId}-${editingModel.modelId}`
+    : `create-${selectedProviderId || availableProviders[0] || ''}`
 
   useEffect(() => {
-    if (open) {
+    if (!open) {
+      resetKeyRef.current = null
+      return
+    }
+
+    if (resetKeyRef.current !== resetKey) {
+      resetKeyRef.current = resetKey
       form.reset(getDefaultValues())
       void form.trigger()
     }
-  }, [open, form, getDefaultValues])
+  }, [open, resetKey, form, getDefaultValues])
 
   const handleSubmit = (values: ModelFormValues) => {
     const extra = parseOptionalJsonField(values.extraJson)

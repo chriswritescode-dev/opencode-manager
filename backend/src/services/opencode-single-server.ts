@@ -1,4 +1,4 @@
-import { spawn, execSync } from 'child_process'
+import { spawn, execSync, spawnSync } from 'child_process'
 import path from 'path'
 import { promises as fs } from 'fs'
 import { logger } from '../utils/logger'
@@ -24,16 +24,19 @@ import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import { writeFileContent } from './file-operations'
 
-const OPENCODE_SERVER_HOST = ENV.OPENCODE.HOST
-export const OPENCODE_SERVER_CONNECT_HOST = OPENCODE_SERVER_HOST === '0.0.0.0' ? '127.0.0.1' : OPENCODE_SERVER_HOST
+
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 const HEALTH_CHECK_TIMEOUT_MS = 3000
+const DEPRECATED_PLUGIN_PACKAGES = ['opencode-openai-codex-auth', 'opencode-copilot-auth']
 
 type StartupValidationIssue = {
   path: string
   message: string
 }
+
+type OpenCodePluginOptions = Record<string, unknown>
+type OpenCodePluginSpec = string | [string, OpenCodePluginOptions]
 
 export class ConfigReloadError extends Error {
   validationIssues: StartupValidationIssue[]
@@ -302,7 +305,9 @@ class OpenCodeServerManager {
     logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
     await this.initializeOpencodeBinDirectory()
-    const configuredPluginCount = await this.getConfiguredPluginCount(openCodeConfigPath)
+    const configuredPlugins = await this.getConfiguredPlugins(openCodeConfigPath)
+    await this.installConfiguredPlugins(configuredPlugins)
+    const configuredPluginCount = configuredPlugins.length
 
     let stderrOutput = ''
 
@@ -482,13 +487,99 @@ class OpenCodeServerManager {
     }
   }
 
-  private async getConfiguredPluginCount(configPath: string): Promise<number> {
+  private isPathPluginSpec(spec: string): boolean {
+    return spec.startsWith('file://') || spec.startsWith('.') || path.isAbsolute(spec)
+  }
+
+  private getPluginInstallSpec(spec: string): string {
+    if (spec.startsWith('@')) {
+      const slashIndex = spec.indexOf('/')
+      return slashIndex !== -1 && spec.indexOf('@', slashIndex + 1) === -1 ? `${spec}@latest` : spec
+    }
+    return spec.includes('@') ? spec : `${spec}@latest`
+  }
+
+  private getPluginPackageName(spec: string): string {
+    if (spec.startsWith('@')) {
+      const slashIndex = spec.indexOf('/')
+      if (slashIndex === -1) return spec
+      const versionIndex = spec.indexOf('@', slashIndex + 1)
+      return versionIndex === -1 ? spec : spec.slice(0, versionIndex)
+    }
+    const versionIndex = spec.indexOf('@')
+    return versionIndex === -1 ? spec : spec.slice(0, versionIndex)
+  }
+
+  private sanitizeNpmCacheSegment(spec: string): string {
+    if (process.platform !== 'win32') return spec
+    return Array.from(spec, (char) => /[<>:"|?*]/.test(char) || char.charCodeAt(0) < 32 ? '_' : char).join('')
+  }
+
+  private getPluginSpecifier(plugin: OpenCodePluginSpec): string {
+    return Array.isArray(plugin) ? plugin[0] : plugin
+  }
+
+  private isOpenCodePluginSpec(plugin: unknown): plugin is OpenCodePluginSpec {
+    if (typeof plugin === 'string') return plugin.trim().length > 0
+    if (!Array.isArray(plugin) || plugin.length !== 2 || typeof plugin[0] !== 'string' || plugin[0].trim().length === 0) return false
+    const options = plugin[1]
+    return options !== null && typeof options === 'object' && !Array.isArray(options)
+  }
+
+  private async getConfiguredPlugins(configPath: string): Promise<OpenCodePluginSpec[]> {
     try {
       const content = await fs.readFile(configPath, 'utf-8')
       const config = parseJsonc(content) as { plugin?: unknown }
-      return Array.isArray(config.plugin) ? config.plugin.length : 0
+      if (!Array.isArray(config.plugin)) return []
+      return config.plugin
+        .filter((plugin): plugin is OpenCodePluginSpec => this.isOpenCodePluginSpec(plugin))
     } catch {
-      return 0
+      return []
+    }
+  }
+
+  private async installConfiguredPlugins(plugins: OpenCodePluginSpec[]): Promise<void> {
+    const npmPlugins = plugins
+      .map((plugin) => this.getPluginSpecifier(plugin))
+      .filter((plugin) => !this.isPathPluginSpec(plugin) && !DEPRECATED_PLUGIN_PACKAGES.some((pkg) => plugin.includes(pkg)))
+    if (npmPlugins.length === 0) return
+
+    const cacheHome = process.env.XDG_CACHE_HOME || path.join(process.env.HOME || '/home/node', '.cache')
+    logger.info(`Pre-installing ${npmPlugins.length} configured OpenCode plugin(s)`)
+
+    for (const plugin of npmPlugins) {
+      const installSpec = this.getPluginInstallSpec(plugin)
+      const packageName = this.getPluginPackageName(plugin)
+      const installDir = path.join(cacheHome, 'opencode', 'packages', this.sanitizeNpmCacheSegment(installSpec))
+      const packageJsonPath = path.join(installDir, 'node_modules', packageName, 'package.json')
+
+      try {
+        await fs.access(packageJsonPath)
+        logger.info(`OpenCode plugin already installed: ${plugin}`)
+        continue
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as NodeJS.ErrnoException).code : ''
+        if (errorCode !== 'ENOENT') {
+          logger.warn(`Could not check OpenCode plugin install state for ${plugin}:`, error)
+        }
+      }
+
+      await fs.mkdir(installDir, { recursive: true })
+      if (!await fs.access(path.join(installDir, 'package.json')).then(() => true).catch(() => false)) {
+        const init = spawnSync('bun', ['init', '-y'], { cwd: installDir, encoding: 'utf8' })
+        if (init.status !== 0) {
+          logger.warn(`Failed to initialize OpenCode plugin cache for ${plugin}: ${init.stderr || init.stdout}`)
+          continue
+        }
+      }
+
+      const result = spawnSync('bun', ['add', '--ignore-scripts', installSpec], { cwd: installDir, encoding: 'utf8' })
+      if (result.status === 0) {
+        logger.info(`Installed OpenCode plugin: ${plugin}`)
+        continue
+      }
+
+      logger.warn(`Failed to install OpenCode plugin ${plugin}: ${result.stderr || result.stdout}`)
     }
   }
 

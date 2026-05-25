@@ -5,8 +5,7 @@ import { getRepo, initializeAssistantMode } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
-import { X, CornerUpLeft, ArrowDown } from "lucide-react";
-import { ModelSelectDialog } from "@/components/model/ModelSelectDialog";
+import { X, CornerUpLeft } from "lucide-react";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
 import { getSessionListPath } from '@/lib/navigation'
@@ -27,7 +26,6 @@ import { useSettingsDialog } from "@/hooks/useSettingsDialog";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useMobile } from "@/hooks/useMobile";
 import { useVisualViewport } from "@/hooks/useVisualViewport";
-import { useTallScrollContent } from "@/hooks/useTallScrollContent";
 import { useTTS } from "@/hooks/useTTS";
 import { getAssistantText, getLatestPlayableAssistantMessage, useAutoPlayLastResponse } from "@/hooks/useAutoPlayLastResponse";
 import { useEffect, useRef, useCallback, useMemo } from "react";
@@ -62,7 +60,7 @@ const compareMessageIds = (id1: string, id2: string): number => {
 }
 
 const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
-
+const PROMPT_OVERLAY_CLEARANCE_PX = 16
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
@@ -73,7 +71,6 @@ export function SessionDetail() {
   const { open: openSettings } = useSettingsDialog();
   const messageContainerRef = useRef<HTMLDivElement>(null);
   const promptInputRef = useRef<PromptInputHandle>(null);
-  const [modelDialogOpen, setModelDialogOpen] = useState(false);
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
   const [lspDialogOpen, setLspDialogOpen] = useDialogParam('lsp');
@@ -85,16 +82,12 @@ export function SessionDetail() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
   const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
-  const [isHeaderVisible, setIsHeaderVisible] = useState(true);
-  const lastHeaderScrollTopRef = useRef(0);
-  const lastHeaderScrollHeightRef = useRef(0);
 
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
   const promptOverlayRef = useRef<HTMLDivElement>(null);
   const [promptOverlayHeight, setPromptOverlayHeight] = useState(112);
-  const isContentTall = useTallScrollContent(messageContainerRef, 1.5);
 
   useEffect(() => {
     const el = promptOverlayRef.current;
@@ -196,7 +189,6 @@ export function SessionDetail() {
     isStreamingResponse,
   });
 
-  const handleShowModelsDialog = useCallback(() => setModelDialogOpen(true), []);
   const handleShowSessionsDialog = useCallback(() => setSessionsDialogOpen(true), []);
   const handleShowHelpDialog = useCallback(() => openSettings(), [openSettings]);
 
@@ -213,52 +205,6 @@ export function SessionDetail() {
       setMinimizedQuestion(null)
     }
   }, [sessionId, minimizedQuestion])
-
-  useEffect(() => {
-    const container = messageContainerRef.current
-    if (!container) return
-
-    lastHeaderScrollTopRef.current = container.scrollTop
-    lastHeaderScrollHeightRef.current = container.scrollHeight
-    setIsHeaderVisible(true)
-
-    const SCROLL_DELTA_THRESHOLD = 8
-
-    const handleScroll = () => {
-      if (!isMobile) {
-        setIsHeaderVisible(true)
-        return
-      }
-      const currentScrollTop = container.scrollTop
-      const previousScrollTop = lastHeaderScrollTopRef.current
-      const currentScrollHeight = container.scrollHeight
-      const previousScrollHeight = lastHeaderScrollHeightRef.current
-
-      lastHeaderScrollTopRef.current = currentScrollTop
-      lastHeaderScrollHeightRef.current = currentScrollHeight
-
-      if (currentScrollHeight !== previousScrollHeight) return
-
-      const delta = currentScrollTop - previousScrollTop
-      if (Math.abs(delta) < SCROLL_DELTA_THRESHOLD) return
-
-      const isAtTop = currentScrollTop < 24
-
-      if (isAtTop) {
-        setIsHeaderVisible(true)
-        return
-      }
-
-      if (delta > 0) {
-        setIsHeaderVisible(true)
-      } else {
-        setIsHeaderVisible(false)
-      }
-    }
-
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
-  }, [repoDirectory, sessionId, isMobile])
 
   const syncPendingActionsForSession = useCallback(async () => {
     if (!repoDirectory || !sessionId) return
@@ -355,7 +301,12 @@ export function SessionDetail() {
   }, [navigate, repoId, isAssistantSession])
 
   const { leaderActive } = useKeyboardShortcuts({
-    openModelDialog: () => setModelDialogOpen(true),
+    openModelDialog: () => {
+      const modelSelectTrigger = document.querySelector(
+        "[data-model-select-trigger]",
+      ) as HTMLElement;
+      modelSelectTrigger?.click();
+    },
     openSessions: () => setSessionsDialogOpen(true),
     openSettings,
     newSession: handleNewSession,
@@ -478,11 +429,7 @@ export function SessionDetail() {
     >
       <div
         data-testid="session-header-region"
-        className={`flex-shrink-0 overflow-hidden bg-background transition-all duration-200 ease-out ${
-          isHeaderVisible
-            ? 'max-h-72 sm:max-h-80 opacity-100 translate-y-0'
-            : 'max-h-0 opacity-0 -translate-y-2'
-        }`}
+        className="flex-shrink-0 overflow-hidden bg-background max-h-72 sm:max-h-80"
       >
         <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
@@ -532,7 +479,7 @@ export function SessionDetail() {
       </div>
 
       <div className="relative flex-1 overflow-hidden flex flex-col">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + 16 }}>
+        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
           {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
@@ -578,18 +525,6 @@ export function SessionDetail() {
                   </button>
                 )}
               </div>
-              {isMobile && showScrollButton && isContentTall && (
-                <div className="absolute -top-9 left-0 z-50 flex flex-col items-start gap-2">
-                  <button
-                    onClick={scrollToBottom}
-                    className="flex items-center justify-center px-3 py-1.5 rounded-lg bg-zinc-950/80 hover:bg-zinc-900/90 text-blue-300 hover:text-blue-200 border border-blue-400/20 shadow-md backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-blue-400/15"
-                    aria-label="Scroll to bottom"
-                    title="Scroll to bottom"
-                  >
-                    <ArrowDown className="w-5 h-5" />
-                  </button>
-                </div>
-              )}
               {leaderActive && (
                 <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-primary/90 text-primary-foreground border border-primary shadow-lg backdrop-blur-md animate-pulse">
                   <span className="text-sm font-medium">Waiting for shortcut key...</span>
@@ -618,11 +553,10 @@ export function SessionDetail() {
                 directory={repoDirectory}
                 sessionID={sessionId}
                 disabled={!isConnected}
-                showScrollButton={showScrollButton}
+                showScrollButton={showScrollButton && !hasPromptContent}
                 isSessionActive={isSessionActive}
                 isStreamingResponse={isStreamingResponse}
                 onScrollToBottom={scrollToBottom}
-                onShowModelsDialog={handleShowModelsDialog}
                 onShowSessionsDialog={handleShowSessionsDialog}
                 onShowHelpDialog={handleShowHelpDialog}
                 onToggleDetails={handleToggleDetails}
@@ -633,13 +567,6 @@ export function SessionDetail() {
           </div>
         )}
       </div>
-
-      <ModelSelectDialog
-        open={modelDialogOpen}
-        onOpenChange={setModelDialogOpen}
-        opcodeUrl={opcodeUrl}
-        directory={repoDirectory}
-      />
 
       {/* Sessions Dialog */}
       <Dialog open={sessionsDialogOpen} onOpenChange={setSessionsDialogOpen}>

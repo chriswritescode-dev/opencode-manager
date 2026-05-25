@@ -141,7 +141,7 @@ describe("DialogContent", () => {
     const content = screen.getByTestId("dialog-content");
     expect(content).toHaveClass("custom-class");
     expect(content).toHaveClass("fixed");
-    expect(content).toHaveClass("z-50");
+    expect(content).toHaveClass("z-[70]");
   });
 
   it("renders children correctly", () => {

@@ -205,7 +205,7 @@ export function Login() {
                   id="email"
                   type="email"
                   placeholder=""
-                  className="bg-input border-border focus:border-primary"
+                  className="border-border focus:border-primary"
                   {...register('email')}
                   aria-invalid={!!errors.email}
                 />
@@ -219,7 +219,7 @@ export function Login() {
                   id="password"
                   type="password"
                   placeholder=""
-                  className="bg-input border-border focus:border-primary"
+                  className="border-border focus:border-primary"
                   {...register('password')}
                   aria-invalid={!!errors.password}
                 />

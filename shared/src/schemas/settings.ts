@@ -278,6 +278,12 @@ export const ProviderConfigSchema = z.object({
 export type ProviderSource = z.infer<typeof ProviderSourceSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 
+export const OpenCodePluginOptionsSchema = z.record(z.string(), z.unknown());
+export const OpenCodePluginSpecSchema = z.union([
+  z.string(),
+  z.tuple([z.string(), OpenCodePluginOptionsSchema]),
+]);
+
 export const OpenCodeConfigSchema = z.object({
   $schema: z.string().optional(),
   theme: z.string().optional(),
@@ -295,7 +301,7 @@ export const OpenCodeConfigSchema = z.object({
   instructions: z.array(z.string()).optional(),
   disabled_providers: z.array(z.string()).optional(),
   share: z.enum(["manual", "auto", "disabled"]).optional(),
-  plugin: z.array(z.string()).optional(),
+  plugin: z.array(OpenCodePluginSpecSchema).optional(),
   skills: z.object({
     paths: z.array(z.string()).optional(),
     urls: z.array(z.string()).optional(),

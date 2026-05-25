@@ -101,8 +101,13 @@ export function ProviderSettings() {
 
   const oauthProviders = useMemo(() => {
     if (!providers || !authMethods) return []
-    return providers.filter(provider => supportsOAuth(provider.id))
-  }, [providers, authMethods, supportsOAuth])
+    const oauth = providers.filter(provider => supportsOAuth(provider.id))
+    return oauth.slice().sort((a, b) => {
+      const aConnected = hasCredentials(a.id) ? 1 : 0
+      const bConnected = hasCredentials(b.id) ? 1 : 0
+      return bConnected - aConnected
+    })
+  }, [providers, authMethods, supportsOAuth, hasCredentials])
 
   const apiKeyProviders = useMemo(() => {
     if (!providers || !authMethods) return { connected: [], available: [] }

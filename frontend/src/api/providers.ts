@@ -249,6 +249,14 @@ export async function addOpenCodeRecentModel(model: ModelSelection): Promise<Ope
   });
 }
 
+export async function removeOpenCodeRecentModel(model: ModelSelection): Promise<OpenCodeModelState> {
+  return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ removeRecent: model }),
+  });
+}
+
 export async function toggleOpenCodeFavoriteModel(model: ModelSelection): Promise<OpenCodeModelState> {
   return await fetchWrapper<OpenCodeModelState>(`${API_BASE_URL}/api/providers/model-state`, {
     method: 'POST',

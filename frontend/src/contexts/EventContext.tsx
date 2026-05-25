@@ -626,11 +626,6 @@ export function useQuestions() {
   return questions
 }
 
-export function usePendingAlerts(): boolean {
-  const { permissions, questions } = useEventContext()
-  return permissions.pendingCount + questions.pendingCount > 0
-}
-
 export function useSSEHealth(): EventStreamHealthState {
   return useEventContext().sseHealth
 }

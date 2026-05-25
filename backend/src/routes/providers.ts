@@ -12,6 +12,7 @@ import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   addRecentOpenCodeModel,
   getOpenCodeModelState as readModelStateFromDb,
+  removeRecentOpenCodeModel,
   toggleFavoriteOpenCodeModel,
   type OpenCodeModelStateRecord,
 } from '../db/model-state'
@@ -31,6 +32,7 @@ export const ModelStateSchema = z.object({
 const UpdateModelStateSchema = z.object({
   recent: ModelSelectionSchema.optional(),
   favorite: ModelSelectionSchema.optional(),
+  removeRecent: ModelSelectionSchema.optional(),
 }).strict()
 
 export function getModelStatePath(): string {
@@ -86,6 +88,8 @@ export function createProvidersRoutes(db: Database, openCodeClient: OpenCodeClie
         nextState = toggleFavoriteOpenCodeModel(db, validated.favorite)
       } else if (validated.recent) {
         nextState = addRecentOpenCodeModel(db, validated.recent)
+      } else if (validated.removeRecent) {
+        nextState = removeRecentOpenCodeModel(db, validated.removeRecent)
       } else {
         nextState = readModelStateFromDb(db)
       }

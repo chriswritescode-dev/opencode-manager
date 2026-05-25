@@ -3,6 +3,8 @@ import type { Message } from '@/api/types'
 
 const SCROLL_LOCK_MS = 300
 const BOTTOM_THRESHOLD_PX = 48
+const SHOW_SCROLL_BUTTON_THRESHOLD_PX = 120
+const SCROLL_TO_BOTTOM_FRAME_COUNT = 2
 
 interface UseAutoScrollOptions {
   containerRef?: React.RefObject<HTMLDivElement | null>
@@ -30,6 +32,8 @@ export function useAutoScroll({
   const pointerStartYRef = useRef<number | null>(null)
   const pointerActiveRef = useRef(false)
   const onScrollStateChangeRef = useRef(onScrollStateChange)
+  const scrollRequestIdRef = useRef(0)
+  const isScrollButtonVisibleRef = useRef(false)
   
   onScrollStateChangeRef.current = onScrollStateChange
 
@@ -37,7 +41,25 @@ export function useAutoScroll({
     if (!containerRef?.current) return
     userScrolledAtRef.current = 0
     userDisengagedRef.current = false
-    containerRef.current.scrollTop = containerRef.current.scrollHeight
+    isScrollButtonVisibleRef.current = false
+    const scrollRequestId = scrollRequestIdRef.current + 1
+    scrollRequestIdRef.current = scrollRequestId
+    const scroll = () => {
+      if (!containerRef?.current) return
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
+    }
+
+    scroll()
+    let frameCount = 0
+    const scrollAfterLayout = () => {
+      if (scrollRequestIdRef.current !== scrollRequestId) return
+      frameCount += 1
+      scroll()
+      if (frameCount < SCROLL_TO_BOTTOM_FRAME_COUNT) {
+        requestAnimationFrame(scrollAfterLayout)
+      }
+    }
+    requestAnimationFrame(scrollAfterLayout)
     onScrollStateChangeRef.current?.(false)
   }, [containerRef])
 
@@ -53,8 +75,13 @@ export function useAutoScroll({
     if (!container) return
     
     const markDisengaged = () => {
+      const container = containerRef?.current
+      if (!container) return
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
       userScrolledAtRef.current = Date.now()
-      if (!userDisengagedRef.current) {
+      scrollRequestIdRef.current += 1
+      if (!isScrollButtonVisibleRef.current && distanceFromBottom > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
+        isScrollButtonVisibleRef.current = true
         onScrollStateChangeRef.current?.(true)
       }
       userDisengagedRef.current = true
@@ -63,6 +90,7 @@ export function useAutoScroll({
     const handlePointerDown = (e: PointerEvent) => {
       pointerStartYRef.current = e.clientY
       pointerActiveRef.current = true
+      scrollRequestIdRef.current += 1
     }
 
     const handlePointerMove = (e: PointerEvent) => {
@@ -98,12 +126,19 @@ export function useAutoScroll({
         if (userDisengagedRef.current) {
           userScrolledAtRef.current = 0
           userDisengagedRef.current = false
+          isScrollButtonVisibleRef.current = false
           onScrollStateChangeRef.current?.(false)
         }
+      } else if (userDisengagedRef.current && !isScrollButtonVisibleRef.current && scrollHeight - scrollTop - clientHeight > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
+        isScrollButtonVisibleRef.current = true
+        onScrollStateChangeRef.current?.(true)
       } else if (pointerActiveRef.current && !userDisengagedRef.current) {
         userScrolledAtRef.current = Date.now()
         userDisengagedRef.current = true
-        onScrollStateChangeRef.current?.(true)
+        if (scrollHeight - scrollTop - clientHeight > SHOW_SCROLL_BUTTON_THRESHOLD_PX) {
+          isScrollButtonVisibleRef.current = true
+          onScrollStateChangeRef.current?.(true)
+        }
       }
     }
     
