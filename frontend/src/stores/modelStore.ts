@@ -10,8 +10,6 @@ export interface ModelSelection {
 interface ModelStore {
   model: ModelSelection | null
   agentModels: Record<string, ModelSelection>
-  recentModels: ModelSelection[]
-  favoriteModels: ModelSelection[]
   variants: Record<string, string | undefined>
   lastConfigModel: string | undefined
 
@@ -20,7 +18,6 @@ interface ModelStore {
   setAgentModel: (agent: string, model: ModelSelection) => void
   getAgentModel: (agent: string) => ModelSelection | null
   syncModelState: (state: { recent: ModelSelection[], favorite: ModelSelection[], variant: Record<string, string | undefined> }) => void
-  toggleFavorite: (model: ModelSelection) => void
   syncFromConfig: (configModel: string | undefined, force?: boolean) => void
   validateAndSyncModel: (configModel: string | undefined, providers?: Provider[]) => void
   getModelString: () => string | null
@@ -29,7 +26,12 @@ interface ModelStore {
   clearVariant: (model: ModelSelection) => void
 }
 
-const MAX_RECENT_MODELS = 10
+export function modelExists(model: ModelSelection | null, providers: Provider[]): boolean {
+  if (!model) return false
+  return providers.some(
+    (p) => p.id === model.providerID && p.models && model.modelID in p.models
+  )
+}
 
 function parseModelString(model: string): ModelSelection | null {
   const [providerID, ...rest] = model.split('/')
@@ -38,30 +40,41 @@ function parseModelString(model: string): ModelSelection | null {
   return { providerID, modelID }
 }
 
+export function modelStorePartialize(state: ModelStore): { model: ModelStore['model']; agentModels: ModelStore['agentModels'] } {
+  return {
+    model: state.model,
+    agentModels: state.agentModels,
+  }
+}
+
+function stripLegacyKeys(obj: Record<string, unknown>): void {
+  delete obj.recentModels
+  delete obj.favoriteModels
+  delete obj.variants
+}
+
+export function modelStoreMigrate(persistedState: unknown): unknown {
+  if (!persistedState || typeof persistedState !== 'object') return persistedState
+  const next = { ...persistedState } as Record<string, unknown>
+  stripLegacyKeys(next)
+  if (next.state && typeof next.state === 'object' && !Array.isArray(next.state)) {
+    const state = { ...(next.state as Record<string, unknown>) }
+    stripLegacyKeys(state)
+    next.state = state
+  }
+  return next
+}
+
 export const useModelStore = create<ModelStore>()(
   persist(
     (set, get) => ({
     model: null,
     agentModels: {},
-    recentModels: [],
-    favoriteModels: [],
     variants: {},
     lastConfigModel: undefined,
 
     setModel: (model: ModelSelection) => {
-      set((state) => {
-        const newRecent = [
-          model,
-          ...state.recentModels.filter(
-            (m) => !(m.providerID === model.providerID && m.modelID === model.modelID)
-          ),
-        ].slice(0, MAX_RECENT_MODELS)
-
-        return {
-          model,
-          recentModels: newRecent,
-        }
-      })
+      set({ model })
     },
 
     setActiveModel: (model: ModelSelection) => {
@@ -84,8 +97,6 @@ export const useModelStore = create<ModelStore>()(
 
     syncModelState: (modelState) => {
       set((state) => ({
-        recentModels: modelState.recent,
-        favoriteModels: modelState.favorite,
         variants: {
           ...modelState.variant,
           ...state.variants,
@@ -93,35 +104,14 @@ export const useModelStore = create<ModelStore>()(
       }))
     },
 
-    toggleFavorite: (model: ModelSelection) => {
-      set((state) => {
-        const exists = state.favoriteModels.some(
-          (favorite) => favorite.providerID === model.providerID && favorite.modelID === model.modelID
-        )
-
-        return {
-          favoriteModels: exists
-            ? state.favoriteModels.filter((favorite) => favorite.providerID !== model.providerID || favorite.modelID !== model.modelID)
-            : [model, ...state.favoriteModels],
-        }
-      })
-    },
-
     syncFromConfig: (configModel: string | undefined, force = false) => {
       const state = get()
       if (!force && state.lastConfigModel === configModel) return
-      
+
       if (configModel) {
         const parsed = parseModelString(configModel)
         if (parsed) {
-          const newRecent = [
-            parsed,
-            ...state.recentModels.filter(
-              (m) => !(m.providerID === parsed.providerID && m.modelID === parsed.modelID)
-            ),
-          ].slice(0, MAX_RECENT_MODELS)
-          
-          set({ model: parsed, lastConfigModel: configModel, recentModels: newRecent })
+          set({ model: parsed, lastConfigModel: configModel })
           return
         }
       }
@@ -138,29 +128,11 @@ export const useModelStore = create<ModelStore>()(
 
       const state = get()
 
-      const modelExists = (model: ModelSelection) =>
-        providers.some(
-          (p) => p.id === model.providerID && p.models && model.modelID in p.models
-        )
-
-      const currentModelExists = state.model ? modelExists(state.model) : false
-
-      const cleanedRecentModels = state.recentModels.filter(modelExists)
-      const cleanedFavoriteModels = state.favoriteModels.filter(modelExists)
-
-      if (cleanedRecentModels.length !== state.recentModels.length) {
-        set({ recentModels: cleanedRecentModels })
-      }
-
-      if (cleanedFavoriteModels.length !== state.favoriteModels.length) {
-        set({ favoriteModels: cleanedFavoriteModels })
-      }
+      const currentModelExists = state.model ? modelExists(state.model, providers) : false
 
       if (!currentModelExists) {
         const parsedConfig = configModel ? parseModelString(configModel) : null
-        const configIsValid = parsedConfig
-          ? providers.some(p => p.id === parsedConfig.providerID && p.models && parsedConfig.modelID in p.models)
-          : false
+        const configIsValid = parsedConfig ? modelExists(parsedConfig, providers) : false
 
         if (configIsValid && configModel) {
           get().syncFromConfig(configModel, true)
@@ -207,13 +179,9 @@ export const useModelStore = create<ModelStore>()(
     }),
     {
       name: 'opencode-model-selection',
-      partialize: (state) => ({
-        model: state.model,
-        agentModels: state.agentModels,
-        recentModels: state.recentModels,
-        favoriteModels: state.favoriteModels,
-        variants: state.variants,
-      }),
+      version: 2,
+      migrate: modelStoreMigrate,
+      partialize: modelStorePartialize,
     }
   )
 )

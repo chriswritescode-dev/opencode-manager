@@ -1,8 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConfig } from './useOpenCode'
 import { useOpenCodeClient } from './useOpenCode'
-import { useModelStore, type ModelSelection } from '@/stores/modelStore'
+import { useModelStore, modelExists, type ModelSelection } from '@/stores/modelStore'
 import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, toggleOpenCodeFavoriteModel } from '@/api/providers'
 
 interface UseModelSelectionResult {
@@ -36,12 +36,9 @@ export function useModelSelection(
 
   const { 
     model, 
-    recentModels, 
-    favoriteModels,
     setModel: setStoreModel,
     setActiveModel: setStoreActiveModel,
     syncModelState,
-    toggleFavorite: toggleStoreFavorite,
     validateAndSyncModel, 
     getModelString 
   } = useModelStore()
@@ -77,6 +74,20 @@ export function useModelSelection(
       console.error('Failed to toggle favorite model on backend', error)
     },
   })
+
+  const providers = providersData?.providers
+
+  const recentModels = useMemo(() => {
+    const raw = modelState?.recent ?? []
+    if (!providers || providers.length === 0) return raw
+    return raw.filter((m) => modelExists(m, providers))
+  }, [modelState?.recent, providers])
+
+  const favoriteModels = useMemo(() => {
+    const raw = modelState?.favorite ?? []
+    if (!providers || providers.length === 0) return raw
+    return raw.filter((m) => modelExists(m, providers))
+  }, [modelState?.favorite, providers])
 
   const defaultModelString = providersData?.providers
     .map((provider) => {
@@ -119,7 +130,6 @@ export function useModelSelection(
   }
 
   const toggleFavorite = (nextModel: ModelSelection) => {
-    toggleStoreFavorite(nextModel)
     updateFavoriteModel.mutate(nextModel)
   }
 

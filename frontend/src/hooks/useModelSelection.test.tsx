@@ -140,7 +140,6 @@ describe('useModelSelection', () => {
 
     expect(returnValue).toBe(true)
     expect(useModelStore.getState().model).toEqual(testModel)
-    expect(useModelStore.getState().recentModels).toEqual([])
   })
 
   it('rejects unknown model after providers are loaded', async () => {
@@ -174,13 +173,114 @@ describe('useModelSelection', () => {
     })
 
     const initialModel = useModelStore.getState().model
-    const initialRecentModels = useModelStore.getState().recentModels
     const testModel: ModelSelection = { providerID: 'anthropic', modelID: 'missing-model' }
     const returnValue = result.current.setActiveModel(testModel)
 
     expect(returnValue).toBe(false)
     expect(useModelStore.getState().model).toEqual(initialModel)
-    expect(useModelStore.getState().recentModels).toEqual(initialRecentModels)
+  })
+
+  describe('recentModels/favoriteModels derived from React Query', () => {
+    it('filters out models not present in providers', async () => {
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [
+          { providerID: 'AI2', modelID: 'foo' },
+          { providerID: 'GreatScott', modelID: 'mimo' },
+        ],
+        favorite: [
+          { providerID: 'VLLM', modelID: 'bar' },
+          { providerID: 'GreatScott', modelID: 'mimo' },
+        ],
+        variant: {},
+      })
+      mockGetProviders.mockResolvedValue({
+        providers: [
+          {
+            id: 'AI2',
+            name: 'AI2',
+            models: { foo: { id: 'foo', name: 'Foo' } },
+            isConnected: true,
+            env: [],
+            options: {},
+          },
+          {
+            id: 'VLLM',
+            name: 'VLLM',
+            models: { bar: { id: 'bar', name: 'Bar' } },
+            isConnected: true,
+            env: [],
+            options: {},
+          },
+        ],
+        connected: ['AI2', 'VLLM'],
+        default: {},
+      } as any)
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.recentModels).toEqual([{ providerID: 'AI2', modelID: 'foo' }])
+      })
+
+      await waitFor(() => {
+        expect(result.current.favoriteModels).toEqual([{ providerID: 'VLLM', modelID: 'bar' }])
+      })
+    })
+
+    it('returns raw values when providers query is loading (undefined)', async () => {
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [{ providerID: 'AI2', modelID: 'foo' }],
+        favorite: [{ providerID: 'VLLM', modelID: 'bar' }],
+        variant: {},
+      })
+      mockGetProviders.mockImplementation(() => new Promise(() => {}))
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.recentModels).toEqual([{ providerID: 'AI2', modelID: 'foo' }])
+      })
+
+      expect(result.current.favoriteModels).toEqual([{ providerID: 'VLLM', modelID: 'bar' }])
+    })
+
+    it('returns raw values when providers returns empty array', async () => {
+      mockGetOpenCodeModelState.mockResolvedValue({
+        recent: [{ providerID: 'AI2', modelID: 'foo' }],
+        favorite: [{ providerID: 'VLLM', modelID: 'bar' }],
+        variant: {},
+      })
+      mockGetProviders.mockResolvedValue({
+        providers: [],
+        connected: [],
+        default: {},
+      } as any)
+
+      const { result } = renderHookWithProviders()
+
+      await waitFor(() => {
+        expect(result.current.recentModels).toEqual([{ providerID: 'AI2', modelID: 'foo' }])
+      })
+
+      expect(result.current.favoriteModels).toEqual([{ providerID: 'VLLM', modelID: 'bar' }])
+    })
+  })
+
+  it('toggleFavorite calls toggleOpenCodeFavoriteModel and does not mutate Zustand', async () => {
+    const { result } = renderHookWithProviders()
+
+    await waitFor(() => {
+      expect(result.current).toBeDefined()
+    })
+
+    const testModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
+    result.current.toggleFavorite(testModel)
+
+    await waitFor(() => {
+      expect(mockToggleOpenCodeFavoriteModel).toHaveBeenCalledTimes(1)
+    })
+    expect(mockToggleOpenCodeFavoriteModel.mock.calls[0][0]).toEqual(testModel)
+    expect(useModelStore.getState().model).not.toEqual(testModel)
   })
 
   it('user selection still updates recents', async () => {
@@ -222,10 +322,13 @@ describe('useModelSelection', () => {
     result.current.setModel(testModel)
 
     expect(useModelStore.getState().model).toEqual(testModel)
-    expect(useModelStore.getState().recentModels[0]).toEqual(testModel)
     await waitFor(() => {
       expect(mockAddOpenCodeRecentModel).toHaveBeenCalled()
       expect(mockAddOpenCodeRecentModel.mock.calls[0][0]).toEqual(testModel)
+    })
+
+    await waitFor(() => {
+      expect(mockAddOpenCodeRecentModel).toHaveBeenCalledTimes(1)
     })
   })
 
