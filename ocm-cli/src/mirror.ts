@@ -6,8 +6,11 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { getRepoRoot, getOriginUrl, getDirtyPaths, urlsEqual } from './local-repo.js'
 import type { ManagerApi } from './manager-api.js'
+import { ManagerApiError } from './manager-api.js'
 
 const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo']
+const PART_RETRIES = 3
+const PART_BACKOFF_MS = [500, 2000, 8000]
 
 function getGitignoreExclusions(repoRoot: string): string[] {
   const res = spawnSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'], {
@@ -56,10 +59,93 @@ export interface MirrorUpOpts {
   create?: { name: string; originUrl: string | null; branch: string | null }
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isRetryablePartError(err: unknown): boolean {
+  if (err instanceof ManagerApiError) {
+    return err.status >= 500 || err.status === 408 || err.status === 429
+  }
+  return true
+}
+
+async function uploadPartWithRetry(
+  api: ManagerApi,
+  repoId: number,
+  uploadId: string,
+  index: number,
+  chunk: Buffer,
+): Promise<void> {
+  let lastError: unknown
+  for (let attempt = 0; attempt < PART_RETRIES; attempt++) {
+    try {
+      await api.mirrorUploadPart(repoId, uploadId, index, chunk)
+      return
+    } catch (err) {
+      lastError = err
+      if (!isRetryablePartError(err)) break
+      if (attempt < PART_RETRIES - 1) {
+        await delay(PART_BACKOFF_MS[attempt]!)
+      }
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`part ${index} failed: ${String(lastError)}`)
+}
+
+interface PartFlusher {
+  push(buf: Buffer): Promise<void>
+  finish(): Promise<number>
+}
+
+function createPartFlusher(
+  api: ManagerApi,
+  repoId: number,
+  uploadId: string,
+  chunkSize: number,
+): PartFlusher {
+  let acc: Buffer[] = []
+  let accLen = 0
+  let index = 0
+
+  const flush = async (): Promise<void> => {
+    if (accLen === 0) return
+    const buf = Buffer.concat(acc, accLen)
+    acc = []
+    accLen = 0
+    await uploadPartWithRetry(api, repoId, uploadId, index, buf)
+    index += 1
+  }
+
+  return {
+    async push(buf: Buffer): Promise<void> {
+      let offset = 0
+      while (offset < buf.length) {
+        const room = chunkSize - accLen
+        const take = Math.min(room, buf.length - offset)
+        acc.push(buf.subarray(offset, offset + take))
+        accLen += take
+        offset += take
+        if (accLen >= chunkSize) {
+          await flush()
+        }
+      }
+    },
+    async finish(): Promise<number> {
+      await flush()
+      return index
+    },
+  }
+}
+
 export async function mirrorUp(
   plan: MirrorPlan,
   opts: MirrorUpOpts,
-): Promise<{ repoId: number; branch: string; head: string; created: boolean }> {
+): Promise<{ repoId: number; branch: string | null; head: string | null; created: boolean }> {
+  const repoId = opts.create ? 0 : plan.matched[0]!.repoId
+
+  const begin = await opts.api.mirrorBegin(repoId, { force: opts.force, create: opts.create })
+
   const tarArgs = ['-c', '-C', plan.repoRoot]
   for (const dir of HARDCODED_EXCLUDES) tarArgs.push('--exclude', dir)
 
@@ -90,18 +176,20 @@ export async function mirrorUp(
     child.on('error', reject)
   })
 
-  const body = Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>
-  const repoId = opts.create ? 0 : plan.matched[0]!.repoId
+  const flusher = createPartFlusher(opts.api, begin.repoId, begin.uploadId, begin.chunkSize)
 
   try {
-    const [result] = await Promise.all([
-      opts.api.mirrorUp(repoId, body, {
-        force: opts.force,
-        create: opts.create,
-      }),
-      tarExit,
-    ])
+    for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
+      await flusher.push(chunk)
+    }
+    await tarExit
+    const totalParts = await flusher.finish()
+    const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts)
     return result
+  } catch (err) {
+    if (!child.killed) child.kill('SIGKILL')
+    await opts.api.mirrorAbort(begin.repoId, begin.uploadId)
+    throw err
   } finally {
     if (excludeFile) {
       await fsp.rm(excludeFile, { force: true }).catch(() => {})

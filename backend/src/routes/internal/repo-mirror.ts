@@ -1,10 +1,11 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { spawn } from 'child_process'
-import { pipeline } from 'stream/promises'
+import { createWriteStream } from 'fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'fs'
 import { Readable } from 'stream'
-import { mkdtempSync, mkdirSync, readdirSync, statSync, existsSync, writeFileSync } from 'fs'
-import { dirname, join } from 'path'
+import { pipeline } from 'stream/promises'
+import { join } from 'path'
 import * as fsp from 'fs/promises'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { getRepoById, updateLastPulled, updateRepoBranch, deleteRepo } from '../../db/queries'
@@ -12,22 +13,54 @@ import { ensureMirrorTargetPath, createRepoRow, isRepoInUse } from '../../servic
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
 import { safeGitOut, gitOut } from './repo-sync-helpers'
+import {
+  MIRROR_CHUNK_SIZE,
+  createUploadSession,
+  readUploadMeta,
+  deleteUploadSession,
+  getPartPath,
+  extractPartsToStaging,
+  atomicSwapIntoPlace,
+  discardBackup,
+  restoreBackup,
+} from './repo-mirror-helpers'
 
 const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo']
+
+interface BeginBody {
+  create?: boolean
+  name?: string
+  originUrl?: string
+  branch?: string
+  force?: boolean
+}
+
+interface CommitBody {
+  uploadId: string
+  totalParts: number
+  gzip?: boolean
+}
+
+const LEGACY_UPGRADE_MESSAGE = 'this ocm CLI is too old for this server; upgrade to ocm-cli >= 0.1.2 (the mirror upload protocol changed to chunked uploads)'
 
 export function createInternalRepoMirrorRoutes(db: Database) {
   const app = new Hono()
 
-  app.post('/:repoId/mirror', async (c) => {
-    const repoIdRaw = c.req.param('repoId')
-    const force = c.req.query('force') === '1'
-    const create = c.req.query('create') === '1'
-    const name = c.req.query('name')
-    const originUrl = c.req.query('originUrl')
-    const branch = c.req.query('branch')
+  app.post('/:repoId/mirror', (c) => {
+    return c.json({ error: 'cli_too_old', message: LEGACY_UPGRADE_MESSAGE }, 410)
+  })
 
-    const rawBody = c.req.raw.body
-    if (!rawBody) return c.json({ error: 'no body provided' }, 400)
+  app.post('/:repoId/mirror/begin', async (c) => {
+    const repoIdRaw = c.req.param('repoId')
+    let body: BeginBody
+    try {
+      body = (await c.req.json()) as BeginBody
+    } catch {
+      return c.json({ error: 'invalid json body' }, 400)
+    }
+
+    const force = body.force === true
+    const create = body.create === true
 
     let repoId: number
     let fullPath: string
@@ -35,9 +68,15 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     let createdRepoId: number | undefined
 
     if (repoIdRaw === '0' && create) {
-      if (!name) return c.json({ error: 'name required', message: 'provide a name query param' }, 400)
-      const target = ensureMirrorTargetPath(name)
-      const { repo: newRepo, created: wasCreated } = createRepoRow(db, { name, originUrl, localPath: target.localPath, fullPath: target.fullPath, branch })
+      if (!body.name) return c.json({ error: 'name required', message: 'provide name in body' }, 400)
+      const target = ensureMirrorTargetPath(body.name)
+      const { repo: newRepo, created: wasCreated } = createRepoRow(db, {
+        name: body.name,
+        originUrl: body.originUrl,
+        localPath: target.localPath,
+        fullPath: target.fullPath,
+        branch: body.branch,
+      })
       repoId = newRepo.id
       fullPath = newRepo.fullPath
       created = wasCreated
@@ -59,105 +98,118 @@ export function createInternalRepoMirrorRoutes(db: Database) {
       }
     }
 
-    let staging: string | undefined
-    let backupDir: string | undefined
     try {
-      const stagingParent = join(getReposPath(), '.ocm-staging')
-      mkdirSync(stagingParent, { recursive: true })
-      staging = mkdtempSync(join(stagingParent, 'recv-'))
-
-      const isGzip = c.req.header('Content-Encoding') === 'gzip'
-      const tarArgs = ['-x', '-f', '-', '-C', staging]
-      if (isGzip) tarArgs.unshift('-z')
-      const child = spawn('tar', tarArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
-
-      const stderrChunks: Buffer[] = []
-      child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
-
-      const tarDone = new Promise<void>((resolve, reject) => {
-        child.on('close', (code) => {
-          if (code === 0) resolve()
-          else {
-            const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
-            reject(new Error(`tar exited with code ${code}${stderr ? `: ${stderr}` : ''}`))
-          }
-        })
-        child.on('error', reject)
-      })
-
-      const body = Readable.fromWeb(rawBody as unknown as Parameters<typeof Readable.fromWeb>[0])
-      await pipeline(body, child.stdin)
-      await tarDone
-
-      const entries = readdirSync(staging)
-      let extractedRoot = staging
-      if (entries.length === 1) {
-        const candidate = join(staging, entries[0]!)
-        try {
-          if (statSync(candidate).isDirectory()) {
-            extractedRoot = candidate
-          }
-        } catch { /* ignore stat errors */ }
-      }
-
-      await fsp.mkdir(dirname(fullPath), { recursive: true })
-
-      if (existsSync(fullPath)) {
-        backupDir = `${fullPath}.ocm-old-${Date.now()}-${Math.random().toString(36).slice(2)}`
-        await fsp.rename(fullPath, backupDir)
-      }
-
-      await fsp.rename(extractedRoot, fullPath)
-
-      if (backupDir) {
-        await fsp.rm(backupDir, { recursive: true, force: true }).catch(() => {})
-        backupDir = undefined
-      }
-
-      const branchName = await safeGitOut(fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
-      const head = await safeGitOut(fullPath, ['rev-parse', 'HEAD'])
-
-      if (branchName) {
-        updateRepoBranch(db, repoId, branchName.trim())
-      }
-      updateLastPulled(db, repoId)
-
-      await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
-
-      return c.json({
-        repoId,
-        fullPath,
-        branch: branchName?.trim() || null,
-        head: head?.trim() || null,
-        created,
-      })
+      const meta = await createUploadSession({ repoId, fullPath, created, createdRepoId, force })
+      return c.json({ uploadId: meta.uploadId, repoId, chunkSize: MIRROR_CHUNK_SIZE, created })
     } catch (error) {
-      logger.error('mirror POST failed:', error)
-
-      if (backupDir) {
-        try {
-          if (existsSync(fullPath)) {
-            await fsp.rm(fullPath, { recursive: true, force: true })
-          }
-          await fsp.rename(backupDir, fullPath)
-        } catch {
-          logger.error('failed to restore old repo from backup')
-        }
-      }
-
+      logger.error('mirror begin failed:', error)
       if (createdRepoId !== undefined) {
-        try {
-          deleteRepo(db, createdRepoId)
-        } catch {
-          logger.error('failed to delete created repo row on failure')
-        }
-      }
-
-      if (staging) {
-        await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+        try { deleteRepo(db, createdRepoId) } catch { /* ignore */ }
       }
       return c.json({ error: getErrorMessage(error) }, 500)
     }
+  })
+
+  app.put('/:repoId/mirror/parts/:uploadId/:index', async (c) => {
+    const repoIdRaw = c.req.param('repoId')
+    const uploadId = c.req.param('uploadId')
+    const indexRaw = c.req.param('index')
+    const index = Number(indexRaw)
+    if (!Number.isFinite(index) || index < 0 || !Number.isInteger(index)) {
+      return c.json({ error: 'invalid index' }, 400)
+    }
+
+    const meta = await readUploadMeta(uploadId)
+    if (!meta) return c.json({ error: 'upload session not found' }, 404)
+
+    const repoIdNum = Number(repoIdRaw)
+    if (!Number.isFinite(repoIdNum) || repoIdNum !== meta.repoId) {
+      if (!(repoIdRaw === '0' && meta.created)) {
+        return c.json({ error: 'upload session does not belong to repo' }, 403)
+      }
+    }
+
+    const rawBody = c.req.raw.body
+    if (!rawBody) return c.json({ error: 'no body provided' }, 400)
+
+    const partPath = getPartPath(uploadId, index)
+    try {
+      const body = Readable.fromWeb(rawBody as unknown as Parameters<typeof Readable.fromWeb>[0])
+      await pipeline(body, createWriteStream(partPath))
+      const stat = await fsp.stat(partPath)
+      return c.json({ index, size: stat.size })
+    } catch (error) {
+      logger.error(`mirror part ${index} upload failed:`, error)
+      await fsp.rm(partPath, { force: true }).catch(() => {})
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.post('/:repoId/mirror/commit', async (c) => {
+    let body: CommitBody
+    try {
+      body = (await c.req.json()) as CommitBody
+    } catch {
+      return c.json({ error: 'invalid json body' }, 400)
+    }
+
+    const { uploadId, totalParts, gzip } = body
+    if (!uploadId) return c.json({ error: 'uploadId required' }, 400)
+    if (!Number.isInteger(totalParts) || totalParts < 0) return c.json({ error: 'totalParts must be a non-negative integer' }, 400)
+
+    const meta = await readUploadMeta(uploadId)
+    if (!meta) return c.json({ error: 'upload session not found' }, 404)
+
+    let backupDir: string | undefined
+    let staging: string | undefined
+    try {
+      const extracted = await extractPartsToStaging(uploadId, totalParts, gzip === true)
+      staging = extracted.staging
+
+      const swap = await atomicSwapIntoPlace(extracted.extractedRoot, meta.fullPath)
+      backupDir = swap.backupDir
+
+      const branchName = await safeGitOut(meta.fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+      const head = await safeGitOut(meta.fullPath, ['rev-parse', 'HEAD'])
+
+      if (branchName) updateRepoBranch(db, meta.repoId, branchName.trim())
+      updateLastPulled(db, meta.repoId)
+
+      await discardBackup(backupDir)
+      backupDir = undefined
+      await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+      staging = undefined
+      await deleteUploadSession(uploadId)
+
+      return c.json({
+        repoId: meta.repoId,
+        fullPath: meta.fullPath,
+        branch: branchName?.trim() || null,
+        head: head?.trim() || null,
+        created: meta.created,
+      })
+    } catch (error) {
+      logger.error('mirror commit failed:', error)
+      await restoreBackup(meta.fullPath, backupDir)
+      if (meta.createdRepoId !== undefined) {
+        try { deleteRepo(db, meta.createdRepoId) } catch { /* ignore */ }
+      }
+      if (staging) {
+        await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
+      }
+      await deleteUploadSession(uploadId)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.delete('/:repoId/mirror/uploads/:uploadId', async (c) => {
+    const uploadId = c.req.param('uploadId')
+    const meta = await readUploadMeta(uploadId)
+    if (meta?.createdRepoId !== undefined) {
+      try { deleteRepo(db, meta.createdRepoId) } catch { /* ignore */ }
+    }
+    await deleteUploadSession(uploadId)
+    return c.json({ ok: true })
   })
 
   app.get('/:repoId/mirror', async (c) => {
