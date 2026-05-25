@@ -187,6 +187,20 @@ export function ModelQuickSelect({
       .sort((a, b) => a.label.localeCompare(b.label)) || []
   }, [providersData])
 
+  const filteredAllModels = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    const items = selectedProviderId
+      ? allModels.filter(item => item.providerID === selectedProviderId)
+      : allModels
+
+    if (!query) return items
+
+    return items.filter(item =>
+      item.displayName.toLowerCase().includes(query) ||
+      item.modelID.toLowerCase().includes(query)
+    )
+  }, [allModels, selectedProviderId, searchQuery])
+
   const filteredProviderItems = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
     if (!query) return providerItems
@@ -348,7 +362,7 @@ export function ModelQuickSelect({
         isOpen={isOpen}
         onClose={() => handleOpenChange(false)}
         heightClass="h-[70dvh] max-h-[720px]"
-        className="z-[300] mx-auto max-w-lg rounded-t-2xl border-white/10 bg-zinc-950 text-white shadow-2xl sm:inset-x-auto sm:bottom-6 sm:w-[440px] sm:rounded-2xl sm:border"
+        className="z-[300] border-white/10 bg-zinc-950 text-white shadow-2xl"
         ariaLabel="Select model"
       >
         <div className="flex items-center justify-between px-4 pb-3 pt-0">
@@ -372,36 +386,81 @@ export function ModelQuickSelect({
           </button>
         </div>
 
-        <BottomSheetContent className="px-4 pb-5 pt-0">
-          {showAllModels && (
-            <div className="sticky top-0 z-10 -mx-4 mb-3 space-y-2 border-b border-white/10 bg-zinc-950 px-4 pb-3">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
-                <Input
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder={selectedProviderId ? 'Search models...' : 'Search providers...'}
-                  className="h-9 border-white/10 bg-white/5 pl-9 text-sm text-white placeholder:text-white/40"
-                  autoComplete="off"
-                  name="model-search"
-                />
+        {showAllModels ? (
+          <div className="flex-1 flex overflow-hidden min-h-0">
+            {/* Provider sidebar — desktop only */}
+            <div className="hidden md:flex md:flex-col w-48 lg:w-56 border-r border-white/10 overflow-y-auto flex-shrink-0">
+              <div className="p-3 space-y-1">
+                {providerItems.map(provider => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    onClick={() => handleProviderSelect(provider.id)}
+                    className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                      selectedProviderId === provider.id
+                        ? 'bg-orange-500/20 text-orange-300 font-medium'
+                        : 'text-white/70 hover:bg-white/5'
+                    }`}
+                  >
+                    <div className="truncate">{provider.label}</div>
+                    <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? 'model' : 'models'}</div>
+                  </button>
+                ))}
               </div>
-              <p className="text-xs text-white/45">
-                {selectedProviderId
-                  ? `${filteredSelectedProviderModels.length} ${filteredSelectedProviderModels.length === 1 ? 'model' : 'models'}`
-                  : `${filteredProviderItems.length} ${filteredProviderItems.length === 1 ? 'provider' : 'providers'}`}
-                {searchQuery && ` matching "${searchQuery}"`}
-              </p>
             </div>
-          )}
 
-          {showAllModels ? (
-            <div className="space-y-1">
-              {selectedProviderId
-                ? filteredSelectedProviderModels.map(renderModelOption)
-                : filteredProviderItems.map(renderProviderOption)}
+            {/* Right panel */}
+            <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+              {/* Search bar */}
+              <div className="sticky top-0 z-10 border-b border-white/10 bg-zinc-950 px-4 pb-3 pt-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+                  <Input
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    placeholder={selectedProviderId ? 'Search models...' : 'Search models...'}
+                    className="h-9 border-white/10 bg-white/5 pl-9 text-sm text-white placeholder:text-white/40"
+                    autoComplete="off"
+                    name="model-search"
+                  />
+                </div>
+                <p className="text-xs text-white/45">
+                  <span className="hidden md:inline">{filteredAllModels.length} model{filteredAllModels.length !== 1 ? 's' : ''}</span>
+                  <span className="md:hidden">
+                    {selectedProviderId
+                      ? `${filteredSelectedProviderModels.length} model${filteredSelectedProviderModels.length !== 1 ? 's' : ''}`
+                      : `${filteredProviderItems.length} provider${filteredProviderItems.length !== 1 ? 's' : ''}`}
+                  </span>
+                  {searchQuery && ` matching "${searchQuery}"`}
+                </p>
+              </div>
+
+              {/* Desktop: model grid */}
+              <div className="hidden md:block flex-1 overflow-y-auto px-4 pb-4">
+                <div className="space-y-1">{filteredAllModels.map(renderModelOption)}</div>
+                {filteredAllModels.length === 0 && (
+                  <div className="py-10 text-center text-sm text-white/50">No models found</div>
+                )}
+              </div>
+
+              {/* Mobile: current single-column navigation */}
+              <div className="md:hidden flex-1 overflow-y-auto px-4 pb-4">
+                <div className="space-y-1">
+                  {selectedProviderId
+                    ? filteredSelectedProviderModels.map(renderModelOption)
+                    : filteredProviderItems.map(renderProviderOption)}
+                </div>
+                {selectedProviderId && filteredSelectedProviderModels.length === 0 && (
+                  <div className="py-10 text-center text-sm text-white/50">No models found</div>
+                )}
+                {!selectedProviderId && filteredProviderItems.length === 0 && (
+                  <div className="py-10 text-center text-sm text-white/50">No providers found</div>
+                )}
+              </div>
             </div>
-          ) : (
+          </div>
+        ) : (
+          <BottomSheetContent className="px-4 pb-5 pt-0">
             <div className="space-y-4">
               {selectedModelItem && (
                 <div>
@@ -422,17 +481,6 @@ export function ModelQuickSelect({
                 </section>
               ))}
             </div>
-          )}
-
-          {showAllModels && selectedProviderId && filteredSelectedProviderModels.length === 0 && (
-            <div className="py-10 text-center text-sm text-white/50">No models found</div>
-          )}
-
-          {showAllModels && !selectedProviderId && filteredProviderItems.length === 0 && (
-            <div className="py-10 text-center text-sm text-white/50">No providers found</div>
-          )}
-
-          {!showAllModels ? (
             <button
               type="button"
               onClick={() => setShowAllModels(true)}
@@ -441,8 +489,8 @@ export function ModelQuickSelect({
               <span>More models</span>
               <ChevronRight className="h-5 w-5 text-white/50" />
             </button>
-          ) : null}
-        </BottomSheetContent>
+          </BottomSheetContent>
+        )}
       </BottomSheet>
     </>
   )
