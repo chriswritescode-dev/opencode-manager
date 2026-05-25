@@ -103,6 +103,22 @@ export const GitIdentitySchema = z.object({
 
 export type GitIdentity = z.infer<typeof GitIdentitySchema>;
 
+export const ServerEnvVarSchema = z.object({
+  key: z.string().min(1),
+  value: z.string(),
+});
+
+type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
+
+export const BLOCKED_SERVER_ENV_KEYS = [
+  'OPENCODE_SERVER_PASSWORD',
+  'OPENCODE_SERVER_USERNAME',
+  'OPENCODE_CONFIG',
+  'XDG_DATA_HOME',
+  'XDG_STATE_HOME',
+  'XDG_CONFIG_HOME',
+] as const;
+
 export const DEFAULT_GIT_IDENTITY: GitIdentity = {
   name: 'OpenCode Agent',
   email: '',
@@ -130,6 +146,7 @@ export const UserPreferencesSchema = z.object({
   lastKnownGoodConfig: z.string().optional(),
   repoOrder: z.array(z.number()).optional(),
   repoSortMode: z.enum(['recent', 'manual', 'name']).optional(),
+  serverEnvVars: z.array(ServerEnvVarSchema).optional(),
 });
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
@@ -177,6 +194,7 @@ export const DEFAULT_USER_PREFERENCES = {
   stt: DEFAULT_STT_CONFIG,
   notifications: DEFAULT_NOTIFICATION_PREFERENCES,
   repoSortMode: 'recent' as const,
+  serverEnvVars: [] as ServerEnvVar[],
 };
 
 export const SettingsResponseSchema = z.object({

@@ -1,0 +1,293 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { Hono } from 'hono'
+import { Database } from 'bun:sqlite'
+import { migrate } from '../db/migration-runner'
+import { allMigrations } from '../db/migrations'
+import { createSettingsRoutes } from './settings'
+import type { GitAuthService } from '../services/git-auth'
+import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
+
+interface TestUserPreferenceRow {
+  preferences: string
+  updated_at: number
+}
+
+interface TestMigrationRow {
+  version: number
+  name: string
+  applied_at: number
+}
+
+interface StatementResult {
+  get?: (..._params: unknown[]) => TestUserPreferenceRow | TestMigrationRow | { count: number } | { name: string } | { user_id: string; preferences: string } | undefined
+  run?: (..._params: unknown[]) => { changes: number }
+  all?: () => Array<unknown>
+}
+
+class InMemoryDatabase {
+  private userPreferences = new Map<string, TestUserPreferenceRow>()
+  private schemaMigrations = new Map<number, { name: string; applied_at: number }>()
+
+  private normalizeSql(sql: string): string {
+    return sql.trim().toLowerCase().replace(/\s+/g, ' ')
+  }
+
+  private getMigrationRows(): TestMigrationRow[] {
+    return [...this.schemaMigrations.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([version, value]) => ({
+        version,
+        name: value.name,
+        applied_at: value.applied_at,
+      }))
+  }
+
+  private setUserPreference(userId: string, preferences: string, updatedAt: number): void {
+    this.userPreferences.set(userId, { preferences, updated_at: updatedAt })
+  }
+
+  private createStatement(sql: string): StatementResult {
+    const normalizedSql = this.normalizeSql(sql)
+
+    if (normalizedSql === 'select version from schema_migrations order by version') {
+      return {
+        all: () => this.getMigrationRows(),
+      }
+    }
+
+    if (normalizedSql.startsWith('insert into schema_migrations')) {
+      return {
+        run: (...params: unknown[]) => {
+          const [version, name, appliedAt] = params as [number, string, number]
+          this.schemaMigrations.set(version, { name, applied_at: appliedAt })
+          return { changes: 1 }
+        },
+      }
+    }
+
+    if (normalizedSql === 'select preferences, updated_at from user_preferences where user_id = ?') {
+      return {
+        get: (...params: unknown[]) => {
+          const userId = params[0]
+          if (typeof userId !== 'string') {
+            return undefined
+          }
+          return this.userPreferences.get(userId)
+        },
+      }
+    }
+
+    if (normalizedSql.startsWith('insert into user_preferences')) {
+      return {
+        run: (...params: unknown[]) => {
+          const [userId, preferences, updatedAt] = params as [string, string, number]
+          this.setUserPreference(userId, preferences, updatedAt)
+          return { changes: 1 }
+        },
+      }
+    }
+
+    if (normalizedSql.startsWith('delete from user_preferences where user_id = ?')) {
+      return {
+        run: (...params: unknown[]) => {
+          const userId = params[0]
+          if (typeof userId !== 'string') {
+            return { changes: 0 }
+          }
+          const hadRow = this.userPreferences.delete(userId)
+          return { changes: hadRow ? 1 : 0 }
+        },
+      }
+    }
+
+    if (normalizedSql.startsWith('select user_id, preferences from user_preferences')) {
+      return {
+        all: () => [...this.userPreferences.entries()].map(([user_id, row]) => ({
+          user_id,
+          preferences: row.preferences,
+        })),
+      }
+    }
+
+    if (normalizedSql.startsWith('pragma table_info(') || normalizedSql.includes('select name from sqlite_master')) {
+      return {
+        all: () => [],
+        get: () => undefined,
+      }
+    }
+
+    if (normalizedSql.startsWith('select count(*) as count')) {
+      return {
+        get: () => ({ count: 0 }),
+      }
+    }
+
+    if (
+      normalizedSql.startsWith('create table') ||
+      normalizedSql.startsWith('create index') ||
+      normalizedSql.startsWith('drop table') ||
+      normalizedSql.startsWith('drop index')
+    ) {
+      return {
+        run: () => ({ changes: 0 }),
+      }
+    }
+
+    if (
+      normalizedSql.startsWith('begin transaction') ||
+      normalizedSql.startsWith('commit') ||
+      normalizedSql.startsWith('rollback')
+    ) {
+      return {
+        run: () => ({ changes: 0 }),
+      }
+    }
+
+    return {
+      get: () => undefined,
+      run: () => ({ changes: 0 }),
+      all: () => [],
+    }
+  }
+
+  query(sql: string): StatementResult {
+    return this.createStatement(sql)
+  }
+
+  prepare(sql: string): StatementResult {
+    return this.createStatement(sql)
+  }
+
+  run(sql: string, ...params: unknown[]): { changes: number } {
+    const statement = this.createStatement(sql)
+    return statement.run ? statement.run(...params) : { changes: 0 }
+  }
+
+  close() {
+    this.userPreferences.clear()
+    this.schemaMigrations.clear()
+  }
+}
+
+vi.mock('bun:sqlite', () => ({
+  Database: class {
+    private db = new InMemoryDatabase()
+
+    query(sql: string) {
+      return this.db.query(sql)
+    }
+
+    prepare(sql: string) {
+      return this.db.prepare(sql)
+    }
+
+    run(sql: string, ...params: unknown[]) {
+      return this.db.run(sql, ...params)
+    }
+
+    close() {
+      return this.db.close()
+    }
+
+    exec(sql: string) {
+      return this.db.run(sql)
+    }
+  },
+}))
+
+const mockGitAuthService = {
+  getGitEnvironment: () => ({}),
+} as unknown as GitAuthService
+
+function createTestDb(): Database {
+  const db = new Database(':memory:')
+  migrate(db, allMigrations)
+  return db
+}
+
+function createTestApp(db: Database): Hono {
+  const app = new Hono()
+  app.route('/settings', createSettingsRoutes(db, mockGitAuthService, createStubOpenCodeClient()))
+  return app
+}
+
+describe('settings routes — serverEnvVars', () => {
+  let db: Database
+  let app: Hono
+  let originalWorkspacePath: string | undefined
+
+  beforeEach(() => {
+    db = createTestDb()
+    app = createTestApp(db)
+    originalWorkspacePath = process.env.WORKSPACE_PATH
+    process.env.WORKSPACE_PATH = '/tmp/test-workspace-settings-routes'
+  })
+
+  afterEach(() => {
+    if (originalWorkspacePath) {
+      process.env.WORKSPACE_PATH = originalWorkspacePath
+    } else {
+      delete process.env.WORKSPACE_PATH
+    }
+    db.close()
+  })
+
+  it('GET / returns empty serverEnvVars by default', async () => {
+    const res = await app.request('/settings')
+
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { preferences: { serverEnvVars?: Array<{ key: string; value: string }> } }
+    expect(data.preferences.serverEnvVars).toEqual([])
+  })
+
+  it('PATCH / saves and returns serverEnvVars', async () => {
+    const patchRes = await app.request('/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        preferences: {
+          serverEnvVars: [
+            {
+              key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
+              value: 'true',
+            },
+          ],
+        },
+      }),
+    })
+
+    expect(patchRes.status).toBe(200)
+    const data = (await patchRes.json()) as { preferences: { serverEnvVars: Array<{ key: string; value: string }> } }
+    expect(data.preferences.serverEnvVars).toEqual([
+      {
+        key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
+        value: 'true',
+      },
+    ])
+  })
+
+  it('PATCH / persists serverEnvVars and returns on GET', async () => {
+    await app.request('/settings', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        preferences: {
+          serverEnvVars: [{
+            key: 'MY_FLAG',
+            value: '1',
+          }],
+        },
+      }),
+    })
+
+    const res = await app.request('/settings')
+    const data = (await res.json()) as { preferences: { serverEnvVars: Array<{ key: string; value: string }> } }
+
+    expect(data.preferences.serverEnvVars).toEqual([
+      {
+        key: 'MY_FLAG',
+        value: '1',
+      },
+    ])
+  })
+})

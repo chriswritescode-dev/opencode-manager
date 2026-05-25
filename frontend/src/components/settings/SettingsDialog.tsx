@@ -5,6 +5,7 @@ import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
 import { OpenCodeConfigManager } from '@/components/settings/OpenCodeConfigManager'
 import { OpenCodeServerAuthSettings } from '@/components/settings/OpenCodeServerAuthSettings'
 import { ManagerTokenSettings } from '@/components/settings/ManagerTokenSettings'
+import { ServerEnvVarsSettings } from '@/components/settings/ServerEnvVarsSettings'
 import { ServerHealthStatus } from '@/components/settings/ServerHealthStatus'
 import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
@@ -163,6 +164,7 @@ export function SettingsDialog() {
                       <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                     </div>
+                    <ServerEnvVarsSettings />
                     <OpenCodeConfigManager hideHealthStatus />
                   </div>
                 </TabsContent>
@@ -228,14 +230,15 @@ export function SettingsDialog() {
              {mobileView === 'voice' && <div key="voice"><VoiceSettings /></div>}
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
-               {mobileView === 'opencode' && (
-                 <div key="opencode" className="space-y-6">
-                   <ServerHealthStatus />
-                   <OpenCodeServerAuthSettings />
-                   <ManagerTokenSettings />
-                   <OpenCodeConfigManager hideHealthStatus />
-                 </div>
-               )}
+                {mobileView === 'opencode' && (
+                  <div key="opencode" className="space-y-6">
+                    <ServerHealthStatus />
+                    <OpenCodeServerAuthSettings />
+                    <ManagerTokenSettings />
+                    <ServerEnvVarsSettings />
+                    <OpenCodeConfigManager hideHealthStatus />
+                  </div>
+                )}
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
            </div>
         </div>

@@ -9,6 +9,7 @@ import {
   CreateOpenCodeConfigRequestSchema,
   UpdateOpenCodeConfigRequestSchema,
   OpenCodeConfigResponseSchema,
+  ServerEnvVarSchema,
 } from '../schemas/settings'
 import {
   RepoSchema,
@@ -51,6 +52,7 @@ export type UserPreferences = z.infer<typeof UserPreferencesSchema>
 export type SettingsResponse = z.infer<typeof SettingsResponseSchema>
 export type UpdateSettingsRequest = z.infer<typeof UpdateSettingsRequestSchema>
 export type CustomCommand = z.infer<typeof CustomCommandSchema>
+export type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
 export type OpenCodeConfig = z.infer<typeof OpenCodeConfigMetadataSchema>
 export type OpenCodeConfigInput = z.infer<typeof OpenCodeConfigSchema>
 export type CreateOpenCodeConfigRequest = z.infer<typeof CreateOpenCodeConfigRequestSchema>
@@ -90,6 +92,7 @@ export type AssistantSettingsPatch = z.infer<typeof AssistantSettingsPatchSchema
 
 export { FetchError } from './errors'
 export type { ApiErrorResponse, ApiErrorCode, GitErrorCode } from './errors'
+export { BLOCKED_SERVER_ENV_KEYS } from '../schemas/settings'
 
 export interface SuccessResponse {
   success: boolean
