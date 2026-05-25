@@ -11,23 +11,36 @@ interface AgentInfo {
   hidden?: boolean
 }
 
+const getPrimaryAgents = (agents: AgentInfo[] | undefined): AgentInfo[] => {
+  return agents?.filter(
+    (agent) => (agent.mode === 'primary' || agent.mode === 'all') && !agent.hidden
+  ) ?? []
+}
+
+const resolveAvailableAgentName = (
+  agentName: string | undefined,
+  agents: AgentInfo[] | undefined,
+  agentsLoaded: boolean
+): string | undefined => {
+  if (!agentName) return undefined
+  if (!agentsLoaded) return agentName
+
+  const normalizedAgentName = agentName.toLowerCase()
+  return getPrimaryAgents(agents).find(
+    (agent) => agent.name.toLowerCase() === normalizedAgentName
+  )?.name
+}
+
 export function resolveDefaultSessionAgent(
   configDefaultAgent: string | undefined,
   agents: AgentInfo[] | undefined,
   agentsLoaded: boolean
 ): string {
-  const primaryAgents = agents?.filter(
-    (agent) => (agent.mode === 'primary' || agent.mode === 'all') && !agent.hidden
-  ) ?? []
+  const primaryAgents = getPrimaryAgents(agents)
 
-  if (configDefaultAgent) {
-    const normalizedConfig = configDefaultAgent.toLowerCase()
-    const configInPrimary = primaryAgents.some(
-      (agent) => agent.name.toLowerCase() === normalizedConfig
-    )
-    if (!agentsLoaded || configInPrimary) {
-      return configDefaultAgent
-    }
+  const resolvedConfigAgent = resolveAvailableAgentName(configDefaultAgent, agents, agentsLoaded)
+  if (resolvedConfigAgent) {
+    return resolvedConfigAgent
   }
 
   if (agentsLoaded && primaryAgents.length > 0) {
@@ -87,10 +100,11 @@ export function useSessionAgent(
       }
     }
 
-    if (latestAgent) {
+    const resolvedLatestAgent = resolveAvailableAgentName(latestAgent, agents, agentsLoaded)
+    if (resolvedLatestAgent) {
       const prev = prevRef.current
       if (
-        prev.agent === latestAgent &&
+        prev.agent === resolvedLatestAgent &&
         prev.variant === latestVariant &&
         prev.model?.providerID === latestModel?.providerID &&
         prev.model?.modelID === latestModel?.modelID
@@ -99,7 +113,7 @@ export function useSessionAgent(
       }
 
       const next: SessionAgentResult = {
-        agent: latestAgent,
+        agent: resolvedLatestAgent,
         model: latestModel,
         variant: latestVariant,
         fromMessage: true,
@@ -108,10 +122,11 @@ export function useSessionAgent(
       return next
     }
 
-    if (storedAgent) {
+    const resolvedStoredAgent = resolveAvailableAgentName(storedAgent, agents, agentsLoaded)
+    if (resolvedStoredAgent) {
       const prev = prevRef.current
       if (
-        prev.agent === storedAgent &&
+        prev.agent === resolvedStoredAgent &&
         prev.variant === latestVariant &&
         prev.model?.providerID === latestModel?.providerID &&
         prev.model?.modelID === latestModel?.modelID
@@ -119,13 +134,13 @@ export function useSessionAgent(
         return { ...prev, fromMessage: false }
       }
 
-      const next: SessionAgentResult = { agent: storedAgent, model: latestModel, variant: latestVariant, fromMessage: false }
+      const next: SessionAgentResult = { agent: resolvedStoredAgent, model: latestModel, variant: latestVariant, fromMessage: false }
       prevRef.current = next
       return next
     }
 
     return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
-  }, [messages, messagesLoading, messagesFetching, storedAgent, defaultAgent])
+  }, [messages, messagesLoading, messagesFetching, storedAgent, defaultAgent, agents, agentsLoaded])
 
   useEffect(() => {
     if (result.agent && sessionID && result.fromMessage) {
