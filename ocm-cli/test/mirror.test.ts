@@ -298,7 +298,7 @@ describe('mirrorDown', () => {
   })
 })
 
-describe('mirrorUp with gitignore', () => {
+describe('mirrorUp chunked upload', () => {
   let tmpDir: string
 
   beforeEach(() => {
@@ -309,70 +309,106 @@ describe('mirrorUp with gitignore', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('excludes gitignored files from tar stream', async () => {
-    const repoRoot = join(tmpDir, 'repo-up-gitignore')
+  function makeMockApi(opts: { partFailures?: Record<number, number>; chunkSize?: number } = {}) {
+    const partsReceived: Buffer[] = []
+    const partFailures: Record<number, number> = opts.partFailures ?? {}
+    const chunkSize = opts.chunkSize ?? 8 * 1024 * 1024
+    let committed = false
+    let commitTotalParts = 0
+    const api = {
+      mirrorBegin: vi.fn().mockResolvedValue({ uploadId: 'upload-1', repoId: 1, chunkSize, created: false }),
+      mirrorUploadPart: vi.fn().mockImplementation(async (_repoId: number, _uploadId: string, index: number, chunk: Buffer) => {
+        if (partFailures[index] && partFailures[index] > 0) {
+          partFailures[index] -= 1
+          throw new Error(`simulated transient failure on part ${index}`)
+        }
+        partsReceived[index] = Buffer.from(chunk)
+      }),
+      mirrorCommit: vi.fn().mockImplementation(async (_repoId: number, _uploadId: string, totalParts: number) => {
+        committed = true
+        commitTotalParts = totalParts
+        return { repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }
+      }),
+      mirrorAbort: vi.fn().mockResolvedValue(undefined),
+    }
+    return {
+      api,
+      partsReceived,
+      get committed() { return committed },
+      get commitTotalParts() { return commitTotalParts },
+    }
+  }
+
+  it('uploads a small repo as a single part and commits', async () => {
+    const repoRoot = join(tmpDir, 'repo-small')
     mkdirSync(repoRoot)
     spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
-
     writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
-    writeFileSync(join(repoRoot, 'secrets.env'), 'SECRET_KEY=abc123')
-    writeFileSync(join(repoRoot, '.gitignore'), 'secrets.env\n')
 
-    const mockApi = {
-      mirrorUp: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: 'abc123', created: false }),
-    } as any
-
+    const ctx = makeMockApi()
     const plan = {
       repoRoot,
       localOrigin: 'https://github.com/test/repo.git',
       matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: mockApi, force: false })
+    await mirrorUp(plan, { api: ctx.api as any, force: false })
 
-    expect(mockApi.mirrorUp).toHaveBeenCalledTimes(1)
-    expect(mockApi.mirrorUp.mock.calls[0][0]).toBe(1)
-
-    const opts = mockApi.mirrorUp.mock.calls[0][2]
-    expect(opts.force).toBe(false)
+    expect(ctx.api.mirrorBegin).toHaveBeenCalledTimes(1)
+    expect(ctx.api.mirrorUploadPart).toHaveBeenCalled()
+    expect(ctx.api.mirrorCommit).toHaveBeenCalledTimes(1)
+    expect(ctx.committed).toBe(true)
+    expect(ctx.commitTotalParts).toBeGreaterThan(0)
   })
 
-  it('excludes node_modules from tar stream', async () => {
-    const repoRoot = join(tmpDir, 'repo-up-node-modules')
+  it('splits a tarball larger than chunkSize across multiple parts', async () => {
+    const repoRoot = join(tmpDir, 'repo-multi')
     mkdirSync(repoRoot)
     spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.bin'), Buffer.alloc(200 * 1024, 0xab))
+    writeFileSync(join(repoRoot, 'b.bin'), Buffer.alloc(200 * 1024, 0xcd))
 
-    writeFileSync(join(repoRoot, 'file.txt'), 'content')
-    mkdirSync(join(repoRoot, 'node_modules'))
-    writeFileSync(join(repoRoot, 'node_modules', 'dep.js'), 'dep content')
-
-    const mockApi = {
-      mirrorUp: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: 'abc123', created: false }),
-    } as any
-
+    const ctx = makeMockApi({ chunkSize: 128 * 1024 })
     const plan = {
       repoRoot,
       localOrigin: 'https://github.com/test/repo.git',
       matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: mockApi, force: false })
+    await mirrorUp(plan, { api: ctx.api as any, force: false })
 
-    expect(mockApi.mirrorUp).toHaveBeenCalledTimes(1)
-    expect(mockApi.mirrorUp.mock.calls[0][0]).toBe(1)
-    expect(mockApi.mirrorUp.mock.calls[0][2].force).toBe(false)
+    expect(ctx.api.mirrorUploadPart.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(ctx.commitTotalParts).toBe(ctx.api.mirrorUploadPart.mock.calls.length)
   })
 
-  it('does not create exclude file when no gitignored paths exist', async () => {
-    const repoRoot = join(tmpDir, 'repo-up-no-ignore')
+  it('retries a failing part and still commits', async () => {
+    const repoRoot = join(tmpDir, 'repo-retry')
     mkdirSync(repoRoot)
     spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
 
-    writeFileSync(join(repoRoot, 'file.txt'), 'content')
+    const ctx = makeMockApi({ partFailures: { 0: 2 }, chunkSize: 64 * 1024 })
+    const plan = {
+      repoRoot,
+      localOrigin: 'https://github.com/test/repo.git',
+      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+    }
 
-    const mockApi = {
-      mirrorUp: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: 'abc123', created: false }),
-    } as any
+    await mirrorUp(plan, { api: ctx.api as any, force: false })
+
+    const part0Calls = ctx.api.mirrorUploadPart.mock.calls.filter((c) => c[2] === 0)
+    expect(part0Calls.length).toBe(3)
+    expect(ctx.committed).toBe(true)
+  })
+
+  it('aborts the upload session if commit fails terminally', async () => {
+    const repoRoot = join(tmpDir, 'repo-abort')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
+
+    const ctx = makeMockApi()
+    ctx.api.mirrorCommit.mockRejectedValueOnce(new Error('boom'))
 
     const plan = {
       repoRoot,
@@ -380,11 +416,7 @@ describe('mirrorUp with gitignore', () => {
       matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
     }
 
-    await mirrorUp(plan, { api: mockApi, force: false })
-
-    expect(mockApi.mirrorUp).toHaveBeenCalledTimes(1)
-    expect(mockApi.mirrorUp.mock.calls[0][0]).toBe(1)
-    const opts = mockApi.mirrorUp.mock.calls[0][2]
-    expect(opts.force).toBe(false)
+    await expect(mirrorUp(plan, { api: ctx.api as any, force: false })).rejects.toThrow('boom')
+    expect(ctx.api.mirrorAbort).toHaveBeenCalledWith(1, 'upload-1')
   })
 })
