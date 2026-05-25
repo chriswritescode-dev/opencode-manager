@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useConfig } from './useOpenCode'
 import { useOpenCodeClient } from './useOpenCode'
 import { useModelStore, modelExists, type ModelSelection } from '@/stores/modelStore'
-import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, toggleOpenCodeFavoriteModel } from '@/api/providers'
+import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel } from '@/api/providers'
 
 interface UseModelSelectionResult {
   model: ModelSelection | null
@@ -14,6 +14,7 @@ interface UseModelSelectionResult {
   setActiveModel: (model: ModelSelection) => boolean
   restoreSessionModel: (model: ModelSelection) => void
   toggleFavorite: (model: ModelSelection) => void
+  removeRecentModel: (model: ModelSelection) => void
   isModelStateLoading: boolean
 }
 
@@ -75,6 +76,18 @@ export function useModelSelection(
     },
   })
 
+  const removeRecentMutation = useMutation({
+    mutationFn: removeOpenCodeRecentModel,
+    onSuccess: (state) => {
+      syncModelState(state)
+      queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
+      queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
+    },
+    onError: (error) => {
+      console.error('Failed to remove recent model on backend', error)
+    },
+  })
+
   const providers = providersData?.providers
 
   const recentModels = useMemo(() => {
@@ -133,6 +146,10 @@ export function useModelSelection(
     updateFavoriteModel.mutate(nextModel)
   }
 
+  const removeRecentModel = (nextModel: ModelSelection) => {
+    removeRecentMutation.mutate(nextModel)
+  }
+
   return {
     model,
     modelString: getModelString(),
@@ -142,6 +159,7 @@ export function useModelSelection(
     setActiveModel,
     restoreSessionModel,
     toggleFavorite,
+    removeRecentModel,
     isModelStateLoading,
   }
 }

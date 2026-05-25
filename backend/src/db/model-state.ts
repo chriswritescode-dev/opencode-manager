@@ -81,6 +81,30 @@ export function addRecentOpenCodeModel(
   return insertMany()
 }
 
+export function removeRecentOpenCodeModel(
+  db: Database,
+  model: ModelSelectionRecord,
+  userId = 'default',
+): OpenCodeModelStateRecord {
+  const remove = db.transaction(() => {
+    const current = getOpenCodeModelState(db, userId)
+    const updated = current.recent.filter(
+      m => m.providerID !== model.providerID || m.modelID !== model.modelID,
+    )
+    const now = Date.now()
+
+    db.prepare(`
+      INSERT INTO opencode_model_state(user_id, recent, favorite, variant, updated_at)
+      VALUES(?,?,?,?,?)
+      ON CONFLICT(user_id) DO UPDATE SET recent=excluded.recent, updated_at=excluded.updated_at
+    `).run(userId, JSON.stringify(updated), JSON.stringify(current.favorite), JSON.stringify(current.variant), now)
+
+    return { recent: updated, favorite: current.favorite, variant: current.variant }
+  })
+
+  return remove()
+}
+
 export function toggleFavoriteOpenCodeModel(
   db: Database,
   model: ModelSelectionRecord,
