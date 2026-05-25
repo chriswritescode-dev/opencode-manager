@@ -3,7 +3,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import { useConfig } from './useOpenCode'
 import { useOpenCodeClient } from './useOpenCode'
 import { useModelStore, modelExists, type ModelSelection } from '@/stores/modelStore'
-import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel } from '@/api/providers'
+import { addOpenCodeRecentModel, getOpenCodeModelState, getProviders, removeOpenCodeRecentModel, toggleOpenCodeFavoriteModel, type OpenCodeModelState } from '@/api/providers'
 
 interface UseModelSelectionResult {
   model: ModelSelection | null
@@ -19,6 +19,10 @@ interface UseModelSelectionResult {
 }
 
 const modelStateQueryKey = ['opencode', 'model-state']
+
+const isSameModel = (left: ModelSelection, right: ModelSelection) => (
+  left.providerID === right.providerID && left.modelID === right.modelID
+)
 
 export function useModelSelection(
   opcodeUrl: string | null | undefined,
@@ -78,12 +82,32 @@ export function useModelSelection(
 
   const removeRecentMutation = useMutation({
     mutationFn: removeOpenCodeRecentModel,
+    onMutate: async (removedModel) => {
+      const queryKey = [...modelStateQueryKey, opcodeUrl, directory]
+      await queryClient.cancelQueries({ queryKey })
+      const previousState = queryClient.getQueryData<OpenCodeModelState>(queryKey)
+
+      if (previousState) {
+        const nextState: OpenCodeModelState = {
+          ...previousState,
+          recent: previousState.recent.filter((model) => !isSameModel(model, removedModel)),
+        }
+        queryClient.setQueryData(queryKey, nextState)
+        syncModelState(nextState)
+      }
+
+      return { previousState }
+    },
     onSuccess: (state) => {
       syncModelState(state)
       queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], state)
       queryClient.invalidateQueries({ queryKey: [...modelStateQueryKey, opcodeUrl, directory] })
     },
-    onError: (error) => {
+    onError: (error, _removedModel, context) => {
+      if (context?.previousState) {
+        syncModelState(context.previousState)
+        queryClient.setQueryData([...modelStateQueryKey, opcodeUrl, directory], context.previousState)
+      }
       console.error('Failed to remove recent model on backend', error)
     },
   })

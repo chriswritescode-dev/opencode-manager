@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useModelSelection } from './useModelSelection'
 import { useModelStore, type ModelSelection } from '@/stores/modelStore'
@@ -30,6 +30,7 @@ vi.mock('@/api/providers', async () => {
     getProviders: vi.fn(),
     getOpenCodeModelState: vi.fn(),
     addOpenCodeRecentModel: vi.fn(),
+    removeOpenCodeRecentModel: vi.fn(),
     toggleOpenCodeFavoriteModel: vi.fn(),
   }
 })
@@ -47,6 +48,7 @@ const mockUseOpenCodeClient = vi.mocked(useOpenCodeExports.useOpenCodeClient)
 const mockGetProviders = vi.mocked(providersApi.getProviders)
 const mockGetOpenCodeModelState = vi.mocked(providersApi.getOpenCodeModelState)
 const mockAddOpenCodeRecentModel = vi.mocked(providersApi.addOpenCodeRecentModel)
+const mockRemoveOpenCodeRecentModel = vi.mocked(providersApi.removeOpenCodeRecentModel)
 const mockToggleOpenCodeFavoriteModel = vi.mocked(providersApi.toggleOpenCodeFavoriteModel)
 
 describe('useModelSelection', () => {
@@ -68,6 +70,11 @@ describe('useModelSelection', () => {
       variant: {},
     })
     mockAddOpenCodeRecentModel.mockResolvedValue({
+      recent: [],
+      favorite: [],
+      variant: {},
+    })
+    mockRemoveOpenCodeRecentModel.mockResolvedValue({
       recent: [],
       favorite: [],
       variant: {},
@@ -281,6 +288,42 @@ describe('useModelSelection', () => {
     })
     expect(mockToggleOpenCodeFavoriteModel.mock.calls[0][0]).toEqual(testModel)
     expect(useModelStore.getState().model).not.toEqual(testModel)
+  })
+
+  it('removes recent models optimistically and rolls back on failure', async () => {
+    const removedModel: ModelSelection = { providerID: 'anthropic', modelID: 'claude-sonnet-4' }
+    const retainedModel: ModelSelection = { providerID: 'openai', modelID: 'gpt-4.1' }
+    let rejectRemove: (error: Error) => void = () => {}
+    mockGetOpenCodeModelState.mockResolvedValue({
+      recent: [removedModel, retainedModel],
+      favorite: [],
+      variant: {},
+    })
+    mockRemoveOpenCodeRecentModel.mockImplementation(() => new Promise((_, reject) => {
+      rejectRemove = reject
+    }))
+
+    const { result } = renderHookWithProviders()
+
+    await waitFor(() => {
+      expect(result.current.recentModels).toEqual([removedModel, retainedModel])
+    })
+
+    act(() => {
+      result.current.removeRecentModel(removedModel)
+    })
+
+    await waitFor(() => {
+      expect(result.current.recentModels).toEqual([retainedModel])
+    })
+
+    act(() => {
+      rejectRemove(new Error('remove failed'))
+    })
+
+    await waitFor(() => {
+      expect(result.current.recentModels).toEqual([removedModel, retainedModel])
+    })
   })
 
   it('user selection still updates recents', async () => {
