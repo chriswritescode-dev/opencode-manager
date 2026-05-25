@@ -19,6 +19,7 @@ export default defineConfig({
       'test/routes/internal-repos.test.ts',
       'src/db/model-state.test.ts',
       'src/routes/providers.test.ts',
+      'src/routes/repos.test.ts',
     ],
     coverage: {
       provider: 'v8',

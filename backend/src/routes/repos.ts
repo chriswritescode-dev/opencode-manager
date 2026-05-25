@@ -194,6 +194,22 @@ app.get('/', async (c) => {
     }
   })
 
+  app.get('/:id/siblings', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+      const siblings = await repoService.getSiblingRepos(
+        database,
+        id,
+        gitAuthService.getGitEnvironment(),
+      )
+      return c.json(siblings)
+    } catch (error: unknown) {
+      logger.error('Failed to list sibling repos:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
   app.post('/:id/access', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))

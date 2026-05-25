@@ -11,8 +11,10 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
+import { useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
+import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +44,8 @@ export function RepoDetail() {
   });
 
   useRepoActivity(repoId, Boolean(repo));
+
+  const { data: siblings } = useRepoSiblings(repoId);
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
@@ -136,6 +140,8 @@ export function RepoDetail() {
           </Button>
         </Header.Actions>
       </Header>
+
+      <WorktreeTabs siblings={siblings ?? []} activeRepoId={repoId} />
 
       <div className="flex-1 flex flex-col min-h-0">
         {opcodeUrl && repoDirectory && (

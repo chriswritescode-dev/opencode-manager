@@ -13,6 +13,9 @@ import path from 'path'
 import { parseSSHHost } from '../utils/ssh-key-manager'
 import { getErrorMessage } from '../utils/error-utils'
 import { sseAggregator } from './sse-aggregator'
+import { resolveProjectId } from './project-id-resolver'
+import { listRepos } from '../db/queries'
+import { SettingsService } from './settings'
 
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
@@ -1087,4 +1090,39 @@ export function isRepoInUse(db: Database, repoId: number): boolean {
   }
 
   return sseAggregator.getActiveDirectories().includes(repo.fullPath)
+}
+
+export async function getSiblingRepos(
+  database: Database,
+  repoId: number,
+  gitEnv: Record<string, string>,
+): Promise<Array<Repo & { currentBranch: string | undefined }>> {
+  const settingsService = new SettingsService(database)
+  const settings = settingsService.getSettings()
+  const allRepos = listRepos(database, settings.preferences.repoOrder)
+
+  const target = allRepos.find((r) => r.id === repoId)
+  if (!target || target.cloneStatus !== 'ready') return []
+
+  const targetProjectId = await resolveProjectId(target.fullPath)
+  if (!targetProjectId) return []
+
+  const ready = allRepos.filter((r) => r.cloneStatus === 'ready')
+  const withProjectIds = await Promise.all(
+    ready.map(async (repo) => ({
+      repo,
+      projectId: await resolveProjectId(repo.fullPath).catch(() => null),
+    })),
+  )
+
+  const matching = withProjectIds
+    .filter((entry) => entry.projectId === targetProjectId)
+    .map((entry) => entry.repo)
+
+  return Promise.all(
+    matching.map(async (repo) => ({
+      ...repo,
+      currentBranch: (await getCurrentBranch(repo, gitEnv)) ?? undefined,
+    })),
+  )
 }
