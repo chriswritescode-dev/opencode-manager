@@ -7,6 +7,7 @@ import { createRepoRoutes } from './repos'
 import { createRepo } from '../db/queries'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import type { GitAuthService } from '../services/git-auth'
+import type { OpenCodeClient } from '../services/opencode/client'
 
 beforeEach(() => {
   mock.module('../services/project-id-resolver', () => ({
@@ -23,7 +24,9 @@ const stubGitAuthService = {
   getGitCredentials: async () => [],
 } as unknown as GitAuthService
 
-function createTestApp(db: Database): Hono {
+function createTestApp(db: Database, openCodeClient: OpenCodeClient = createStubOpenCodeClient({
+  getJson: mock(async () => []) as any,
+})): Hono {
   const app = new Hono()
   const scheduleService = {
     createSchedule: () => {},
@@ -32,7 +35,7 @@ function createTestApp(db: Database): Hono {
     updateSchedule: () => {},
     deleteSchedule: () => {},
   } as any
-  app.route('/repos', createRepoRoutes(db, stubGitAuthService, scheduleService, createStubOpenCodeClient()))
+  app.route('/repos', createRepoRoutes(db, stubGitAuthService, scheduleService, openCodeClient))
   return app
 }
 
@@ -67,7 +70,35 @@ describe('GET /api/repos/:id/siblings', () => {
     expect(res.status).toBe(200)
     const data = await res.json() as Array<{ id: number; currentBranch: string | null | undefined }>
     expect(data).toHaveLength(3)
-    expect(data.map((d) => d.id)).toEqual([1, 2, 3])
+    expect(data.map((d) => d.id).sort((a, b) => a - b)).toEqual([1, 2, 3])
+  })
+
+  it('includes OpenCode workspaces that are not manager repo rows', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+    }))
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    app = createTestApp(db, createStubOpenCodeClient({
+      getJson: mock(async () => ([{
+        id: 'wrk_test',
+        type: 'worktree',
+        name: 'plugin-workspace',
+        branch: 'plugin-branch',
+        directory: '/tmp/plugin-workspace',
+        projectID: 'commit-A',
+      }])) as any,
+    }))
+
+    const res = await app.request('/repos/1/siblings')
+    expect(res.status).toBe(200)
+    const data = await res.json() as Array<{ id: number; workspaceId?: string; currentBranch?: string }>
+    expect(data).toHaveLength(2)
+    expect(data[1]).toMatchObject({
+      id: -1,
+      workspaceId: 'wrk_test',
+      currentBranch: 'plugin-branch',
+    })
   })
 
   it('excludes repos with non-matching projectID', async () => {
@@ -129,5 +160,35 @@ describe('GET /api/repos/:id/siblings', () => {
     expect(res.status).toBe(400)
     const data = await res.json() as { error: string }
     expect(data.error).toBe('Invalid repo id')
+  })
+})
+
+describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
+  let db: Database
+  let captured: { path: string; directory?: string } | null
+
+  beforeEach(() => {
+    db = createTestDb()
+    captured = null
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  it('forwards workspace delete to OpenCode with repo directory', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const app = createTestApp(db, createStubOpenCodeClient({
+      forward: mock(async (req) => {
+        captured = { path: req.path, directory: req.directory }
+        return new Response(JSON.stringify({ id: 'wrk_test' }), { status: 200 })
+      }) as any,
+    }))
+
+    const res = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
+
+    expect(res.status).toBe(200)
+    expect(captured?.path).toBe('/experimental/workspace/wrk_test')
+    expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
   })
 })

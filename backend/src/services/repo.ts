@@ -16,6 +16,7 @@ import { sseAggregator } from './sse-aggregator'
 import { resolveProjectId } from './project-id-resolver'
 import { listRepos } from '../db/queries'
 import { SettingsService } from './settings'
+import type { OpenCodeClient } from './opencode/client'
 
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
@@ -1096,6 +1097,7 @@ export async function getSiblingRepos(
   database: Database,
   repoId: number,
   gitEnv: Record<string, string>,
+  openCodeClient?: OpenCodeClient,
 ): Promise<Array<Repo & { currentBranch: string | undefined }>> {
   const settingsService = new SettingsService(database)
   const settings = settingsService.getSettings()
@@ -1119,10 +1121,49 @@ export async function getSiblingRepos(
     .filter((entry) => entry.projectId === targetProjectId)
     .map((entry) => entry.repo)
 
-  return Promise.all(
+  const repoSiblings = await Promise.all(
     matching.map(async (repo) => ({
       ...repo,
       currentBranch: (await getCurrentBranch(repo, gitEnv)) ?? undefined,
     })),
   )
+
+  if (!openCodeClient) return repoSiblings
+
+  try {
+    const workspaces = await openCodeClient.getJson<Array<{
+      id: string
+      type: string
+      name: string | null
+      branch: string | null
+      directory: string | null
+      projectID: string
+    }>>('/experimental/workspace', { directory: target.fullPath })
+
+    const knownDirectories = new Set(repoSiblings.map((repo) => repo.fullPath))
+    const workspaceSiblings = workspaces
+      .filter((workspace) => workspace.projectID === targetProjectId && workspace.directory && !knownDirectories.has(workspace.directory))
+      .map((workspace) => ({
+        id: -1,
+        repoUrl: target.repoUrl,
+        localPath: workspace.name ?? workspace.id,
+        fullPath: workspace.directory!,
+        sourcePath: workspace.directory!,
+        branch: workspace.branch ?? undefined,
+        defaultBranch: target.defaultBranch,
+        cloneStatus: 'ready' as const,
+        clonedAt: Date.now(),
+        isWorktree: true,
+        isLocal: true,
+        currentBranch: workspace.branch ?? undefined,
+        workspaceId: workspace.id,
+        workspaceType: workspace.type,
+        workspaceName: workspace.name ?? undefined,
+      }))
+
+    return [...repoSiblings, ...workspaceSiblings]
+  } catch (error) {
+    logger.warn('Failed to list OpenCode workspaces:', error)
+    return repoSiblings
+  }
 }

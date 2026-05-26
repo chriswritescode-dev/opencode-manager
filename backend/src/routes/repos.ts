@@ -202,6 +202,7 @@ app.get('/', async (c) => {
         database,
         id,
         gitAuthService.getGitEnvironment(),
+        openCodeClient,
       )
       return c.json(siblings)
     } catch (error: unknown) {
@@ -224,6 +225,34 @@ app.get('/', async (c) => {
       return c.json({ success: true })
     } catch (error: unknown) {
       logger.error('Failed to update repo access:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.delete('/:id/workspaces/:workspaceId', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+
+      const repo = getRepoById(database, id)
+      if (!repo || repo.cloneStatus !== 'ready') return c.json({ error: 'Repo not found' }, 404)
+
+      const workspaceId = c.req.param('workspaceId')
+      if (!workspaceId.startsWith('wrk')) return c.json({ error: 'Invalid workspace id' }, 400)
+
+      const response = await openCodeClient.forward({
+        method: 'DELETE',
+        path: `/experimental/workspace/${encodeURIComponent(workspaceId)}`,
+        directory: repo.fullPath,
+      })
+
+      if (!response.ok) {
+        return c.json({ error: await response.text() || 'Failed to delete workspace' }, response.status as ContentfulStatusCode)
+      }
+
+      return c.json({ success: true })
+    } catch (error: unknown) {
+      logger.error('Failed to delete workspace:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })

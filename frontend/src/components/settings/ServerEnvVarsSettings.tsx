@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ChevronDown, Plus, Trash2, RotateCcw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { showToast } from '@/lib/toast'
-import { BLOCKED_SERVER_ENV_KEYS } from '@/api/types/settings'
+import { BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS } from '@/api/types/settings'
 
 interface EnvVar {
   key: string
@@ -17,11 +18,13 @@ export function ServerEnvVarsSettings() {
   const { preferences, updateSettingsAsync, isUpdating } = useSettings()
   const [isOpen, setIsOpen] = useState(false)
   const [envVars, setEnvVars] = useState<EnvVar[]>([])
+  const [disabledDefaultKeys, setDisabledDefaultKeys] = useState<string[]>([])
   const [needsRestart, setNeedsRestart] = useState(false)
 
   useEffect(() => {
     setEnvVars(preferences?.serverEnvVars ?? [])
-  }, [preferences?.serverEnvVars])
+    setDisabledDefaultKeys(preferences?.disabledDefaultServerEnvVars ?? [])
+  }, [preferences?.disabledDefaultServerEnvVars, preferences?.serverEnvVars])
 
   const blockedSet = useMemo(() => new Set<string>(BLOCKED_SERVER_ENV_KEYS), [])
 
@@ -31,6 +34,15 @@ export function ServerEnvVarsSettings() {
       .filter((key) => key.length > 0 && blockedSet.has(key)),
     [envVars, blockedSet],
   )
+
+  const disabledDefaultSet = useMemo(() => new Set(disabledDefaultKeys), [disabledDefaultKeys])
+  const enabledDefaultCount = DEFAULT_SERVER_ENV_VARS.filter((envVar) => !disabledDefaultSet.has(envVar.key)).length
+
+  const handleDefaultToggle = (key: string, enabled: boolean) => {
+    setDisabledDefaultKeys((prev) => enabled
+      ? prev.filter((disabledKey) => disabledKey !== key)
+      : [...new Set([...prev, key])])
+  }
 
   const handleAdd = () => {
     setEnvVars((prev) => [...prev, { key: '', value: '' }])
@@ -50,7 +62,10 @@ export function ServerEnvVarsSettings() {
     const filtered = envVars.filter((envVar) => envVar.key.trim() !== '')
 
     try {
-      await updateSettingsAsync({ serverEnvVars: filtered })
+      await updateSettingsAsync({
+        serverEnvVars: filtered,
+        disabledDefaultServerEnvVars: disabledDefaultKeys,
+      })
       setNeedsRestart(true)
       showToast.success('Environment variables saved')
     } catch {
@@ -68,7 +83,7 @@ export function ServerEnvVarsSettings() {
         <div className="flex items-center gap-2 min-w-0">
           <h3 className="text-sm font-semibold truncate">Server Environment Variables</h3>
           <Badge variant="outline" className="text-xs">
-            {(preferences?.serverEnvVars ?? []).length}
+            {enabledDefaultCount + (preferences?.serverEnvVars ?? []).length}
           </Badge>
         </div>
         <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
@@ -86,6 +101,29 @@ export function ServerEnvVarsSettings() {
           )}
 
           <div className="space-y-2">
+            <div className="rounded-md border bg-muted/20 p-3 space-y-2">
+              <div className="text-xs font-medium text-muted-foreground">Default variables</div>
+              {DEFAULT_SERVER_ENV_VARS.map((envVar) => {
+                const isEnabled = !disabledDefaultSet.has(envVar.key)
+
+                return (
+                  <div key={envVar.key} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-mono text-xs truncate">{envVar.key}={envVar.value}</div>
+                      <p className="text-xs text-muted-foreground">
+                        Required for OpenCode workspace listing and deletion.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={isEnabled}
+                      onCheckedChange={(checked) => handleDefaultToggle(envVar.key, checked)}
+                      aria-label={`Toggle ${envVar.key}`}
+                    />
+                  </div>
+                )
+              })}
+            </div>
+
             {envVars.map((envVar, index) => {
               const isBlocked = blockedSet.has(envVar.key.trim())
 

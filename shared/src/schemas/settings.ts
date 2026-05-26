@@ -110,6 +110,13 @@ export const ServerEnvVarSchema = z.object({
 
 type ServerEnvVar = z.infer<typeof ServerEnvVarSchema>
 
+export const DEFAULT_SERVER_ENV_VARS = [
+  {
+    key: 'OPENCODE_EXPERIMENTAL_WORKSPACES',
+    value: 'true',
+  },
+] as const satisfies readonly ServerEnvVar[];
+
 export const BLOCKED_SERVER_ENV_KEYS = [
   'OPENCODE_SERVER_PASSWORD',
   'OPENCODE_SERVER_USERNAME',
@@ -147,6 +154,7 @@ export const UserPreferencesSchema = z.object({
   repoOrder: z.array(z.number()).optional(),
   repoSortMode: z.enum(['recent', 'manual', 'name']).optional(),
   serverEnvVars: z.array(ServerEnvVarSchema).optional(),
+  disabledDefaultServerEnvVars: z.array(z.string()).optional(),
 });
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
@@ -195,6 +203,7 @@ export const DEFAULT_USER_PREFERENCES = {
   notifications: DEFAULT_NOTIFICATION_PREFERENCES,
   repoSortMode: 'recent' as const,
   serverEnvVars: [] as ServerEnvVar[],
+  disabledDefaultServerEnvVars: [] as string[],
 };
 
 export const SettingsResponseSchema = z.object({

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
@@ -11,7 +11,7 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
-import { useRepoSiblings } from "@/hooks/useRepoSiblings";
+import { useDeleteRepoWorkspace, useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
@@ -36,6 +36,7 @@ export function RepoDetail() {
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -46,10 +47,20 @@ export function RepoDetail() {
   useRepoActivity(repoId, Boolean(repo));
 
   const { data: siblings } = useRepoSiblings(repoId);
+  const deleteWorkspace = useDeleteRepoWorkspace(repoId);
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = repo?.fullPath;
+  const activeWorkspace = useMemo(
+    () => (siblings ?? []).find((sibling) => sibling.workspaceId === activeWorkspaceId),
+    [activeWorkspaceId, siblings],
+  );
+
+  useEffect(() => {
+    if (activeWorkspaceId && !activeWorkspace) setActiveWorkspaceId(null);
+  }, [activeWorkspace, activeWorkspaceId]);
+
+  const repoDirectory = activeWorkspace?.fullPath ?? repo?.fullPath;
 
   useSSE(opcodeUrl, repoDirectory);
 
@@ -141,7 +152,14 @@ export function RepoDetail() {
         </Header.Actions>
       </Header>
 
-      <WorktreeTabs siblings={siblings ?? []} activeRepoId={repoId} />
+      <WorktreeTabs
+        siblings={siblings ?? []}
+        activeRepoId={repoId}
+        activeValue={activeWorkspaceId ?? String(repoId)}
+        onSelectWorkspace={setActiveWorkspaceId}
+        onDeleteWorkspace={(workspaceId) => deleteWorkspace.mutate(workspaceId)}
+        deletingWorkspaceId={deleteWorkspace.variables}
+      />
 
       <div className="flex-1 flex flex-col min-h-0">
         {opcodeUrl && repoDirectory && (

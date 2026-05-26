@@ -5,6 +5,7 @@ import {
   DEFAULT_USER_PREFERENCES,
   DEFAULT_LEADER_KEY,
   BLOCKED_SERVER_ENV_KEYS,
+  DEFAULT_SERVER_ENV_VARS,
   type TTSConfig,
   type STTConfig,
   type OpenCodeConfigContent,
@@ -18,7 +19,7 @@ import {
 import type { NotificationPreferences } from '@opencode-manager/shared/types'
 
 export type { TTSConfig, STTConfig, OpenCodeConfigContent, ModelConfig, ProviderConfig, NotificationPreferences, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope }
-export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS }
+export { DEFAULT_TTS_CONFIG, DEFAULT_STT_CONFIG, DEFAULT_KEYBOARD_SHORTCUTS, DEFAULT_USER_PREFERENCES, DEFAULT_LEADER_KEY, BLOCKED_SERVER_ENV_KEYS, DEFAULT_SERVER_ENV_VARS }
 
 export interface CustomCommand {
   name: string
@@ -65,6 +66,7 @@ export interface UserPreferences {
   repoOrder?: number[]
   repoSortMode?: 'recent' | 'manual' | 'name'
   serverEnvVars?: Array<{ key: string; value: string }>
+  disabledDefaultServerEnvVars?: string[]
 }
 
 export interface SettingsResponse {

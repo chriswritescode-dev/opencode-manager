@@ -16,6 +16,12 @@ const makeSibling = (id: number, branch: string, isWorktree = true): RepoSibling
   isWorktree, currentBranch: branch, branch,
 })
 
+const makeWorkspaceSibling = (workspaceId: string, branch: string): RepoSibling => ({
+  ...makeSibling(-1, branch, true),
+  workspaceId,
+  workspaceName: branch,
+})
+
 beforeEach(() => navigate.mockReset())
 
 describe('WorktreeTabs', () => {
@@ -75,6 +81,31 @@ describe('WorktreeTabs', () => {
     render(<WorktreeTabs siblings={siblings} activeRepoId={1} />)
     const tabs = screen.getAllByRole('tab')
     await userEvent.click(tabs[0])
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('selects workspace tabs without navigating', async () => {
+    const onSelectWorkspace = vi.fn()
+    const siblings = [
+      makeSibling(1, 'main', false),
+      makeWorkspaceSibling('wrk_plugin', 'plugin-branch'),
+    ]
+    render(<WorktreeTabs siblings={siblings} activeRepoId={1} onSelectWorkspace={onSelectWorkspace} />)
+    const tabs = screen.getAllByRole('tab')
+    await userEvent.click(tabs[1])
+    expect(onSelectWorkspace).toHaveBeenCalledWith('wrk_plugin')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('deletes workspace tabs', async () => {
+    const onDeleteWorkspace = vi.fn()
+    const siblings = [
+      makeSibling(1, 'main', false),
+      makeWorkspaceSibling('wrk_plugin', 'plugin-branch'),
+    ]
+    render(<WorktreeTabs siblings={siblings} activeRepoId={1} onDeleteWorkspace={onDeleteWorkspace} />)
+    await userEvent.click(screen.getByRole('button', { name: 'Delete workspace plugin-branch' }))
+    expect(onDeleteWorkspace).toHaveBeenCalledWith('wrk_plugin')
     expect(navigate).not.toHaveBeenCalled()
   })
 })

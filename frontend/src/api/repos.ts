@@ -37,10 +37,21 @@ export async function getRepo(id: number): Promise<Repo> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`)
 }
 
-export type RepoSibling = Repo & { currentBranch?: string }
+export type RepoSibling = Repo & {
+  currentBranch?: string
+  workspaceId?: string
+  workspaceType?: string
+  workspaceName?: string
+}
 
 export async function getRepoSiblings(id: number): Promise<RepoSibling[]> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/siblings`)
+}
+
+export async function deleteRepoWorkspace(repoId: number, workspaceId: string): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${repoId}/workspaces/${workspaceId}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function deleteRepo(id: number): Promise<void> {
