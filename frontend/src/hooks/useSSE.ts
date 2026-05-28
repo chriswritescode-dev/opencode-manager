@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
 import type { SSEEvent, MessageWithParts, Session } from '@/api/types'
@@ -46,8 +46,17 @@ const handleRestartServer = async () => {
 }
 
 
-export const useSSE = (opcodeUrl: string | null | undefined, directory?: string, currentSessionId?: string) => {
-  const client = useOpenCodeClient(opcodeUrl, directory)
+export const useSSE = (opcodeUrl: string | null | undefined, directory?: string | string[], currentSessionId?: string) => {
+  const directoriesList = useMemo(() => {
+    if (!directory) return [] as string[]
+    if (Array.isArray(directory)) return directory.filter(Boolean)
+    return [directory]
+  }, [directory])
+  const directoryKey = directoriesList.join('|')
+  const primaryDirectory = directoriesList[0]
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const directorySet = useMemo(() => new Set(directoriesList), [directoryKey])
+  const client = useOpenCodeClient(opcodeUrl, primaryDirectory)
   const queryClient = useQueryClient()
   const mountedRef = useRef(true)
   const sessionIdRef = useRef(currentSessionId)
@@ -63,31 +72,40 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
   const batcherRef = useRef<ReturnType<typeof createPartsBatcher> | null>(null)
 
   useEffect(() => {
-    if (!opcodeUrl || !directory) {
+    if (!opcodeUrl || !primaryDirectory) {
       batcherRef.current?.destroy()
       batcherRef.current = null
       return
     }
 
-    batcherRef.current = createPartsBatcher(queryClient, opcodeUrl, directory)
+    batcherRef.current = createPartsBatcher(queryClient, opcodeUrl, primaryDirectory)
 
     return () => {
       batcherRef.current?.destroy()
       batcherRef.current = null
     }
-  }, [queryClient, opcodeUrl, directory])
+  }, [queryClient, opcodeUrl, primaryDirectory])
+
+  const resolveCacheDirectory = useCallback(
+    (eventDirectory: string | undefined): string | undefined => {
+      if (!eventDirectory) return primaryDirectory
+      return directorySet.has(eventDirectory) ? eventDirectory : primaryDirectory
+    },
+    [directorySet, primaryDirectory],
+  )
 
   const handleSSEEvent = useCallback((event: SSEEvent) => {
     const eventDirectory = getEventDirectory(event)
-    if (eventDirectory && directory && eventDirectory !== directory) return
+    if (eventDirectory && directorySet.size > 0 && !directorySet.has(eventDirectory)) return
+    const cacheDirectory = resolveCacheDirectory(eventDirectory)
 
     switch (event.type) {
       case 'session.created':
       case 'session.updated':
         if ('info' in event.properties) {
           const session = event.properties.info
-          const sessionQueryKey = ['opencode', 'session', opcodeUrl, session.id, directory]
-          const sessionsQueryKey = ['opencode', 'sessions', opcodeUrl, directory]
+          const sessionQueryKey = ['opencode', 'session', opcodeUrl, session.id, cacheDirectory]
+          const sessionsQueryKey = ['opencode', 'sessions', opcodeUrl, cacheDirectory]
 
           queryClient.setQueryData(sessionQueryKey, session)
 
@@ -104,14 +122,14 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           queryClient.invalidateQueries({ queryKey: sessionsQueryKey })
           break
         }
-        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, directory] })
+        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, cacheDirectory] })
         break
 
       case 'session.deleted':
-        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, directory] })
+        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, cacheDirectory] })
         if ('sessionID' in event.properties) {
           queryClient.invalidateQueries({ 
-            queryKey: ['opencode', 'session', opcodeUrl, event.properties.sessionID, directory] 
+            queryKey: ['opencode', 'session', opcodeUrl, event.properties.sessionID, cacheDirectory] 
           })
         }
         break
@@ -145,7 +163,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         const { info } = event.properties
         const sessionID = info.sessionID
         
-        const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
+        const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, cacheDirectory]
         const currentData = queryClient.getQueryData<MessageWithParts[]>(messagesQueryKey)
         if (!currentData) {
           queryClient.invalidateQueries({ queryKey: messagesQueryKey })
@@ -178,7 +196,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         const { sessionID, messageID } = event.properties
         
         queryClient.setQueryData<MessageWithParts[]>(
-          ['opencode', 'messages', opcodeUrl, sessionID, directory],
+          ['opencode', 'messages', opcodeUrl, sessionID, cacheDirectory],
           (old) => {
             if (!old) return old
             return old.filter(msgWithParts => msgWithParts.info.id !== messageID)
@@ -205,7 +223,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         showToast.dismiss(`compact-${sessionID}`)
         showToast.success('Session compacted')
         queryClient.invalidateQueries({ 
-          queryKey: ['opencode', 'messages', opcodeUrl, sessionID, directory] 
+          queryKey: ['opencode', 'messages', opcodeUrl, sessionID, cacheDirectory] 
         })
         break
       }
@@ -219,7 +237,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         
         batcherRef.current?.flush()
         
-        const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
+        const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, cacheDirectory]
         const currentData = queryClient.getQueryData<MessageWithParts[]>(messagesQueryKey)
         if (!currentData) break
         
@@ -268,7 +286,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
           const { sessionID, todos } = event.properties
           setSessionTodos(sessionID, todos)
           queryClient.invalidateQueries({ 
-            queryKey: ['opencode', 'todos', opcodeUrl, sessionID, directory] 
+            queryKey: ['opencode', 'todos', opcodeUrl, sessionID, cacheDirectory] 
           })
         }
         break
@@ -317,7 +335,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         if (!('sessionID' in event.properties)) break
         const { sessionID } = event.properties
         queryClient.invalidateQueries({ 
-          queryKey: ['opencode', 'messages', opcodeUrl, sessionID, directory] 
+          queryKey: ['opencode', 'messages', opcodeUrl, sessionID, cacheDirectory] 
         })
         break
       }
@@ -325,10 +343,10 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       default:
         break
     }
-  }, [queryClient, opcodeUrl, directory, setSessionStatus, setSessionTodos, currentSessionId])
+  }, [queryClient, opcodeUrl, directorySet, resolveCacheDirectory, setSessionStatus, setSessionTodos, currentSessionId])
 
   const fetchInitialData = useCallback(async () => {
-    if (!client || !directory || !mountedRef.current) return
+    if (!client || !primaryDirectory || !mountedRef.current) return
     const syncVersion = ++statusSyncVersionRef.current
     
     try {
@@ -341,27 +359,27 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         throw err
       }
     }
-  }, [client, directory, replaceSessionStatuses])
+  }, [client, primaryDirectory, replaceSessionStatuses])
 
   const syncCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current
-    if (!sessionId || !opcodeUrl || !directory) return
+    if (!sessionId || !opcodeUrl || !primaryDirectory) return
 
     queryClient.invalidateQueries({
-      queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory],
+      queryKey: ['opencode', 'session', opcodeUrl, sessionId, primaryDirectory],
     })
     queryClient.invalidateQueries({
-      queryKey: ['opencode', 'messages', opcodeUrl, sessionId, directory],
+      queryKey: ['opencode', 'messages', opcodeUrl, sessionId, primaryDirectory],
     })
     queryClient.invalidateQueries({
-      queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, directory],
+      queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, primaryDirectory],
     })
-  }, [queryClient, opcodeUrl, directory])
+  }, [queryClient, opcodeUrl, primaryDirectory])
 
   useEffect(() => {
     mountedRef.current = true
     
-    if (!opcodeUrl || !directory) {
+    if (!opcodeUrl || directoriesList.length === 0) {
       statusSyncVersionRef.current += 1
       setIsConnected(false)
       setIsReconnecting(false)
@@ -389,8 +407,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
       }
     }
 
-    const subscription = openCodeEventStream.subscribeToDirectory({
-      directory,
+    const subscription = openCodeEventStream.subscribeGlobalMonitor({
+      directories: directoriesList,
       onEvent: handleMessage,
       onStatusChange: handleStatusChange,
     })
@@ -420,7 +438,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string,
         eventStreamSubscriptionRef.current = null
       }
     }
-  }, [opcodeUrl, directory, handleSSEEvent, fetchInitialData, syncCurrentSession])
+  }, [opcodeUrl, directoryKey, directoriesList, handleSSEEvent, fetchInitialData, syncCurrentSession])
 
   useEffect(() => {
     if (isConnected && document.visibilityState === 'visible') {

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useSessions, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
+import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
@@ -10,6 +10,8 @@ import { Search, Trash2, Pencil, X } from "lucide-react";
 interface SessionListProps {
   opcodeUrl: string;
   directory?: string;
+  directories?: string[];
+  directoryLabels?: Record<string, string>;
   activeSessionID?: string;
   onSelectSession: (sessionID: string) => void;
 }
@@ -17,12 +19,21 @@ interface SessionListProps {
 export const SessionList = ({
   opcodeUrl,
   directory,
+  directories,
+  directoryLabels,
   activeSessionID,
   onSelectSession,
 }: SessionListProps) => {
-  const { data: sessions, isLoading } = useSessions(opcodeUrl, directory);
-  const deleteSession = useDeleteSession(opcodeUrl, directory);
-  const createSession = useCreateSession(opcodeUrl, directory, (newSession) => {
+  const directoriesList = useMemo(() => {
+    if (directories && directories.length > 0) return directories.filter(Boolean);
+    if (directory) return [directory];
+    return [];
+  }, [directory, directories]);
+  const directorySet = useMemo(() => new Set(directoriesList), [directoriesList]);
+  const primaryDirectory = directoriesList[0];
+  const { data: sessions, isLoading } = useSessionsAcrossDirectories(opcodeUrl, directoriesList);
+  const deleteSession = useDeleteSession(opcodeUrl, primaryDirectory);
+  const createSession = useCreateSession(opcodeUrl, primaryDirectory, (newSession) => {
     onSelectSession(newSession.id);
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -36,7 +47,7 @@ export const SessionList = ({
 
     let filtered = sessions.filter((session) => {
       if (session.parentID) return false;
-      if (directory && session.directory && session.directory !== directory) return false;
+      if (directorySet.size > 0 && session.directory && !directorySet.has(session.directory)) return false;
       return true;
     });
 
@@ -48,7 +59,7 @@ export const SessionList = ({
     }
 
     return filtered.sort((a, b) => b.time.updated - a.time.updated);
-  }, [sessions, searchQuery, directory]);
+  }, [sessions, searchQuery, directorySet]);
 
   const todaySessions = useMemo(() => {
     const today = new Date();
@@ -214,6 +225,7 @@ export const SessionList = ({
                       isSelected={selectedSessions.has(session.id)}
                       isActive={activeSessionID === session.id}
                       manageMode={manageMode}
+                      workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
                       onSelect={onSelectSession}
                       onToggleSelection={(selected) => toggleSessionSelection(session.id, selected)}
                       onDelete={(e) => handleDelete(session.id, e)}
@@ -232,6 +244,7 @@ export const SessionList = ({
                   isSelected={selectedSessions.has(session.id)}
                   isActive={activeSessionID === session.id}
                   manageMode={manageMode}
+                  workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
                   onSelect={onSelectSession}
                   onToggleSelection={(selected) => toggleSessionSelection(session.id, selected)}
                   onDelete={(e) => handleDelete(session.id, e)}

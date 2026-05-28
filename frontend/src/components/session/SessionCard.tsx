@@ -12,6 +12,7 @@ interface SessionCardProps {
   isSelected: boolean;
   isActive: boolean;
   manageMode: boolean;
+  workspaceLabel?: string;
   onSelect: (sessionID: string) => void;
   onToggleSelection: (selected: boolean) => void;
   onDelete: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -22,6 +23,7 @@ export const SessionCard = ({
   isSelected,
   isActive,
   manageMode,
+  workspaceLabel,
   onSelect,
   onToggleSelection,
   onDelete,
@@ -107,6 +109,9 @@ export const SessionCard = ({
                         addSuffix: true,
                       })}
                     </span>
+                    {workspaceLabel ? (
+                      <span className="text-purple-400 truncate max-w-[140px]">{workspaceLabel}</span>
+                    ) : null}
                   </div>
                 </div>
               </div>
@@ -122,6 +127,9 @@ export const SessionCard = ({
                       addSuffix: true,
                     })}
                   </span>
+                  {workspaceLabel ? (
+                    <span className="text-purple-400 truncate max-w-[120px]">{workspaceLabel}</span>
+                  ) : null}
                   <SessionStatusIndicator sessionID={session.id} size="sm" />
                 </div>
               </div>

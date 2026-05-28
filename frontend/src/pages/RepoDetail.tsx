@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getRepo } from "@/api/repos";
@@ -14,7 +14,8 @@ import { useRepoActivity } from "@/hooks/useRepoActivity";
 import { useDeleteRepoWorkspace, useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
-import { WorktreeTabs } from "@/components/repo/WorktreeTabs";
+import { WorktreeTabs, type WorktreeTabValue } from "@/components/repo/WorktreeTabs";
+import { WorkspaceChipRow } from "@/components/repo/WorkspaceChipRow";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,7 @@ export function RepoDetail() {
   const [skillsDialogOpen, setSkillsDialogOpen] = useDialogParam('skills');
   const [sourceControlOpen, setSourceControlOpen] = useDialogParam('sourceControl');
   const [resetPermissionsOpen, setResetPermissionsOpen] = useDialogParam('resetPermissions');
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<WorktreeTabValue>('repo');
 
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
@@ -50,21 +51,41 @@ export function RepoDetail() {
   const deleteWorkspace = useDeleteRepoWorkspace(repoId);
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
-  
-  const activeWorkspace = useMemo(
-    () => (siblings ?? []).find((sibling) => sibling.workspaceId === activeWorkspaceId),
-    [activeWorkspaceId, siblings],
+
+  const workspaceSiblings = useMemo(
+    () => (siblings ?? []).filter((sibling) => !!sibling.workspaceId),
+    [siblings],
   );
 
-  useEffect(() => {
-    if (activeWorkspaceId && !activeWorkspace) setActiveWorkspaceId(null);
-  }, [activeWorkspace, activeWorkspaceId]);
+  const workspaceDirectories = useMemo(
+    () => workspaceSiblings.map((sibling) => sibling.fullPath).filter(Boolean),
+    [workspaceSiblings],
+  );
 
-  const repoDirectory = activeWorkspace?.fullPath ?? repo?.fullPath;
+  const baseDirectory = repo?.fullPath;
+  const subscriptionDirectories = useMemo(() => {
+    const set = new Set<string>();
+    if (baseDirectory) set.add(baseDirectory);
+    workspaceDirectories.forEach((dir) => set.add(dir));
+    return Array.from(set);
+  }, [baseDirectory, workspaceDirectories]);
 
-  useSSE(opcodeUrl, repoDirectory);
+  const sessionListDirectories = activeTab === 'workspaces' ? workspaceDirectories : (baseDirectory ? [baseDirectory] : []);
+  const composerDirectory = activeTab === 'workspaces' ? workspaceDirectories[0] : baseDirectory;
 
-  const createSessionMutation = useCreateSession(opcodeUrl, repoDirectory, (session) => {
+  const directoryLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    workspaceSiblings.forEach((sibling) => {
+      if (sibling.fullPath) {
+        labels[sibling.fullPath] = sibling.currentBranch || sibling.branch || sibling.workspaceName || 'workspace';
+      }
+    });
+    return labels;
+  }, [workspaceSiblings]);
+
+  useSSE(opcodeUrl, subscriptionDirectories);
+
+  const createSessionMutation = useCreateSession(opcodeUrl, composerDirectory, (session) => {
     navigate(`/repos/${repoId}/sessions/${session.id}`);
   });
 
@@ -153,19 +174,26 @@ export function RepoDetail() {
       </Header>
 
       <WorktreeTabs
-        siblings={siblings ?? []}
-        activeRepoId={repoId}
-        activeValue={activeWorkspaceId ?? String(repoId)}
-        onSelectWorkspace={setActiveWorkspaceId}
-        onDeleteWorkspace={(workspaceId) => deleteWorkspace.mutate(workspaceId)}
-        deletingWorkspaceId={deleteWorkspace.variables}
+        workspaces={workspaceSiblings}
+        value={activeTab}
+        onValueChange={setActiveTab}
+        baseLabel={currentBranch}
       />
 
+      {activeTab === 'workspaces' ? (
+        <WorkspaceChipRow
+          workspaces={workspaceSiblings}
+          onDelete={(workspaceId) => deleteWorkspace.mutate(workspaceId)}
+          deletingWorkspaceId={deleteWorkspace.variables}
+        />
+      ) : null}
+
       <div className="flex-1 flex flex-col min-h-0">
-        {opcodeUrl && repoDirectory && (
+        {opcodeUrl && sessionListDirectories.length > 0 && (
           <SessionList
             opcodeUrl={opcodeUrl}
-            directory={repoDirectory}
+            directories={sessionListDirectories}
+            directoryLabels={activeTab === 'workspaces' ? directoryLabels : undefined}
             onSelectSession={handleSelectSession}
           />
         )}
@@ -183,7 +211,7 @@ export function RepoDetail() {
       <RepoMcpDialog
         open={mcpDialogOpen}
         onOpenChange={setMcpDialogOpen}
-        directory={repoDirectory}
+        directory={composerDirectory}
       />
 
       <RepoSkillsDialog
@@ -220,7 +248,7 @@ export function RepoDetail() {
         open={resetPermissionsOpen}
         onOpenChange={setResetPermissionsOpen}
         repoId={repoId}
-        repoDirectory={repoDirectory}
+        repoDirectory={composerDirectory}
       />
     </div>
   );

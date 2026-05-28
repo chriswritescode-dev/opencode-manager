@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
@@ -47,6 +47,31 @@ export const useSessions = (opcodeUrl: string | null | undefined, directory?: st
     refetchOnReconnect: true,
     staleTime: 10000,
   });
+};
+
+export const useSessionsAcrossDirectories = (
+  opcodeUrl: string | null | undefined,
+  directories: string[],
+) => {
+  const directoryKey = directories.join('|');
+  const queries = useQueries({
+    queries: directories.map((directory) => ({
+      queryKey: ["opencode", "sessions", opcodeUrl, directory],
+      queryFn: () => new OpenCodeClient(opcodeUrl!, directory).listSessions(),
+      enabled: !!opcodeUrl && !!directory,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      staleTime: 10000,
+    })),
+  });
+
+  return useMemo(() => {
+    const data = queries.flatMap((q) => q.data ?? []);
+    const isLoading = queries.some((q) => q.isLoading);
+    const isError = queries.some((q) => q.isError);
+    return { data, isLoading, isError };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directoryKey, queries.map((q) => q.dataUpdatedAt).join('|'), queries.map((q) => q.isLoading).join('|')]);
 };
 
 export const useSession = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string) => {
