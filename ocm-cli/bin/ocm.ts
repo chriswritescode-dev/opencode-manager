@@ -4,7 +4,8 @@ import { readState, writeState, clearState, getStatePath, type OcmState } from '
 import { getToken, setToken, deleteToken, KeychainError } from '../src/keychain.js'
 import { ManagerApi } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, prepareMirror } from '../src/mirror.js'
-import type { RemoteRepoSummary } from '../src/mirror.js'
+import type { RemoteRepoSummary, MirrorProgress } from '../src/mirror.js'
+import { createProgressReporter } from '../src/progress.js'
 import { getBranchName } from '../src/local-repo.js'
 import { resolveTarget } from '../src/resolve-target.js'
 import packageJson from '../package.json' with { type: 'json' }
@@ -294,6 +295,13 @@ export async function cmdPush(args: string[]): Promise<void> {
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 
+  const progress = createProgressReporter('push')
+  const onProgress = (p: MirrorProgress) => {
+    if (p.phase === 'committing') progress.tick(p.bytesSent)
+    else if (p.totalBytes > 0) progress.update(p.bytesSent, p.totalBytes)
+    else progress.tick(p.bytesSent)
+  }
+
   const remotes: RemoteRepoSummary[] = repos.map((r) => ({
     repoId: r.repoId,
     name: r.name,
@@ -329,11 +337,13 @@ export async function cmdPush(args: string[]): Promise<void> {
       api,
       force,
       create: { name, originUrl: plan.localOrigin, branch },
+      onProgress,
     })
-
+    progress.done()
     info(`pushed ${plan.repoRoot} -> ${result.created ? 'created' : 'updated'} (repoId=${result.repoId}, branch=${result.branch})`)
   } else if (plan.matched.length === 1) {
-    const result = await mirrorUp(plan, { api, force })
+    const result = await mirrorUp(plan, { api, force, onProgress })
+    progress.done()
     info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} (repoId=${result.repoId}, branch=${result.branch})`)
   } else {
     const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
@@ -371,7 +381,12 @@ async function cmdPull(args: string[]): Promise<void> {
     die(`multiple Manager repos match origin ${plan.localOrigin}: ${names}; disambiguate with \`ocm pull <repoId>\``)
   }
 
-  await mirrorDown(plan.matched[0]!.repoId, plan.repoRoot, api, { force })
+  const progress = createProgressReporter('pull')
+  try {
+    await mirrorDown(plan.matched[0]!.repoId, plan.repoRoot, api, { force, onProgress: (bytes) => progress.tick(bytes) })
+  } finally {
+    progress.done()
+  }
   info(`pulled ${plan.matched[0]!.name} -> ${plan.repoRoot}`)
 }
 

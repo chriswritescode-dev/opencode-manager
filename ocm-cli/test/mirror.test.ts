@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync,
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp } from '../src/mirror'
+import { prepareMirror, MirrorAbort, estimateTarSize, mirrorDown, mirrorUp } from '../src/mirror'
 
 describe('prepareMirror', () => {
   let tmpDir: string
@@ -63,6 +63,51 @@ describe('prepareMirror', () => {
     expect(plan.matched).toHaveLength(1)
     expect(plan.matched[0]!.repoId).toBe(1)
     expect(plan.localOrigin).toContain('me/repo')
+  })
+})
+
+describe('estimateTarSize', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'estimate-tar-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('returns a value > 0 for a repo with content, and respects 512-byte tar block alignment', () => {
+    const repoRoot = join(tmpDir, 'repo')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    const fileSize = 12345
+    writeFileSync(join(repoRoot, 'data.bin'), Buffer.alloc(fileSize, 0xab))
+    spawnSync('git', ['add', 'data.bin'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const size = estimateTarSize(repoRoot)
+    expect(size).toBeGreaterThan(0)
+    expect(size).toBeGreaterThanOrEqual(fileSize)
+    expect((size - 1024) % 512).toBe(0)
+  })
+
+  it('excludes files under HARDCODED_EXCLUDES directories', () => {
+    const repoRoot = join(tmpDir, 'repo-excl')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'hello')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+
+    mkdirSync(join(repoRoot, 'node_modules'))
+    writeFileSync(join(repoRoot, 'node_modules', 'big.bin'), Buffer.alloc(99999, 0x42))
+
+    const sizeWithExcluded = estimateTarSize(repoRoot)
+
+    rmSync(join(repoRoot, 'node_modules'), { recursive: true, force: true })
+    const sizeWithoutExcluded = estimateTarSize(repoRoot)
+
+    expect(sizeWithExcluded).toBe(sizeWithoutExcluded)
   })
 })
 
@@ -296,6 +341,43 @@ describe('mirrorDown', () => {
     const stagingEntries = readdirSync(tmpDir).filter((e) => e.startsWith('repo-replace.ocm-recv-'))
     expect(stagingEntries.length).toBe(0)
   })
+
+  it('reports cumulative received bytes via onProgress callback', async () => {
+    const repoRoot = join(tmpDir, 'repo-progress')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const contentDir = join(tmpDir, 'content-progress')
+    mkdirSync(contentDir)
+    writeFileSync(join(contentDir, 'file.txt'), 'hello')
+
+    const tarData = createTarball(contentDir)
+
+    const mockApi = {
+      mirrorDown: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(tarData))
+            controller.close()
+          },
+        })
+      ),
+    } as any
+
+    const onProgress = vi.fn()
+
+    await mirrorDown(1, repoRoot, mockApi, { force: true, onProgress })
+
+    expect(onProgress).toHaveBeenCalled()
+    const calls = onProgress.mock.calls.map((args: any[]) => args[0] as number)
+    expect(calls[calls.length - 1]).toBe(tarData.length)
+
+    let prev = -1
+    for (const v of calls) {
+      expect(v).toBeGreaterThanOrEqual(prev)
+      prev = v
+    }
+  })
 })
 
 describe('mirrorUp chunked upload', () => {
@@ -418,5 +500,39 @@ describe('mirrorUp chunked upload', () => {
 
     await expect(mirrorUp(plan, { api: ctx.api as any, force: false })).rejects.toThrow('boom')
     expect(ctx.api.mirrorAbort).toHaveBeenCalledWith(1, 'upload-1')
+  })
+
+  it('calls onProgress with monotonically non-decreasing bytesSent and a terminal committing phase', async () => {
+    const repoRoot = join(tmpDir, 'repo-progress')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
+
+    const ctx = makeMockApi()
+    const onProgress = vi.fn()
+    const plan = {
+      repoRoot,
+      localOrigin: 'https://github.com/test/repo.git',
+      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+    }
+
+    await mirrorUp(plan, { api: ctx.api as any, force: false, onProgress })
+
+    expect(onProgress).toHaveBeenCalled()
+
+    const uploadingCalls = onProgress.mock.calls.filter(([p]) => p.phase === 'uploading')
+    expect(uploadingCalls.length).toBeGreaterThanOrEqual(1)
+
+    let prevBytes = -1
+    for (const [p] of uploadingCalls) {
+      expect(p.bytesSent).toBeGreaterThanOrEqual(prevBytes)
+      expect(p.totalBytes).toBeGreaterThan(0)
+      prevBytes = p.bytesSent
+    }
+
+    const committingCalls = onProgress.mock.calls.filter(([p]) => p.phase === 'committing')
+    expect(committingCalls.length).toBe(1)
+    expect(committingCalls[0][0].totalBytes).toBeGreaterThan(0)
+    expect(committingCalls[0][0].bytesSent).toBeGreaterThanOrEqual(0)
   })
 })
