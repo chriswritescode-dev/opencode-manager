@@ -2,7 +2,7 @@ import { spawnSync, spawn } from 'child_process'
 import { existsSync, statSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { Readable } from 'stream'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import { getRepoRoot, getOriginUrl, getDirtyPaths, urlsEqual } from './local-repo.js'
 import type { ManagerApi } from './manager-api.js'
@@ -19,6 +19,19 @@ function getGitignoreExclusions(repoRoot: string): string[] {
   })
   if (res.status !== 0) return []
   return (res.stdout ?? '').split('\n').filter((line) => line.length > 0)
+}
+
+async function carryOverIgnored(fromDir: string, toDir: string): Promise<void> {
+  if (!existsSync(fromDir)) return
+  for (const rel of getGitignoreExclusions(fromDir)) {
+    const clean = rel.replace(/\/+$/, '')
+    if (!clean) continue
+    const src = join(fromDir, clean)
+    const dest = join(toDir, clean)
+    if (!existsSync(src) || existsSync(dest)) continue
+    await fsp.mkdir(dirname(dest), { recursive: true })
+    await fsp.rename(src, dest).catch(() => {})
+  }
 }
 
 function listIncludedFiles(repoRoot: string): string[] {
@@ -296,6 +309,8 @@ export async function mirrorDown(
       for (const entry of stagingEntries) {
         await fsp.rename(join(staging, entry), join(repoRoot, entry))
       }
+
+      await carryOverIgnored(backupDir, repoRoot)
 
       await fsp.rm(backupDir, { recursive: true, force: true }).catch(() => {})
       await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})

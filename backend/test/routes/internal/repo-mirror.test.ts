@@ -291,6 +291,38 @@ describe('internal-repo-mirror routes', () => {
       expect(existsSync(join(targetPath, 'payload.txt'))).toBe(true)
     })
 
+    it('preserves gitignored local files on the receiving repo across commit', async () => {
+      const repoDir = join(getTmpRoot(), 'test-repo')
+      mkdirSync(repoDir, { recursive: true })
+      spawnSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir, stdio: 'ignore' })
+      writeFileSync(join(repoDir, '.gitignore'), 'data/\n')
+      writeFileSync(join(repoDir, 'tracked.txt'), 'old tracked')
+      mkdirSync(join(repoDir, 'data'))
+      writeFileSync(join(repoDir, 'data', 'local.db'), 'local-only')
+      spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'init'], { cwd: repoDir, stdio: 'ignore' })
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+
+      const sourceDir = join(getTmpRoot(), 'source-carry')
+      mkdirSync(sourceDir, { recursive: true })
+      writeFileSync(join(sourceDir, 'tracked.txt'), 'new tracked')
+      writeFileSync(join(sourceDir, 'added.txt'), 'added')
+
+      const result = spawnSync('tar', ['-c', '-C', sourceDir, '.'], { encoding: 'buffer' })
+      const tarball = result.stdout as Buffer
+
+      const { commitRes } = await pushTarball(app, 1, { force: true }, tarball)
+      expect(commitRes?.status).toBe(200)
+
+      expect(existsSync(join(repoDir, 'data', 'local.db'))).toBe(true)
+      expect(readFileSync(join(repoDir, 'data', 'local.db'), 'utf-8')).toBe('local-only')
+      expect(readFileSync(join(repoDir, 'tracked.txt'), 'utf-8')).toBe('new tracked')
+      expect(existsSync(join(repoDir, 'added.txt'))).toBe(true)
+    })
+
     it('returns 409 from begin when repo is in use and force not set', async () => {
       const repoDir = join(getTmpRoot(), 'test-repo')
       mkdirSync(repoDir, { recursive: true })

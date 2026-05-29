@@ -342,6 +342,50 @@ describe('mirrorDown', () => {
     expect(stagingEntries.length).toBe(0)
   })
 
+  it('preserves gitignored local files excluded from the tarball', async () => {
+    const repoRoot = join(tmpDir, 'repo-carryover')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, '.gitignore'), 'data/\n.env\n')
+    mkdirSync(join(repoRoot, 'data'))
+    writeFileSync(join(repoRoot, 'data', 'local.db'), 'local-only')
+    writeFileSync(join(repoRoot, '.env'), 'SECRET=1')
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'old tracked')
+    spawnSync('git', ['add', '.gitignore', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const contentDir = join(tmpDir, 'content-carryover')
+    mkdirSync(contentDir)
+    writeFileSync(join(contentDir, 'tracked.txt'), 'new tracked')
+    writeFileSync(join(contentDir, 'added.txt'), 'added')
+
+    const tarData = createTarball(contentDir)
+
+    const mockApi = {
+      mirrorDown: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(tarData))
+            controller.close()
+          },
+        })
+      ),
+    } as any
+
+    await mirrorDown(1, repoRoot, mockApi, { force: true })
+
+    expect(existsSync(join(repoRoot, 'data', 'local.db'))).toBe(true)
+    expect(readFileSync(join(repoRoot, 'data', 'local.db'), 'utf-8')).toBe('local-only')
+    expect(existsSync(join(repoRoot, '.env'))).toBe(true)
+    expect(readFileSync(join(repoRoot, 'tracked.txt'), 'utf-8')).toBe('new tracked')
+    expect(existsSync(join(repoRoot, 'added.txt'))).toBe(true)
+
+    const backups = readdirSync(tmpDir).filter((e) => e.startsWith('repo-carryover.ocm-backup-'))
+    expect(backups.length).toBe(0)
+  })
+
   it('reports cumulative received bytes via onProgress callback', async () => {
     const repoRoot = join(tmpDir, 'repo-progress')
     mkdirSync(repoRoot)

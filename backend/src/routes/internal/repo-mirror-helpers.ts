@@ -1,4 +1,4 @@
-import { spawn } from 'child_process'
+import { spawn, spawnSync } from 'child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, statSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { createReadStream } from 'fs'
@@ -162,6 +162,28 @@ export async function atomicSwapIntoPlace(extractedRoot: string, fullPath: strin
   }
 
   return { backupDir }
+}
+
+function listIgnoredPaths(dir: string): string[] {
+  const res = spawnSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'], {
+    cwd: dir,
+    encoding: 'utf-8',
+  })
+  if (res.status !== 0) return []
+  return (res.stdout ?? '').split('\n').filter((line) => line.length > 0)
+}
+
+export async function carryOverIgnoredFiles(backupDir: string | undefined, fullPath: string): Promise<void> {
+  if (!backupDir || !existsSync(backupDir)) return
+  for (const rel of listIgnoredPaths(backupDir)) {
+    const clean = rel.replace(/\/+$/, '')
+    if (!clean) continue
+    const src = join(backupDir, clean)
+    const dest = join(fullPath, clean)
+    if (!existsSync(src) || existsSync(dest)) continue
+    await fsp.mkdir(dirname(dest), { recursive: true })
+    await fsp.rename(src, dest).catch(() => {})
+  }
 }
 
 export async function discardBackup(backupDir: string | undefined): Promise<void> {
