@@ -1,8 +1,8 @@
 import { spawnSync, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { Readable } from 'stream'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import { getRepoRoot, getOriginUrl, getDirtyPaths, urlsEqual } from './local-repo.js'
 import type { ManagerApi } from './manager-api.js'
@@ -19,6 +19,45 @@ function getGitignoreExclusions(repoRoot: string): string[] {
   })
   if (res.status !== 0) return []
   return (res.stdout ?? '').split('\n').filter((line) => line.length > 0)
+}
+
+async function carryOverIgnored(fromDir: string, toDir: string): Promise<void> {
+  if (!existsSync(fromDir)) return
+  for (const rel of getGitignoreExclusions(fromDir)) {
+    const clean = rel.replace(/\/+$/, '')
+    if (!clean) continue
+    const src = join(fromDir, clean)
+    const dest = join(toDir, clean)
+    if (!existsSync(src) || existsSync(dest)) continue
+    await fsp.mkdir(dirname(dest), { recursive: true })
+    await fsp.rename(src, dest).catch(() => {})
+  }
+}
+
+function listIncludedFiles(repoRoot: string): string[] {
+  const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf-8' })
+  const untracked = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: repoRoot, encoding: 'utf-8' })
+  const split = (out: string | null): string[] => (out ?? '').split('\0').filter((p) => p.length > 0)
+  const all = [...split(tracked.stdout), ...split(untracked.stdout)]
+  return all.filter((p) => {
+    const top = p.split('/')[0] ?? p
+    return !HARDCODED_EXCLUDES.includes(top)
+  })
+}
+
+export function estimateTarSize(repoRoot: string): number {
+  const files = listIncludedFiles(repoRoot)
+  let total = 0
+  for (const rel of files) {
+    let size = 0
+    try {
+      size = statSync(join(repoRoot, rel)).size
+    } catch {
+      continue
+    }
+    total += 512 + Math.ceil(size / 512) * 512
+  }
+  return total + 1024
 }
 
 export class MirrorAbort extends Error {
@@ -53,10 +92,17 @@ export function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): Mirror
   return { repoRoot, localOrigin, matched }
 }
 
+export interface MirrorProgress {
+  phase: 'uploading' | 'committing'
+  bytesSent: number
+  totalBytes: number
+}
+
 export interface MirrorUpOpts {
   api: ManagerApi
   force: boolean
   create?: { name: string; originUrl: string | null; branch: string | null }
+  onProgress?: (p: MirrorProgress) => void
 }
 
 function delay(ms: number): Promise<void> {
@@ -146,6 +192,9 @@ export async function mirrorUp(
 
   const begin = await opts.api.mirrorBegin(repoId, { force: opts.force, create: opts.create })
 
+  const totalBytes = estimateTarSize(plan.repoRoot)
+  let bytesSent = 0
+
   const tarArgs = ['-c', '-C', plan.repoRoot]
   for (const dir of HARDCODED_EXCLUDES) tarArgs.push('--exclude', dir)
 
@@ -184,9 +233,12 @@ export async function mirrorUp(
   try {
     for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
       await flusher.push(chunk)
+      bytesSent += chunk.length
+      opts.onProgress?.({ phase: 'uploading', bytesSent, totalBytes })
     }
     await tarExit
     const totalParts = await flusher.finish()
+    opts.onProgress?.({ phase: 'committing', bytesSent, totalBytes })
     const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts)
     return result
   } catch (err) {
@@ -204,7 +256,7 @@ export async function mirrorDown(
   repoId: number,
   repoRoot: string,
   api: ManagerApi,
-  opts: { force: boolean } = { force: false },
+  opts: { force: boolean; onProgress?: (bytesReceived: number) => void } = { force: false },
 ): Promise<void> {
   if (!opts.force && getDirtyPaths(repoRoot).size > 0) {
     throw new MirrorAbort('working tree has uncommitted changes; rerun with --force')
@@ -233,6 +285,11 @@ export async function mirrorDown(
     })
 
     const stdinWritable = Readable.fromWeb(tarball as unknown as Parameters<typeof Readable.fromWeb>[0])
+    let received = 0
+    stdinWritable.on('data', (chunk: Buffer) => {
+      received += chunk.length
+      opts.onProgress?.(received)
+    })
     stdinWritable.pipe(child.stdin)
 
     await tarDone
@@ -252,6 +309,8 @@ export async function mirrorDown(
       for (const entry of stagingEntries) {
         await fsp.rename(join(staging, entry), join(repoRoot, entry))
       }
+
+      await carryOverIgnored(backupDir, repoRoot)
 
       await fsp.rm(backupDir, { recursive: true, force: true }).catch(() => {})
       await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})

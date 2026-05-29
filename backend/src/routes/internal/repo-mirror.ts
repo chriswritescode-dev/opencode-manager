@@ -21,6 +21,7 @@ import {
   getPartPath,
   extractPartsToStaging,
   atomicSwapIntoPlace,
+  carryOverIgnoredFiles,
   discardBackup,
   restoreBackup,
 } from './repo-mirror-helpers'
@@ -175,6 +176,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
       if (branchName) updateRepoBranch(db, meta.repoId, branchName.trim())
       updateLastPulled(db, meta.repoId)
 
+      await carryOverIgnoredFiles(backupDir, meta.fullPath)
       await discardBackup(backupDir)
       backupDir = undefined
       await fsp.rm(staging, { recursive: true, force: true }).catch(() => {})
