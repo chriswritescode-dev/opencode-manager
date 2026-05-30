@@ -83,7 +83,7 @@ describe('OpenCodeEventStream', () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })
 
-    const subscription = stream.subscribeToDirectory({ directory: '/repo', onEvent: vi.fn() })
+    const subscription = stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn() })
     transport.openConnection()
     transport.connected('client-1')
     subscription.reportVisibility(true, 'session-1')

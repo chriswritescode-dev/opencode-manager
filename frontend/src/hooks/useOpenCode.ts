@@ -36,19 +36,6 @@ export const useOpenCodeClient = (opcodeUrl: string | null | undefined, director
   );
 };
 
-export const useSessions = (opcodeUrl: string | null | undefined, directory?: string) => {
-  const client = useOpenCodeClient(opcodeUrl, directory);
-
-  return useQuery({
-    queryKey: ["opencode", "sessions", opcodeUrl, directory],
-    queryFn: () => client!.listSessions(),
-    enabled: !!client,
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-    staleTime: 10000,
-  });
-};
-
 export const useSessionsAcrossDirectories = (
   opcodeUrl: string | null | undefined,
   directories: string[],

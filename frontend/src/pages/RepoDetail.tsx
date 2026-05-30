@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getRepo } from "@/api/repos";
+import { getRepo, workspaceLabel } from "@/api/repos";
 import { SessionList } from "@/components/session/SessionList";
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Header } from "@/components/ui/header";
@@ -27,10 +27,6 @@ import { PendingActionsGroup } from "@/components/notifications/PendingActionsGr
 import { invalidateConfigCaches } from "@/lib/queryInvalidation";
 import { getRepoDisplayName } from "@/lib/utils";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
-
-function normalizeWorkspaceDirectory(directory: string) {
-  return directory.replace(/\/+$/, '');
-}
 
 export function RepoDetail() {
   const { id } = useParams<{ id: string }>();
@@ -63,18 +59,7 @@ export function RepoDetail() {
   const opcodeUrl = OPENCODE_API_ENDPOINT;
 
   const workspaceSiblings = useMemo(
-    () => {
-      const unique = new Map<string, NonNullable<typeof siblings>[number]>();
-      (siblings ?? [])
-        .filter((sibling) => !!sibling.workspaceId && !!sibling.fullPath)
-        .forEach((sibling) => {
-          const directory = normalizeWorkspaceDirectory(sibling.fullPath);
-          if (!unique.has(directory)) {
-            unique.set(directory, sibling);
-          }
-        });
-      return Array.from(unique.values());
-    },
+    () => (siblings ?? []).filter((sibling) => !!sibling.workspaceId && !!sibling.fullPath),
     [siblings],
   );
 
@@ -110,7 +95,7 @@ export function RepoDetail() {
     const labels: Record<string, string> = {};
     workspaceSiblings.forEach((sibling) => {
       if (sibling.fullPath) {
-        labels[sibling.fullPath] = sibling.currentBranch || sibling.branch || sibling.workspaceName || 'workspace';
+        labels[sibling.fullPath] = workspaceLabel(sibling);
       }
     });
     return labels;

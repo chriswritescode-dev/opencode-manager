@@ -44,6 +44,16 @@ export type RepoSibling = Repo & {
   workspaceName?: string
 }
 
+export function workspaceLabel(workspace: RepoSibling): string {
+  return (
+    workspace.currentBranch ||
+    workspace.branch ||
+    workspace.workspaceName ||
+    workspace.workspaceId ||
+    'workspace'
+  )
+}
+
 export interface RepoWorkspace {
   id: string
   type: string

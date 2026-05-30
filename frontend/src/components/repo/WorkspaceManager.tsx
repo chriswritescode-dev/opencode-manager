@@ -4,7 +4,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { GitBranch, Plus, Search, Trash2 } from 'lucide-react'
-import type { RepoSibling } from '@/api/repos'
+import { workspaceLabel, type RepoSibling } from '@/api/repos'
 
 interface WorkspaceManagerProps {
   open: boolean
@@ -15,16 +15,6 @@ interface WorkspaceManagerProps {
   onActiveWorkspaceChange: (directory: string) => void
   onCreateWorkspace: () => void
   isDeleting?: boolean
-}
-
-function workspaceLabel(workspace: RepoSibling): string {
-  return (
-    workspace.currentBranch ||
-    workspace.branch ||
-    workspace.workspaceName ||
-    workspace.workspaceId ||
-    'workspace'
-  )
 }
 
 export function WorkspaceManager({

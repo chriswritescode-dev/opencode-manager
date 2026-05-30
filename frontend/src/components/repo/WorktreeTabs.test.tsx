@@ -25,11 +25,13 @@ beforeEach(() => {
 })
 
 describe('WorktreeTabs', () => {
-  it('returns null when there are no workspaces', () => {
-    const { container } = render(
+  it('renders the repo tab with a create-workspace button when there are no workspaces', () => {
+    render(
       <WorktreeTabs workspaces={[]} value="repo" onValueChange={onValueChange} baseLabel="main" />
     )
-    expect(container.firstChild).toBeNull()
+    expect(screen.getAllByRole('tab')).toHaveLength(1)
+    expect(screen.getByText('main')).toBeInTheDocument()
+    expect(screen.getByText('Workspace')).toBeInTheDocument()
   })
 
   it('renders Repo and Workspaces tabs when at least one workspace exists', () => {

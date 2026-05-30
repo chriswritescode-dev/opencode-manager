@@ -3,7 +3,6 @@ import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
   EventStreamStatusHandler,
-  EventStreamSubscription,
   EventStreamTransport,
   GlobalMonitorSubscription,
   OpenCodeEventHandler,
@@ -52,22 +51,6 @@ export class OpenCodeEventStream {
 
     return {
       updateDirectories: (directories) => this.updateSubscriberDirectories(id, directories),
-      reconnect: () => this.reconnect(),
-      reportVisibility: (visible, activeSessionId) => this.reportVisibility(visible, activeSessionId),
-      dispose: () => this.removeSubscriber(id),
-    }
-  }
-
-  subscribeToDirectory(input: {
-    directory: string
-    onEvent: OpenCodeEventHandler
-    onStatusChange?: EventStreamStatusHandler
-    onHealthChange?: (state: EventStreamHealthState) => void
-  }): EventStreamSubscription {
-    const id = this.addSubscriber(input.onEvent, input.onStatusChange, input.onHealthChange)
-    this.updateSubscriberDirectories(id, [input.directory])
-
-    return {
       reconnect: () => this.reconnect(),
       reportVisibility: (visible, activeSessionId) => this.reportVisibility(visible, activeSessionId),
       dispose: () => this.removeSubscriber(id),
