@@ -1,12 +1,13 @@
-import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createRepo, discoverRepos } from '@/api/repos'
+import { useState, useRef, useCallback, useMemo } from 'react'
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query'
+import { listRepos, createRepo, discoverRepos } from '@/api/repos'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2 } from 'lucide-react'
 import { showToast } from '@/lib/toast'
+import { getRepoDirectoryNameError, getRepoNameFromUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 import type { Repo } from '@/api/types'
 
@@ -20,8 +21,10 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   const [repoUrl, setRepoUrl] = useState('')
   const [localPath, setLocalPath] = useState('')
   const [folderPath, setFolderPath] = useState('')
+  const [directoryName, setDirectoryName] = useState('')
   const [branch, setBranch] = useState('')
   const [skipSSHVerification, setSkipSSHVerification] = useState(false)
+  const directoryTouched = useRef(false)
   const queryClient = useQueryClient()
 
   const isSSHUrl = (url: string): boolean => {
@@ -29,6 +32,29 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
   }
 
   const showSkipSSHCheckbox = repoType === 'remote' && isSSHUrl(repoUrl)
+  const showDirectoryName = repoType === 'remote'
+
+  const { data: existingRepos } = useQuery({
+    queryKey: ['repos'],
+    queryFn: listRepos,
+    staleTime: 30_000,
+  })
+
+  const directoryNameError = useMemo(() => {
+    if (!showDirectoryName || !directoryName) return null
+    return getRepoDirectoryNameError(directoryName)
+  }, [showDirectoryName, directoryName])
+
+  const directoryCollision = useMemo(() => {
+    if (!showDirectoryName || !directoryName || directoryNameError || !existingRepos) return null
+    const normalizedNewUrl = normalizeRepoUrlForCompare(repoUrl)
+    const colliding = existingRepos.find((r) => {
+      if (r.localPath !== directoryName) return false
+      if (r.repoUrl && normalizeRepoUrlForCompare(r.repoUrl) === normalizedNewUrl) return false
+      return true
+    })
+    return colliding ?? null
+  }, [showDirectoryName, directoryName, directoryNameError, existingRepos, repoUrl])
 
   type AddRepoResult =
     | { mode: 'single'; repo: Repo }
@@ -46,7 +72,13 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
         return { mode: 'discover', ...result }
       }
 
-      const repo = await createRepo({ repoUrl, branch: branch || undefined, useWorktree: false, skipSSHVerification })
+      const repo = await createRepo({
+        repoUrl,
+        directoryName: directoryName || undefined,
+        branch: branch || undefined,
+        useWorktree: false,
+        skipSSHVerification,
+      })
       return { mode: 'single', repo }
     },
     onSuccess: (result) => {
@@ -55,9 +87,11 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
       setRepoUrl('')
       setLocalPath('')
       setFolderPath('')
+      setDirectoryName('')
       setBranch('')
       setRepoType('remote')
       setSkipSSHVerification(false)
+      directoryTouched.current = false
 
       if (result.mode === 'discover') {
         const summary = [
@@ -91,12 +125,21 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     }
   }
 
-  const handleRepoUrlChange = (value: string) => {
+  const handleRepoUrlChange = useCallback((value: string) => {
     setRepoUrl(value)
     if (!isSSHUrl(value)) {
       setSkipSSHVerification(false)
     }
-  }
+    if (!directoryTouched.current) {
+      const extracted = sanitizeRepoDirectoryName(getRepoNameFromUrl(value))
+      setDirectoryName(extracted)
+    }
+  }, [])
+
+  const handleDirectoryNameChange = useCallback((value: string) => {
+    directoryTouched.current = true
+    setDirectoryName(value)
+  }, [])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -161,6 +204,37 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
               </p>
             </div>
           )}
+
+          {showDirectoryName && (
+            <div className="space-y-2">
+              <label className="text-sm text-zinc-400">Directory Name</label>
+              <Input
+                placeholder="Auto-detected from URL"
+                value={directoryName}
+                onChange={(e) => handleDirectoryNameChange(e.target.value)}
+                disabled={mutation.isPending}
+                className="bg-[#1a1a1a] border-[#2a2a2a] text-white placeholder:text-zinc-500 min-h-[44px] text-base"
+              />
+              {directoryNameError ? (
+                <p className="text-xs text-amber-400">
+                  {directoryNameError}.
+                </p>
+              ) : directoryCollision ? (
+                <p className="text-xs text-amber-400">
+                  A repository named '{directoryName}' already exists.
+                  {directoryCollision.repoUrl && directoryCollision.repoUrl !== repoUrl
+                    ? ` (${directoryCollision.repoUrl})`
+                    : ''
+                  }
+                  {' '}Choose a different directory name to clone this fork.
+                </p>
+              ) : (
+                <p className="text-xs text-zinc-500">
+                  Custom directory name for the cloned repository
+                </p>
+              )}
+            </div>
+          )}
           
           <div className="space-y-2">
             <label className="text-sm text-zinc-400">Branch (optional)</label>
@@ -204,7 +278,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
 
           <Button 
             type="submit" 
-            disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending}
+            disabled={(!repoUrl && repoType === 'remote') || (!localPath && repoType === 'local') || (!folderPath && repoType === 'folder') || mutation.isPending || (showDirectoryName && (!!directoryNameError || !!directoryCollision))}
             className="w-full min-h-[48px] bg-blue-600 hover:bg-blue-700 text-white text-base font-medium"
           >
             {mutation.isPending ? (

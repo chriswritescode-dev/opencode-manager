@@ -7,6 +7,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
 import path from 'path'
@@ -103,19 +104,9 @@ async function isGitWorktreeRepo(targetPath: string): Promise<boolean> {
   }
 }
 
-function sanitizeWorkspaceAliasSegment(segment: string): string {
-  const sanitized = segment
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '')
-
-  return sanitized || 'repo'
-}
-
 function buildWorkspaceAliasCandidates(sourcePath: string, rootPath?: string): string[] {
   const candidates: string[] = []
-  const baseName = sanitizeWorkspaceAliasSegment(path.basename(sourcePath))
+  const baseName = sanitizeRepoDirectoryName(path.basename(sourcePath))
   candidates.push(baseName)
 
   if (rootPath) {
@@ -123,7 +114,7 @@ function buildWorkspaceAliasCandidates(sourcePath: string, rootPath?: string): s
     if (relativePath && !relativePath.startsWith('..')) {
       const relativeAlias = relativePath
         .split(path.sep)
-        .map(sanitizeWorkspaceAliasSegment)
+        .map(sanitizeRepoDirectoryName)
         .filter(Boolean)
         .join('--')
 
@@ -579,6 +570,7 @@ export async function initLocalRepo(
 
 export interface CloneRepoOptions {
   branch?: string
+  directoryName?: string
   useWorktree?: boolean
   skipSSHVerification?: boolean
   baseBranch?: string
@@ -590,24 +582,22 @@ export async function cloneRepo(
   repoUrl: string,
   options: CloneRepoOptions = {}
 ): Promise<Repo> {
-  const { branch, useWorktree = false, skipSSHVerification = false, baseBranch } = options
+  const { branch, directoryName, useWorktree = false, skipSSHVerification = false, baseBranch } = options
   const effectiveUrl = normalizeSSHUrl(repoUrl)
   const isSSH = isSSHUrl(effectiveUrl)
   const preserveSSH = isSSH
-  const hasSSHCredential = await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
-
   const { url: normalizedRepoUrl, name: repoName } = normalizeRepoUrl(effectiveUrl, preserveSSH)
-  const baseRepoDirName = repoName
-  const worktreeDirName = branch && useWorktree ? `${repoName}-${branch.replace(/[\\/]/g, '-')}` : repoName
+  const dirName = directoryName === undefined
+    ? sanitizeRepoDirectoryName(repoName)
+    : normalizeRepoDirectoryName(directoryName)
+  const baseRepoDirName = dirName
+  const worktreeDirName = branch && useWorktree ? `${dirName}-${branch.replace(/[\\/]/g, '-')}` : dirName
   const localPath = worktreeDirName
 
   const existing = getRepoByUrlAndBranch(database, normalizedRepoUrl, branch)
 
   if (existing) {
     logger.info(`Repo branch already exists: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`)
-    if (hasSSHCredential) {
-      await gitAuthService.cleanupSSHKey()
-    }
     return existing
   }
 
@@ -632,6 +622,8 @@ export async function cloneRepo(
   const repo = createRepo(database, createRepoInput)
 
   try {
+    await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
+
     const env = {
       ...gitAuthService.getGitEnvironment(),
       ...(isSSH ? gitAuthService.getSSHEnvironment() : {})

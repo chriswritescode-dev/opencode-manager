@@ -46,7 +46,7 @@ export function createRepoRoutes(
   app.post('/', async (c) => {
     try {
       const body = await c.req.json()
-      const { repoUrl, localPath, branch, openCodeConfigName, useWorktree, skipSSHVerification, provider, baseBranch } = body
+      const { repoUrl, localPath, branch, directoryName, openCodeConfigName, useWorktree, skipSSHVerification, provider, baseBranch } = body
 
       if (!repoUrl && !localPath) {
         return c.json({ error: 'Either repoUrl or localPath is required' }, 400)
@@ -67,7 +67,7 @@ export function createRepoRoutes(
           database,
           gitAuthService,
           repoUrl!,
-          { branch, useWorktree, skipSSHVerification, baseBranch }
+          { branch, directoryName, useWorktree, skipSSHVerification, baseBranch }
         )
       }
       

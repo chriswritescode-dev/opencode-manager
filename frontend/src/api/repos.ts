@@ -7,6 +7,7 @@ export interface CreateRepoOptions {
   repoUrl?: string
   localPath?: string
   branch?: string
+  directoryName?: string
   openCodeConfigName?: string
   useWorktree?: boolean
   skipSSHVerification?: boolean

@@ -27,6 +27,7 @@ export const CreateRepoRequestSchema = z.object({
   repoUrl: z.string().url().optional(),
   localPath: z.string().optional(),
   branch: z.string().optional(),
+  directoryName: z.string().optional(),
   openCodeConfigName: z.string().optional(),
   useWorktree: z.boolean().optional(),
   skipSSHVerification: z.boolean().optional(),
