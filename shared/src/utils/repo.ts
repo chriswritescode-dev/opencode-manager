@@ -44,6 +44,21 @@ export function normalizeRepoDirectoryName(input: string): string {
   return input.trim()
 }
 
+export function sanitizeBranchForDirectory(branch: string): string {
+  return branch.replace(/[\\/]/g, '-')
+}
+
+export function getRepoBaseDirectoryName(repo: { localPath: string; branch?: string; isWorktree?: boolean }): string {
+  if (repo.isWorktree && repo.branch) {
+    const suffix = `-${sanitizeBranchForDirectory(repo.branch)}`
+    if (repo.localPath.endsWith(suffix)) {
+      return repo.localPath.slice(0, -suffix.length)
+    }
+  }
+
+  return repo.localPath
+}
+
 export function getRepoNameFromUrl(url: string): string {
   const cleaned = url.trim().replace(/\.git$/, '').replace(/\/+$/, '')
   const scpMatch = cleaned.match(/^git@[^:]+:(.+)$/)

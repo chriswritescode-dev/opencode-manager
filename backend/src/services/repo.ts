@@ -7,7 +7,7 @@ import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
+import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
 import path from 'path'
@@ -591,7 +591,7 @@ export async function cloneRepo(
     ? sanitizeRepoDirectoryName(repoName)
     : normalizeRepoDirectoryName(directoryName)
   const baseRepoDirName = dirName
-  const worktreeDirName = branch && useWorktree ? `${dirName}-${branch.replace(/[\\/]/g, '-')}` : dirName
+  const worktreeDirName = branch && useWorktree ? `${dirName}-${sanitizeBranchForDirectory(branch)}` : dirName
   const localPath = worktreeDirName
 
   const existing = getRepoByUrlAndBranch(database, normalizedRepoUrl, branch)
@@ -705,6 +705,17 @@ export async function cloneRepo(
         const isValidRepo = await executeCommand(['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'rev-parse', '--git-dir'], path.resolve(getReposPath())).then(() => 'valid').catch(() => 'invalid')
         
         if (isValidRepo.trim() === 'valid') {
+          const existingOriginUrl = await executeCommand(
+            ['git', '-C', path.resolve(getReposPath(), baseRepoDirName), 'remote', 'get-url', 'origin'],
+            { cwd: path.resolve(getReposPath()), silent: true }
+          ).then((output) => output.trim()).catch(() => '')
+
+          if (existingOriginUrl && normalizeRepoUrlForCompare(existingOriginUrl) !== normalizeRepoUrlForCompare(normalizedRepoUrl)) {
+            const collisionError = new Error(`Directory '${baseRepoDirName}' already contains a different repository (${existingOriginUrl}). Choose a different directory name.`) as Error & { statusCode: number }
+            collisionError.statusCode = 409
+            throw collisionError
+          }
+
           logger.info(`Valid repository found: ${normalizedRepoUrl}`)
           
           if (branch) {

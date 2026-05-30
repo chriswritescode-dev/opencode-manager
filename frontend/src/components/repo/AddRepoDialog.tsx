@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2 } from 'lucide-react'
 import { showToast } from '@/lib/toast'
-import { getRepoDirectoryNameError, getRepoNameFromUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
+import { getRepoBaseDirectoryName, getRepoDirectoryNameError, getRepoNameFromUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 import type { Repo } from '@/api/types'
 
@@ -49,7 +49,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
     if (!showDirectoryName || !directoryName || directoryNameError || !existingRepos) return null
     const normalizedNewUrl = normalizeRepoUrlForCompare(repoUrl)
     const colliding = existingRepos.find((r) => {
-      if (r.localPath !== directoryName) return false
+      if (r.localPath !== directoryName && getRepoBaseDirectoryName(r) !== directoryName) return false
       if (r.repoUrl && normalizeRepoUrlForCompare(r.repoUrl) === normalizedNewUrl) return false
       return true
     })
