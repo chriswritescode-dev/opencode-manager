@@ -1,9 +1,12 @@
+function trimTrailingChar(value: string, char: string): string {
+  let end = value.length
+  while (end > 0 && value[end - 1] === char) end--
+  return value.slice(0, end)
+}
+
 export function sanitizeRepoDirectoryName(input: string): string {
-  const sanitized = input
-    .trim()
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+/, '')
-    .replace(/-+$/, '')
+  const collapsed = input.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+/, '')
+  const sanitized = trimTrailingChar(collapsed, '-')
 
   return sanitized || 'repo'
 }
@@ -60,7 +63,7 @@ export function getRepoBaseDirectoryName(repo: { localPath: string; branch?: str
 }
 
 export function getRepoNameFromUrl(url: string): string {
-  const cleaned = url.trim().replace(/\.git$/, '').replace(/\/+$/, '')
+  const cleaned = trimTrailingChar(url.trim().replace(/\.git$/, ''), '/')
   const scpMatch = cleaned.match(/^git@[^:]+:(.+)$/)
 
   if (scpMatch) {
@@ -73,7 +76,7 @@ export function getRepoNameFromUrl(url: string): string {
 }
 
 export function normalizeRepoUrlForCompare(url: string): string {
-  let normalized = url.trim().replace(/\.git$/, '').replace(/\/+$/, '')
+  let normalized = trimTrailingChar(url.trim().replace(/\.git$/, ''), '/')
   const shorthandMatch = normalized.match(/^([^/]+)\/([^/]+)$/)
 
   if (shorthandMatch && !normalized.includes('://') && !normalized.startsWith('git@')) {
