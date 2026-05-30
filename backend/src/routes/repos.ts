@@ -256,7 +256,35 @@ app.get('/', async (c) => {
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })
-  
+
+  app.post('/:id/workspaces', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+
+      const repo = getRepoById(database, id)
+      if (!repo || repo.cloneStatus !== 'ready') return c.json({ error: 'Repo not found' }, 404)
+
+      const response = await openCodeClient.forward({
+        method: 'POST',
+        path: '/experimental/workspace',
+        directory: repo.fullPath,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'worktree', branch: null }),
+      })
+
+      const body = await response.text()
+      if (!response.ok) {
+        return c.json({ error: body || 'Failed to create workspace' }, response.status as ContentfulStatusCode)
+      }
+
+      return c.json(body ? JSON.parse(body) : { success: true })
+    } catch (error: unknown) {
+      logger.error('Failed to create workspace:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
   app.delete('/:id', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))

@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useCallback, useState, useMemo } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
+import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
@@ -11,6 +12,7 @@ interface SessionListProps {
   opcodeUrl: string;
   directory?: string;
   directories?: string[];
+  createDirectory?: string;
   directoryLabels?: Record<string, string>;
   activeSessionID?: string;
   onSelectSession: (sessionID: string) => void;
@@ -20,24 +22,28 @@ export const SessionList = ({
   opcodeUrl,
   directory,
   directories,
+  createDirectory,
   directoryLabels,
   activeSessionID,
   onSelectSession,
 }: SessionListProps) => {
   const directoriesList = useMemo(() => {
-    if (directories && directories.length > 0) return directories.filter(Boolean);
-    if (directory) return [directory];
-    return [];
+    const source = directories && directories.length > 0 ? directories : directory ? [directory] : [];
+    return Array.from(new Set(source.filter(Boolean)));
   }, [directory, directories]);
   const directorySet = useMemo(() => new Set(directoriesList), [directoriesList]);
   const primaryDirectory = directoriesList[0];
+  const sessionCreateDirectory = createDirectory ?? primaryDirectory;
+  const getSessionSelectionKey = useCallback((session: { id: string; directory?: string }) =>
+    `${session.directory ?? primaryDirectory ?? ''}:${session.id}`,
+  [primaryDirectory]);
   const { data: sessions, isLoading } = useSessionsAcrossDirectories(opcodeUrl, directoriesList);
-  const deleteSession = useDeleteSession(opcodeUrl, primaryDirectory);
-  const createSession = useCreateSession(opcodeUrl, primaryDirectory, (newSession) => {
+  const deleteSession = useDeleteSession(opcodeUrl, directoriesList);
+  const createSession = useCreateSession(opcodeUrl, sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [sessionToDelete, setSessionToDelete] = useState<string | string[] | null>(null);
+  const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [manageMode, setManageMode] = useState(false);
@@ -58,8 +64,16 @@ export const SessionList = ({
       );
     }
 
-    return filtered.sort((a, b) => b.time.updated - a.time.updated);
-  }, [sessions, searchQuery, directorySet]);
+    const uniqueSessions = new Map<string, (typeof filtered)[number]>();
+    filtered.forEach((session) => {
+      const key = getSessionSelectionKey(session);
+      if (!uniqueSessions.has(key)) {
+        uniqueSessions.set(key, session);
+      }
+    });
+
+    return Array.from(uniqueSessions.values()).sort((a, b) => b.time.updated - a.time.updated);
+  }, [sessions, searchQuery, directorySet, getSessionSelectionKey]);
 
   const todaySessions = useMemo(() => {
     const today = new Date();
@@ -95,9 +109,20 @@ export const SessionList = ({
     );
   }
 
-  const handleDelete = (sessionId: string, e: React.MouseEvent<HTMLButtonElement>) => {
+  const getDeleteTarget = (session: { id: string; directory?: string; workspaceID?: string }): DeleteSessionTarget => {
+    const target: Extract<DeleteSessionTarget, { id: string }> = {
+      id: session.id,
+      directory: session.directory ?? primaryDirectory,
+    };
+    if (session.workspaceID) {
+      target.workspaceID = session.workspaceID;
+    }
+    return target;
+  };
+
+  const handleDelete = (session: { id: string; directory?: string; workspaceID?: string }, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
-    setSessionToDelete(sessionId);
+    setSessionToDelete(getDeleteTarget(session));
     setDeleteDialogOpen(true);
   };
 
@@ -118,31 +143,36 @@ export const SessionList = ({
     setManageMode(false);
   };
 
-  const toggleSessionSelection = (sessionId: string, selected: boolean) => {
+  const toggleSessionSelection = (session: { id: string; directory?: string }, selected: boolean) => {
+    const selectionKey = getSessionSelectionKey(session);
     const newSelected = new Set(selectedSessions);
     if (selected) {
-      newSelected.add(sessionId);
+      newSelected.add(selectionKey);
     } else {
-      newSelected.delete(sessionId);
+      newSelected.delete(selectionKey);
     }
     setSelectedSessions(newSelected);
   };
 
   const allVisibleSelected =
     filteredSessions.length > 0 &&
-    filteredSessions.every((s) => selectedSessions.has(s.id));
+    filteredSessions.every((session) => selectedSessions.has(getSessionSelectionKey(session)));
 
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
       setSelectedSessions(new Set());
     } else {
-      setSelectedSessions(new Set(filteredSessions.map((s) => s.id)));
+      setSelectedSessions(new Set(filteredSessions.map(getSessionSelectionKey)));
     }
   };
 
   const handleBulkDelete = () => {
     if (selectedSessions.size > 0) {
-      setSessionToDelete(Array.from(selectedSessions));
+      const selectedTargets = filteredSessions
+        .filter((session) => selectedSessions.has(getSessionSelectionKey(session)))
+        .map(getDeleteTarget);
+      if (selectedTargets.length === 0) return;
+      setSessionToDelete(selectedTargets);
       setDeleteDialogOpen(true);
     }
   };
@@ -194,6 +224,7 @@ export const SessionList = ({
             <Button
               variant="outline"
               size="icon"
+              aria-label="Manage sessions"
               className="shrink-0 size-9"
               onClick={() => {
                 setManageMode(true);
@@ -220,15 +251,15 @@ export const SessionList = ({
                   </div>
                   {todaySessions.map((session) => (
                     <SessionCard
-                      key={session.id}
+                      key={getSessionSelectionKey(session)}
                       session={session}
-                      isSelected={selectedSessions.has(session.id)}
+                      isSelected={selectedSessions.has(getSessionSelectionKey(session))}
                       isActive={activeSessionID === session.id}
                       manageMode={manageMode}
                       workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
                       onSelect={onSelectSession}
-                      onToggleSelection={(selected) => toggleSessionSelection(session.id, selected)}
-                      onDelete={(e) => handleDelete(session.id, e)}
+                      onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
+                      onDelete={(e) => handleDelete(session, e)}
                     />
                   ))}
                 </>
@@ -239,15 +270,15 @@ export const SessionList = ({
               )}
               {olderSessions.map((session) => (
                 <SessionCard
-                  key={session.id}
+                  key={getSessionSelectionKey(session)}
                   session={session}
-                  isSelected={selectedSessions.has(session.id)}
+                  isSelected={selectedSessions.has(getSessionSelectionKey(session))}
                   isActive={activeSessionID === session.id}
                   manageMode={manageMode}
                   workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
                   onSelect={onSelectSession}
-                  onToggleSelection={(selected) => toggleSessionSelection(session.id, selected)}
-                  onDelete={(e) => handleDelete(session.id, e)}
+                  onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
+                  onDelete={(e) => handleDelete(session, e)}
                 />
               ))}
             </>

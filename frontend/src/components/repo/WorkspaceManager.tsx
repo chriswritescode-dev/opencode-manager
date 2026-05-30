@@ -1,13 +1,19 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { ChevronDown, ChevronRight, GitBranch, Trash2 } from 'lucide-react'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { GitBranch, Plus, Search, Trash2 } from 'lucide-react'
 import type { RepoSibling } from '@/api/repos'
 
 interface WorkspaceManagerProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   workspaces: RepoSibling[]
   onDelete: (workspaceIds: string[]) => void
+  activeWorkspaceDirectory?: string
+  onActiveWorkspaceChange: (directory: string) => void
+  onCreateWorkspace: () => void
   isDeleting?: boolean
 }
 
@@ -21,17 +27,49 @@ function workspaceLabel(workspace: RepoSibling): string {
   )
 }
 
-export function WorkspaceManager({ workspaces, onDelete, isDeleting = false }: WorkspaceManagerProps) {
-  const [expanded, setExpanded] = useState(false)
+export function WorkspaceManager({
+  open,
+  onOpenChange,
+  workspaces,
+  onDelete,
+  activeWorkspaceDirectory,
+  onActiveWorkspaceChange,
+  onCreateWorkspace,
+  isDeleting = false,
+}: WorkspaceManagerProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
+  const [manageMode, setManageMode] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  useEffect(() => {
+    if (!open) {
+      setSearchQuery('')
+    }
+  }, [open])
+
+  const filteredWorkspaces = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase()
+    if (!query) return workspaces
+
+    return workspaces.filter((workspace) => {
+      const haystack = [
+        workspaceLabel(workspace),
+        workspace.fullPath,
+        workspace.workspaceName,
+        workspace.workspaceId,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [searchQuery, workspaces])
 
   const selectableIds = useMemo(
-    () => workspaces.map((workspace) => workspace.workspaceId).filter((id): id is string => !!id),
-    [workspaces],
+    () => filteredWorkspaces.map((workspace) => workspace.workspaceId).filter((id): id is string => !!id),
+    [filteredWorkspaces],
   )
-
-  if (!workspaces || workspaces.length === 0) return null
 
   const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id))
   const selectedCount = selected.size
@@ -55,73 +93,161 @@ export function WorkspaceManager({ workspaces, onDelete, isDeleting = false }: W
   const handleConfirm = () => {
     onDelete(Array.from(selected))
     setSelected(new Set())
+    setManageMode(false)
     setConfirmOpen(false)
   }
 
   return (
-    <div className="px-4 pt-2 flex-shrink-0">
-      <button
-        type="button"
-        onClick={() => setExpanded((prev) => !prev)}
-        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/30 hover:text-foreground"
-      >
-        {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        <span>Workspaces ({workspaces.length})</span>
-      </button>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent mobileFullscreen className="flex flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-[560px]">
+          <DialogHeader className="border-b border-border px-4 py-4">
+            <DialogTitle>Workspaces</DialogTitle>
+            <DialogDescription>Choose where new sessions should start.</DialogDescription>
+          </DialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
+            <div className="flex items-center justify-between gap-3">
+            {manageMode ? (
+              <div className="flex items-center gap-2">
+                <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all workspaces" />
+                <span className="text-xs text-muted-foreground">
+                  {selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}
+                </span>
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {activeWorkspaceDirectory ? 'Selected workspace' : 'Select a workspace'}
+              </span>
+            )}
+            <div className="flex shrink-0 items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7"
+                onClick={() => {
+                  onOpenChange(false)
+                  onCreateWorkspace()
+                }}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                New
+              </Button>
+              {manageMode ? (
+                <>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-destructive hover:text-destructive"
+                    disabled={selectedCount === 0 || isDeleting}
+                    onClick={() => setConfirmOpen(true)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1" />
+                    Delete
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7"
+                    onClick={() => {
+                      setSelected(new Set())
+                      setManageMode(false)
+                    }}
+                  >
+                    Done
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7"
+                  onClick={() => setManageMode(true)}
+                >
+                  Manage
+                </Button>
+              )}
+            </div>
+            </div>
 
-      {expanded && (
-        <div className="mt-2 space-y-2">
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={toggleAll}
-              className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              <Checkbox checked={allSelected} aria-label="Select all workspaces" />
-              <span>{selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}</span>
-            </button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-destructive hover:text-destructive"
-              disabled={selectedCount === 0 || isDeleting}
-              onClick={() => setConfirmOpen(true)}
-            >
-              <Trash2 className="h-3.5 w-3.5 mr-1" />
-              Delete
-            </Button>
-          </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search workspaces..."
+                className="h-10 w-full rounded-md border border-border bg-background pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary"
+              />
+            </div>
 
-          <div className="flex flex-col gap-1 max-h-40 overflow-y-auto">
-            {workspaces.map((workspace) => {
+            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
+            {filteredWorkspaces.map((workspace) => {
               if (!workspace.workspaceId) return null
               const workspaceId = workspace.workspaceId
               const isChecked = selected.has(workspaceId)
+              const isActive = !!workspace.fullPath && workspace.fullPath === activeWorkspaceDirectory
+              const label = workspaceLabel(workspace)
+              const rowClassName = isActive
+                ? 'border-purple-500/50 bg-purple-500/10 text-foreground'
+                : 'border-border bg-muted/30 hover:bg-muted/50'
+              if (!manageMode) {
+                return (
+                  <button
+                    key={workspaceId}
+                    type="button"
+                    disabled={!workspace.fullPath}
+                    onClick={() => {
+                      if (!workspace.fullPath) return
+                      onActiveWorkspaceChange(workspace.fullPath)
+                      onOpenChange(false)
+                    }}
+                    className={`flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm text-left ${rowClassName}`}
+                    aria-pressed={isActive}
+                  >
+                    <GitBranch className="h-3.5 w-3.5 text-purple-400 flex-shrink-0" />
+                    <span className="truncate">{label}</span>
+                    {isActive && <span className="text-xs text-purple-400">Selected</span>}
+                    {workspace.fullPath && (
+                      <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
+                        {workspace.fullPath}
+                      </span>
+                    )}
+                  </button>
+                )
+              }
               return (
-                <label
+                <div
                   key={workspaceId}
-                  className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-2 py-1.5 text-xs cursor-pointer hover:bg-muted/50"
+                  className="flex min-h-11 items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-sm hover:bg-muted/50"
                 >
                   <Checkbox
                     checked={isChecked}
                     disabled={isDeleting}
                     onCheckedChange={(checked) => toggle(workspaceId, checked === true)}
-                    aria-label={`Select workspace ${workspaceLabel(workspace)}`}
+                    aria-label={`Select workspace ${label}`}
                   />
-                  <GitBranch className="h-3 w-3 text-purple-400 flex-shrink-0" />
-                  <span className="truncate">{workspaceLabel(workspace)}</span>
+                  <GitBranch className="h-3.5 w-3.5 text-purple-400 flex-shrink-0" />
+                  <span className="truncate">{label}</span>
                   {workspace.fullPath && (
-                    <span className="ml-auto truncate text-[10px] text-muted-foreground max-w-[45%]">
+                    <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
                       {workspace.fullPath}
                     </span>
                   )}
-                </label>
+                </div>
               )
             })}
+            {filteredWorkspaces.length === 0 && (
+              <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                No workspaces found
+              </div>
+            )}
+            </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       <DeleteDialog
         open={confirmOpen}
@@ -136,6 +262,6 @@ export function WorkspaceManager({ workspaces, onDelete, isDeleting = false }: W
         }
         isDeleting={isDeleting}
       />
-    </div>
+    </>
   )
 }

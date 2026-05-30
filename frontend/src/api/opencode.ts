@@ -61,7 +61,14 @@ export class OpenCodeClient {
   }
 
   async deleteSession(sessionID: string) {
-    return fetchWrapper(`${this.baseURL}/session/${sessionID}`, {
+    return fetchWrapperVoid(`${this.baseURL}/session/${sessionID}`, {
+      method: 'DELETE',
+      params: this.getParams(),
+    })
+  }
+
+  async deleteWorkspace(workspaceID: string) {
+    return fetchWrapperVoid(`${this.baseURL}/experimental/workspace/${workspaceID}`, {
       method: 'DELETE',
       params: this.getParams(),
     })

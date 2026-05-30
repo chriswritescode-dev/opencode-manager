@@ -1175,8 +1175,17 @@ export async function getSiblingRepos(
       candidates.map((workspace) => isGitMainCheckout(workspace.directory!).catch(() => false)),
     )
 
-    const workspaceSiblings = candidates
+    const uniqueWorkspaces = new Map<string, typeof candidates[number]>()
+    candidates
       .filter((_, index) => !mainChecks[index])
+      .forEach((workspace) => {
+        const directory = canonical(workspace.directory!)
+        if (!uniqueWorkspaces.has(directory)) {
+          uniqueWorkspaces.set(directory, workspace)
+        }
+      })
+
+    const workspaceSiblings = Array.from(uniqueWorkspaces.values())
       .map((workspace) => ({
         id: -1,
         repoUrl: target.repoUrl,

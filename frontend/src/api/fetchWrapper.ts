@@ -29,10 +29,22 @@ function formatDetails(details: unknown): string | undefined {
 }
 
 async function handleResponse(response: Response): Promise<never> {
-  const data: ApiErrorResponse = await response.json().catch(() => ({ error: 'An error occurred' }))
+  const text = await response.text().catch(() => '')
+  const data: ApiErrorResponse = (() => {
+    if (!text) return { error: 'An error occurred' }
+    try {
+      return JSON.parse(text) as ApiErrorResponse
+    } catch {
+      return { error: text }
+    }
+  })()
+  const errorData = data as ApiErrorResponse & { message?: string; data?: { message?: unknown } }
+  const openCodeMessage = typeof errorData.data?.message === 'string'
+    ? errorData.data.message
+    : undefined
   const detail = data.detail || formatDetails(data.details)
   throw new FetchError(
-    data.error || 'Request failed',
+    data.error || errorData.message || openCodeMessage || 'Request failed',
     response.status,
     data.code,
     detail,

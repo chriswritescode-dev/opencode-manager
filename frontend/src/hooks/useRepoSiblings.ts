@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { deleteRepoWorkspace, getRepoSiblings, type RepoSibling } from '@/api/repos'
+import { createRepoWorkspace, deleteRepoWorkspace, getRepoSiblings, type RepoSibling } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 
 export function useRepoSiblings(repoId: number | undefined) {
@@ -36,6 +36,24 @@ export function useDeleteRepoWorkspaces(repoId: number | undefined) {
     },
     onError: () => {
       showToast.error('Failed to delete workspaces')
+    },
+  })
+}
+
+export function useCreateRepoWorkspace(repoId: number | undefined) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!repoId) throw new Error('Repo id is required')
+      return createRepoWorkspace(repoId)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['repo', 'siblings', repoId] })
+      showToast.success('Workspace created')
+    },
+    onError: () => {
+      showToast.error('Failed to create workspace')
     },
   })
 }

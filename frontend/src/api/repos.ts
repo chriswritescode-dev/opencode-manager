@@ -44,6 +44,15 @@ export type RepoSibling = Repo & {
   workspaceName?: string
 }
 
+export interface RepoWorkspace {
+  id: string
+  type: string
+  name?: string | null
+  branch?: string | null
+  directory?: string | null
+  projectID?: string
+}
+
 export async function getRepoSiblings(id: number): Promise<RepoSibling[]> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/siblings`)
 }
@@ -51,6 +60,12 @@ export async function getRepoSiblings(id: number): Promise<RepoSibling[]> {
 export async function deleteRepoWorkspace(repoId: number, workspaceId: string): Promise<void> {
   return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${repoId}/workspaces/${workspaceId}`, {
     method: 'DELETE',
+  })
+}
+
+export async function createRepoWorkspace(repoId: number): Promise<RepoWorkspace> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/workspaces`, {
+    method: 'POST',
   })
 }
 

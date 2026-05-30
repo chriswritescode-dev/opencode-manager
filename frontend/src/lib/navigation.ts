@@ -10,11 +10,15 @@ export function isAssistantPath(pathname: string): boolean {
   return pathname === '/assistant' || /^\/repos\/[^/]+\/assistant$/.test(pathname);
 }
 
-export function getSessionListPath(repoId: string | number, isAssistantSession: boolean): string {
+export function getSessionListPath(repoId: string | number, isAssistantSession: boolean, tab?: string): string {
   if (isAssistantSession) {
     return getAssistantSessionListPath();
   }
-  return `/repos/${String(repoId)}`;
+  const base = `/repos/${String(repoId)}`;
+  if (tab && tab !== 'repo') {
+    return `${base}?tab=${tab}`;
+  }
+  return base;
 }
 
 export function getSwipeBackTarget(pathname: string, search = ''): string | null {
@@ -25,7 +29,8 @@ export function getSwipeBackTarget(pathname: string, search = ''): string | null
     const repoId = match[1];
     const params = new URLSearchParams(search);
     const isAssistant = params.get('assistant') === '1';
-    return getSessionListPath(repoId, isAssistant);
+    const tab = params.get('tab') ?? undefined;
+    return getSessionListPath(repoId, isAssistant, tab);
   }
 
   if (isAssistantPath(pathname)) {

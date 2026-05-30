@@ -106,6 +106,41 @@ describe('GET /api/repos/:id/siblings', () => {
     })
   })
 
+  it('deduplicates OpenCode workspaces with the same directory', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
+    }))
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    app = createTestApp(db, createStubOpenCodeClient({
+      getJson: mock(async () => ([
+        {
+          id: 'wrk_first',
+          type: 'worktree',
+          name: 'duplicate-workspace',
+          branch: 'duplicate-branch',
+          directory: '/tmp/duplicate-workspace',
+          projectID: 'commit-A',
+        },
+        {
+          id: 'wrk_second',
+          type: 'worktree',
+          name: 'duplicate-workspace',
+          branch: 'duplicate-branch',
+          directory: '/tmp/duplicate-workspace/',
+          projectID: 'commit-A',
+        },
+      ])) as any,
+    }))
+
+    const res = await app.request('/repos/1/siblings')
+    expect(res.status).toBe(200)
+    const data = await res.json() as Array<{ workspaceId?: string }>
+    expect(data.filter((entry) => entry.workspaceId)).toHaveLength(1)
+    expect(data.some((entry) => entry.workspaceId === 'wrk_first')).toBe(true)
+  })
+
   it('excludes a workspace pointing at the repo directory so it cannot be deleted', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => Promise.resolve('commit-A')) as any,
@@ -248,11 +283,12 @@ describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
 
   it('forwards workspace delete to OpenCode with repo directory', async () => {
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const forward = mock(async (req: Parameters<OpenCodeClient['forward']>[0]) => {
+      captured = { path: req.path, directory: req.directory }
+      return new Response(JSON.stringify({ id: 'wrk_test' }), { status: 200 })
+    })
     const app = createTestApp(db, createStubOpenCodeClient({
-      forward: mock(async (req) => {
-        captured = { path: req.path, directory: req.directory }
-        return new Response(JSON.stringify({ id: 'wrk_test' }), { status: 200 })
-      }) as any,
+      forward,
     }))
 
     const res = await app.request('/repos/1/workspaces/wrk_test', { method: 'DELETE' })
@@ -260,5 +296,38 @@ describe('DELETE /api/repos/:id/workspaces/:workspaceId', () => {
     expect(res.status).toBe(200)
     expect(captured?.path).toBe('/experimental/workspace/wrk_test')
     expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
+  })
+})
+
+describe('POST /api/repos/:id/workspaces', () => {
+  let db: Database
+  let captured: { path: string; directory?: string; body?: string } | null
+
+  beforeEach(() => {
+    db = createTestDb()
+    captured = null
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  it('forwards workspace creation to OpenCode with repo directory', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const forward = mock(async (req: Parameters<OpenCodeClient['forward']>[0]) => {
+      captured = { path: req.path, directory: req.directory, body: req.body }
+      return new Response(JSON.stringify({ id: 'wrk_test', type: 'worktree', directory: '/tmp/wrk-test' }), { status: 200 })
+    })
+    const app = createTestApp(db, createStubOpenCodeClient({
+      forward,
+    }))
+
+    const res = await app.request('/repos/1/workspaces', { method: 'POST' })
+
+    expect(res.status).toBe(200)
+    expect(captured?.path).toBe('/experimental/workspace')
+    expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
+    expect(JSON.parse(captured?.body ?? '{}')).toEqual({ type: 'worktree', branch: null })
+    expect(await res.json()).toMatchObject({ id: 'wrk_test', type: 'worktree' })
   })
 })

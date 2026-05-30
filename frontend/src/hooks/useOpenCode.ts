@@ -53,9 +53,13 @@ export const useSessionsAcrossDirectories = (
   opcodeUrl: string | null | undefined,
   directories: string[],
 ) => {
-  const directoryKey = directories.join('|');
+  const uniqueDirectories = useMemo(
+    () => Array.from(new Set(directories.filter(Boolean))),
+    [directories],
+  );
+  const directoryKey = uniqueDirectories.join('|');
   const queries = useQueries({
-    queries: directories.map((directory) => ({
+    queries: uniqueDirectories.map((directory) => ({
       queryKey: ["opencode", "sessions", opcodeUrl, directory],
       queryFn: () => new OpenCodeClient(opcodeUrl!, directory).listSessions(),
       enabled: !!opcodeUrl && !!directory,
@@ -137,33 +141,114 @@ export const useCreateSession = (
   });
 };
 
-export const useDeleteSession = (opcodeUrl: string | null | undefined, directory?: string) => {
+export type DeleteSessionTarget = string | { id: string; directory?: string; workspaceID?: string };
+
+const getDeleteSessionTargetId = (target: DeleteSessionTarget) =>
+  typeof target === 'string' ? target : target.id;
+
+const getDeleteSessionTargetDirectory = (target: DeleteSessionTarget, fallbackDirectory?: string) =>
+  typeof target === 'string' ? fallbackDirectory : target.directory ?? fallbackDirectory;
+
+const getDeleteSessionTargetWorkspaceID = (target: DeleteSessionTarget) =>
+  typeof target === 'string' ? undefined : target.workspaceID;
+
+const getDeleteSessionTargetKey = (target: DeleteSessionTarget, fallbackDirectory?: string) =>
+  `${getDeleteSessionTargetDirectory(target, fallbackDirectory) ?? ''}:${getDeleteSessionTargetId(target)}`;
+
+const isMissingWorkspaceError = (error: unknown) =>
+  error instanceof Error && error.message.includes('Workspace not found:');
+
+const shouldDeleteWorkspaceForSessionDeleteError = (error: unknown) =>
+  isMissingWorkspaceError(error) ||
+  (error instanceof FetchError &&
+    error.statusCode === 500 &&
+    (error.message.includes('Unexpected server error') || error.message === 'Request failed'));
+
+export const useDeleteSession = (opcodeUrl: string | null | undefined, directory?: string | string[]) => {
   const queryClient = useQueryClient();
-  const client = useOpenCodeClient(opcodeUrl, directory);
+  const directories = useMemo(
+    () => (Array.isArray(directory) ? directory : directory ? [directory] : []),
+    [directory],
+  );
+  const primaryDirectory = directories[0];
 
   return useMutation({
-    mutationFn: async (sessionIDs: string | string[]) => {
-      if (!client) {
+    mutationFn: async (sessionIDs: DeleteSessionTarget | DeleteSessionTarget[]) => {
+      if (!opcodeUrl) {
         throw new Error('OpenCode client not available');
       }
       
-      const ids = Array.isArray(sessionIDs) ? sessionIDs : [sessionIDs]
+      const targets = Array.from(
+        new Map(
+          (Array.isArray(sessionIDs) ? sessionIDs : [sessionIDs]).map((target) => [
+            getDeleteSessionTargetKey(target, primaryDirectory),
+            target,
+          ]),
+        ).values(),
+      )
       
-      const deletePromises = ids.map(async (sessionID) => {
-        await client.deleteSession(sessionID);
-      })
-      
-      const results = await Promise.allSettled(deletePromises)
+      const results: PromiseSettledResult<void>[] = []
+      const removedWorkspaces = new Set<string>()
+      for (const target of targets) {
+        const workspaceID = getDeleteSessionTargetWorkspaceID(target)
+        if (workspaceID && removedWorkspaces.has(workspaceID)) {
+          results.push({ status: 'fulfilled', value: undefined })
+          continue
+        }
+
+        const client = new OpenCodeClient(
+          opcodeUrl,
+          getDeleteSessionTargetDirectory(target, primaryDirectory),
+        )
+        try {
+          await client.deleteSession(getDeleteSessionTargetId(target))
+          results.push({ status: 'fulfilled', value: undefined })
+        } catch (reason) {
+          if (workspaceID && shouldDeleteWorkspaceForSessionDeleteError(reason)) {
+            try {
+              await client.deleteWorkspace(workspaceID)
+              removedWorkspaces.add(workspaceID)
+              results.push({ status: 'fulfilled', value: undefined })
+              continue
+            } catch (workspaceReason) {
+              results.push({ status: 'rejected', reason: workspaceReason })
+              continue
+            }
+          }
+          results.push({ status: 'rejected', reason })
+        }
+      }
       const failures = results.filter(result => result.status === 'rejected')
       
       if (failures.length > 0) {
         throw new Error(`Failed to delete ${failures.length} session(s)`)
       }
       
-      return results
+      return { deleted: targets.length, results }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, directory] });
+    onSuccess: ({ deleted }) => {
+      showToast.success(deleted === 1 ? 'Session deleted' : `${deleted} sessions deleted`);
+    },
+    onError: () => {
+      showToast.error('Failed to delete sessions');
+    },
+    onSettled: (_data, _error, variables) => {
+      const targets = variables ? (Array.isArray(variables) ? variables : [variables]) : [];
+      const affectedDirectories = new Set([
+        ...directories,
+        ...targets
+          .map((target) => getDeleteSessionTargetDirectory(target))
+          .filter((value): value is string => !!value),
+      ]);
+
+      if (affectedDirectories.size === 0) {
+        queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl] });
+        return;
+      }
+
+      for (const affectedDirectory of affectedDirectories) {
+        queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, affectedDirectory] });
+      }
     },
   });
 };
