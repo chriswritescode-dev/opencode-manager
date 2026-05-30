@@ -7,7 +7,7 @@
   "scripts": {
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
-    "dev:backend": "bun --watch-path backend/src --watch backend/src/index.ts",
+    "dev:backend": "NODE_ENV=development bun --watch-path backend/src --watch backend/src/index.ts",
     "dev:frontend": "pnpm --filter frontend dev",
     "start": "concurrently \"pnpm:start:backend\" \"pnpm:start:frontend\"",
     "start:backend": "bun run backend/dist/index.js",

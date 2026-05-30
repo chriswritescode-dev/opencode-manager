@@ -1,5 +1,5 @@
 import fs from 'fs/promises'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, rmSync, realpathSync } from 'node:fs'
 import { executeCommand } from '../utils/process'
 import { ensureDirectoryExists } from './file-operations'
 import { createRepo, getRepoByLocalPath, getRepoBySourcePath, getRepoById, updateRepoStatus, updateRepoBranch, updateLastPulled, deleteRepo, getRepoByUrlAndBranch } from '../db/queries'
@@ -13,7 +13,7 @@ import path from 'path'
 import { parseSSHHost } from '../utils/ssh-key-manager'
 import { getErrorMessage } from '../utils/error-utils'
 import { sseAggregator } from './sse-aggregator'
-import { resolveProjectId } from './project-id-resolver'
+import { resolveProjectId, isGitMainCheckout } from './project-id-resolver'
 import { listRepos } from '../db/queries'
 import { SettingsService } from './settings'
 import type { OpenCodeClient } from './opencode/client'
@@ -21,6 +21,14 @@ import type { OpenCodeClient } from './opencode/client'
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
 const DISCOVERY_SKIP_DIRECTORIES = new Set(['.git', 'node_modules'])
+
+function canonical(dir: string): string {
+  try {
+    return realpathSync(path.resolve(dir))
+  } catch {
+    return path.resolve(dir)
+  }
+}
 
 function enhanceCloneError(error: unknown, repoUrl: string, originalMessage: string): Error {
   const message = originalMessage.toLowerCase()
@@ -1140,9 +1148,35 @@ export async function getSiblingRepos(
       projectID: string
     }>>('/experimental/workspace', { directory: target.fullPath })
 
-    const knownDirectories = new Set(repoSiblings.map((repo) => repo.fullPath))
-    const workspaceSiblings = workspaces
-      .filter((workspace) => workspace.projectID === targetProjectId && workspace.directory && !knownDirectories.has(workspace.directory))
+    // Normalize paths so a workspace pointing at a real repo directory can never
+    // be exposed as deletable. Deleting an OpenCode workspace recursively removes
+    // its directory, so the current repo directory and all known managed repo
+    // directories must be excluded regardless of trailing slashes or symlinks.
+    // Workspaces that are git main checkouts (not linked worktrees) are also
+    // excluded so the project's origin/main repository can never be surfaced
+    // as deletable.
+    const knownDirectories = new Set(repoSiblings.map((repo) => canonical(repo.fullPath)))
+    const targetDirectory = canonical(target.fullPath)
+    const reposRoot = canonical(getReposPath())
+
+    const candidates = workspaces.filter((workspace) => {
+      if (workspace.projectID !== targetProjectId) return false
+      if (!workspace.directory) return false
+
+      const workspaceDirectory = canonical(workspace.directory)
+      if (workspaceDirectory === targetDirectory) return false
+      if (workspaceDirectory === reposRoot) return false
+      if (knownDirectories.has(workspaceDirectory)) return false
+
+      return true
+    })
+
+    const mainChecks = await Promise.all(
+      candidates.map((workspace) => isGitMainCheckout(workspace.directory!).catch(() => false)),
+    )
+
+    const workspaceSiblings = candidates
+      .filter((_, index) => !mainChecks[index])
       .map((workspace) => ({
         id: -1,
         repoUrl: target.repoUrl,

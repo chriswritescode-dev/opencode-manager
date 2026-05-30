@@ -11,20 +11,31 @@ export function useRepoSiblings(repoId: number | undefined) {
   })
 }
 
-export function useDeleteRepoWorkspace(repoId: number | undefined) {
+export function useDeleteRepoWorkspaces(repoId: number | undefined) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: (workspaceId: string) => {
+    mutationFn: async (workspaceIds: string[]) => {
       if (!repoId) throw new Error('Repo id is required')
-      return deleteRepoWorkspace(repoId, workspaceId)
+      const results = await Promise.allSettled(
+        workspaceIds.map((workspaceId) => deleteRepoWorkspace(repoId, workspaceId)),
+      )
+      const failed = results.filter((result) => result.status === 'rejected').length
+      return { total: workspaceIds.length, failed }
     },
-    onSuccess: () => {
+    onSuccess: ({ total, failed }) => {
       queryClient.invalidateQueries({ queryKey: ['repo', 'siblings', repoId] })
-      showToast.success('Workspace deleted')
+      const deleted = total - failed
+      if (failed === 0) {
+        showToast.success(deleted === 1 ? 'Workspace deleted' : `${deleted} workspaces deleted`)
+      } else if (deleted === 0) {
+        showToast.error('Failed to delete workspaces')
+      } else {
+        showToast.error(`Deleted ${deleted}, failed ${failed}`)
+      }
     },
     onError: () => {
-      showToast.error('Failed to delete workspace')
+      showToast.error('Failed to delete workspaces')
     },
   })
 }

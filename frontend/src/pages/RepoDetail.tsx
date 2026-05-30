@@ -11,11 +11,11 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { SourceControlPanel } from "@/components/source-control";
 import { useCreateSession } from "@/hooks/useOpenCode";
 import { useRepoActivity } from "@/hooks/useRepoActivity";
-import { useDeleteRepoWorkspace, useRepoSiblings } from "@/hooks/useRepoSiblings";
+import { useDeleteRepoWorkspaces, useRepoSiblings } from "@/hooks/useRepoSiblings";
 import { useSSE } from "@/hooks/useSSE";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { WorktreeTabs, type WorktreeTabValue } from "@/components/repo/WorktreeTabs";
-import { WorkspaceChipRow } from "@/components/repo/WorkspaceChipRow";
+import { WorkspaceManager } from "@/components/repo/WorkspaceManager";
 import { OPENCODE_API_ENDPOINT } from "@/config";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -48,7 +48,7 @@ export function RepoDetail() {
   useRepoActivity(repoId, Boolean(repo));
 
   const { data: siblings } = useRepoSiblings(repoId);
-  const deleteWorkspace = useDeleteRepoWorkspace(repoId);
+  const deleteWorkspaces = useDeleteRepoWorkspaces(repoId);
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
 
@@ -181,10 +181,10 @@ export function RepoDetail() {
       />
 
       {activeTab === 'workspaces' ? (
-        <WorkspaceChipRow
+        <WorkspaceManager
           workspaces={workspaceSiblings}
-          onDelete={(workspaceId) => deleteWorkspace.mutate(workspaceId)}
-          deletingWorkspaceId={deleteWorkspace.variables}
+          onDelete={(workspaceIds) => deleteWorkspaces.mutate(workspaceIds)}
+          isDeleting={deleteWorkspaces.isPending}
         />
       ) : null}
 

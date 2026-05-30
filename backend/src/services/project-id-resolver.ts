@@ -1,5 +1,6 @@
 import { exec } from 'child_process'
 import { readFile } from 'fs/promises'
+import path from 'path'
 import { fileExists } from './file-operations'
 
 const projectIdCache = new Map<string, string>()
@@ -64,5 +65,27 @@ export async function resolveProjectId(repoFullPath: string): Promise<string | n
     return projectId
   } catch {
     return null
+  }
+}
+
+const mainCheckoutCache = new Map<string, boolean>()
+
+export async function isGitMainCheckout(repoFullPath: string): Promise<boolean> {
+  if (mainCheckoutCache.has(repoFullPath)) {
+    return mainCheckoutCache.get(repoFullPath) ?? false
+  }
+  try {
+    const gitDir = await executeGitCommand(repoFullPath, ['rev-parse', '--absolute-git-dir'])
+    const commonDir = await executeGitCommand(repoFullPath, [
+      'rev-parse',
+      '--path-format=absolute',
+      '--git-common-dir',
+    ])
+    const isMain = !!gitDir && !!commonDir && path.resolve(gitDir) === path.resolve(commonDir)
+    mainCheckoutCache.set(repoFullPath, isMain)
+    return isMain
+  } catch {
+    mainCheckoutCache.set(repoFullPath, false)
+    return false
   }
 }

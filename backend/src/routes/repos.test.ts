@@ -8,10 +8,13 @@ import { createRepo } from '../db/queries'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeClient } from '../services/opencode/client'
+import { getReposPath } from '@opencode-manager/shared/config/env'
+import path from 'path'
 
 beforeEach(() => {
   mock.module('../services/project-id-resolver', () => ({
     resolveProjectId: (() => null) as any,
+    isGitMainCheckout: (() => Promise.resolve(false)) as any,
   }))
 })
 
@@ -59,6 +62,7 @@ describe('GET /api/repos/:id/siblings', () => {
       resolveProjectId: ((path: string) => Promise.resolve(
         path.includes('repo-unrelated') ? 'commit-B' : 'commit-A'
       )) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
@@ -76,6 +80,7 @@ describe('GET /api/repos/:id/siblings', () => {
   it('includes OpenCode workspaces that are not manager repo rows', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
@@ -101,11 +106,74 @@ describe('GET /api/repos/:id/siblings', () => {
     })
   })
 
+  it('excludes a workspace pointing at the repo directory so it cannot be deleted', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
+    }))
+
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    const repoDirectory = path.join(getReposPath(), 'repo-a')
+    app = createTestApp(db, createStubOpenCodeClient({
+      getJson: mock(async () => ([{
+        id: 'wrk_self',
+        type: 'worktree',
+        name: 'self-workspace',
+        branch: 'main',
+        directory: `${repoDirectory}/`,
+        projectID: 'commit-A',
+      }])) as any,
+    }))
+
+    const res = await app.request('/repos/1/siblings')
+    expect(res.status).toBe(200)
+    const data = await res.json() as Array<{ id: number; workspaceId?: string }>
+    expect(data).toHaveLength(1)
+    expect(data.some((d) => d.workspaceId === 'wrk_self')).toBe(false)
+  })
+
+  it('excludes a workspace that is a git main checkout so the main repo cannot be deleted', async () => {
+    mock.module('../services/project-id-resolver', () => ({
+      resolveProjectId: (() => Promise.resolve('commit-A')) as any,
+      isGitMainCheckout: ((dir: string) =>
+        Promise.resolve(dir === '/Users/dev/main-repo')) as any,
+    }))
+
+    createRepo(db, { localPath: 'repo-wt', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    app = createTestApp(db, createStubOpenCodeClient({
+      getJson: mock(async () => ([
+        {
+          id: 'wrk_main',
+          type: 'worktree',
+          name: 'main-checkout',
+          branch: 'dev',
+          directory: '/Users/dev/main-repo',
+          projectID: 'commit-A',
+        },
+        {
+          id: 'wrk_linked',
+          type: 'worktree',
+          name: 'feature',
+          branch: 'feature/x',
+          directory: '/Users/dev/worktrees/feature-x',
+          projectID: 'commit-A',
+        },
+      ])) as any,
+    }))
+
+    const res = await app.request('/repos/1/siblings')
+    expect(res.status).toBe(200)
+    const data = await res.json() as Array<{ workspaceId?: string }>
+    expect(data.some((d) => d.workspaceId === 'wrk_main')).toBe(false)
+    expect(data.some((d) => d.workspaceId === 'wrk_linked')).toBe(true)
+  })
+
   it('excludes repos with non-matching projectID', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: ((path: string) => Promise.resolve(
         path.includes('repo-only') ? 'commit-X' : 'commit-Y'
       )) as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     createRepo(db, { localPath: 'repo-only', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
@@ -134,6 +202,7 @@ describe('GET /api/repos/:id/siblings', () => {
   it('returns empty when target cloneStatus !== ready', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => 'commit-A') as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     createRepo(db, { localPath: 'repo-cloning', defaultBranch: 'main', cloneStatus: 'cloning', clonedAt: Date.now(), isLocal: true })
@@ -147,6 +216,7 @@ describe('GET /api/repos/:id/siblings', () => {
   it('returns empty when target missing', async () => {
     mock.module('../services/project-id-resolver', () => ({
       resolveProjectId: (() => 'commit-A') as any,
+      isGitMainCheckout: (() => Promise.resolve(false)) as any,
     }))
 
     const res = await app.request('/repos/9999/siblings')
