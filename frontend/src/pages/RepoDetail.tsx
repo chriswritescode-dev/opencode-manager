@@ -313,7 +313,6 @@ export function RepoDetail() {
         open={resetPermissionsOpen}
         onOpenChange={setResetPermissionsOpen}
         repoId={repoId}
-        repoDirectory={composerDirectory}
       />
     </div>
   );

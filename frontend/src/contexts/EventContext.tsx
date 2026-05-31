@@ -8,7 +8,7 @@ import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, 
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
-import { invalidateSessionListCaches } from '@/lib/queryInvalidation'
+import { invalidateSessionListCachesDebounced } from '@/lib/queryInvalidation'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
@@ -247,10 +247,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           for (const page of infiniteData.pages) {
             if (!page.items) continue
             const found = page.items.find(s => s.id === sessionID)
-            if (found) {
-              const directory = found.directory || (key[3] as string)
-              if (directory) return directory
-            }
+            if (found && found.directory) return found.directory
           }
         }
       }
@@ -517,7 +514,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
               }
             }
             // Invalidate session list caches instead of mutating infinite-query data
-            invalidateSessionListCaches(queryClient)
+            invalidateSessionListCachesDebounced(queryClient)
           }
           break
         case 'lsp.updated':

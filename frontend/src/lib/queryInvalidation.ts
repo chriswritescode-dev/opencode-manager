@@ -45,3 +45,17 @@ export function invalidateSessionListCaches(queryClient: QueryClient, opcodeUrl?
     },
   })
 }
+
+const sessionListInvalidationTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>()
+
+export function invalidateSessionListCachesDebounced(queryClient: QueryClient, delayMs = 200) {
+  const existing = sessionListInvalidationTimers.get(queryClient)
+  if (existing) clearTimeout(existing)
+  sessionListInvalidationTimers.set(
+    queryClient,
+    setTimeout(() => {
+      sessionListInvalidationTimers.delete(queryClient)
+      invalidateSessionListCaches(queryClient)
+    }, delayMs),
+  )
+}

@@ -266,9 +266,11 @@ describe('useSSE', () => {
       )
     })
 
-    expect(invalidateQueriesSpy).toHaveBeenCalledWith(
-      expect.objectContaining({ predicate: expect.any(Function) }),
-    )
+    await waitFor(() => {
+      expect(invalidateQueriesSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ predicate: expect.any(Function) }),
+      )
+    })
 
     unmount()
   })

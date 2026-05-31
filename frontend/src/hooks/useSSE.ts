@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
-import { invalidateSessionListCaches } from '@/lib/queryInvalidation'
+import { invalidateSessionListCaches, invalidateSessionListCachesDebounced } from '@/lib/queryInvalidation'
 import type { SSEEvent, MessageWithParts } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
@@ -108,10 +108,10 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
           const sessionQueryKey = ['opencode', 'session', opcodeUrl, session.id, cacheDirectory]
 
           queryClient.setQueryData(sessionQueryKey, session)
-          invalidateSessionListCaches(queryClient, opcodeUrl)
+          invalidateSessionListCachesDebounced(queryClient)
           break
         }
-        invalidateSessionListCaches(queryClient, opcodeUrl)
+        invalidateSessionListCachesDebounced(queryClient)
         break
 
       case 'session.deleted':

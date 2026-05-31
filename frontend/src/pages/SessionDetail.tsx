@@ -652,7 +652,6 @@ export function SessionDetail() {
         open={resetPermissionsOpen}
         onOpenChange={setResetPermissionsOpen}
         repoId={repoId}
-        repoDirectory={repoDirectory}
       />
     </div>
   );
