@@ -470,7 +470,11 @@ app.get('/', async (c) => {
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
-      
+
+      if (!repo.fullPath) {
+        return c.json({ error: 'Repo has no directory to reset' }, 400)
+      }
+
       const response = await openCodeClient.forward({
         method: 'POST',
         path: '/instance/dispose',

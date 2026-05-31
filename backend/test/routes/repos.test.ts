@@ -248,4 +248,63 @@ describe('Repo Routes', () => {
       expect(res.status).toBe(500)
     })
   })
+
+  describe('POST /:id/reset-permissions', () => {
+    it('should return 404 when repo not found', async () => {
+      vi.mocked(db.getRepoById).mockReturnValue(null)
+
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient())
+      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+
+      expect(res.status).toBe(404)
+    })
+
+    it('should return 400 without disposing when repo has no directory', async () => {
+      const mockRepo = {
+        id: 1,
+        repoUrl: undefined,
+        localPath: 'assistant',
+        fullPath: '',
+        sourcePath: undefined,
+        branch: undefined,
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: Date.now(),
+      }
+      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+
+      const forward = vi.fn(async () => new Response(JSON.stringify(true), { status: 200 }))
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+
+      expect(res.status).toBe(400)
+      expect(forward).not.toHaveBeenCalled()
+    })
+
+    it('should dispose only the repo directory and return success', async () => {
+      const mockRepo = {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo',
+        localPath: 'repos/test-repo',
+        fullPath: '/tmp/test-repo',
+        sourcePath: '/tmp/test-repo/.git',
+        branch: 'main',
+        defaultBranch: 'main',
+        cloneStatus: 'ready' as const,
+        clonedAt: Date.now(),
+      }
+      vi.mocked(db.getRepoById).mockReturnValue(mockRepo)
+
+      const forward = vi.fn(async () => new Response(JSON.stringify(true), { status: 200 }))
+      const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient({ forward }))
+      const res = await app.request('/1/reset-permissions', { method: 'POST' })
+
+      expect(res.status).toBe(200)
+      expect(forward).toHaveBeenCalledWith({
+        method: 'POST',
+        path: '/instance/dispose',
+        directory: '/tmp/test-repo',
+      })
+    })
+  })
 })

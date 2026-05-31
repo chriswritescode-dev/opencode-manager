@@ -1,6 +1,5 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { resetRepoPermissions } from "@/api/repos";
-import { invalidateSessionListCaches } from "@/lib/queryInvalidation";
 import {
   Dialog,
   DialogContent,
@@ -24,12 +23,9 @@ export function ResetPermissionsDialog({
   onOpenChange,
   repoId,
 }: ResetPermissionsDialogProps) {
-  const queryClient = useQueryClient();
-
   const resetPermissionsMutation = useMutation({
     mutationFn: () => resetRepoPermissions(repoId),
     onSuccess: () => {
-      invalidateSessionListCaches(queryClient);
       showToast.success("Permissions reset successfully");
       onOpenChange(false);
     },
