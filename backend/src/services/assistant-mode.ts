@@ -53,17 +53,11 @@ export function getAssistantModeDirectory(): string {
 export function buildAssistantRepo(): Repo {
   return {
     id: 0,
-    repoUrl: undefined,
     localPath: ASSISTANT_MODE_DIR,
-    sourcePath: undefined,
-    fullPath: '',
-    branch: undefined,
+    fullPath: getAssistantModeDirectory(),
     defaultBranch: 'main',
     cloneStatus: 'ready',
     clonedAt: Date.now(),
-    lastPulled: undefined,
-    lastAccessedAt: undefined,
-    openCodeConfigName: undefined,
     isWorktree: false,
     isLocal: false,
   }

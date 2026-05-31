@@ -18,7 +18,7 @@ import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
-import { ensureAssistantMode, getAssistantModeStatus, getAssistantModeDirectory, buildAssistantRepo } from '../services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, buildAssistantRepo } from '../services/assistant-mode'
 import path from 'path'
 
 async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
@@ -156,31 +156,10 @@ app.get('/', async (c) => {
   app.get('/:id', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
-      
-      let repo: Repo | null
-      let isAssistant = false
-      if (id === 0) {
-        isAssistant = true
-        repo = {
-          id: 0,
-          repoUrl: undefined,
-          localPath: 'assistant',
-          sourcePath: undefined,
-          fullPath: getAssistantModeDirectory(),
-          branch: undefined,
-          defaultBranch: 'main',
-          cloneStatus: 'ready',
-          clonedAt: Date.now(),
-          lastPulled: undefined,
-          lastAccessedAt: undefined,
-          openCodeConfigName: undefined,
-          isWorktree: false,
-          isLocal: false,
-        }
-      } else {
-        repo = getRepoById(database, id)
-      }
-      
+
+      const isAssistant = id === 0
+      const repo: Repo | null = isAssistant ? buildAssistantRepo() : getRepoById(database, id)
+
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
