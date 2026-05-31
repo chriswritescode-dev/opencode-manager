@@ -8,6 +8,7 @@ import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, 
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
+import { invalidateSessionListCaches } from '@/lib/queryInvalidation'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
@@ -229,12 +230,28 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     for (const query of queries) {
       const key = query.queryKey
       if (key[0] === 'opencode' && key[1] === 'sessions' && key.length >= 4) {
-        const sessionsList = query.state.data as Array<{ id: string }> | undefined
-        if (!sessionsList) continue
-        const found = sessionsList.find(s => s.id === sessionID)
-        if (found) {
-          const directory = key[3] as string
-          if (directory) return directory
+        const sessionsData = query.state.data
+        if (!sessionsData) continue
+
+        if (Array.isArray(sessionsData)) {
+          const found = sessionsData.find((s: { id: string }) => s.id === sessionID)
+          if (found) {
+            const directory = (found as { directory?: string }).directory || (key[3] as string)
+            if (directory) return directory
+          }
+          continue
+        }
+
+        if (typeof sessionsData === 'object' && 'pages' in sessionsData) {
+          const infiniteData = sessionsData as { pages: Array<{ items: Array<{ id: string; directory?: string }> }> }
+          for (const page of infiniteData.pages) {
+            if (!page.items) continue
+            const found = page.items.find(s => s.id === sessionID)
+            if (found) {
+              const directory = found.directory || (key[3] as string)
+              if (directory) return directory
+            }
+          }
         }
       }
     }
@@ -488,18 +505,19 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
         case 'session.updated':
           if ('info' in event.properties) {
             const sessionInfo = event.properties.info as { id: string }
+            // Update single-session cache entries
             const cache = queryClient.getQueryCache()
             for (const query of cache.getAll()) {
               const key = query.queryKey
-              if (key[0] === 'opencode' && key[1] === 'sessions' && key.length >= 4) {
-                const currentList = query.state.data as Array<{ id: string }> | undefined
-                if (!currentList) continue
-                const exists = currentList.some(s => s.id === sessionInfo.id)
-                if (!exists) {
-                  queryClient.setQueryData(key, [...currentList, sessionInfo])
+              if (key[0] === 'opencode' && key[1] === 'session' && key.length >= 5) {
+                const sessionData = query.state.data as { id: string } | undefined
+                if (sessionData?.id === sessionInfo.id) {
+                  queryClient.setQueryData(key, sessionInfo)
                 }
               }
             }
+            // Invalidate session list caches instead of mutating infinite-query data
+            invalidateSessionListCaches(queryClient)
           }
           break
         case 'lsp.updated':

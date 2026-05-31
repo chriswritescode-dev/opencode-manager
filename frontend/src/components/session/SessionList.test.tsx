@@ -1,20 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor, within, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SessionList } from './SessionList'
 
-const { createSessionMock, deleteSessionMock, sessionsData, createSessionState } = vi.hoisted(() => ({
+const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, lastSessionsHookArgs } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
-  sessionsData: [] as Array<{ id: string; title: string; directory: string; workspaceID?: string; time: { updated: number } }>,
+  sessionsData: [] as Array<{ id: string; title: string; directory: string; workspaceID?: string; parentID?: string; time: { updated: number } }>,
   createSessionState: { directory: undefined as string | undefined },
+  fetchNextPageMock: vi.fn(),
+  hasNextPageRef: { current: false },
+  isFetchingNextPageRef: { current: false },
+  lastSessionsHookArgs: { current: undefined as { opcodeUrl: string; directories: string[]; options?: { search?: string; limit?: number } } | undefined },
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useSessionsAcrossDirectories: () => ({
-    data: sessionsData,
-    isLoading: false,
-  }),
+  useSessionsAcrossDirectories: (opcodeUrl: string, directories: string[], options?: { search?: string; limit?: number }) => {
+    lastSessionsHookArgs.current = { opcodeUrl, directories, options }
+    // Simulate server-side search: return empty data when a search query is active
+    const data = options?.search ? [] : sessionsData
+    return {
+      data,
+      isLoading: false,
+      fetchNextPage: fetchNextPageMock,
+      hasNextPage: hasNextPageRef.current,
+      isFetchingNextPage: isFetchingNextPageRef.current,
+    }
+  },
   useCreateSession: (_opcodeUrl: string, directory?: string) => {
     createSessionState.directory = directory
     return { mutate: createSessionMock }
@@ -33,6 +45,10 @@ describe('SessionList', () => {
     createSessionState.directory = undefined
     deleteSessionMock.mockReset()
     deleteSessionMock.mockResolvedValue(undefined)
+    fetchNextPageMock.mockReset()
+    hasNextPageRef.current = false
+    isFetchingNextPageRef.current = false
+    lastSessionsHookArgs.current = undefined
   })
 
   it('selects duplicate session IDs independently by workspace directory', async () => {
@@ -109,5 +125,146 @@ describe('SessionList', () => {
 
     expect(createSessionState.directory).toBe('/w/b')
     expect(createSessionMock).toHaveBeenCalledWith({ agent: undefined })
+  })
+
+  it('passes search query and limit option to useSessionsAcrossDirectories', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    const searchInput = screen.getByPlaceholderText('Search sessions...')
+    await user.type(searchInput, 'deploy')
+
+    await waitFor(() => {
+      expect(lastSessionsHookArgs.current?.options?.search).toBe('deploy')
+      expect(lastSessionsHookArgs.current?.options?.limit).toBe(25)
+    })
+  })
+
+  it('fetches next page when scrolling near the bottom and hasNextPage is true', async () => {
+    hasNextPageRef.current = true
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    const scrollContainer = screen.getByRole('region', { name: 'Sessions' })
+    Object.defineProperty(scrollContainer, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(scrollContainer, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 300, configurable: true })
+
+    fireEvent.scroll(scrollContainer)
+
+    await waitFor(() => {
+      expect(fetchNextPageMock).toHaveBeenCalled()
+    })
+  })
+
+  it('does not fetch next page on scroll when isFetchingNextPage is true', async () => {
+    hasNextPageRef.current = true
+    isFetchingNextPageRef.current = true
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    const scrollContainer = screen.getByRole('region', { name: 'Sessions' })
+    Object.defineProperty(scrollContainer, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(scrollContainer, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(scrollContainer, 'scrollTop', { value: 300, configurable: true })
+
+    fireEvent.scroll(scrollContainer)
+
+    await waitFor(() => {
+      expect(fetchNextPageMock).not.toHaveBeenCalled()
+    })
+  })
+
+  it('shows search-results empty state instead of create-session card when search returns no results', async () => {
+    const user = userEvent.setup()
+    // Default beforeEach data has 3 sessions; typing search triggers mock to return empty data
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    await user.type(screen.getByPlaceholderText('Search sessions...'), 'nonexistent')
+
+    await waitFor(() => {
+      expect(screen.getByText('No sessions found')).toBeTruthy()
+    })
+    expect(screen.queryByText('No sessions yet')).toBeNull()
+    expect(screen.queryByText('Click here to start a new session')).toBeNull()
+  })
+
+  it('shows create-session card when there are no sessions and no active search', () => {
+    sessionsData.splice(0, sessionsData.length)
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('No sessions yet')).toBeTruthy()
+    expect(screen.getByText('Click here to start a new session')).toBeTruthy()
+  })
+
+  it('shows loading state instead of create-session card when the first page is empty but more pages are pending', () => {
+    sessionsData.splice(0, sessionsData.length)
+    hasNextPageRef.current = true
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Loading sessions...')).toBeTruthy()
+    expect(screen.queryByText('No sessions yet')).toBeNull()
+    expect(screen.queryByText('Click here to start a new session')).toBeNull()
+  })
+
+  it('auto-fetches next page when all visible sessions are filtered out as child sessions', async () => {
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'child1', title: 'child session', directory: '/w/a', parentID: 'parent1', time: { updated: Date.now() } },
+      { id: 'child2', title: 'child session 2', directory: '/w/a', parentID: 'parent2', time: { updated: Date.now() } },
+    )
+    hasNextPageRef.current = true
+    isFetchingNextPageRef.current = false
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(fetchNextPageMock).toHaveBeenCalled()
+    })
   })
 })

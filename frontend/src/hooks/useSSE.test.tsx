@@ -54,6 +54,9 @@ class MockEventSource {
   emit(type: string, data: unknown) {
     const event = { data: JSON.stringify(data) } as MessageEvent
     this.listeners.get(type)?.forEach((listener) => listener(event))
+    if (type === 'message' && this.onmessage) {
+      this.onmessage(event)
+    }
   }
 }
 
@@ -208,6 +211,64 @@ describe('useSSE', () => {
 
     expect(useSessionStatus.getState().getStatus('session-b')).toEqual({ type: 'busy' })
     expect(useSessionStatus.getState().getStatus('session-a')).toEqual({ type: 'idle' })
+
+    unmount()
+  })
+
+  it('sets single-session cache and invalidates session list on session.updated', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const invalidateQueriesSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData')
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper }
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    // Clear initial connection-related calls
+    invalidateQueriesSpy.mockClear()
+    setQueryDataSpy.mockClear()
+
+    const sessionData = {
+      id: 'session-2',
+      projectID: 'proj-1',
+      title: 'Updated Session',
+      time: { created: 1000, updated: 2000 },
+    }
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.updated',
+        properties: { info: sessionData },
+      })
+    })
+
+    await waitFor(() => {
+      expect(setQueryDataSpy).toHaveBeenCalledWith(
+        ['opencode', 'session', 'http://localhost:5551', 'session-2', '/repo'],
+        sessionData,
+      )
+    })
+
+    expect(invalidateQueriesSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ predicate: expect.any(Function) }),
+    )
 
     unmount()
   })

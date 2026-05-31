@@ -34,3 +34,14 @@ export function invalidateSessionCaches(queryClient: QueryClient) {
         query.queryKey[1] === 'messages'),
   })
 }
+
+export function invalidateSessionListCaches(queryClient: QueryClient, opcodeUrl?: string | null) {
+  queryClient.invalidateQueries({
+    predicate: (query) => {
+      if (query.queryKey[0] !== 'opencode') return false
+      if (query.queryKey[1] !== 'sessions') return false
+      if (opcodeUrl && query.queryKey[2] !== opcodeUrl) return false
+      return true
+    },
+  })
+}

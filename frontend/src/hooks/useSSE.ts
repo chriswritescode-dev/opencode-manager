@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useOpenCodeClient } from './useOpenCode'
-import type { SSEEvent, MessageWithParts, Session } from '@/api/types'
+import { invalidateSessionListCaches } from '@/lib/queryInvalidation'
+import type { SSEEvent, MessageWithParts } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
@@ -105,28 +106,16 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         if ('info' in event.properties) {
           const session = event.properties.info
           const sessionQueryKey = ['opencode', 'session', opcodeUrl, session.id, cacheDirectory]
-          const sessionsQueryKey = ['opencode', 'sessions', opcodeUrl, cacheDirectory]
 
           queryClient.setQueryData(sessionQueryKey, session)
-
-          const sessions = queryClient.getQueryData<Session[]>(sessionsQueryKey)
-          if (sessions) {
-            const exists = sessions.some((item) => item.id === session.id)
-            const updated = exists
-              ? sessions.map((item) => (item.id === session.id ? session : item))
-              : [session, ...sessions]
-            queryClient.setQueryData(sessionsQueryKey, updated)
-            break
-          }
-
-          queryClient.invalidateQueries({ queryKey: sessionsQueryKey })
+          invalidateSessionListCaches(queryClient, opcodeUrl)
           break
         }
-        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, cacheDirectory] })
+        invalidateSessionListCaches(queryClient, opcodeUrl)
         break
 
       case 'session.deleted':
-        queryClient.invalidateQueries({ queryKey: ['opencode', 'sessions', opcodeUrl, cacheDirectory] })
+        invalidateSessionListCaches(queryClient, opcodeUrl)
         if ('sessionID' in event.properties) {
           queryClient.invalidateQueries({ 
             queryKey: ['opencode', 'session', opcodeUrl, event.properties.sessionID, cacheDirectory] 

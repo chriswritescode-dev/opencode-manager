@@ -19,6 +19,34 @@ type SendPromptResponse = paths['/session/{sessionID}/message']['post']['respons
 type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['application/json']
 type LspStatus = LspStatusResponse[number]
 
+type LegacySession = SessionListResponse[number]
+type SessionV2Info = {
+  id: string
+  parentID?: string
+  projectID: string
+  workspaceID?: string
+  title: string
+  time: LegacySession['time']
+  path?: unknown
+}
+type SessionPageCursor = { previous?: string; next?: string }
+type SessionPageResponse = { items: SessionV2Info[]; cursor?: SessionPageCursor }
+type SessionPageParams = { limit?: number; order?: 'asc' | 'desc'; search?: string; cursor?: string }
+type SessionPage = { items: LegacySession[]; nextCursor?: string }
+
+function toLegacySession(session: SessionV2Info, directory?: string): LegacySession {
+  return {
+    id: session.id,
+    projectID: session.projectID,
+    workspaceID: session.workspaceID,
+    directory: directory ?? '',
+    parentID: session.parentID,
+    title: session.title || 'Untitled Session',
+    version: 'v2',
+    time: session.time,
+  } as LegacySession
+}
+
 export type { SendPromptResponse, SendCommandResponse, LspStatus }
 
 export class OpenCodeClient {
@@ -34,7 +62,7 @@ export class OpenCodeClient {
     this.directory = directory
   }
 
-  private getParams(params?: Record<string, string>) {
+  private getParams(params?: Record<string, string | number | boolean | undefined>) {
     if (!this.directory) return params
     return { ...params, directory: this.directory }
   }
@@ -43,6 +71,24 @@ export class OpenCodeClient {
     return fetchWrapper<SessionListResponse>(`${this.baseURL}/session`, {
       params: this.getParams(),
     })
+  }
+
+  async listSessionsPage(params?: SessionPageParams): Promise<SessionPage> {
+    const isCursorRequest = params?.cursor !== undefined
+    const queryParams = isCursorRequest
+      ? { cursor: params.cursor }
+      : this.getParams({
+          ...(params?.limit !== undefined && { limit: params.limit }),
+          ...(params?.order !== undefined && { order: params.order }),
+          ...(params?.search !== undefined && { search: params.search }),
+        })
+    const response = await fetchWrapper<SessionPageResponse>(`${this.baseURL}/api/session`, {
+      params: queryParams,
+    })
+    return {
+      items: response.items.map((item) => toLegacySession(item, this.directory)),
+      nextCursor: response.cursor?.next,
+    }
   }
 
   async getSession(sessionID: string) {

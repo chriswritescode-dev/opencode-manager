@@ -1,4 +1,4 @@
-import { useCallback, useState, useMemo } from "react";
+import { useCallback, useState, useMemo, useEffect } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
@@ -37,32 +37,25 @@ export const SessionList = ({
   const getSessionSelectionKey = useCallback((session: { id: string; directory?: string }) =>
     `${session.directory ?? primaryDirectory ?? ''}:${session.id}`,
   [primaryDirectory]);
-  const { data: sessions, isLoading } = useSessionsAcrossDirectories(opcodeUrl, directoriesList);
+  const [searchQuery, setSearchQuery] = useState("");
+  const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useSessionsAcrossDirectories(opcodeUrl, directoriesList, { search: searchQuery, limit: 25 });
   const deleteSession = useDeleteSession(opcodeUrl, directoriesList);
   const createSession = useCreateSession(opcodeUrl, sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
   const [manageMode, setManageMode] = useState(false);
 
   const filteredSessions = useMemo(() => {
     if (!sessions) return [];
 
-    let filtered = sessions.filter((session) => {
+    const filtered = sessions.filter((session) => {
       if (session.parentID) return false;
       if (directorySet.size > 0 && session.directory && !directorySet.has(session.directory)) return false;
       return true;
     });
-
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter((session) =>
-        (session.title || "Untitled Session").toLowerCase().includes(query),
-      );
-    }
 
     const uniqueSessions = new Map<string, (typeof filtered)[number]>();
     filtered.forEach((session) => {
@@ -73,7 +66,7 @@ export const SessionList = ({
     });
 
     return Array.from(uniqueSessions.values()).sort((a, b) => b.time.updated - a.time.updated);
-  }, [sessions, searchQuery, directorySet, getSessionSelectionKey]);
+  }, [sessions, directorySet, getSessionSelectionKey]);
 
   const todaySessions = useMemo(() => {
     const today = new Date();
@@ -87,26 +80,44 @@ export const SessionList = ({
     return filteredSessions.filter((session) => new Date(session.time.updated) < today);
   }, [filteredSessions]);
 
+  const handleSessionsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight <= 240 && hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  useEffect(() => {
+    if (!isLoading && filteredSessions.length === 0 && hasNextPage && !isFetchingNextPage) {
+      void fetchNextPage();
+    }
+  }, [isLoading, filteredSessions.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   if (isLoading) {
     return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
   }
 
   if (!sessions || sessions.length === 0) {
-    return (
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
-        <Card
-          className="p-6 cursor-pointer hover:bg-accent hover:border-border transition-all border-dashed"
-          onClick={() => createSession.mutate({ agent: undefined })}
-        >
-          <div className="flex flex-col items-center justify-center gap-2 text-center">
-            <p className="font-medium">No sessions yet</p>
-            <p className="text-sm text-muted-foreground">
-              Click here to start a new session
-            </p>
-          </div>
-        </Card>
-      </div>
-    );
+    if (hasNextPage || isFetchingNextPage) {
+      return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
+    }
+    if (!searchQuery.trim()) {
+      return (
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+          <Card
+            className="p-6 cursor-pointer hover:bg-accent hover:border-border transition-all border-dashed"
+            onClick={() => createSession.mutate({ agent: undefined })}
+          >
+            <div className="flex flex-col items-center justify-center gap-2 text-center">
+              <p className="font-medium">No sessions yet</p>
+              <p className="text-sm text-muted-foreground">
+                Click here to start a new session
+              </p>
+            </div>
+          </Card>
+        </div>
+      );
+    }
   }
 
   const getDeleteTarget = (session: { id: string; directory?: string; workspaceID?: string }): DeleteSessionTarget => {
@@ -236,9 +247,14 @@ export const SessionList = ({
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
+      <div
+        className="flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4 pb-4 min-h-0 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]"
+        role="region"
+        aria-label="Sessions"
+        onScroll={handleSessionsScroll}
+      >
         <div className="flex flex-col gap-4">
-          {filteredSessions.length === 0 ? (
+          {filteredSessions.length === 0 && !isFetchingNextPage ? (
             <div className="text-sm text-muted-foreground text-center py-4">
               No sessions found
             </div>
@@ -282,6 +298,11 @@ export const SessionList = ({
                 />
               ))}
             </>
+          )}
+          {isFetchingNextPage && (
+            <div className="text-sm text-muted-foreground text-center py-4">
+              Loading more sessions...
+            </div>
           )}
         </div>
       </div>

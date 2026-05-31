@@ -42,4 +42,130 @@ describe('OpenCodeClient', () => {
       'Workspace not found: wrk_stale',
     )
   })
+
+  describe('listSessionsPage', () => {
+    it('sends first-page params to /api/session with directory and returns adapted sessions', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'ses_1',
+                projectID: 'proj_1',
+                workspaceID: 'ws_1',
+                parentID: 'parent_1',
+                title: 'My Session',
+                time: { created: 1000, updated: 2000 },
+              },
+            ],
+            cursor: { next: 'cursor_next' },
+          }),
+          { status: 200 },
+        ),
+      )
+
+      const result = await new OpenCodeClient('/api/opencode', '/repo').listSessionsPage({
+        limit: 25,
+        order: 'desc',
+        search: 'deploy',
+      })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost/api/opencode/api/session?limit=25&order=desc&search=deploy&directory=%2Frepo',
+        expect.any(Object),
+      )
+      expect(result.items).toHaveLength(1)
+      expect(result.items[0]).toMatchObject({
+        id: 'ses_1',
+        projectID: 'proj_1',
+        directory: '/repo',
+        parentID: 'parent_1',
+        title: 'My Session',
+        version: 'v2',
+        time: { created: 1000, updated: 2000 },
+      })
+    })
+
+    it('sends cursor-only params without directory for cursor-based requests', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            items: [],
+          }),
+          { status: 200 },
+        ),
+      )
+
+      await new OpenCodeClient('/api/opencode', '/repo').listSessionsPage({ cursor: 'cursor_123' })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost/api/opencode/api/session?cursor=cursor_123',
+        expect.any(Object),
+      )
+    })
+
+    it('exposes response cursor as nextCursor', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            items: [],
+            cursor: { next: 'next_1' },
+          }),
+          { status: 200 },
+        ),
+      )
+
+      const result = await new OpenCodeClient('/api/opencode', '/repo').listSessionsPage({ limit: 10 })
+
+      expect(result.nextCursor).toBe('next_1')
+    })
+
+    it('uses Untitled Session for empty title', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'ses_2',
+                projectID: 'proj_2',
+                title: '',
+                time: { created: 1000, updated: 2000 },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+
+      const result = await new OpenCodeClient('/api/opencode', '/repo').listSessionsPage()
+
+      expect(result.items[0].title).toBe('Untitled Session')
+    })
+
+    it('works without directory set', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: 'ses_3',
+                projectID: 'proj_3',
+                title: 'No Dir',
+                time: { created: 1000, updated: 2000 },
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+
+      const result = await new OpenCodeClient('/api/opencode').listSessionsPage({ limit: 5 })
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost/api/opencode/api/session?limit=5',
+        expect.any(Object),
+      )
+      expect(result.items[0].directory).toBe('')
+    })
+  })
 })

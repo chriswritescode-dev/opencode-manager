@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PermissionRequest, QuestionRequest } from '@/api/types'
-import { EventProvider, usePermissions, useQuestions, useSSEHealth } from './EventContext'
+import { EventProvider, useEventContext, usePermissions, useQuestions, useSSEHealth } from './EventContext'
 
 const mocks = vi.hoisted(() => ({
   listRepos: vi.fn(),
@@ -345,6 +345,100 @@ describe('EventProvider questions', () => {
   })
 
 
+
+  it('handles session.updated event without throwing when cache has infinite-query data', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    // Seed infinite-query shaped data into session-list cache
+    queryClient.setQueryData(
+      ['opencode', 'sessions', 'http://localhost:5551', '/repo', { search: undefined, limit: 25 }],
+      {
+        pages: [{
+          items: [
+            { id: 'existing-session', projectID: 'proj-1', title: 'Existing', directory: '/repo', time: { created: 1000, updated: 1000 } },
+          ],
+          cursors: {},
+        }],
+        pageParams: [undefined],
+      },
+    )
+
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <EventProvider>{children}</EventProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    )
+
+    render(<Harness />, { wrapper })
+
+    await waitFor(() => {
+      expect(mocks.subscribeGlobalMonitor).toHaveBeenCalled()
+    })
+
+    // Trigger session.updated event - should not throw with infinite-query cache data
+    const lastSubscribeCall = mocks.subscribeGlobalMonitor.mock.calls[mocks.subscribeGlobalMonitor.mock.calls.length - 1]
+    const onEvent = lastSubscribeCall[0].onEvent as (data: unknown) => void
+
+    expect(() => {
+      act(() => {
+        onEvent({
+          type: 'session.updated',
+          properties: {
+            info: { id: 'new-session', projectID: 'proj-1', title: 'New', directory: '/repo', time: { created: 2000, updated: 2000 } },
+          },
+        })
+      })
+    }).not.toThrow()
+  })
+
+  it('getClient resolves directory from infinite-query session list cache', async () => {
+    mocks.listRepos.mockResolvedValue([{ id: 123, fullPath: '/repo' }])
+
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    // Seed infinite-query data with a session that has directory field
+    queryClient.setQueryData(
+      ['opencode', 'sessions', 'http://localhost:5551', '/repo', { search: undefined, limit: 25 }],
+      {
+        pages: [{
+          items: [
+            { id: 'ses-infinite', projectID: 'proj-1', title: 'From Infinite Query', directory: '/repo', time: { created: 1000, updated: 1000 } },
+          ],
+          cursors: {},
+        }],
+        pageParams: [undefined],
+      },
+    )
+
+    // Ensure no single-session cache exists for this session (forces fallback to session-list lookup)
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <EventProvider>{children}</EventProvider>
+        </QueryClientProvider>
+      </MemoryRouter>
+    )
+
+    function ClientHarness() {
+      const { getClient } = useEventContext()
+      const client = getClient('ses-infinite')
+      return <div data-testid="client-result">{client ? 'found' : 'not-found'}</div>
+    }
+
+    render(<ClientHarness />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('client-result')).toHaveTextContent('found')
+    })
+  })
 
   it('exposes sseHealth through context', async () => {
     mocks.getHealth.mockReturnValue({ isConnected: true, isHealthy: true, lastEventAt: Date.now(), isStalled: false })

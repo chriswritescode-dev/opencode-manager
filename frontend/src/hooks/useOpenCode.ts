@@ -1,4 +1,4 @@
-import { useQueries, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo, useRef, useEffect, useCallback } from "react";
 import { OpenCodeClient } from "../api/opencode";
 import { FetchError } from "../api/fetchWrapper";
@@ -13,6 +13,7 @@ import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { useSendErrorStore } from "../stores/sendErrorStore";
+import { invalidateSessionListCaches } from "../lib/queryInvalidation";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -36,33 +37,90 @@ export const useOpenCodeClient = (opcodeUrl: string | null | undefined, director
   );
 };
 
+const SESSION_LIST_PAGE_SIZE = 25
+
+interface UseSessionsAcrossDirectoriesOptions {
+  search?: string
+  limit?: number
+}
+
+type SessionPageParam = Record<string, string>
+
 export const useSessionsAcrossDirectories = (
   opcodeUrl: string | null | undefined,
   directories: string[],
+  options?: UseSessionsAcrossDirectoriesOptions,
 ) => {
   const uniqueDirectories = useMemo(
     () => Array.from(new Set(directories.filter(Boolean))),
     [directories],
   );
+  const normalizedSearch = options?.search?.trim() || undefined;
+  const limit = options?.limit ?? SESSION_LIST_PAGE_SIZE;
   const directoryKey = uniqueDirectories.join('|');
-  const queries = useQueries({
-    queries: uniqueDirectories.map((directory) => ({
-      queryKey: ["opencode", "sessions", opcodeUrl, directory],
-      queryFn: () => new OpenCodeClient(opcodeUrl!, directory).listSessions(),
-      enabled: !!opcodeUrl && !!directory,
-      refetchOnWindowFocus: true,
-      refetchOnReconnect: true,
-      staleTime: 10000,
-    })),
+
+  const query = useInfiniteQuery({
+    queryKey: ['opencode', 'sessions', opcodeUrl, directoryKey, { search: normalizedSearch, limit }],
+    queryFn: async ({ pageParam }) => {
+      if (!pageParam) {
+        const pages = await Promise.all(
+          uniqueDirectories.map((directory) =>
+            new OpenCodeClient(opcodeUrl!, directory).listSessionsPage({
+              limit,
+              order: 'desc',
+              search: normalizedSearch,
+            }),
+          ),
+        );
+        const cursors: SessionPageParam = {};
+        const items: Array<components['schemas']['Session']> = [];
+        for (let i = 0; i < pages.length; i++) {
+          items.push(...pages[i].items);
+          if (pages[i].nextCursor) {
+            cursors[uniqueDirectories[i]] = pages[i].nextCursor!;
+          }
+        }
+        return { items, cursors };
+      }
+
+      const entries = Object.entries(pageParam);
+      const pages = await Promise.all(
+        entries.map(([directory, cursor]) =>
+          new OpenCodeClient(opcodeUrl!, directory).listSessionsPage({ cursor }),
+        ),
+      );
+      const cursors: SessionPageParam = {};
+      const items: Array<components['schemas']['Session']> = [];
+      for (let i = 0; i < pages.length; i++) {
+        items.push(...pages[i].items);
+        if (pages[i].nextCursor) {
+          cursors[entries[i][0]] = pages[i].nextCursor!;
+        }
+      }
+      return { items, cursors };
+    },
+    initialPageParam: undefined as SessionPageParam | undefined,
+    getNextPageParam: (lastPage) => {
+      if (Object.keys(lastPage.cursors).length > 0) {
+        return lastPage.cursors;
+      }
+      return undefined;
+    },
+    enabled: !!opcodeUrl && uniqueDirectories.length > 0,
+    staleTime: 10000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
   });
 
-  return useMemo(() => {
-    const data = queries.flatMap((q) => q.data ?? []);
-    const isLoading = queries.some((q) => q.isLoading);
-    const isError = queries.some((q) => q.isError);
-    return { data, isLoading, isError };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [directoryKey, queries.map((q) => q.dataUpdatedAt).join('|'), queries.map((q) => q.isLoading).join('|')]);
+  return {
+    data: query.data?.pages.flatMap((page) => page.items) ?? [],
+    isLoading: query.isLoading,
+    isError: query.isError,
+    fetchNextPage: query.fetchNextPage,
+    hasNextPage: query.hasNextPage,
+    isFetchingNextPage: query.isFetchingNextPage,
+    error: query.error,
+  };
 };
 
 export const useSession = (opcodeUrl: string | null | undefined, sessionID: string | undefined, directory?: string) => {
@@ -115,7 +173,7 @@ export const useCreateSession = (
       return client.createSession(data);
     },
     onSuccess: (session) => {
-      queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, directory] });
+      invalidateSessionListCaches(queryClient, opcodeUrl);
       onSuccess?.(session);
     },
     onError: (error) => {
@@ -219,23 +277,8 @@ export const useDeleteSession = (opcodeUrl: string | null | undefined, directory
     onError: () => {
       showToast.error('Failed to delete sessions');
     },
-    onSettled: (_data, _error, variables) => {
-      const targets = variables ? (Array.isArray(variables) ? variables : [variables]) : [];
-      const affectedDirectories = new Set([
-        ...directories,
-        ...targets
-          .map((target) => getDeleteSessionTargetDirectory(target))
-          .filter((value): value is string => !!value),
-      ]);
-
-      if (affectedDirectories.size === 0) {
-        queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl] });
-        return;
-      }
-
-      for (const affectedDirectory of affectedDirectories) {
-        queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, affectedDirectory] });
-      }
+    onSettled: () => {
+      invalidateSessionListCaches(queryClient, opcodeUrl);
     },
   });
 };
@@ -252,7 +295,7 @@ export const useUpdateSession = (opcodeUrl: string | null | undefined, directory
     onSuccess: (_, variables) => {
       const { sessionID } = variables;
       queryClient.invalidateQueries({ queryKey: ["opencode", "session", opcodeUrl, sessionID, directory] });
-      queryClient.invalidateQueries({ queryKey: ["opencode", "sessions", opcodeUrl, directory] });
+      invalidateSessionListCaches(queryClient, opcodeUrl);
     },
   });
 };
