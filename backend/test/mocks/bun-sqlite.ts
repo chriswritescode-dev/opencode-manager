@@ -1,20 +1,19 @@
-import DatabaseImpl from 'better-sqlite3'
-import type { Database as BetterSqlite3Database } from 'better-sqlite3'
+import { DatabaseSync } from 'node:sqlite'
 
-// Adapter to make better-sqlite3 compatible with bun:sqlite API
+// Adapter to make node:sqlite compatible with bun:sqlite API
 export class Database {
-  private db: BetterSqlite3Database
+  private db: DatabaseSync
 
   constructor(path: string) {
-    this.db = new DatabaseImpl(path)
+    this.db = new DatabaseSync(path)
   }
 
   prepare(sql: string) {
     const stmt = this.db.prepare(sql)
     return {
-      run: (...params: unknown[]) => stmt.run(...params),
-      get: (...params: unknown[]) => stmt.get(...params),
-      all: (...params: unknown[]) => stmt.all(...params),
+      run: (...params: unknown[]) => (stmt.run as (...args: unknown[]) => void)(...params),
+      get: (...params: unknown[]) => (stmt.get as (...args: unknown[]) => unknown)(...params),
+      all: (...params: unknown[]) => (stmt.all as (...args: unknown[]) => unknown[])(...params),
     }
   }
 
@@ -23,11 +22,22 @@ export class Database {
   }
 
   run(sql: string, ...params: unknown[]) {
-    return this.db.prepare(sql).run(...params)
+    const stmt = this.db.prepare(sql)
+    return (stmt.run as (...args: unknown[]) => void)(...params)
   }
 
   transaction<T extends (...args: unknown[]) => void>(fn: T) {
-    return this.db.transaction(fn)
+    return (...args: unknown[]) => {
+      this.db.exec('BEGIN')
+      try {
+        const result = fn(...args)
+        this.db.exec('COMMIT')
+        return result
+      } catch (e) {
+        this.db.exec('ROLLBACK')
+        throw e
+      }
+    }
   }
 
   close() {
