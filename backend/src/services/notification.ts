@@ -7,6 +7,11 @@ import {
   NotificationEventType,
   DEFAULT_NOTIFICATION_PREFERENCES,
 } from "@opencode-manager/shared/schemas";
+import {
+  getPermissionLabel,
+  getPermissionDetail,
+  getQuestionText,
+} from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
 import { getRepoByLocalPath, getRepoBySourcePath } from "../db/queries";
@@ -21,21 +26,28 @@ interface VapidConfig {
 
 const EVENT_CONFIG: Record<
   string,
-  { preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events; title: string; bodyFn: (props: Record<string, unknown>) => string }
+  {
+    preferencesKey: keyof typeof DEFAULT_NOTIFICATION_PREFERENCES.events;
+    titleFn: (props: Record<string, unknown>) => string;
+    bodyFn: (props: Record<string, unknown>) => string;
+  }
 > = {
   [NotificationEventType.PERMISSION_ASKED]: {
     preferencesKey: "permissionAsked",
-    title: "Permission Required",
-    bodyFn: () => "OpenCode needs your approval to continue",
+    titleFn: (props) =>
+      getPermissionLabel(
+        typeof props.permission === "string" ? props.permission : ""
+      ),
+    bodyFn: (props) => getPermissionDetail(props) || "Approval required",
   },
   [NotificationEventType.QUESTION_ASKED]: {
     preferencesKey: "questionAsked",
-    title: "Question from Agent",
-    bodyFn: () => "The agent has a question for you",
+    titleFn: () => "Question",
+    bodyFn: (props) => getQuestionText(props) || "A question needs your answer",
   },
   [NotificationEventType.SESSION_ERROR]: {
     preferencesKey: "sessionError",
-    title: "Session Error",
+    titleFn: () => "Error",
     bodyFn: (props) => {
       const error = props.error as { message?: string } | undefined;
       return error?.message ?? "A session encountered an error";
@@ -43,10 +55,51 @@ const EVENT_CONFIG: Record<
   },
   [NotificationEventType.SESSION_IDLE]: {
     preferencesKey: "sessionIdle",
-    title: "Session Complete",
+    titleFn: () => "Session complete",
     bodyFn: () => "Your session has finished processing",
   },
 };
+
+const MAX_BODY_LENGTH = 140;
+
+export function buildEventNotificationPayload(
+  event: SSEEvent,
+  context: {
+    repoName?: string;
+    repoId?: number;
+    sessionId?: string;
+    directory?: string;
+    url: string;
+  }
+): PushNotificationPayload | null {
+  const config = EVENT_CONFIG[event.type];
+  if (!config) return null;
+
+  const action = config.titleFn(event.properties);
+  const title = context.repoName
+    ? `${context.repoName}: ${action}`
+    : action;
+
+  const rawBody = config.bodyFn(event.properties);
+  const body =
+    rawBody.length > MAX_BODY_LENGTH
+      ? `${rawBody.slice(0, MAX_BODY_LENGTH - 1)}…`
+      : rawBody;
+
+  return {
+    title,
+    body,
+    tag: `${event.type}-${context.sessionId ?? "global"}`,
+    data: {
+      eventType: event.type,
+      sessionId: context.sessionId,
+      directory: context.directory,
+      repoId: context.repoId,
+      repoName: context.repoName,
+      url: context.url,
+    },
+  };
+}
 
 export class NotificationService {
   private vapidConfig: VapidConfig | null = null;
@@ -234,21 +287,14 @@ export class NotificationService {
         }
       }
 
-      const body = config.bodyFn(event.properties);
-
-      const payload: PushNotificationPayload = {
-        title: repoName ? `[${repoName.toUpperCase()}] ${config.title}` : config.title,
-        body: body,
-        tag: `${event.type}-${sessionId ?? "global"}`,
-        data: {
-          eventType: event.type,
-          sessionId,
-          directory: _directory,
-          repoId,
-          repoName,
-          url: notificationUrl,
-        },
-      };
+      const payload = buildEventNotificationPayload(event, {
+        repoName: repoName || undefined,
+        repoId,
+        sessionId,
+        directory: _directory,
+        url: notificationUrl,
+      });
+      if (!payload) continue;
 
       await this.sendToUser(userId, payload);
     }
