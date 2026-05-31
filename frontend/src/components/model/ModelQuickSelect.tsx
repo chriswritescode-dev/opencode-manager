@@ -557,7 +557,7 @@ export function ModelQuickSelect({
         isOpen={isOpen}
         onClose={() => handleOpenChange(false)}
         heightClass="h-[70dvh] max-h-[720px]"
-        className="z-[300] border-white/10 bg-zinc-950 text-white shadow-2xl"
+        className="z-[300] border-white/10 bg-zinc-950 text-white shadow-2xl md:mx-auto md:max-w-lg"
         ariaLabel="Select model"
       >
         <div className={`flex items-center justify-between gap-2 px-4 ${showAllModels ? 'pb-2 pt-2' : 'pb-3 pt-0'}`}>
