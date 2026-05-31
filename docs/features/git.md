@@ -27,13 +27,13 @@ OpenCode Manager scans that folder for nested git repositories and links each on
 
 For private repositories, configure a GitHub Personal Access Token:
 
-1. Go to **Settings > Credentials**
+1. Go to **Settings > Git > Credentials**
 2. Enter your GitHub PAT
 3. Ensure the token has `repo` scope
 
 ### SSH Repositories
 
-SSH key authentication added for git repositories. Configure SSH keys in Settings > Credentials.
+SSH key authentication added for git repositories. Configure SSH keys in Settings > Git > Credentials.
 
 ## Git Worktrees
 

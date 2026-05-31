@@ -1,4 +1,4 @@
-# OpenCode Manager `ocm` CLI
+# `ocm` CLI
 
 `ocm` is a small CLI that attaches your local OpenCode TUI to a repo hosted on an OpenCode Manager. Prompts execute on the Manager's filesystem against a single shared OpenCode server, while your laptop terminal hosts the TUI.
 
@@ -49,9 +49,7 @@ The plugin itself is a no-op — it does not register tools, commands, or hooks.
 If you don't use the OpenCode plugin loader, install globally:
 
 ```bash
-bun add -g @opencode-manager/ocm-cli
-# or
-npm i -g @opencode-manager/ocm-cli
+pnpm add -g @opencode-manager/ocm-cli
 ```
 
 This puts `ocm` on your PATH via the package manager's own bin shim. The `~/.local/bin` symlink is skipped for global installs.

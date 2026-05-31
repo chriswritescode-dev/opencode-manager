@@ -46,7 +46,7 @@ Complete reference for all configuration options.
 Generate VAPID public/private key pair:
 
 ```bash
-npx web-push generate-vapid-keys
+pnpm dlx web-push generate-vapid-keys
 ```
 
 Add to `.env`:
@@ -94,8 +94,19 @@ When configured, users can enable push notifications in Settings → Notificatio
 |----------|-------------|---------|
 | `OPENCODE_SERVER_PORT` | Port for the OpenCode CLI server | `5551` |
 | `OPENCODE_HOST` | OpenCode server bind address | `127.0.0.1` |
+| `OPENCODE_PUBLIC_URL` | Public URL passed to OpenCode for OAuth callbacks | - |
+| `OPENCODE_HEALTH_WATCH_ENABLED` | Enable OpenCode health watcher and recovery | `true` (`false` in tests) |
+| `OPENCODE_HEALTH_POLL_MS` | OpenCode health watcher poll interval | `30000` |
+| `OPENCODE_HEALTH_FAILURE_THRESHOLD` | Failed health checks before recovery starts | `2` |
 | `OPENCODE_SERVER_PASSWORD` | Basic Auth password required when binding OpenCode to a non-loopback host. Can also be set via UI (Settings → OpenCode → Server Auth). DB-stored passwords override this env var. | - |
 | `OPENCODE_SERVER_USERNAME` | Basic Auth username | `opencode` |
+
+## OpenCode Import
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode `opencode.json` to import on first startup | - |
+| `OPENCODE_IMPORT_STATE_PATH` | Existing standalone OpenCode state directory to import on first startup | - |
 
 ## Timeouts
 
@@ -178,7 +189,7 @@ K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols=
 Generate VAPID public/private key pair for push notifications:
 
 ```bash
-npx web-push generate-vapid-keys
+pnpm dlx web-push generate-vapid-keys
 ```
 
 Output example:
@@ -201,11 +212,4 @@ mailto:you@example.com
 
 ## Environment Precedence
 
-Variables are loaded in this order (later overrides earlier):
-
-1. System environment variables
-2. `.env` file in project root
-3. Docker Compose `environment` section
-4. Docker Compose `env_file` reference
-
-```
+Local runtime loads `.env` from the project root with `dotenv` without overriding variables that are already present in the process environment. Docker Compose reads `.env` for interpolation, then passes the explicit `environment` entries from `docker-compose.yml` into the container.

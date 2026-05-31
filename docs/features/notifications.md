@@ -50,7 +50,7 @@ Apple's Push Notification Service (APNs) has strict requirements:
 Generate VAPID public/private key pair:
 
 ```bash
-npx web-push generate-vapid-keys
+pnpm dlx web-push generate-vapid-keys
 ```
 
 Output:
@@ -113,4 +113,3 @@ Control which events trigger notifications:
 - **Question Asked** - Get notified when agent has a question (default: on)
 - **Session Error** - Get notified on session errors (default: on)
 - **Session Complete** - Get notified when session finishes (default: off)
-

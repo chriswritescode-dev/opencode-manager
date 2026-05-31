@@ -47,6 +47,7 @@ services:
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
+      - OPENCODE_HOST=127.0.0.1
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000

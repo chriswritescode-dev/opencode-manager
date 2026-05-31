@@ -40,13 +40,13 @@ To browse all available models:
 
 You can switch models at any point during a session without losing context. The new model is used for all subsequent messages.
 
-## Provider Credentials
+## Providers
 
 Configure API keys or OAuth for AI providers.
 
 ### API Key Method
 
-1. Go to **Settings > Provider Credentials**
+1. Go to **Settings > Providers**
 2. Select a provider (OpenAI, Anthropic, etc.)
 3. Enter your API key
 4. Click **Save**
@@ -55,7 +55,7 @@ Configure API keys or OAuth for AI providers.
 
 For providers that support OAuth (Anthropic, GitHub Copilot):
 
-1. Go to **Settings > Provider Credentials**
+1. Go to **Settings > Providers**
 2. Select a provider with the OAuth badge
 3. Click **Add OAuth**
 4. Choose authorization method:

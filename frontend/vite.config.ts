@@ -21,14 +21,10 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "0.0.0.0",
       port: 5173,
-      allowedHosts: ["test.getfit.us"],
       proxy: {
         "/api": {
           target: `http://localhost:${backendPort}`,
           changeOrigin: true,
-          headers: {
-            'Access-Control-Allow-Origin': 'https://test.getfit.us',
-          },
         },
       },
     },

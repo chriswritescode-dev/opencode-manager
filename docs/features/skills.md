@@ -17,11 +17,6 @@ Each skill is a `SKILL.md` file with YAML frontmatter and a markdown body:
 ---
 name: my-skill
 description: Short description of what this skill does
-license: MIT
-compatibility: opencode >= 1.0
-metadata:
-  author: your-name
-  version: 1.0.0
 ---
 Your skill instructions go here. This is the content that gets
 injected into the AI agent's context when the skill is loaded.
@@ -33,9 +28,6 @@ injected into the AI agent's context when the skill is loaded.
 |-------|----------|-------------|
 | `name` | Yes | Lowercase alphanumeric with hyphens (e.g., `my-skill`). Max 64 characters. |
 | `description` | Yes | What the skill does. Max 1024 characters. |
-| `license` | No | License identifier (e.g., `MIT`) |
-| `compatibility` | No | Version compatibility note |
-| `metadata` | No | Key-value pairs for additional context |
 
 ### Naming Rules
 
@@ -69,11 +61,7 @@ All endpoints are under `/api/settings/skills`.
   "name": "my-skill",
   "description": "Runs type check and lint",
   "body": "Instructions for the AI agent...",
-  "scope": "global",
-  "license": "MIT",
-  "compatibility": "opencode >= 1.0",
-  "metadata": { "author": "your-name" },
-  "repoId": 1
+  "scope": "global"
 }
 ```
 
@@ -81,12 +69,11 @@ All endpoints are under `/api/settings/skills`.
 
 ### Update Request
 
-All fields are optional. Set a field to `null` to clear it.
+All fields are optional. Omit fields you do not want to change.
 
 ```json
 {
   "description": "Updated description",
-  "body": "Updated instructions",
-  "license": null
+  "body": "Updated instructions"
 }
 ```

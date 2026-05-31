@@ -37,6 +37,7 @@ nav:
     - MCP Servers: features/mcp.md
     - Assistant Mode: features/assistant-mode.md
     - Assistant Internal API: features/assistant-internal-api.md
+    - ocm CLI: ocm-cli.md
     - Text-to-Speech: features/tts.md
     - Speech-to-Text: features/stt.md
     - Push Notifications: features/notifications.md

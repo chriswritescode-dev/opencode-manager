@@ -45,7 +45,7 @@ On first launch, you'll be redirected to the setup page:
 Before chatting, you need to configure at least one AI provider:
 
 1. Go to **Settings** (gear icon)
-2. Select **Provider Credentials**
+2. Select **Providers**
 3. Choose a provider (e.g., Anthropic, OpenAI)
 4. Enter your **API key** or click **Add OAuth** for supported providers
 5. Click **Save**
@@ -73,7 +73,7 @@ Choose the onboarding flow that matches your setup:
 If you already used standalone OpenCode in those repositories, existing chats appear as soon as the discovered repo path matches the original OpenCode path.
 
 !!! note "Private Repositories"
-    For private repos, configure a GitHub Personal Access Token in Settings > Credentials first.
+    For private repos, configure a GitHub Personal Access Token in Settings > Git > Credentials first.
 
 ## 5. Start Chatting
 

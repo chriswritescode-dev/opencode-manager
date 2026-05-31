@@ -131,15 +131,6 @@ Toggle servers on/off:
 
 Disabled servers won't be started or connected.
 
-### Edit Configuration
-
-Modify server settings:
-
-1. Click the **Edit** button on a server
-2. Update configuration
-3. Click **Save**
-4. Server will restart with new settings
-
 ### Delete Server
 
 Remove a server:
@@ -147,14 +138,9 @@ Remove a server:
 1. Click the **Delete** button
 2. Confirm deletion
 
-### Restart Server
+### Refresh Status
 
-Force restart a server:
-
-1. Click the **Restart** button
-2. Server process is stopped and restarted
-
-Useful after configuration changes or if a server becomes unresponsive.
+Use the refresh button in **Settings > MCP Servers** to reload the current connection status after changing a server outside the UI or completing OAuth.
 
 ## Server Status
 
@@ -162,33 +148,15 @@ Monitor server health:
 
 | Status | Description |
 |--------|-------------|
-| Running | Server is active and connected |
-| Starting | Server is launching |
-| Stopped | Server is disabled |
-| Error | Server failed to start |
-
-Click on a server to see detailed status and logs.
+| Connected | Server is active and connected |
+| Disabled | Server is configured but disabled |
+| Auth Required | Remote server needs OAuth authentication |
+| Registration Required | Remote server needs OAuth client registration |
+| Failed | Server failed to start or connect |
 
 ## Tool Permissions
 
-Control which tools AI can access:
-
-### Global Settings
-
-In **Settings > MCP Servers**:
-
-- **Allow All Tools** - AI can use any tool
-- **Require Confirmation** - Ask before using tools
-- **Deny by Default** - Block tools unless allowed
-
-### Per-Agent Settings
-
-Configure tool access for custom agents:
-
-1. Go to **Settings > Agents**
-2. Edit an agent
-3. Set **Allowed Tools**
-4. Save changes
+The MCP server manager adds, toggles, authenticates, and deletes server configurations. Tool access is controlled by the active OpenCode configuration and any custom agent configuration, not by a separate global MCP permission mode in this screen.
 
 ## Troubleshooting
 
@@ -196,14 +164,14 @@ Configure tool access for custom agents:
 
 1. Check the command is installed: `npx -y @modelcontextprotocol/server-<name>`
 2. Verify environment variables are set
-3. Check server logs for errors
+3. Check the displayed status error
 4. Try running the command manually
 
 ### Tools Not Appearing
 
-1. Verify server status is "Running"
+1. Verify server status is "Connected"
 2. Check server provides the expected tools
-3. Restart the server
+3. Refresh server status
 4. Check AI model supports tool use
 
 ### Connection Issues

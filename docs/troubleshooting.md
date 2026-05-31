@@ -111,7 +111,7 @@ ADMIN_PASSWORD_RESET=true
 
 **Solutions:**
 
-1. Configure GitHub PAT in Settings > Credentials
+1. Configure GitHub PAT in Settings > Git > Credentials
 2. Ensure PAT has `repo` scope
 3. Check PAT hasn't expired
 
