@@ -181,7 +181,7 @@ export function WorkspaceManager({
               const isActive = !!workspace.fullPath && workspace.fullPath === activeWorkspaceDirectory
               const label = workspaceLabel(workspace)
               const rowClassName = isActive
-                ? 'border-purple-500/50 bg-purple-500/10 text-foreground'
+                ? 'border-primary/50 bg-primary/10 text-foreground'
                 : 'border-border bg-muted/30 hover:bg-muted/50'
               if (!manageMode) {
                 return (
@@ -197,9 +197,9 @@ export function WorkspaceManager({
                     className={`flex min-h-11 items-center gap-2 rounded-md border px-3 py-2 text-sm text-left ${rowClassName}`}
                     aria-pressed={isActive}
                   >
-                    <GitBranch className="h-3.5 w-3.5 text-purple-400 flex-shrink-0" />
-                    <span className="truncate">{label}</span>
-                    {isActive && <span className="text-xs text-purple-400">Selected</span>}
+                    <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
+                    <span className={isActive ? 'truncate text-orange-600 dark:text-orange-400' : 'truncate'}>{label}</span>
+                    {isActive && <span className="text-xs text-orange-600 dark:text-orange-400">Selected</span>}
                     {workspace.fullPath && (
                       <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
                         {workspace.fullPath}
@@ -219,7 +219,7 @@ export function WorkspaceManager({
                     onCheckedChange={(checked) => toggle(workspaceId, checked === true)}
                     aria-label={`Select workspace ${label}`}
                   />
-                  <GitBranch className="h-3.5 w-3.5 text-purple-400 flex-shrink-0" />
+                  <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                   <span className="truncate">{label}</span>
                   {workspace.fullPath && (
                     <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">

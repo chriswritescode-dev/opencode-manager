@@ -24,30 +24,33 @@ export function WorktreeTabs({
 }: WorktreeTabsProps) {
   const hasWorkspaces = workspaces.length > 0
   const workspaceLabel = value === 'workspaces' && activeWorkspaceLabel ? activeWorkspaceLabel : 'Workspaces'
+  const tabClassName =
+    'group min-w-0 flex-1 gap-1.5 px-2 sm:flex-none sm:px-3 data-[state=active]:border data-[state=active]:border-primary/50 data-[state=active]:bg-primary/10 data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-foreground'
+  const activeLabelClassName = 'group-data-[state=active]:text-orange-600 dark:group-data-[state=active]:text-orange-400'
 
   return (
     <div className="px-4 pt-2 flex-shrink-0">
       <Tabs value={value} onValueChange={(next) => onValueChange(next as WorktreeTabValue)} className="min-w-0">
-        <TabsList className="w-full justify-start overflow-hidden">
-          <TabsTrigger value="repo" className="min-w-0 flex-1 gap-1.5 px-2 sm:flex-none sm:px-3">
+        <TabsList className="w-full justify-start gap-1 overflow-hidden">
+          <TabsTrigger value="repo" className={tabClassName}>
             <GitBranch className="h-3 w-3 shrink-0" />
-            <span className="min-w-0 truncate">{baseLabel}</span>
+            <span className={`min-w-0 truncate ${activeLabelClassName}`}>{baseLabel}</span>
           </TabsTrigger>
           {hasWorkspaces ? (
             <>
-              <TabsTrigger value="workspaces" className="min-w-0 flex-1 gap-1.5 px-2 sm:flex-none sm:px-3" onClick={onWorkspaceMenu}>
-                <Layers className="h-3 w-3 shrink-0 text-purple-400" />
-                <span className="min-w-0 truncate">{workspaceLabel}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">({workspaces.length})</span>
+              <TabsTrigger value="workspaces" className={tabClassName} onClick={onWorkspaceMenu}>
+                <Layers className="h-3 w-3 shrink-0 text-primary" />
+                <span className={`min-w-0 truncate ${activeLabelClassName}`}>{workspaceLabel}</span>
+                <span className={`shrink-0 text-xs text-muted-foreground ${activeLabelClassName}`}>({workspaces.length})</span>
               </TabsTrigger>
             </>
           ) : (
             <button
               type="button"
               onClick={onCreateWorkspace}
-              className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium text-muted-foreground hover:bg-background hover:text-foreground sm:flex-none sm:px-3"
+              className="inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground sm:flex-none sm:px-3"
             >
-              <Layers className="h-3 w-3 shrink-0 text-purple-400" />
+              <Layers className="h-3 w-3 shrink-0 text-primary" />
               <span className="min-w-0 truncate">Workspace</span>
               <Plus className="h-3.5 w-3.5 shrink-0" />
             </button>
