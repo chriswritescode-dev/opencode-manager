@@ -26,7 +26,7 @@ describe('internal/notifications routes', () => {
     notificationService = new NotificationService(db)
     settingsService = new SettingsService(db)
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, openCodeClient))
     token = getOrCreateInternalToken(db)
   })
 

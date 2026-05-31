@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import path from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
-import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig } from '../../src/services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
 import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
@@ -44,6 +44,43 @@ describe('buildReposSkill', () => {
   })
 })
 
+describe('buildSettingsSkill', () => {
+  it('uses ENV.SERVER.PORT in the internal base URL', () => {
+    const skill = buildSettingsSkill('https://example.com:443/api/internal')
+    expect(skill).toContain(`http://localhost:${ENV.SERVER.PORT}/api/internal`)
+    expect(skill).not.toContain(':443')
+  })
+
+  it('includes tts and stt in allowed non-secret preferences', () => {
+    const skill = buildSettingsSkill('http://localhost:5003/api/internal')
+    expect(skill).toContain('tts')
+    expect(skill).toContain('stt')
+    expect(skill).toContain('enabled')
+    expect(skill).toContain('provider')
+    expect(skill).toContain('autoPlay')
+    expect(skill).toContain('voice')
+    expect(skill).toContain('model')
+    expect(skill).toContain('speed')
+    expect(skill).toContain('language')
+  })
+
+  it('documents the POST /assistant/reload endpoint', () => {
+    const skill = buildSettingsSkill('http://localhost:5003/api/internal')
+    expect(skill).toContain('/assistant/reload')
+    expect(skill).toContain('Always confirm with the user before reloading')
+    expect(skill).toContain('5 requests per minute')
+  })
+
+  it('still lists apiKey and endpoint as forbidden', () => {
+    const skill = buildSettingsSkill('http://localhost:5003/api/internal')
+    expect(skill).toContain('tts.apiKey')
+    expect(skill).toContain('tts.endpoint')
+    expect(skill).toContain('stt.apiKey')
+    expect(skill).toContain('stt.endpoint')
+    expect(skill).toContain('DO NOT attempt to set')
+  })
+})
+
 describe('buildAssistantDefaultAgentMd', () => {
   it('contains description and mode in frontmatter', () => {
     const content = buildAssistantDefaultAgentMd()
@@ -59,6 +96,12 @@ describe('buildAssistantDefaultAgentMd', () => {
     expect(content).toContain('manager-settings')
   })
 
+  it('contains reload guidance in the agent prompt', () => {
+    const content = buildAssistantDefaultAgentMd()
+    expect(content).toContain('/assistant/reload')
+    expect(content).toContain('Always ask the user before reloading')
+  })
+
   it('does not contain v file', () => {
     const content = buildAssistantDefaultAgentMd()
     expect(content).not.toContain('v file')
@@ -66,13 +109,13 @@ describe('buildAssistantDefaultAgentMd', () => {
 })
 
 describe('buildAssistantOpenCodeConfig', () => {
-  it('includes default_agent and agent.assistant with primary mode', () => {
+  it('includes default_agent and agent.assistant with primary mode and no embedded persona', () => {
     const config = buildAssistantOpenCodeConfig()
     expect(config.default_agent).toBe('assistant')
-    expect(config.agent?.assistant?.mode).toBe('primary')
-    expect(config.agent?.assistant?.prompt).toContain('default Assistant Mode agent')
-    expect(config.agent?.assistant?.permission?.read).toBe('allow')
-    expect(config.agent?.assistant?.permission?.external_directory).toBe('ask')
+    expect(config.agent?.assistant).toEqual({ mode: 'primary' })
+    expect(config.agent?.assistant?.prompt).toBeUndefined()
+    expect(config.agent?.assistant?.description).toBeUndefined()
+    expect(config.agent?.assistant?.permission).toBeUndefined()
   })
 })
 
@@ -102,8 +145,10 @@ describe('ensureAssistantMode', () => {
     const parsedConfig = JSON.parse(opencodeJson)
     expect(parsedConfig.default_agent).toBe('assistant')
     expect(parsedConfig).not.toHaveProperty('mcp')
-    expect(parsedConfig.agent?.assistant?.mode).toBe('primary')
-    expect(parsedConfig.agent?.assistant?.prompt).toContain('default Assistant Mode agent')
+    expect(parsedConfig.agent?.assistant).toEqual({ mode: 'primary' })
+    expect(parsedConfig.agent?.assistant?.prompt).toBeUndefined()
+    expect(parsedConfig.agent?.assistant?.description).toBeUndefined()
+    expect(parsedConfig.agent?.assistant?.permission).toBeUndefined()
     expect(token).toMatch(/^[0-9a-f]{64}$/)
     expect(skill).toContain('Authorization: Bearer')
     expect(skill).toContain(localApiBaseUrl)
@@ -161,23 +206,10 @@ describe('ensureAssistantMode', () => {
       bash: 'allow',
       external_directory: 'ask',
     })
-    expect(opencodeJson.agent?.assistant?.description).toBe('Default OpenCode Manager assistant workspace agent')
-    expect(opencodeJson.agent?.assistant?.mode).toBe('primary')
-    expect(opencodeJson.agent?.assistant?.prompt).toContain('This workspace is the shared assistant workspace')
-    expect(opencodeJson.agent?.assistant?.prompt).toContain('Self-Editing')
-    expect(opencodeJson.agent?.assistant?.prompt).toContain('repo-management')
-    expect(opencodeJson.agent?.assistant?.prompt).toContain('schedule-management')
-    expect(opencodeJson.agent?.assistant?.prompt).toContain('notifications')
-    expect(opencodeJson.agent?.assistant?.prompt).toContain('manager-settings')
-    expect(opencodeJson.agent?.assistant?.permission).toEqual({
-      read: 'allow',
-      edit: 'allow',
-      glob: 'allow',
-      grep: 'allow',
-      list: 'allow',
-      bash: 'allow',
-      external_directory: 'ask',
-    })
+    expect(opencodeJson.agent?.assistant).toEqual({ mode: 'primary' })
+    expect(opencodeJson.agent?.assistant?.prompt).toBeUndefined()
+    expect(opencodeJson.agent?.assistant?.description).toBeUndefined()
+    expect(opencodeJson.agent?.assistant?.permission).toBeUndefined()
 
     const agentsMdContent = await readFile(agentsMdPath, 'utf8')
     expect(agentsMdContent).toContain('Assistant Mode Workspace')
@@ -262,8 +294,8 @@ describe('ensureAssistantMode', () => {
     const repaired = JSON.parse(await readFile(opencodeJsonPath, 'utf8'))
 
     expect(repaired.default_agent).toBe('assistant')
-    expect(repaired.agent.assistant.mode).toBe('primary')
-    expect(repaired.agent.assistant.prompt).toContain('default Assistant Mode agent')
+    expect(repaired.agent.assistant).toEqual({ mode: 'primary', disable: false })
+    expect(repaired.agent.assistant.prompt).toBeUndefined()
     expect(repaired.agent.custom.prompt).toBe('Custom agent')
     expect(repaired.model).toBe('provider/model')
     expect(repaired.skills.paths).toEqual(['.opencode/skills'])
@@ -424,18 +456,17 @@ Ask before destructive operations or changes outside this assistant workspace.
     expect(updatedAgentsMd).not.toContain('Self-Editing Rules')
 
     expect(updatedAssistantAgent).toContain('Self-Editing')
+    expect(updatedAssistantAgent).toContain('/assistant/reload')
+    expect(updatedAssistantAgent).toContain('Always ask the user before reloading')
     expect(updatedAssistantAgent).toContain('repo-management')
     expect(updatedAssistantAgent).toContain('schedule-management')
     expect(updatedAssistantAgent).toContain('notifications')
     expect(updatedAssistantAgent).toContain('manager-settings')
 
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('Self-Editing')
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('.opencode/agents/assistant.md')
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('repo-management')
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('schedule-management')
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('notifications')
-    expect(updatedOpenCodeJson.agent.assistant.prompt).toContain('manager-settings')
-    expect(updatedOpenCodeJson.agent.assistant.prompt).not.toContain('Update AGENTS.md')
+    expect(updatedOpenCodeJson.agent.assistant.prompt).toBeUndefined()
+    expect(updatedOpenCodeJson.agent.assistant.description).toBeUndefined()
+    expect(updatedOpenCodeJson.agent.assistant.permission).toBeUndefined()
+    expect(updatedOpenCodeJson.agent.assistant.mode).toBe('primary')
 
     expect(result.files.agentsMd?.created).toBe(true)
     expect(result.files.opencodeJson?.created).toBe(true)
@@ -544,7 +575,7 @@ describe('assistant-mode end-to-end', () => {
     const notificationService = new NotificationService(db)
     const settingsService = new SettingsService(db)
     const app = new Hono()
-    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService))
+    app.route('/api/internal', createInternalRoutes(db, scheduleService, notificationService, settingsService, createOpenCodeClient()))
 
     const unauth = await app.request('/api/internal/schedules/all')
     expect(unauth.status).toBe(401)

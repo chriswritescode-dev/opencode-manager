@@ -18,6 +18,26 @@ export const AssistantNotificationResponseSchema = z.object({
   noSubscriptions: z.boolean(),
 })
 
+// NOTE: These are defined as plain z.object (not .pick() from the full schemas)
+// so that .default() values from the source schemas are NOT inherited. A patch
+// like { voice: 'nova' } must produce only { voice: 'nova' } in the parsed output,
+// not { voice: 'nova', provider: 'external', autoPlay: false }.
+export const AssistantTTSPatchSchema = z.object({
+  enabled: z.boolean(),
+  provider: z.enum(['external', 'builtin']),
+  autoPlay: z.boolean(),
+  voice: z.string(),
+  model: z.string(),
+  speed: z.number().min(0.25).max(4.0),
+}).partial().strict()
+
+export const AssistantSTTPatchSchema = z.object({
+  enabled: z.boolean(),
+  provider: z.enum(['external', 'builtin']),
+  model: z.string(),
+  language: z.string(),
+}).partial().strict()
+
 export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   theme: true,
   mode: true,
@@ -35,23 +55,7 @@ export const AssistantSettingsPatchSchema = UserPreferencesSchema.pick({
   notifications: true,
   repoOrder: true,
   repoSortMode: true,
+}).extend({
+  tts: AssistantTTSPatchSchema,
+  stt: AssistantSTTPatchSchema,
 }).partial().strict()
-
-export const ASSISTANT_SETTINGS_ALLOWED_KEYS = [
-  'theme',
-  'mode',
-  'defaultModel',
-  'defaultAgent',
-  'autoScroll',
-  'expandDiffs',
-  'expandToolCalls',
-  'showReasoning',
-  'simpleChatMode',
-  'leaderKey',
-  'directShortcuts',
-  'keyboardShortcuts',
-  'customCommands',
-  'notifications',
-  'repoOrder',
-  'repoSortMode',
-] as const

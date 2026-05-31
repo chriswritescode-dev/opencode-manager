@@ -5,6 +5,7 @@ import { createInternalRoutes } from '../../src/routes/internal'
 import type { ScheduleService } from '../../src/services/schedules'
 import type { NotificationService } from '../../src/services/notification'
 import type { SettingsService } from '../../src/services/settings'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 import type { Repo } from '../../src/types/repo'
 
 const mockDb = {
@@ -73,8 +74,18 @@ describe('internal-opencode-workspaces routes', () => {
     const scheduleService = {} as ScheduleService
     const notificationService = {} as NotificationService
     const settingsService = {} as SettingsService
+    const openCodeClient = {
+      forward: vi.fn(),
+      forwardRaw: vi.fn(),
+      getJson: vi.fn(),
+      postJson: vi.fn(),
+      setProviderAuth: vi.fn(),
+      deleteProviderAuth: vi.fn(),
+      startMcpAuth: vi.fn(),
+      authenticateMcp: vi.fn(),
+    } as unknown as OpenCodeClient
     app = new Hono()
-    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService))
+    app.route('/api/internal', createInternalRoutes(mockDb, scheduleService, notificationService, settingsService, openCodeClient))
     token = 'test-internal-token'
   })
 

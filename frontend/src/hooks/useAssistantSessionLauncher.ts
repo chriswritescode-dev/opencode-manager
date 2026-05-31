@@ -2,11 +2,85 @@ import { useCallback } from 'react'
 import { initializeAssistantMode } from '@/api/repos'
 import { OpenCodeClient } from '@/api/opencode'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
+import type { components } from '@/api/opencode-types'
 
 interface UseAssistantSessionLauncherOptions {
   repoId: number
   opcodeUrl: string
   onNavigate: (sessionId: string) => void
+}
+
+type OpenCodeSession = components['schemas']['Session']
+
+const LAST_ASSISTANT_SESSION_KEY_PREFIX = 'ocm:assistant:last-session'
+
+function getLastAssistantSessionKey(repoId: number, directory: string): string {
+  return `${LAST_ASSISTANT_SESSION_KEY_PREFIX}:${repoId}:${directory}`
+}
+
+function getCachedAssistantSessionId(repoId: number, directory: string): string | undefined {
+  try {
+    return localStorage.getItem(getLastAssistantSessionKey(repoId, directory)) || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function setCachedAssistantSessionId(repoId: number, directory: string, sessionId: string): void {
+  try {
+    localStorage.setItem(getLastAssistantSessionKey(repoId, directory), sessionId)
+  } catch {
+    return
+  }
+}
+
+function removeCachedAssistantSessionId(repoId: number, directory: string): void {
+  try {
+    localStorage.removeItem(getLastAssistantSessionKey(repoId, directory))
+  } catch {
+    return
+  }
+}
+
+function isAssistantRootSession(session: OpenCodeSession, assistantDirectory: string): boolean {
+  return !session.parentID && session.directory === assistantDirectory
+}
+
+function findNewestRootAssistantSession(sessions: OpenCodeSession[], assistantDirectory: string): OpenCodeSession | undefined {
+  return sessions
+    .filter((session) => isAssistantRootSession(session, assistantDirectory))
+    .sort((a, b) => b.time.updated - a.time.updated)[0]
+}
+
+async function getCachedAssistantSession(
+  client: OpenCodeClient,
+  repoId: number,
+  assistantDirectory: string,
+): Promise<OpenCodeSession | undefined> {
+  const cachedSessionId = getCachedAssistantSessionId(repoId, assistantDirectory)
+  if (!cachedSessionId) return undefined
+
+  try {
+    const session = await client.getSession(cachedSessionId)
+    if (isAssistantRootSession(session, assistantDirectory)) return session
+    removeCachedAssistantSessionId(repoId, assistantDirectory)
+  } catch {
+    removeCachedAssistantSessionId(repoId, assistantDirectory)
+  }
+
+  return undefined
+}
+
+async function getLatestAssistantSession(
+  client: OpenCodeClient,
+  assistantDirectory: string,
+): Promise<OpenCodeSession | undefined> {
+  const latestSessions = await client.listSessions({ limit: 1, roots: true })
+  const latestRootSession = findNewestRootAssistantSession(latestSessions, assistantDirectory)
+  if (latestRootSession || latestSessions.length === 0) return latestRootSession
+
+  const sessions = await client.listSessions()
+  return findNewestRootAssistantSession(sessions, assistantDirectory)
 }
 
 const ASSISTANT_WELCOME_PROMPT = `Welcome to OpenCode Manager! I'm your assistant and I'm here to help you work with your code.
@@ -77,27 +151,18 @@ export function useAssistantSessionLauncher({
   const openAssistant = useCallback(async () => {
     const assistant = await initializeAssistantMode(repoId)
     const client = new OpenCodeClient(opcodeUrl, assistant.directory)
-    const sessions = await client.listSessions()
-
     const assistantDirectory = assistant.directory
 
-    const rootSessions = sessions.filter(
-      (session) => !session.parentID
-    )
-
-    const assistantSessions = rootSessions.filter(
-      (session) => session.directory === assistantDirectory
-    )
-
-    const newest = assistantSessions.sort(
-      (a, b) => b.time.updated - a.time.updated
-    )[0]
+    const newest = await getCachedAssistantSession(client, repoId, assistantDirectory)
+      ?? await getLatestAssistantSession(client, assistantDirectory)
 
     if (newest) {
+      setCachedAssistantSessionId(repoId, assistantDirectory, newest.id)
       onNavigate(newest.id)
       void sendAssistantModeWarningsPrompt(client, newest.id, assistant)
     } else {
       const session = await client.createSession({ title: 'Assistant' })
+      setCachedAssistantSessionId(repoId, assistantDirectory, session.id)
       onNavigate(session.id)
       void sendAssistantWelcomePrompt(client, session.id, assistant)
     }

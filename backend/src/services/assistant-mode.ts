@@ -150,8 +150,7 @@ function buildLegacyAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
-function buildLegacyAssistantDefaultAgentMd(): string {
-  const prompt = buildLegacyAssistantAgentPrompt()
+function buildAssistantDefaultAgentMdFromPrompt(prompt: string): string {
   const permission = buildAssistantAgentPermission()
 
   return `---
@@ -171,6 +170,10 @@ ${prompt}
 `
 }
 
+function buildLegacyAssistantDefaultAgentMd(): string {
+  return buildAssistantDefaultAgentMdFromPrompt(buildLegacyAssistantAgentPrompt())
+}
+
 function matchesGeneratedAssistantAgentsMd(content: string): boolean {
   const currentHash = hashContent(buildAssistantAgentsMd())
   const legacyHash = hashContent(buildLegacyAssistantAgentsMd())
@@ -180,17 +183,19 @@ function matchesGeneratedAssistantAgentsMd(content: string): boolean {
 
 function matchesGeneratedAssistantDefaultAgentMd(content: string): boolean {
   const currentHash = hashContent(buildAssistantDefaultAgentMd())
+  const previousHash = hashContent(buildPreviousAssistantDefaultAgentMd())
   const legacyHash = hashContent(buildLegacyAssistantDefaultAgentMd())
   const contentHash = hashContent(content)
-  return contentHash === currentHash || contentHash === legacyHash
+  return contentHash === currentHash || contentHash === previousHash || contentHash === legacyHash
 }
 
 function matchesGeneratedAssistantAgentPrompt(content: unknown): content is string {
   if (typeof content !== 'string') return false
   const currentHash = hashContent(buildAssistantAgentPrompt())
+  const previousHash = hashContent(buildPreviousAssistantAgentPrompt())
   const legacyHash = hashContent(buildLegacyAssistantAgentPrompt())
   const contentHash = hashContent(content)
-  return contentHash === currentHash || contentHash === legacyHash
+  return contentHash === currentHash || contentHash === previousHash || contentHash === legacyHash
 }
 
 function containsLegacyAssistantAgentsGuidance(content: string): boolean {
@@ -215,7 +220,7 @@ Assistant-specific instructions belong in \`.opencode/agents/assistant.md\`.
 `
 }
 
-function buildAssistantAgentPrompt(): string {
+function buildPreviousAssistantAgentPrompt(): string {
   return [
     'You are the default Assistant Mode agent for OpenCode Manager.',
     '',
@@ -239,6 +244,32 @@ function buildAssistantAgentPrompt(): string {
   ].join('\n')
 }
 
+function buildAssistantAgentPrompt(): string {
+  return [
+    'You are the default Assistant Mode agent for OpenCode Manager.',
+    '',
+    'This workspace is the shared assistant workspace for OpenCode Manager. Help the user manage repos, schedules, notifications, settings, and assistant behavior safely.',
+    '',
+    '## Self-Editing Rules',
+    '',
+    'Durable assistant instructions, behavior, and preferences belong in `.opencode/agents/assistant.md`. Edit that file when the user expresses lasting preferences or when you need to refine your behavior.',
+    '',
+    'The workspace directory explanation belongs in `AGENTS.md`. Keep that file focused on describing the directory contents and pointing to managed files.',
+    '',
+    'Preserve user-customized workspace files unless the user explicitly asks you to change them. Ask before making significant, destructive, or out-of-workspace changes.',
+    '',
+    'After editing `.opencode/agents/assistant.md`, load `manager-settings` and call `POST /assistant/reload` to apply changes. Always ask the user before reloading.',
+    '',
+    '## Skill Usage',
+    '',
+    'Use the workspace skills when relevant:',
+    '- Load `repo-management` before `schedule-management` when you need a repo ID.',
+    '- Load `schedule-management` for schedule jobs and runs.',
+    '- Load `notifications` when the user should be notified about important events.',
+    '- Load `manager-settings` when reading or safely updating UI preferences.',
+  ].join('\n')
+}
+
 function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 'allow'; grep: 'allow'; list: 'allow'; bash: 'allow'; external_directory: 'ask' } {
   return {
     read: 'allow',
@@ -251,34 +282,12 @@ function buildAssistantAgentPermission(): { read: 'allow'; edit: 'allow'; glob: 
   }
 }
 
-export function buildAssistantDefaultAgentConfig() {
-  return {
-    description: 'Default OpenCode Manager assistant workspace agent',
-    mode: 'primary',
-    prompt: buildAssistantAgentPrompt(),
-    permission: buildAssistantAgentPermission(),
-  }
+function buildPreviousAssistantDefaultAgentMd(): string {
+  return buildAssistantDefaultAgentMdFromPrompt(buildPreviousAssistantAgentPrompt())
 }
 
 export function buildAssistantDefaultAgentMd(): string {
-  const prompt = buildAssistantAgentPrompt()
-  const permission = buildAssistantAgentPermission()
-
-  return `---
-description: Default OpenCode Manager assistant workspace agent
-mode: primary
-permission:
-  read: ${permission.read}
-  edit: ${permission.edit}
-  glob: ${permission.glob}
-  grep: ${permission.grep}
-  list: ${permission.list}
-  bash: ${permission.bash}
-  external_directory: ${permission.external_directory}
----
-
-${prompt}
-`
+  return buildAssistantDefaultAgentMdFromPrompt(buildAssistantAgentPrompt())
 }
 
 function toLocalhostInternalBaseUrl(baseUrl: string): string {
@@ -559,12 +568,16 @@ The following preference keys can be modified:
 - \`simpleChatMode\`, \`leaderKey\`, \`directShortcuts\`
 - \`keyboardShortcuts\`, \`customCommands\`, \`notifications\`
 - \`repoOrder\`, \`repoSortMode\`
+- \`tts\` — Non-secret TTS preferences (\`enabled\`, \`provider\`, \`autoPlay\`, \`voice\`, \`model\`, \`speed\`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).
+- \`stt\` — Non-secret STT preferences (\`enabled\`, \`provider\`, \`model\`, \`language\`). STT must already be configured in the UI (the endpoint returns 400 otherwise).
 
 **DO NOT attempt to set:**
 - \`gitCredentials\` - Git credentials must be managed via the full UI
 - \`gitIdentity\` - Git identity must be managed via the full UI
 - \`tts.apiKey\` - TTS credentials must be managed via the full UI
+- \`tts.endpoint\` - TTS endpoint must be managed via the full UI
 - \`stt.apiKey\` - STT credentials must be managed via the full UI
+- \`stt.endpoint\` - STT endpoint must be managed via the full UI
 - \`lastKnownGoodConfig\` - Internal state, do not modify
 - Any other keys not in the allowed list above
 
@@ -581,6 +594,25 @@ curl -X PATCH -H "Authorization: Bearer <token>" \\
 
 **Response:**
 Returns the updated settings object with the same structure as GET.
+
+### POST /assistant/reload
+
+Reload the assistant workspace by disposing the current OpenCode instance. Use this after editing \`.opencode/agents/assistant.md\` or \`opencode.json\` so changes take effect on the next message.
+
+**Note:** Always confirm with the user before reloading, as it re-bootstraps the workspace.
+
+**Rate Limiting:** 5 requests per minute per token. Returns \`429 Too Many Requests\` with \`Retry-After\` header when exceeded.
+
+**Example:**
+\`\`\`bash
+curl -X POST -H "Authorization: Bearer <token>" \\
+  "${internalBaseUrl}/assistant/reload"
+\`\`\`
+
+**Response:**
+\`\`\`ts
+{ "success": true }
+\`\`\`
 
 ## Safety
 
@@ -660,12 +692,10 @@ curl -H "Authorization: Bearer <token>" "${internalBaseUrl}/repos"
 export function buildAssistantOpenCodeConfig(): OpenCodeConfigInput {
   const config: OpenCodeConfigInput = {
     default_agent: ASSISTANT_DEFAULT_AGENT_NAME,
-    instructions: [
-      'AGENTS.md',
-    ],
+    instructions: ['AGENTS.md'],
     permission: buildAssistantAgentPermission(),
     agent: {
-      [ASSISTANT_DEFAULT_AGENT_NAME]: buildAssistantDefaultAgentConfig(),
+      [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: 'primary' },
     },
   }
 
@@ -731,8 +761,8 @@ export async function ensureAssistantMode(
             const existingContent = await readFileContent(opencodeJsonPath)
             const existingConfig = JSON.parse(existingContent) as OpenCodeConfigInput
             const mergedConfig = mergeAssistantOpenCodeConfig(existingConfig)
-            return assistantOpenCodeConfigPromptNeedsMigration(mergedConfig)
-              ? migrateGeneratedAssistantOpenCodePrompt(mergedConfig)
+            return assistantOpenCodeConfigHasGeneratedAgentPersona(mergedConfig)
+              ? stripGeneratedAssistantAgentPersona(mergedConfig)
               : mergedConfig
           } catch {
             return buildAssistantOpenCodeConfig()
@@ -748,8 +778,8 @@ export async function ensureAssistantMode(
       const repairedConfig = assistantOpenCodeConfigNeedsRepair(existingConfig)
         ? mergeAssistantOpenCodeConfig(existingConfig)
         : existingConfig
-      const updatedConfig = assistantOpenCodeConfigPromptNeedsMigration(repairedConfig)
-        ? migrateGeneratedAssistantOpenCodePrompt(repairedConfig)
+      const updatedConfig = assistantOpenCodeConfigHasGeneratedAgentPersona(repairedConfig)
+        ? stripGeneratedAssistantAgentPersona(repairedConfig)
         : repairedConfig
 
       if (updatedConfig !== existingConfig) {
@@ -890,26 +920,31 @@ function assistantOpenCodeConfigNeedsRepair(config: OpenCodeConfigInput): boolea
   const mode = (assistantAgent as { mode?: unknown }).mode
   if (mode !== 'primary' && mode !== 'all') return true
   if ((assistantAgent as { disable?: unknown }).disable === true) return true
+  if (assistantOpenCodeConfigHasGeneratedAgentPersona(config)) return true
   return false
 }
 
-function assistantOpenCodeConfigPromptNeedsMigration(config: OpenCodeConfigInput): boolean {
-  const prompt = (config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME] as { prompt?: unknown } | undefined)?.prompt
-  return matchesGeneratedAssistantAgentPrompt(prompt) && prompt !== buildAssistantAgentPrompt()
+function assistantOpenCodeConfigHasGeneratedAgentPersona(config: OpenCodeConfigInput): boolean {
+  const agent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
+  if (typeof agent !== 'object' || agent === null) return false
+  const prompt = (agent as { prompt?: unknown }).prompt
+  return matchesGeneratedAssistantAgentPrompt(prompt)
 }
 
-function migrateGeneratedAssistantOpenCodePrompt(config: OpenCodeConfigInput): OpenCodeConfigInput {
+function resolveValidAssistantMode(agent: unknown): 'primary' | 'all' {
+  const mode = (agent as { mode?: unknown } | undefined)?.mode
+  return mode === 'primary' || mode === 'all' ? mode : 'primary'
+}
+
+function stripGeneratedAssistantAgentPersona(config: OpenCodeConfigInput): OpenCodeConfigInput {
   const existingAssistantAgent = config.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  if (typeof existingAssistantAgent !== 'object' || existingAssistantAgent === null) return config
+  const validMode = resolveValidAssistantMode(existingAssistantAgent)
 
   return {
     ...config,
     agent: {
       ...(config.agent ?? {}),
-      [ASSISTANT_DEFAULT_AGENT_NAME]: {
-        ...existingAssistantAgent,
-        prompt: buildAssistantAgentPrompt(),
-      },
+      [ASSISTANT_DEFAULT_AGENT_NAME]: { mode: validMode },
     },
   }
 }
@@ -917,14 +952,23 @@ function migrateGeneratedAssistantOpenCodePrompt(config: OpenCodeConfigInput): O
 function mergeAssistantOpenCodeConfig(existing?: OpenCodeConfigInput): OpenCodeConfigInput {
   const generated = buildAssistantOpenCodeConfig()
   const existingAssistantAgent = existing?.agent?.[ASSISTANT_DEFAULT_AGENT_NAME]
-  const existingMode = (existingAssistantAgent as { mode?: 'primary' | 'all' | unknown } | undefined)?.mode
-  const validMode = existingMode === 'primary' || existingMode === 'all' ? existingMode : 'primary'
+  const validMode = resolveValidAssistantMode(existingAssistantAgent)
 
-  const mergedAssistantAgent = {
-    ...generated.agent?.[ASSISTANT_DEFAULT_AGENT_NAME],
-    ...(typeof existingAssistantAgent === 'object' && existingAssistantAgent !== null ? existingAssistantAgent : {}),
-    mode: validMode,
-    disable: false,
+  const existingIsGenerated = existingAssistantAgent != null &&
+    typeof existingAssistantAgent === 'object' &&
+    matchesGeneratedAssistantAgentPrompt(
+      (existingAssistantAgent as { prompt?: unknown }).prompt,
+    )
+
+  let mergedAssistantAgent: Record<string, unknown>
+  if (existingIsGenerated) {
+    mergedAssistantAgent = { mode: validMode }
+  } else {
+    mergedAssistantAgent = {
+      ...(typeof existingAssistantAgent === 'object' && existingAssistantAgent !== null ? existingAssistantAgent : {}),
+      mode: validMode,
+      disable: false,
+    }
   }
 
   return {

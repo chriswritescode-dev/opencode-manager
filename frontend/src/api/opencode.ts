@@ -3,6 +3,9 @@ import { fetchWrapper, fetchWrapperVoid } from './fetchWrapper'
 
 type SessionListResponse = paths['/session']['get']['responses']['200']['content']['application/json']
 type SessionResponse = paths['/session/{sessionID}']['get']['responses']['200']['content']['application/json']
+type SessionListParams = NonNullable<paths['/session']['get']['parameters']['query']> & {
+  roots?: boolean
+}
 type CreateSessionRequest = NonNullable<paths['/session']['post']['requestBody']>['content']['application/json']
 type MessageListResponse = paths['/session/{sessionID}/message']['get']['responses']['200']['content']['application/json']
 type SendPromptRequest = NonNullable<paths['/session/{sessionID}/message']['post']['requestBody']>['content']['application/json']
@@ -67,9 +70,9 @@ export class OpenCodeClient {
     return { ...params, directory: this.directory }
   }
 
-  async listSessions() {
+  async listSessions(params?: SessionListParams) {
     return fetchWrapper<SessionListResponse>(`${this.baseURL}/session`, {
-      params: this.getParams(),
+      params: this.getParams(params),
     })
   }
 

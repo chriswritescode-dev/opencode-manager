@@ -104,13 +104,17 @@ The following preference keys can be modified:
 - `simpleChatMode`, `leaderKey`, `directShortcuts`
 - `keyboardShortcuts`, `customCommands`, `notifications`
 - `repoOrder`, `repoSortMode`
+- `tts` — Non-secret TTS preferences (`enabled`, `provider`, `autoPlay`, `voice`, `model`, `speed`). TTS must already be configured in the UI (the endpoint returns 400 otherwise).
+- `stt` — Non-secret STT preferences (`enabled`, `provider`, `model`, `language`). STT must already be configured in the UI (the endpoint returns 400 otherwise).
 
 **Restricted Keys:**
 The following keys are **NOT** allowed and will be rejected:
 - `gitCredentials` - Git credentials must be managed via the full UI
 - `gitIdentity` - Git identity must be managed via the full UI
 - `tts.apiKey` - TTS credentials must be managed via the full UI
+- `tts.endpoint` - TTS endpoint must be managed via the full UI
 - `stt.apiKey` - STT credentials must be managed via the full UI
+- `stt.endpoint` - STT endpoint must be managed via the full UI
 - `lastKnownGoodConfig` - Internal state, do not modify
 
 **Request Body:**
@@ -123,6 +127,31 @@ Returns the updated settings object.
 - `200`: Settings updated
 - `400`: Invalid request body or disallowed key
 - `401`: Missing or invalid bearer token
+
+### Assistant
+
+**POST `/api/internal/assistant/reload`**
+
+Reload the assistant workspace by disposing the current OpenCode instance. Use this after editing `.opencode/agents/assistant.md` or `opencode.json` so changes take effect on the next message.
+
+**Rate Limiting:** 5 requests per minute per token. Returns `429 Too Many Requests` with `Retry-After` header when exceeded.
+
+**Example:**
+```bash
+curl -X POST -H "Authorization: Bearer <token>" \
+  "http://localhost:5003/api/internal/assistant/reload"
+```
+
+**Response:**
+```ts
+{ "success": true }
+```
+
+**Status Codes:**
+- `200`: Assistant workspace reloaded
+- `401`: Missing or invalid bearer token
+- `429`: Rate limit exceeded
+- `502`: Failed to reload (upstream OpenCode error)
 
 ### Repos
 

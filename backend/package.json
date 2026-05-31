@@ -9,7 +9,7 @@
     "build": "bun build src/index.ts --outdir=dist --target=bun",
     "typecheck": "tsc --noEmit",
     "test": "pnpm run test:bun && pnpm run test:vitest",
-    "test:bun": "bun test test/services/assistant-mode.test.ts test/services/internal-token.test.ts test/auth/internal-token-middleware.test.ts test/routes/internal-schedules.test.ts test/routes/internal-notifications.test.ts test/routes/internal-settings.test.ts test/routes/internal-repos.test.ts src/db/model-state.test.ts src/routes/providers.test.ts src/routes/repos.test.ts",
+    "test:bun": "bun test test/services/assistant-mode.test.ts test/services/internal-token.test.ts test/auth/internal-token-middleware.test.ts test/routes/internal-schedules.test.ts test/routes/internal-notifications.test.ts test/routes/internal-settings.test.ts test/routes/internal-repos.test.ts test/routes/internal-assistant.test.ts src/db/model-state.test.ts src/routes/providers.test.ts src/routes/repos.test.ts",
     "test:vitest": "vitest run",
     "test:ui": "vitest --ui",
     "test:watch": "vitest --watch",

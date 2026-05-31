@@ -6,6 +6,7 @@ import { initializeAssistantMode } from '@/api/repos'
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
+  getSession: vi.fn(),
   createSession: vi.fn(),
   sendPromptAsync: vi.fn(),
   initializeAssistantMode: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('@/api/repos', () => ({
 vi.mock('@/api/opencode', () => ({
   OpenCodeClient: vi.fn(() => ({
     listSessions: mocks.listSessions,
+    getSession: mocks.getSession,
     createSession: mocks.createSession,
     sendPromptAsync: mocks.sendPromptAsync,
   })),
@@ -30,7 +32,27 @@ beforeEach(() => {
 describe('useAssistantSessionLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
     mocks.initializeAssistantMode.mockResolvedValue({ directory: '/assistant' })
+  })
+
+  it('opens the cached assistant session without listing sessions', async () => {
+    localStorage.setItem('ocm:assistant:last-session:123:/assistant', 'cached')
+    mocks.getSession.mockResolvedValue({ id: 'cached', directory: '/assistant', time: { updated: 20 } })
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(mocks.getSession).toHaveBeenCalledWith('cached')
+    expect(mocks.listSessions).not.toHaveBeenCalled()
+    expect(onNavigate).toHaveBeenCalledWith('cached')
   })
 
   it('opens the latest root session in the assistant directory', async () => {
@@ -53,9 +75,34 @@ describe('useAssistantSessionLauncher', () => {
 
     expect(initializeAssistantMode).toHaveBeenCalledWith(123)
     expect(OpenCodeClient).toHaveBeenCalledWith('http://localhost:5551', '/assistant')
+    expect(mocks.listSessions).toHaveBeenCalledWith({ limit: 1, roots: true })
     expect(onNavigate).toHaveBeenCalledWith('newest')
+    expect(localStorage.getItem('ocm:assistant:last-session:123:/assistant')).toBe('newest')
     expect(mocks.createSession).not.toHaveBeenCalled()
     expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
+  })
+
+  it('falls back to latest lookup when the cached session is stale', async () => {
+    localStorage.setItem('ocm:assistant:last-session:123:/assistant', 'stale')
+    mocks.getSession.mockRejectedValueOnce(new Error('not found'))
+    mocks.listSessions.mockResolvedValue([
+      { id: 'latest', directory: '/assistant', time: { updated: 30 } },
+    ])
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(mocks.getSession).toHaveBeenCalledWith('stale')
+    expect(mocks.listSessions).toHaveBeenCalledWith({ limit: 1, roots: true })
+    expect(onNavigate).toHaveBeenCalledWith('latest')
+    expect(localStorage.getItem('ocm:assistant:last-session:123:/assistant')).toBe('latest')
   })
 
   it('notifies an existing assistant session when some generated updates were preserved', async () => {
@@ -84,6 +131,7 @@ describe('useAssistantSessionLauncher', () => {
     })
 
     expect(onNavigate).toHaveBeenCalledWith('existing')
+    expect(mocks.listSessions).toHaveBeenCalledWith({ limit: 1, roots: true })
     expect(mocks.sendPromptAsync).toHaveBeenCalledWith('existing', {
       parts: [
         expect.objectContaining({
@@ -122,6 +170,7 @@ describe('useAssistantSessionLauncher', () => {
       ],
     })
     expect(onNavigate).toHaveBeenCalledWith('created')
+    expect(localStorage.getItem('ocm:assistant:last-session:123:/assistant')).toBe('created')
 
     const promptCall = mocks.sendPromptAsync.mock.calls[0]
     const promptText = promptCall[1].parts[0].text as string

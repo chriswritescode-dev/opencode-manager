@@ -27,7 +27,28 @@ export function createInternalSettingsRoutes(settingsService: SettingsService) {
       return c.json({ error: 'Invalid request body', details: parsed.error.issues }, 400)
     }
 
-    const updated = settingsService.updateSettings(parsed.data as Partial<UserPreferences>, userId)
+    const patch = parsed.data
+    const currentPrefs = settingsService.getSettings(userId).preferences
+    const updates: Partial<UserPreferences> = {}
+    for (const key of Object.keys(patch)) {
+      if (key !== 'tts' && key !== 'stt') {
+        (updates as Record<string, unknown>)[key] = (patch as Record<string, unknown>)[key]
+      }
+    }
+    if (patch.tts) {
+      if (!currentPrefs.tts?.apiKey) {
+        return c.json({ error: 'TTS is not configured. Set up TTS (including credentials) in the UI before adjusting it.' }, 400)
+      }
+      updates.tts = { ...currentPrefs.tts, ...patch.tts }
+    }
+    if (patch.stt) {
+      if (!currentPrefs.stt?.apiKey) {
+        return c.json({ error: 'STT is not configured. Set up STT (including credentials) in the UI before adjusting it.' }, 400)
+      }
+      updates.stt = { ...currentPrefs.stt, ...patch.stt }
+    }
+
+    const updated = settingsService.updateSettings(updates as Partial<UserPreferences>, userId)
     return c.json(updated)
   })
 

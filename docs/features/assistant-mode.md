@@ -22,10 +22,16 @@ Four skills are provisioned automatically when assistant mode is initialized:
 |-------|----------------|
 | `schedule-management` | Create, list, update, delete, and run scheduled jobs |
 | `notifications` | Send push notifications to registered user devices |
-| `manager-settings` | Read and patch user preferences |
+| `manager-settings` | Read and patch user preferences, and reload the assistant workspace |
 | `repo-management` | List all managed repositories |
 
 See [Assistant Internal API](assistant-internal-api.md) for the full API reference these skills expose.
+
+## Assistant Persona
+
+The assistant's system prompt, behavior, and durable preferences live solely in `.opencode/agents/assistant.md`. This file is the single source of truth for the assistant agent's personality and self-editing rules. The `opencode.json` configuration no longer duplicates the agent persona — it only stores agent mode and workspace-level settings.
+
+When the assistant self-edits its agent definition (e.g., to refine behavior or add durable preferences), it uses the `manager-settings` skill to call the `POST /assistant/reload` endpoint. This disposes the current OpenCode workspace instance so the changes take effect on the next message. The reload endpoint is rate-limited to 5 requests per minute; the assistant always asks the user before reloading.
 
 ## Getting Started
 
