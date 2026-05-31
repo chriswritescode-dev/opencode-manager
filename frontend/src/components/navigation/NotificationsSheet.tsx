@@ -1,5 +1,6 @@
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { usePermissions, useQuestions } from '@/contexts/EventContext'
+import { getQuestionText } from '@opencode-manager/shared/notifications'
 import { Bell, HelpCircle } from 'lucide-react'
 
 interface NotificationsSheetProps {
@@ -87,7 +88,7 @@ export function NotificationsSheet({ isOpen, onClose }: NotificationsSheetProps)
                   className="flex flex-col items-start gap-1 p-3 rounded-lg border border-border hover:bg-accent transition-colors text-left w-full"
                 >
                   <span className="font-medium text-foreground">
-                    {currentQuestion.questions?.[0]?.question || 'Question'}
+                    {getQuestionText(currentQuestion) || 'Question'}
                   </span>
                   <span className="text-xs text-muted-foreground truncate w-full">
                     Tap to view

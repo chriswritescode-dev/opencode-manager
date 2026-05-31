@@ -38,7 +38,7 @@ const EVENT_CONFIG: Record<
       getPermissionLabel(
         typeof props.permission === "string" ? props.permission : ""
       ),
-    bodyFn: (props) => getPermissionDetail(props) || "Approval required",
+    bodyFn: (props) => getPermissionDetail(props).primary || "Approval required",
   },
   [NotificationEventType.QUESTION_ASKED]: {
     preferencesKey: "questionAsked",
@@ -258,6 +258,34 @@ export class NotificationService {
     if (!this.isConfigured()) return;
 
     const userIds = this.getAllUserIds();
+    if (userIds.length === 0) return;
+
+    let notificationUrl = "/";
+    let repoName = "";
+    let repoId: number | undefined;
+
+    if (_directory) {
+      const reposBasePath = getReposPath();
+      const localPath = path.relative(reposBasePath, _directory);
+      const repo = getRepoBySourcePath(this.db, path.resolve(_directory)) ?? getRepoByLocalPath(this.db, localPath);
+
+      if (repo) {
+        repoId = repo.id;
+        repoName = path.basename(repo.localPath);
+        notificationUrl = sessionId
+          ? `/repos/${repo.id}/sessions/${sessionId}`
+          : `/repos/${repo.id}`;
+      }
+    }
+
+    const payload = buildEventNotificationPayload(event, {
+      repoName: repoName || undefined,
+      repoId,
+      sessionId,
+      directory: _directory,
+      url: notificationUrl,
+    });
+    if (!payload) return;
 
     for (const userId of userIds) {
       const settings = this.settingsService.getSettings(userId);
@@ -266,35 +294,6 @@ export class NotificationService {
 
       if (!notifPrefs.enabled) continue;
       if (!notifPrefs.events[config.preferencesKey]) continue;
-
-      let notificationUrl = "/";
-      let repoName = "";
-      let repoId: number | undefined;
-
-      if (_directory) {
-        const reposBasePath = getReposPath();
-        const localPath = path.relative(reposBasePath, _directory);
-        const repo = getRepoBySourcePath(this.db, path.resolve(_directory)) ?? getRepoByLocalPath(this.db, localPath);
-
-        if (repo) {
-          repoId = repo.id;
-          repoName = path.basename(repo.localPath);
-          if (sessionId) {
-            notificationUrl = `/repos/${repo.id}/sessions/${sessionId}`;
-          } else {
-            notificationUrl = `/repos/${repo.id}`;
-          }
-        }
-      }
-
-      const payload = buildEventNotificationPayload(event, {
-        repoName: repoName || undefined,
-        repoId,
-        sessionId,
-        directory: _directory,
-        url: notificationUrl,
-      });
-      if (!payload) continue;
 
       await this.sendToUser(userId, payload);
     }

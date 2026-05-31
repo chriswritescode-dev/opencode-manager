@@ -17,19 +17,21 @@ describe('getPermissionLabel', () => {
 
 describe('getPermissionDetail', () => {
   it('returns the bash command', () => {
-    expect(getPermissionDetail({ permission: 'bash', metadata: { command: 'rm -rf node_modules' } })).toBe('rm -rf node_modules')
+    expect(getPermissionDetail({ permission: 'bash', metadata: { command: 'rm -rf node_modules' } }).primary).toBe('rm -rf node_modules')
   })
-  it('returns the edited file path', () => {
-    expect(getPermissionDetail({ permission: 'edit', metadata: { filePath: 'src/index.ts' } })).toBe('src/index.ts')
+  it('returns the edited file path with a diff secondary', () => {
+    const detail = getPermissionDetail({ permission: 'edit', metadata: { filePath: 'src/index.ts', diff: 'a\nb' } })
+    expect(detail.primary).toBe('src/index.ts')
+    expect(detail.secondary).toBe('a\nb')
   })
   it('returns the fetched url', () => {
-    expect(getPermissionDetail({ permission: 'webfetch', metadata: { url: 'https://example.com' } })).toBe('https://example.com')
+    expect(getPermissionDetail({ permission: 'webfetch', metadata: { url: 'https://example.com' } }).primary).toBe('https://example.com')
   })
-  it('falls back to patterns[0] when metadata is missing', () => {
-    expect(getPermissionDetail({ permission: 'bash', patterns: ['git *'] })).toBe('git *')
+  it('falls back to patterns when metadata is missing', () => {
+    expect(getPermissionDetail({ permission: 'bash', patterns: ['git *'] }).primary).toBe('git *')
   })
-  it('returns empty string when no detail available', () => {
-    expect(getPermissionDetail({ permission: 'bash' })).toBe('')
+  it('returns empty primary when no detail available', () => {
+    expect(getPermissionDetail({ permission: 'bash' }).primary).toBe('')
   })
 })
 
