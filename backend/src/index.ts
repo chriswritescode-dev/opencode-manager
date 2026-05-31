@@ -45,6 +45,7 @@ import { createOpenCodeClient } from './services/opencode/client'
 import { NotificationService } from './services/notification'
 import { ScheduleRunner, ScheduleService } from './services/schedules'
 import { migrateGlobalSkills } from './services/skills'
+import { warmAssistantWorkspace } from './services/assistant-mode'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
@@ -272,6 +273,11 @@ try {
   const openCodeStatus = await openCodeSupervisor.start()
   if (openCodeStatus.healthy) {
     logger.info(`OpenCode server running on port ${openCodeStatus.port}`)
+    void warmAssistantWorkspace({
+      db,
+      apiBaseUrl: `http://localhost:${PORT}/api/internal`,
+      openCodeClient,
+    })
   } else {
     logger.warn(`OpenCode server unavailable after startup recovery: ${openCodeStatus.lastError ?? openCodeStatus.state}`)
   }

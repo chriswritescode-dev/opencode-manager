@@ -18,7 +18,7 @@ import { createRepoGitRoutes } from './repo-git'
 import { createScheduleRoutes } from './schedules'
 import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
-import { ensureAssistantMode, getAssistantModeStatus, getAssistantModeDirectory } from '../services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, getAssistantModeDirectory, buildAssistantRepo } from '../services/assistant-mode'
 import path from 'path'
 
 async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
@@ -499,27 +499,7 @@ app.get('/', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
 
-      let repo: Repo | null
-      if (id === 0) {
-        repo = {
-          id: 0,
-          repoUrl: undefined,
-          localPath: 'assistant',
-          sourcePath: undefined,
-          fullPath: '',
-          branch: undefined,
-          defaultBranch: 'main',
-          cloneStatus: 'ready',
-          clonedAt: Date.now(),
-          lastPulled: undefined,
-          lastAccessedAt: undefined,
-          openCodeConfigName: undefined,
-          isWorktree: false,
-          isLocal: false,
-        }
-      } else {
-        repo = getRepoById(database, id)
-      }
+      const repo: Repo | null = id === 0 ? buildAssistantRepo() : getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -537,27 +517,7 @@ app.get('/', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
 
-      let repo: Repo | null
-      if (id === 0) {
-        repo = {
-          id: 0,
-          repoUrl: undefined,
-          localPath: 'assistant',
-          sourcePath: undefined,
-          fullPath: '',
-          branch: undefined,
-          defaultBranch: 'main',
-          cloneStatus: 'ready',
-          clonedAt: Date.now(),
-          lastPulled: undefined,
-          lastAccessedAt: undefined,
-          openCodeConfigName: undefined,
-          isWorktree: false,
-          isLocal: false,
-        }
-      } else {
-        repo = getRepoById(database, id)
-      }
+      const repo: Repo | null = id === 0 ? buildAssistantRepo() : getRepoById(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)

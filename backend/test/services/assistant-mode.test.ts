@@ -2,8 +2,9 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import path from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
-import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig } from '../../src/services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, warmAssistantWorkspace } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
+import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
 import { NotificationService } from '../../src/services/notification'
@@ -586,5 +587,59 @@ describe('assistant-mode end-to-end', () => {
     expect(authed.status).toBe(200)
     const body = await authed.json() as { jobs: unknown[] }
     expect(Array.isArray(body.jobs)).toBe(true)
+  })
+})
+
+describe('buildAssistantRepo', () => {
+  it('returns the synthetic assistant repo with id 0', () => {
+    const repo = buildAssistantRepo()
+    expect(repo.id).toBe(0)
+    expect(repo.localPath).toBe('assistant')
+    expect(repo.cloneStatus).toBe('ready')
+    expect(repo.repoUrl).toBeUndefined()
+    expect(repo.isWorktree).toBe(false)
+  })
+})
+
+describe('warmAssistantWorkspace', () => {
+  let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
+  let db: ReturnType<typeof createTestDb>
+  const apiBaseUrl = 'http://localhost:5003/api/internal'
+
+  beforeEach(async () => {
+    ws = await createTempAssistantWorkspace()
+    db = createTestDb()
+  })
+  afterEach(async () => { await ws.cleanup() })
+
+  it('provisions the workspace and triggers a directory-scoped session request', async () => {
+    const getJsonCalls: Array<{ path: string; directory?: string }> = []
+    const client = {
+      getJson: async (requestPath: string, opts?: { directory?: string }) => {
+        getJsonCalls.push({ path: requestPath, directory: opts?.directory })
+        return []
+      },
+    } as unknown as OpenCodeClient
+
+    await warmAssistantWorkspace({ db, apiBaseUrl, openCodeClient: client })
+
+    const opencodeJson = await readFile(path.join(ws.assistantDir, 'opencode.json'), 'utf8')
+    expect(JSON.parse(opencodeJson).default_agent).toBe('assistant')
+    expect(getJsonCalls).toHaveLength(1)
+    expect(getJsonCalls[0]?.path).toBe('/session')
+    expect(getJsonCalls[0]?.directory).toBe(ws.assistantDir)
+  })
+
+  it('does not throw and still provisions the workspace when the session request fails', async () => {
+    const client = {
+      getJson: async () => { throw new Error('opencode unavailable') },
+    } as unknown as OpenCodeClient
+
+    await expect(
+      warmAssistantWorkspace({ db, apiBaseUrl, openCodeClient: client })
+    ).resolves.toBeUndefined()
+
+    const opencodeJson = await stat(path.join(ws.assistantDir, 'opencode.json'))
+    expect(opencodeJson.isFile()).toBe(true)
   })
 })
