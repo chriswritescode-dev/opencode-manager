@@ -99,6 +99,40 @@ describe('Health Routes', () => {
       expect(json.database).toBe('disconnected')
     })
 
+    it('should return degraded status with opencode busy when supervisor reports healthy but not ready', async () => {
+      mockDb.prepare().get.mockReturnValue({ 1: 1 })
+      ;(opencodeServerManager.getLastStartupError as ReturnType<typeof vi.fn>).mockReturnValueOnce(null)
+
+      const fakeSupervisor = {
+        checkNow: vi.fn().mockResolvedValueOnce({
+          state: 'healthy',
+          healthy: true,
+          ready: false,
+          port: 5551,
+          version: '1.0.0',
+          minVersion: '1.0.137',
+          versionSupported: true,
+          lastError: null,
+          activeRecoveryAction: null,
+          attemptedRecoveryActions: [],
+          nextRecoveryAction: null,
+          failureCount: 0,
+          watching: true,
+          updatedAt: new Date().toISOString(),
+        }),
+      }
+
+      const healthAppWithSupervisor = createHealthRoutes(mockDb, fakeSupervisor as any)
+      const req = new Request('http://localhost/')
+      const res = await healthAppWithSupervisor.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.status).toBe('degraded')
+      expect(json.opencode).toBe('busy')
+      expect(json.opencodeReady).toBe(false)
+    })
+
     it('should return 503 when health check throws an error', async () => {
       mockDb.prepare().get.mockImplementationOnce(() => {
         throw new Error('Database error')

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest'
 
+const spawnExitHandlers: Record<string, (code: number | null, signal: NodeJS.Signals | null) => void> = {}
+
 const createOpenCodeClientMock = vi.hoisted(() => vi.fn(() => ({
   forward: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
   forwardRaw: vi.fn(),
@@ -14,7 +16,7 @@ const createOpenCodeClientMock = vi.hoisted(() => vi.fn(() => ({
 const spawnMock = vi.hoisted(() => vi.fn(() => ({
   pid: 1234,
   stderr: null,
-  on: vi.fn(),
+  on: (event: string, cb: (code: number | null, signal: NodeJS.Signals | null) => void) => { spawnExitHandlers[event] = cb },
 })))
 
 vi.mock('bun:sqlite', () => ({
@@ -32,7 +34,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     SERVER: { PORT: 5003, HOST: '0.0.0.0', NODE_ENV: 'test' },
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
     WORKSPACE: { BASE_PATH: '/test/workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
-    OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: '', SERVER_USERNAME: 'opencode', PUBLIC_URL: '' },
+    OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: '', SERVER_USERNAME: 'opencode', PUBLIC_URL: '', HEALTH_PROBE_TIMEOUT_MS: 100 },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
       MAX_SIZE_BYTES: 1024 * 1024,
@@ -412,4 +414,160 @@ describe('OpenCodeServerManager - checkHealth', () => {
     expect(capturedSignal).toBeDefined()
     expect(aborted).toBe(true)
   }, 5000)
+})
+
+describe('OpenCodeServerManager - isProcessAlive', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('returns false when serverPid is null', async () => {
+    const mod = await import('../../src/services/opencode-single-server')
+    mod.OpenCodeServerManager.resetInstance()
+    const freshManager = mod.OpenCodeServerManager.getInstance()
+    expect(freshManager.isProcessAlive()).toBe(false)
+  })
+
+  it('returns true when process.kill(pid, 0) succeeds', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true)
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    await opencodeServerManager.start()
+    expect(opencodeServerManager.isProcessAlive()).toBe(true)
+    killSpy.mockRestore()
+  })
+
+  it('returns false when process.kill throws ESRCH', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw { code: 'ESRCH' } })
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    await opencodeServerManager.start()
+    expect(opencodeServerManager.isProcessAlive()).toBe(false)
+    killSpy.mockRestore()
+  })
+
+  it('returns true when process.kill throws EPERM', async () => {
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw { code: 'EPERM' } })
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    await opencodeServerManager.start()
+    expect(opencodeServerManager.isProcessAlive()).toBe(true)
+    killSpy.mockRestore()
+  })
+})
+
+describe('OpenCodeServerManager - spawned alive but not ready', () => {
+  let previousExitHandler: ((code: number | null, signal: NodeJS.Signals | null) => void) | undefined
+
+  beforeEach(async () => {
+    // Save and clear the shared exit handler to prevent cross-test contamination
+    previousExitHandler = spawnExitHandlers.exit
+    delete spawnExitHandlers.exit
+    vi.clearAllMocks()
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+  })
+
+  afterEach(() => {
+    // Restore the previous exit handler so subsequent tests are unaffected
+    if (previousExitHandler) {
+      spawnExitHandlers.exit = previousExitHandler
+    }
+    vi.clearAllMocks()
+  })
+
+  it('does not throw when spawned process is alive but not ready after waitForHealth timeout', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'] })
+
+    const mod = await import('../../src/services/opencode-single-server')
+    const freshManager = mod.OpenCodeServerManager.getInstance()
+
+    // Spy on checkHealth to return false (not ready)
+    vi.spyOn(freshManager, 'checkHealth').mockResolvedValue(false)
+
+    // Make process.kill succeed (process is alive)
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true)
+
+    const startPromise = freshManager.start()
+
+    // Advance time past the 30s health check timeout
+    await vi.advanceTimersByTimeAsync(31000)
+
+    await startPromise
+
+    // Process should be tracked as alive and healthy
+    expect(freshManager.isProcessAlive()).toBe(true)
+    // checkHealth still returns false (not serving yet)
+    expect(await freshManager.checkHealth()).toBe(false)
+
+    vi.useRealTimers()
+    killSpy.mockRestore()
+  })
+
+  it('throws when spawned process is dead and not healthy after waitForHealth timeout', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout'] })
+
+    const mod = await import('../../src/services/opencode-single-server')
+    mod.OpenCodeServerManager.resetInstance()
+    const freshManager = mod.OpenCodeServerManager.getInstance()
+
+    // Spy on checkHealth to return false (not ready)
+    vi.spyOn(freshManager, 'checkHealth').mockResolvedValue(false)
+
+    // Make process.kill throw ESRCH (process dead)
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => { throw { code: 'ESRCH' } })
+
+    const startPromise = freshManager.start()
+    // Attach rejection handler BEFORE advancing timers to avoid unhandled rejection
+    const rejectionAssertion = expect(startPromise).rejects.toThrow('OpenCode server failed to become healthy')
+
+    await vi.advanceTimersByTimeAsync(31000)
+
+    await rejectionAssertion
+
+    vi.useRealTimers()
+    killSpy.mockRestore()
+  })
+})
+
+describe('OpenCodeServerManager - unexpected exit notification', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    // Make execSync throw so findProcessesByPort returns empty and start() spawns
+    execSyncMock.mockImplementation(() => { throw new Error('no process') })
+  })
+
+  afterEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('notifies listeners on unexpected exit', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const listener = vi.fn()
+    opencodeServerManager.onUnexpectedExit(listener)
+    // Start will capture the exit handler in spawnExitHandlers
+    await opencodeServerManager.start()
+
+    spawnExitHandlers.exit!(1, null)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(listener).toHaveBeenCalledWith({ code: 1, signal: null })
+    expect(opencodeServerManager.isProcessAlive()).toBe(false)
+  })
+
+  it('does not notify on expected exit after stop', async () => {
+    vi.useFakeTimers()
+    const killSpy = vi.spyOn(process, 'kill').mockReturnValue(true)
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const listener = vi.fn()
+    opencodeServerManager.onUnexpectedExit(listener)
+    await opencodeServerManager.start()
+
+    const stopPromise = opencodeServerManager.stop()
+    await vi.advanceTimersByTimeAsync(2000)
+    await stopPromise
+
+    spawnExitHandlers.exit!(null, 'SIGKILL')
+
+    expect(listener).not.toHaveBeenCalled()
+    vi.useRealTimers()
+    killSpy.mockRestore()
+  })
 })

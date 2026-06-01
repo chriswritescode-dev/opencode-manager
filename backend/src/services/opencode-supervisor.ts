@@ -34,10 +34,12 @@ export type OpenCodeOperationReason =
   | 'settings_restart'
   | 'settings_reload'
   | 'manual'
+  | 'crash'
 
 export interface OpenCodeLifecycleStatus {
   state: OpenCodeLifecycleState
   healthy: boolean
+  ready: boolean
   port: number
   version: string | null
   minVersion: string
@@ -66,6 +68,8 @@ export class OpenCodeSupervisor {
   private attemptedRecoveryActions: OpenCodeRecoveryAction[] = []
   private consecutiveFailures = 0
   private operationInProgress = false
+  private ready = false
+  private exitListenerRegistered = false
   private updatedAt = new Date().toISOString()
 
   constructor(
@@ -88,14 +92,24 @@ export class OpenCodeSupervisor {
   }
 
   async start(): Promise<OpenCodeLifecycleStatus> {
+    if (!this.exitListenerRegistered) {
+      this.exitListenerRegistered = true
+      this.openCodeServerManager.onUnexpectedExit(() => { void this.handleUnexpectedExit() })
+    }
+
     await this.runLifecycleOperation(async () => {
       this.setState('starting')
 
       try {
         await this.openCodeServerManager.start()
-        const healthy = await this.openCodeServerManager.checkHealth()
-        if (healthy) {
+        const ready = await this.openCodeServerManager.checkHealth()
+        if (ready) {
           this.markHealthy()
+          return this.getStatus()
+        }
+
+        if (this.openCodeServerManager.isProcessAlive()) {
+          this.markBusy()
           return this.getStatus()
         }
 
@@ -161,6 +175,7 @@ export class OpenCodeSupervisor {
 
     await this.runLifecycleOperation(async () => {
       this.setState('stopping')
+      this.ready = false
       await this.openCodeServerManager.stop()
       this.setState('stopped')
       return this.getStatus()
@@ -177,6 +192,7 @@ export class OpenCodeSupervisor {
     return {
       state: this.state,
       healthy: this.state === 'healthy',
+      ready: this.ready,
       port: this.openCodeServerManager.getPort(),
       version: this.openCodeServerManager.getVersion(),
       minVersion: this.openCodeServerManager.getMinVersion(),
@@ -206,15 +222,22 @@ export class OpenCodeSupervisor {
   }
 
   private async refreshHealthOrRecover(reason: OpenCodeOperationReason, respectThreshold = false): Promise<OpenCodeLifecycleStatus> {
-    const healthy = await this.openCodeServerManager.checkHealth()
-    if (healthy) {
+    const ready = await this.openCodeServerManager.checkHealth()
+    if (ready) {
       this.markHealthy()
       return this.getStatus()
     }
 
+    if (this.openCodeServerManager.isProcessAlive()) {
+      logger.warn('OpenCode is alive but not answering readiness probe (busy); skipping restart')
+      this.markBusy()
+      return this.getStatus()
+    }
+
     this.consecutiveFailures += 1
+    this.ready = false
     this.setState('unhealthy')
-    this.lastError = this.openCodeServerManager.getLastStartupError() ?? 'OpenCode health check failed'
+    this.lastError = this.openCodeServerManager.getLastStartupError() ?? 'OpenCode process is not running'
 
     if (respectThreshold && this.consecutiveFailures < this.failureThreshold) {
       return this.getStatus()
@@ -251,6 +274,20 @@ export class OpenCodeSupervisor {
     this.activeRecoveryAction = null
     this.setState('failed')
     return this.getStatus()
+  }
+
+  private async handleUnexpectedExit(): Promise<void> {
+    if (!this.isWatchEnabled()) return
+    if (this.operationInProgress || this.openCodeServerManager.isOperationInProgress()) return
+
+    logger.warn('OpenCode server exited unexpectedly; starting recovery')
+    await this.runLifecycleOperation(async () => {
+      this.consecutiveFailures += 1
+      this.ready = false
+      this.setState('unhealthy')
+      this.lastError = this.openCodeServerManager.getLastStartupError() ?? 'OpenCode server exited unexpectedly'
+      return this.recover('crash')
+    })
   }
 
   private async runRecoveryAction(action: OpenCodeRecoveryAction): Promise<void> {
@@ -352,6 +389,17 @@ export class OpenCodeSupervisor {
 
   private markHealthy(): void {
     this.state = 'healthy'
+    this.ready = true
+    this.lastError = null
+    this.activeRecoveryAction = null
+    this.attemptedRecoveryActions = []
+    this.consecutiveFailures = 0
+    this.touch()
+  }
+
+  private markBusy(): void {
+    this.state = 'healthy'
+    this.ready = false
     this.lastError = null
     this.activeRecoveryAction = null
     this.attemptedRecoveryActions = []
@@ -361,6 +409,7 @@ export class OpenCodeSupervisor {
 
   private recordFailure(error: unknown): void {
     this.consecutiveFailures += 1
+    this.ready = false
     this.lastError = error instanceof Error
       ? error.message
       : this.openCodeServerManager.getLastStartupError() ?? 'Unknown OpenCode lifecycle error'

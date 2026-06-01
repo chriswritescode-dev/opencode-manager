@@ -79,18 +79,22 @@ export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSu
         : null
       const opencodeHealthy = lifecycle?.healthy ?? await opencodeServerManager.checkHealth()
       const startupError = lifecycle?.lastError ?? opencodeServerManager.getLastStartupError()
+      const ready = lifecycle ? lifecycle.ready : opencodeHealthy
 
       const status = lifecycle?.state === 'recovering'
         ? 'degraded'
         : startupError && !opencodeHealthy
         ? 'unhealthy'
+        : opencodeHealthy && !ready
+        ? 'degraded'
         : (dbCheck && opencodeHealthy ? 'healthy' : 'degraded')
 
       const response: Record<string, unknown> = {
         status,
         timestamp: new Date().toISOString(),
         database: dbCheck ? 'connected' : 'disconnected',
-        opencode: opencodeHealthy ? 'healthy' : 'unhealthy',
+        opencode: !opencodeHealthy ? 'unhealthy' : (ready ? 'healthy' : 'busy'),
+        opencodeReady: ready,
         opencodePort: opencodeServerManager.getPort(),
         opencodeVersion: opencodeServerManager.getVersion(),
         opencodeMinVersion: opencodeServerManager.getMinVersion(),

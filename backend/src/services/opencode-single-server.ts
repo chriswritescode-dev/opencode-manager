@@ -28,8 +28,9 @@ import { writeFileContent } from './file-operations'
 
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
-const HEALTH_CHECK_TIMEOUT_MS = 3000
 const DEPRECATED_PLUGIN_PACKAGES = ['opencode-openai-codex-auth', 'opencode-copilot-auth']
+
+export interface ServerExitInfo { code: number | null; signal: NodeJS.Signals | null }
 
 type StartupValidationIssue = {
   path: string
@@ -96,6 +97,7 @@ const getOpenCodeServerPort = () => ENV.OPENCODE.PORT
 const getOpenCodeServerHost = () => ENV.OPENCODE.HOST
 const getOpenCodeServerPublicUrl = () => ENV.OPENCODE.PUBLIC_URL
 const getOpenCodeServerUsername = () => ENV.OPENCODE.SERVER_USERNAME
+const getHealthProbeTimeoutMs = () => ENV.OPENCODE.HEALTH_PROBE_TIMEOUT_MS ?? 10000
 
 class OpenCodeServerManager {
   private static instance: OpenCodeServerManager
@@ -107,6 +109,8 @@ class OpenCodeServerManager {
   private lastStartupError: string | null = null
   private opInProgress: boolean = false
   private openCodeClient: OpenCodeClient | null = null
+  private expectedExit = false
+  private exitListeners = new Set<(info: ServerExitInfo) => void>()
 
   private constructor() {}
 
@@ -171,6 +175,22 @@ class OpenCodeServerManager {
 
   isOperationInProgress(): boolean {
     return this.opInProgress
+  }
+
+  isProcessAlive(): boolean {
+    if (this.serverPid === null) return false
+    try {
+      process.kill(this.serverPid, 0)
+      return true
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+      return code === 'EPERM'
+    }
+  }
+
+  onUnexpectedExit(listener: (info: ServerExitInfo) => void): () => void {
+    this.exitListeners.add(listener)
+    return () => { this.exitListeners.delete(listener) }
   }
 
   async start(retryAfterPluginInstall = true, allowNested = false): Promise<void> {
@@ -257,6 +277,23 @@ class OpenCodeServerManager {
           return
         }
       } else {
+        const isAlive = existingProcesses.some(proc => {
+          try {
+            process.kill(proc.pid, 0)
+            return true
+          } catch (error) {
+            const code = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+            return code === 'EPERM'
+          }
+        })
+        if (isAlive) {
+          logger.warn('OpenCode server is alive but not answering readiness probe (busy); keeping existing process')
+          this.isHealthy = true
+          if (existingProcesses[0]) {
+            this.serverPid = existingProcesses[0].pid
+          }
+          return
+        }
         logger.warn('Killing unhealthy OpenCode server')
         for (const proc of existingProcesses) {
           try {
@@ -373,7 +410,10 @@ class OpenCodeServerManager {
       })
     }
 
+    const child = this.serverProcess
     this.serverProcess.on('exit', (code, signal) => {
+      if (this.serverProcess !== child) return
+      const wasExpected = this.expectedExit
       if (code !== null && code !== 0) {
         const fallback = `Server exited with code ${code}${stderrOutput ? `: ${stderrOutput.slice(-500)}` : ''}`
         this.lastStartupError = formatStartupError(stderrOutput, fallback)
@@ -382,15 +422,27 @@ class OpenCodeServerManager {
         this.lastStartupError = `Server terminated by signal ${signal}`
         logger.error('OpenCode server process terminated:', this.lastStartupError)
       }
+      this.isHealthy = false
+      this.serverPid = null
+      if (!wasExpected) {
+        this.exitListeners.forEach((listener) => { try { listener({ code, signal }) } catch { /* ignore */ } })
+      }
     })
 
     this.serverPid = this.serverProcess.pid ?? null
+    this.expectedExit = false
 
     logger.info(`OpenCode server started with PID ${this.serverPid}`)
 
     const healthTimeoutMs = configuredPluginCount > 0 ? 120000 : 30000
     const healthy = await this.waitForHealth(healthTimeoutMs)
     if (!healthy) {
+      if (this.isProcessAlive()) {
+        logger.warn(`OpenCode server process is alive but not answering readiness probe after ${Math.round(healthTimeoutMs / 1000)}s; treating as busy`)
+        this.isHealthy = true
+        return
+      }
+
       const fallback = `Server failed to become healthy after ${Math.round(healthTimeoutMs / 1000)}s${stderrOutput ? `. Last error: ${stderrOutput.slice(-500)}` : ''}`
       this.lastStartupError = formatStartupError(stderrOutput, fallback)
       if (configuredPluginCount > 0 && retryAfterPluginInstall) {
@@ -429,6 +481,7 @@ class OpenCodeServerManager {
       if (!this.serverPid) return
 
       logger.info('Stopping OpenCode server')
+      this.expectedExit = true
       try {
         process.kill(this.serverPid, 'SIGTERM')
       } catch (error) {
@@ -705,7 +758,7 @@ class OpenCodeServerManager {
       const response = await this.openCodeClient.forward({
         method: 'GET',
         path: '/doc',
-        signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+        signal: AbortSignal.timeout(getHealthProbeTimeoutMs()),
       })
       return response.ok
     } catch {

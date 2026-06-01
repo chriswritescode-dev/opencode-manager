@@ -31,6 +31,8 @@ interface FakeManager {
   start: ReturnType<typeof vi.fn>
   stop: ReturnType<typeof vi.fn>
   isOperationInProgress: ReturnType<typeof vi.fn>
+  isProcessAlive: ReturnType<typeof vi.fn>
+  onUnexpectedExit: ReturnType<typeof vi.fn>
   checkHealth: ReturnType<typeof vi.fn>
   restart: ReturnType<typeof vi.fn>
   reloadConfig: ReturnType<typeof vi.fn>
@@ -55,6 +57,8 @@ describe('OpenCodeSupervisor', () => {
     start: vi.fn().mockResolvedValue(undefined),
     stop: vi.fn().mockResolvedValue(undefined),
     isOperationInProgress: vi.fn(() => false),
+    isProcessAlive: vi.fn(() => false),
+    onUnexpectedExit: vi.fn(),
     checkHealth: vi.fn().mockResolvedValue(true),
     restart: vi.fn().mockResolvedValue(undefined),
     reloadConfig: vi.fn().mockResolvedValue(undefined),
@@ -131,6 +135,7 @@ describe('OpenCodeSupervisor', () => {
     })
 
     manager.checkHealth.mockResolvedValueOnce(false)
+    manager.isProcessAlive.mockReturnValue(false)
 
     const status = await supervisor.checkNow('api_probe')
 
@@ -147,6 +152,7 @@ describe('OpenCodeSupervisor', () => {
       watchEnabled: false,
     })
 
+    manager.isProcessAlive.mockReturnValue(false)
     manager.checkHealth
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(false)
@@ -170,5 +176,92 @@ describe('OpenCodeSupervisor', () => {
     await supervisor.checkNow('api_probe')
 
     expect(manager.checkHealth).not.toHaveBeenCalled()
+    expect(manager.isProcessAlive).not.toHaveBeenCalled()
+  })
+
+  it('does not restart a busy-but-alive server', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    manager.checkHealth.mockResolvedValue(false)
+    manager.isProcessAlive.mockReturnValue(true)
+
+    await supervisor.checkNow('api_probe')
+    await supervisor.checkNow('api_probe')
+    const status3 = await supervisor.checkNow('api_probe')
+
+    expect(manager.restart).not.toHaveBeenCalled()
+    expect(manager.stop).not.toHaveBeenCalled()
+    expect(status3.ready).toBe(false)
+    expect(status3.healthy).toBe(true)
+    expect(status3.failureCount).toBe(0)
+  })
+
+  it('recovers when the process is actually dead', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    manager.checkHealth
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true)
+    manager.isProcessAlive.mockReturnValue(false)
+
+    await supervisor.checkNow('api_probe')
+
+    expect(manager.restart).toHaveBeenCalled()
+  })
+
+  it('restarts immediately on unexpected exit', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: true,
+    })
+
+    manager.checkHealth.mockResolvedValue(true)
+    await supervisor.start()
+
+    const exitCallback = manager.onUnexpectedExit.mock.calls[0]?.[0]
+    expect(exitCallback).toBeDefined()
+
+    manager.restart.mockClear()
+    manager.checkHealth.mockClear()
+
+    exitCallback({ code: null, signal: 'SIGTERM' })
+
+    await vi.waitFor(() => {
+      expect(supervisor.getStatus().healthy).toBe(true)
+    })
+
+    expect(manager.restart).toHaveBeenCalled()
+    expect(supervisor.getStatus().ready).toBe(true)
+  })
+
+  it('reports ready=false after being stopped', async () => {
+    const manager = createManager()
+    const settings = createSettings()
+    const supervisor = new OpenCodeSupervisor(manager as unknown as never, settings as unknown as never, {
+      failureThreshold: 1,
+      watchEnabled: false,
+    })
+
+    manager.checkHealth.mockResolvedValue(true)
+    await supervisor.start()
+
+    expect(supervisor.getStatus().ready).toBe(true)
+
+    await supervisor.stop()
+
+    expect(supervisor.getStatus().ready).toBe(false)
   })
 })
