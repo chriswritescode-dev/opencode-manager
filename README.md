@@ -22,7 +22,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/ocmgr-main.webp" alt="OpenCode Manager" style="width: 100%; max-width: 1000px; border: none" />
+  <img src="docs/images/ocmgr-main.webp" alt="OpenCode Manager" width="600" style="border: none" />
+  <img src="docs/images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: none; margin-left: 12px" />
 </p>
 
 ## Quick Start
