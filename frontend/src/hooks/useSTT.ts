@@ -185,6 +185,14 @@ export function useSTT(userId = 'default') {
     })
   }, [])
 
+  const disposeAudioRecorder = useCallback(() => {
+    if (audioRecorder.current) {
+      audioRecorder.current.dispose()
+      audioRecorder.current = null
+    }
+    recorderConfiguredRef.current = false
+  }, [])
+
   useEffect(() => {
     if (!isEnabled || !isExternalProvider) {
       return
@@ -200,11 +208,9 @@ export function useSTT(userId = 'default') {
     }
 
     return () => {
-      if (audioRecorder.current) {
-        audioRecorder.current.abort()
-      }
+      disposeAudioRecorder()
     }
-  }, [isEnabled, isExternalProvider, setupAudioRecorder])
+  }, [isEnabled, isExternalProvider, setupAudioRecorder, disposeAudioRecorder])
 
   const clearStartupTimeout = useCallback(() => {
     if (startupTimeoutRef.current) {
@@ -214,8 +220,8 @@ export function useSTT(userId = 'default') {
   }, [])
 
   const abortAndResetOnTimeout = useCallback(() => {
-    if (isExternalProvider && audioRecorder.current) {
-      audioRecorder.current.abort()
+    if (isExternalProvider) {
+      disposeAudioRecorder()
     } else {
       recognizer.current.abort()
     }
@@ -224,7 +230,7 @@ export function useSTT(userId = 'default') {
     setState('idle')
     setIsError(true)
     setError('Microphone start timed out')
-  }, [isExternalProvider])
+  }, [isExternalProvider, disposeAudioRecorder])
 
   const startRecording = useCallback(async (): Promise<boolean> => {
     if (!isSupported) {
@@ -252,6 +258,7 @@ export function useSTT(userId = 'default') {
       if (!audioRecorder.current) {
         audioRecorder.current = new AudioRecorder()
         setupAudioRecorder(audioRecorder.current)
+        recorderConfiguredRef.current = true
       }
 
       try {

@@ -110,6 +110,32 @@ export class AudioRecorder {
     )
   }
 
+  async prepare(): Promise<void> {
+    if (!AudioRecorder.isSupported()) {
+      throw new Error('Audio recording is not supported in this browser')
+    }
+
+    const ctx = this.getReusableAudioContext()
+
+    if (ctx.state === 'suspended') {
+      await ctx.resume()
+    }
+
+    if (ctx.audioWorklet) {
+      await ensureWorkletLoaded(ctx)
+    }
+  }
+
+  private getReusableAudioContext(): AudioContext {
+    if (this.audioContext && this.audioContext.state !== 'closed') {
+      return this.audioContext
+    }
+    this.audioContext = new AudioContext({
+      sampleRate: this.options.sampleRate,
+    })
+    return this.audioContext
+  }
+
   getState(): AudioRecorderState {
     return this.state
   }
@@ -151,33 +177,39 @@ export class AudioRecorder {
         },
       })
 
-      this.audioContext = new AudioContext({
-        sampleRate: this.options.sampleRate,
-      })
+      if (this.isAborted) {
+        this.mediaStream.getTracks().forEach(t => t.stop())
+        this.mediaStream = null
+        return
+      }
 
-      this.source = this.audioContext.createMediaStreamSource(this.mediaStream)
+      await this.prepare()
 
-      if (this.audioContext.audioWorklet) {
-        try {
-          await ensureWorkletLoaded(this.audioContext)
-          this.workletNode = new AudioWorkletNode(this.audioContext, 'recorder-processor', {
-            processorOptions: { targetSampleRate: this.options.sampleRate },
-          })
-          this.workletNode.port.onmessage = (e: MessageEvent<Int16Array>) => {
-            this.chunks.push(e.data)
-            this.totalSamples += e.data.length
-          }
-          this.source.connect(this.workletNode)
-        } catch (error) {
-          this.audioContext.close()
-          this.audioContext = null
-          throw new Error('Failed to load audio worklet processor', { cause: error })
+      if (this.isAborted) {
+        if (this.mediaStream) {
+          this.mediaStream.getTracks().forEach(t => t.stop())
+          this.mediaStream = null
         }
-      } else if (this.audioContext) {
+        return
+      }
+
+      const ctx = this.audioContext!
+      this.source = ctx.createMediaStreamSource(this.mediaStream)
+
+      if (ctx.audioWorklet) {
+        this.workletNode = new AudioWorkletNode(ctx, 'recorder-processor', {
+          processorOptions: { targetSampleRate: this.options.sampleRate },
+        })
+        this.workletNode.port.onmessage = (e: MessageEvent<Int16Array>) => {
+          this.chunks.push(e.data)
+          this.totalSamples += e.data.length
+        }
+        this.source.connect(this.workletNode)
+      } else {
         const bufferSize = 4096
-        this.processor = this.audioContext.createScriptProcessor(bufferSize, 1, 1)
+        this.processor = ctx.createScriptProcessor(bufferSize, 1, 1)
         const targetRate = this.options.sampleRate ?? 16000
-        const inputRate = this.audioContext.sampleRate
+        const inputRate = ctx.sampleRate
         this.processor.onaudioprocess = (e) => {
           const inputData = e.inputBuffer.getChannelData(0)
           const int16Chunk = downsampleAndConvert(inputData, inputRate, targetRate)
@@ -190,7 +222,7 @@ export class AudioRecorder {
       this.setState('recording')
     } catch (error) {
       this.setState('error')
-      this.cleanup()
+      this.cleanupRecording(true)
 
       if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
@@ -213,14 +245,21 @@ export class AudioRecorder {
       this.processRecording()
     }
     this.resetRecordingState()
-    this.cleanup()
+    this.cleanupRecording(false)
     this.setState('stopped')
   }
 
   abort(): void {
     this.isAborted = true
     this.resetRecordingState()
-    this.cleanup()
+    this.cleanupRecording(false)
+    this.setState('idle')
+  }
+
+  dispose(): void {
+    this.isAborted = true
+    this.resetRecordingState()
+    this.cleanupRecording(true)
     this.setState('idle')
   }
 
@@ -244,7 +283,7 @@ export class AudioRecorder {
     }
   }
 
-  private cleanup(): void {
+  private cleanupRecording(closeAudioContext: boolean): void {
     if (this.workletNode) {
       this.workletNode.port.onmessage = null
       this.workletNode.port.postMessage('stop')
@@ -263,14 +302,14 @@ export class AudioRecorder {
       this.source = null
     }
 
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close()
-      this.audioContext = null
-    }
-
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => track.stop())
       this.mediaStream = null
+    }
+
+    if (closeAudioContext && this.audioContext && this.audioContext.state !== 'closed') {
+      this.audioContext.close()
+      this.audioContext = null
     }
   }
 

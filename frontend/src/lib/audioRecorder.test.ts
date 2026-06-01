@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AudioRecorder, downsampleAndConvert, encodeWavFromInt16 } from './audioRecorder'
 
 const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> =>
@@ -156,5 +156,244 @@ describe('AudioRecorder.isSupported', () => {
       const result = AudioRecorder.isSupported()
       expect(typeof result).toBe('boolean')
     }).not.toThrow()
+  })
+})
+
+describe('AudioRecorder.prepare', () => {
+  let originalAudioContext: typeof window.AudioContext
+  let originalGetUserMedia: (typeof navigator.mediaDevices)['getUserMedia'] | undefined
+  let mockAddModule: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    originalAudioContext = window.AudioContext
+    originalGetUserMedia = navigator.mediaDevices?.getUserMedia
+
+    mockAddModule = vi.fn().mockResolvedValue(undefined)
+
+    const mockSource = { connect: vi.fn(), disconnect: vi.fn() }
+
+    const MockAudioContext = vi.fn().mockImplementation(() => ({
+      state: 'running',
+      sampleRate: 16000,
+      audioWorklet: { addModule: mockAddModule },
+      createMediaStreamSource: vi.fn().mockReturnValue(mockSource),
+      createScriptProcessor: vi.fn().mockReturnValue({
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        onaudioprocess: null,
+      }),
+      resume: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }))
+
+    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn() },
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  afterEach(() => {
+    window.AudioContext = originalAudioContext
+    if (originalGetUserMedia) {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: originalGetUserMedia },
+        writable: true,
+        configurable: true,
+      })
+    }
+  })
+
+  it('prepares the audio context and worklet without requesting microphone access', async () => {
+    const recorder = new AudioRecorder()
+    await recorder.prepare()
+
+    expect(navigator.mediaDevices.getUserMedia).not.toHaveBeenCalled()
+    expect(window.AudioContext).toHaveBeenCalledTimes(1)
+    expect(mockAddModule).toHaveBeenCalledOnce()
+    expect(mockAddModule).toHaveBeenCalledWith('/audio-worklet-processor.js')
+  })
+
+  it('reuses the same AudioContext and worklet when prepare() precedes start()', async () => {
+    const originalAudioWorkletNode = (window as any).AudioWorkletNode
+
+    const mockWorkletNode = {
+      port: {
+        onmessage: null as ((e: MessageEvent) => void) | null,
+        postMessage: vi.fn(),
+      },
+      disconnect: vi.fn(),
+    }
+    const MockAudioWorkletNode = vi.fn().mockImplementation(() => mockWorkletNode)
+    ;(window as any).AudioWorkletNode = MockAudioWorkletNode
+
+    const mockTrack = { stop: vi.fn(), kind: 'audio' }
+    const mockMediaStream = {
+      getTracks: vi.fn().mockReturnValue([mockTrack]),
+      getAudioTracks: vi.fn().mockReturnValue([mockTrack]),
+    }
+    ;(navigator.mediaDevices as any).getUserMedia = vi.fn().mockResolvedValue(mockMediaStream)
+
+    const recorder = new AudioRecorder()
+    await recorder.prepare()
+
+    mockAddModule.mockClear()
+
+    await recorder.start()
+
+    expect(mockAddModule).not.toHaveBeenCalled()
+    expect(window.AudioContext).toHaveBeenCalledTimes(1)
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledTimes(1)
+
+    recorder.stop()
+
+    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
+  })
+
+  it('reuses the prepared audio context and loaded worklet across recordings', async () => {
+    const originalAudioWorkletNode = (window as any).AudioWorkletNode
+    const originalAudioContext = window.AudioContext
+
+    const mockAddModule = vi.fn().mockResolvedValue(undefined)
+    const mockClose = vi.fn().mockResolvedValue(undefined)
+    const mockResume = vi.fn().mockResolvedValue(undefined)
+    const mockTrack = { stop: vi.fn(), kind: 'audio' }
+    const mockSource = { connect: vi.fn(), disconnect: vi.fn() }
+
+    const MockAudioContext = vi.fn().mockImplementation(() => ({
+      state: 'running',
+      sampleRate: 16000,
+      audioWorklet: { addModule: mockAddModule },
+      createMediaStreamSource: vi.fn().mockReturnValue(mockSource),
+      createScriptProcessor: vi.fn().mockReturnValue({
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        onaudioprocess: null,
+      }),
+      resume: mockResume,
+      close: mockClose,
+    }))
+    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
+
+    const mockWorkletNode = {
+      port: {
+        onmessage: null as ((e: MessageEvent) => void) | null,
+        postMessage: vi.fn(),
+      },
+      disconnect: vi.fn(),
+    }
+    const MockAudioWorkletNode = vi.fn().mockImplementation(() => mockWorkletNode)
+    ;(window as any).AudioWorkletNode = MockAudioWorkletNode
+
+    const originalGetUserMedia = navigator.mediaDevices?.getUserMedia
+    const mockGetUserMedia = vi.fn().mockResolvedValue({
+      getTracks: () => [mockTrack],
+      getAudioTracks: () => [mockTrack],
+    })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    })
+
+    const recorder = new AudioRecorder()
+
+    await recorder.start()
+    recorder.stop()
+
+    await recorder.start()
+    recorder.stop()
+
+    recorder.dispose()
+
+    expect(mockGetUserMedia).toHaveBeenCalledTimes(2)
+    expect(MockAudioContext).toHaveBeenCalledTimes(1)
+    expect(mockAddModule).toHaveBeenCalledTimes(1)
+    expect(mockTrack.stop).toHaveBeenCalledTimes(2)
+    expect(mockClose).toHaveBeenCalledTimes(1)
+
+    window.AudioContext = originalAudioContext
+    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
+    if (originalGetUserMedia) {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: originalGetUserMedia },
+        writable: true,
+        configurable: true,
+      })
+    }
+  })
+})
+
+describe('AudioRecorder lifecycle cancellation', () => {
+  let originalAudioContext: typeof window.AudioContext
+  let originalAudioWorkletNode: unknown
+  let originalGetUserMedia: (typeof navigator.mediaDevices)['getUserMedia'] | undefined
+  let mockTrack: { stop: ReturnType<typeof vi.fn>; kind: string }
+
+  beforeEach(() => {
+    originalAudioContext = window.AudioContext
+    originalAudioWorkletNode = (window as any).AudioWorkletNode
+    originalGetUserMedia = navigator.mediaDevices?.getUserMedia
+
+    mockTrack = { stop: vi.fn(), kind: 'audio' }
+
+    const MockAudioContext = vi.fn().mockImplementation(() => ({
+      state: 'running',
+      sampleRate: 16000,
+      audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
+      createMediaStreamSource: vi.fn(),
+      createScriptProcessor: vi.fn(),
+      resume: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }))
+
+    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
+    ;(window as any).AudioWorkletNode = vi.fn().mockImplementation(() => ({
+      port: { onmessage: null, postMessage: vi.fn() },
+      disconnect: vi.fn(),
+    }))
+  })
+
+  afterEach(() => {
+    window.AudioContext = originalAudioContext
+    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
+    if (originalGetUserMedia) {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: originalGetUserMedia },
+        writable: true,
+        configurable: true,
+      })
+    }
+  })
+
+  it('cleans up and does not enter recording state when dispose is called during async startup', async () => {
+    let resolveGetUserMedia: (stream: MediaStream) => void
+    const deferredGetUserMedia = new Promise<MediaStream>((resolve) => {
+      resolveGetUserMedia = resolve
+    })
+
+    const mockGetUserMedia = vi.fn().mockReturnValue(deferredGetUserMedia)
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    })
+
+    const recorder = new AudioRecorder()
+
+    const startPromise = recorder.start()
+
+    recorder.dispose()
+
+    const stream = { getTracks: () => [mockTrack], getAudioTracks: () => [mockTrack] } as unknown as MediaStream
+    resolveGetUserMedia!(stream)
+
+    await startPromise
+
+    expect(recorder.getState()).toBe('idle')
+    expect(mockTrack.stop).toHaveBeenCalled()
+    expect(window.AudioContext).not.toHaveBeenCalled()
   })
 })
