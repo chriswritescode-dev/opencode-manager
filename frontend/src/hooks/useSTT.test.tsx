@@ -121,6 +121,31 @@ describe('useSTT external provider lifecycle', () => {
     expect(result.current.error).toBeNull()
   })
 
+  it('does not get stuck processing when stopping a silent recording', async () => {
+    const { result } = renderHook(() => useSTT())
+
+    await waitFor(() => {
+      expect(mockRecorder.setOnNoSpeech).toHaveBeenCalledTimes(1)
+    })
+
+    const onNoSpeech = mockRecorder.setOnNoSpeech.mock.calls[0][0] as () => void
+    mockRecorder.stop.mockImplementation(() => {
+      onNoSpeech()
+    })
+
+    await act(async () => {
+      await result.current.startRecording()
+    })
+
+    act(() => {
+      result.current.stopRecording()
+    })
+
+    expect(result.current.isProcessing).toBe(false)
+    expect(result.current.isRecording).toBe(false)
+    expect(result.current.isError).toBe(false)
+  })
+
   it('disposes external recorder resources on unmount', async () => {
     const { unmount } = renderHook(() => useSTT())
 

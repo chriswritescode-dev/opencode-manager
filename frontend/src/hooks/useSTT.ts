@@ -318,12 +318,11 @@ export function useSTT(userId = 'default') {
   }, [isSupported, isEnabled, isExternalProvider, config.language, clearStartupTimeout, ensureAudioRecorder, runStartupWithTimeout])
 
   const stopRecording = useCallback(() => {
+    setIsProcessing(true)
     if (isExternalProvider && audioRecorder.current) {
       audioRecorder.current.stop()
-      setIsProcessing(true)
     } else {
       recognizer.current.stop()
-      setIsProcessing(true)
     }
   }, [isExternalProvider])
 
