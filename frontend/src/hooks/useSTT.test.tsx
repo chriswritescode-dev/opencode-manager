@@ -11,6 +11,7 @@ type MockRecorder = {
   setOnStateChange: ReturnType<typeof vi.fn>
   setOnError: ReturnType<typeof vi.fn>
   setOnDataAvailable: ReturnType<typeof vi.fn>
+  setOnNoSpeech: ReturnType<typeof vi.fn>
 }
 
 const mocks = vi.hoisted(() => ({
@@ -61,6 +62,7 @@ describe('useSTT external provider lifecycle', () => {
       setOnStateChange: vi.fn(),
       setOnError: vi.fn(),
       setOnDataAvailable: vi.fn(),
+      setOnNoSpeech: vi.fn(),
     }
 
     mocks.AudioRecorder.mockImplementation(() => mockRecorder)
@@ -91,12 +93,32 @@ describe('useSTT external provider lifecycle', () => {
     expect(mockRecorder.setOnStateChange).toHaveBeenCalledTimes(1)
     expect(mockRecorder.setOnError).toHaveBeenCalledTimes(1)
     expect(mockRecorder.setOnDataAvailable).toHaveBeenCalledTimes(1)
+    expect(mockRecorder.setOnNoSpeech).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       await result.current.startRecording()
     })
 
     expect(mockRecorder.start).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears processing without an error when no speech is detected', async () => {
+    const { result } = renderHook(() => useSTT())
+
+    await waitFor(() => {
+      expect(mockRecorder.setOnNoSpeech).toHaveBeenCalledTimes(1)
+    })
+
+    const onNoSpeech = mockRecorder.setOnNoSpeech.mock.calls[0][0] as () => void
+
+    act(() => {
+      onNoSpeech()
+    })
+
+    expect(result.current.isProcessing).toBe(false)
+    expect(result.current.isRecording).toBe(false)
+    expect(result.current.isError).toBe(false)
+    expect(result.current.error).toBeNull()
   })
 
   it('disposes external recorder resources on unmount', async () => {

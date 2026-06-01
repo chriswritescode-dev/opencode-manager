@@ -337,3 +337,118 @@ describe('AudioRecorder lifecycle cancellation', () => {
     expect(window.AudioContext).not.toHaveBeenCalled()
   })
 })
+
+describe('AudioRecorder voice activity detection', () => {
+  const SAMPLE_RATE = 16000
+  const msToSamples = (ms: number): number => Math.round((ms / 1000) * SAMPLE_RATE)
+
+  let originalAudioContext: typeof window.AudioContext
+  let originalAudioWorkletNode: unknown
+  let originalGetUserMedia: (typeof navigator.mediaDevices)['getUserMedia'] | undefined
+  let mockWorkletNode: { port: { onmessage: ((e: MessageEvent) => void) | null; postMessage: ReturnType<typeof vi.fn> }; disconnect: ReturnType<typeof vi.fn> }
+
+  type Frame = { samples: Int16Array; rms: number }
+  const feed = (rms: number, ms: number): void => {
+    const frame: Frame = { samples: new Int16Array(msToSamples(ms)), rms }
+    mockWorkletNode.port.onmessage?.({ data: frame } as MessageEvent)
+  }
+
+  beforeEach(() => {
+    originalAudioContext = window.AudioContext
+    originalAudioWorkletNode = (window as any).AudioWorkletNode
+    originalGetUserMedia = navigator.mediaDevices?.getUserMedia
+
+    const mockSource = { connect: vi.fn(), disconnect: vi.fn() }
+    mockWorkletNode = {
+      port: { onmessage: null, postMessage: vi.fn() },
+      disconnect: vi.fn(),
+    }
+
+    const MockAudioContext = vi.fn().mockImplementation(() => ({
+      state: 'running',
+      sampleRate: SAMPLE_RATE,
+      audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
+      createMediaStreamSource: vi.fn().mockReturnValue(mockSource),
+      createScriptProcessor: vi.fn(),
+      resume: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    }))
+    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
+
+    ;(window as any).AudioWorkletNode = vi.fn().mockImplementation(() => mockWorkletNode)
+
+    const mockTrack = { stop: vi.fn(), kind: 'audio' }
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [mockTrack],
+          getAudioTracks: () => [mockTrack],
+        }),
+      },
+      writable: true,
+      configurable: true,
+    })
+  })
+
+  afterEach(() => {
+    window.AudioContext = originalAudioContext
+    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
+    if (originalGetUserMedia) {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { getUserMedia: originalGetUserMedia },
+        writable: true,
+        configurable: true,
+      })
+    }
+  })
+
+  it('does not emit audio and signals no-speech when the recording is silent', async () => {
+    const onDataAvailable = vi.fn()
+    const onNoSpeech = vi.fn()
+    const recorder = new AudioRecorder()
+    recorder.setOnDataAvailable(onDataAvailable)
+    recorder.setOnNoSpeech(onNoSpeech)
+
+    await recorder.start()
+    for (let i = 0; i < 5; i++) {
+      feed(0.0005, 100)
+    }
+    recorder.stop()
+
+    expect(onNoSpeech).toHaveBeenCalledTimes(1)
+    expect(onDataAvailable).not.toHaveBeenCalled()
+    expect(recorder.getState()).toBe('stopped')
+  })
+
+  it('emits audio when speech is detected', async () => {
+    const onDataAvailable = vi.fn()
+    const onNoSpeech = vi.fn()
+    const recorder = new AudioRecorder()
+    recorder.setOnDataAvailable(onDataAvailable)
+    recorder.setOnNoSpeech(onNoSpeech)
+
+    await recorder.start()
+    for (let i = 0; i < 3; i++) {
+      feed(0.2, 100)
+    }
+    recorder.stop()
+
+    expect(onDataAvailable).toHaveBeenCalledTimes(1)
+    expect(onNoSpeech).not.toHaveBeenCalled()
+  })
+
+  it('auto-stops after trailing silence once speech has been detected', async () => {
+    const onDataAvailable = vi.fn()
+    const recorder = new AudioRecorder({ vad: { minSpeechMs: 50, silenceTimeoutMs: 200 } })
+    recorder.setOnDataAvailable(onDataAvailable)
+
+    await recorder.start()
+    feed(0.2, 100)
+    feed(0.0005, 100)
+    feed(0.0005, 100)
+
+    expect(recorder.getState()).toBe('stopped')
+    expect(onDataAvailable).toHaveBeenCalledTimes(1)
+    expect(mockWorkletNode.port.onmessage).toBeNull()
+  })
+})

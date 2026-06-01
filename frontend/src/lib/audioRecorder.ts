@@ -1,8 +1,11 @@
+import { VoiceActivityDetector, type VadOptions } from './voiceActivityDetector'
+
 export type AudioRecorderState = 'idle' | 'recording' | 'stopped' | 'error'
 
 export interface AudioRecorderOptions {
   sampleRate?: number
   channelCount?: number
+  vad?: Partial<Omit<VadOptions, 'sampleRate'>>
 }
 
 const DEFAULT_OPTIONS: AudioRecorderOptions = {
@@ -49,6 +52,18 @@ export function downsampleAndConvert(input: Float32Array, inputRate: number, tar
   return output
 }
 
+export function computeRms(samples: Int16Array): number {
+  if (samples.length === 0) {
+    return 0
+  }
+  let sumSquares = 0
+  for (let i = 0; i < samples.length; i++) {
+    const normalized = samples[i] / 32768
+    sumSquares += normalized * normalized
+  }
+  return Math.sqrt(sumSquares / samples.length)
+}
+
 export function encodeWavFromInt16(samples: Int16Array, sampleRate: number, channels: number): Blob {
   const dataLength = samples.length * 2
   const bufferSize = 44 + dataLength
@@ -91,10 +106,12 @@ export class AudioRecorder {
   private state: AudioRecorderState = 'idle'
   private options: AudioRecorderOptions
   private isAborted: boolean = false
+  private vad: VoiceActivityDetector | null = null
 
   private onStateChange?: (state: AudioRecorderState) => void
   private onError?: (error: string) => void
   private onDataAvailable?: (blob: Blob) => void
+  private onNoSpeech?: () => void
 
   constructor(options: AudioRecorderOptions = {}) {
     this.options = { ...DEFAULT_OPTIONS, ...options }
@@ -152,6 +169,10 @@ export class AudioRecorder {
     this.onDataAvailable = callback
   }
 
+  setOnNoSpeech(callback: () => void): void {
+    this.onNoSpeech = callback
+  }
+
   private setState(newState: AudioRecorderState): void {
     this.state = newState
     this.onStateChange?.(newState)
@@ -168,6 +189,10 @@ export class AudioRecorder {
       this.isAborted = false
       this.chunks = []
       this.totalSamples = 0
+      this.vad = new VoiceActivityDetector({
+        sampleRate: this.options.sampleRate ?? 16000,
+        ...this.options.vad,
+      })
 
       this.mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -196,9 +221,11 @@ export class AudioRecorder {
         this.workletNode = new AudioWorkletNode(ctx, 'recorder-processor', {
           processorOptions: { targetSampleRate: this.options.sampleRate },
         })
-        this.workletNode.port.onmessage = (e: MessageEvent<Int16Array>) => {
-          this.chunks.push(e.data)
-          this.totalSamples += e.data.length
+        this.workletNode.port.onmessage = (e: MessageEvent<{ samples: Int16Array; rms: number }>) => {
+          const { samples, rms } = e.data
+          this.chunks.push(samples)
+          this.totalSamples += samples.length
+          this.handleVadFrame(rms, samples.length)
         }
         this.source.connect(this.workletNode)
       } else {
@@ -211,6 +238,7 @@ export class AudioRecorder {
           const int16Chunk = downsampleAndConvert(inputData, inputRate, targetRate)
           this.chunks.push(int16Chunk)
           this.totalSamples += int16Chunk.length
+          this.handleVadFrame(computeRms(int16Chunk), int16Chunk.length)
         }
         this.source.connect(this.processor)
       }
@@ -260,8 +288,23 @@ export class AudioRecorder {
     this.setState('idle')
   }
 
+  private handleVadFrame(rms: number, frameSamples: number): void {
+    if (!this.vad) {
+      return
+    }
+    const { shouldAutoStop } = this.vad.process(rms, frameSamples)
+    if (shouldAutoStop) {
+      this.stop()
+    }
+  }
+
   private processRecording(): void {
     if (this.isAborted || this.chunks.length === 0 || this.totalSamples === 0) {
+      return
+    }
+
+    if (this.vad && !this.vad.hasSpeech) {
+      this.onNoSpeech?.()
       return
     }
 

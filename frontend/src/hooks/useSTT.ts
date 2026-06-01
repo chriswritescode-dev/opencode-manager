@@ -139,6 +139,13 @@ export function useSTT(userId = 'default') {
       }, 3000)
     })
 
+    recorder.setOnNoSpeech(() => {
+      setIsProcessing(false)
+      setIsRecording(false)
+      setInterimTranscript('')
+      setState('idle')
+    })
+
     recorder.setOnDataAvailable(async (blob) => {
       if (lastProcessedBlobRef.current === blob) {
         return

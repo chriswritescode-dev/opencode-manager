@@ -59,12 +59,16 @@ class RecorderProcessor extends AudioWorkletProcessor {
   }
 
   _flushBuffer() {
-    const int16 = new Int16Array(this._buffer.length)
-    for (let i = 0; i < this._buffer.length; i++) {
+    const length = this._buffer.length
+    const int16 = new Int16Array(length)
+    let sumSquares = 0
+    for (let i = 0; i < length; i++) {
       const sample = Math.max(-1, Math.min(1, this._buffer[i]))
+      sumSquares += sample * sample
       int16[i] = sample < 0 ? sample * 32768 : sample * 32767
     }
-    this.port.postMessage(int16, [int16.buffer])
+    const rms = length > 0 ? Math.sqrt(sumSquares / length) : 0
+    this.port.postMessage({ samples: int16, rms }, [int16.buffer])
     this._buffer = []
   }
 }
