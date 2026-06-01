@@ -7,6 +7,7 @@ type MockRecorder = {
   stop: ReturnType<typeof vi.fn>
   abort: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
+  prepare: ReturnType<typeof vi.fn>
   setOnStateChange: ReturnType<typeof vi.fn>
   setOnError: ReturnType<typeof vi.fn>
   setOnDataAvailable: ReturnType<typeof vi.fn>
@@ -56,6 +57,7 @@ describe('useSTT external provider lifecycle', () => {
       stop: vi.fn(),
       abort: vi.fn(),
       dispose: vi.fn(),
+      prepare: vi.fn().mockResolvedValue(undefined),
       setOnStateChange: vi.fn(),
       setOnError: vi.fn(),
       setOnDataAvailable: vi.fn(),
@@ -85,6 +87,7 @@ describe('useSTT external provider lifecycle', () => {
     })
 
     expect(mockRecorder.start).not.toHaveBeenCalled()
+    expect(mockRecorder.prepare).toHaveBeenCalledTimes(1)
     expect(mockRecorder.setOnStateChange).toHaveBeenCalledTimes(1)
     expect(mockRecorder.setOnError).toHaveBeenCalledTimes(1)
     expect(mockRecorder.setOnDataAvailable).toHaveBeenCalledTimes(1)

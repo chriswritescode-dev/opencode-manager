@@ -117,12 +117,12 @@ export class AudioRecorder {
 
     const ctx = this.getReusableAudioContext()
 
-    if (ctx.state === 'suspended') {
-      await ctx.resume()
-    }
-
     if (ctx.audioWorklet) {
       await ensureWorkletLoaded(ctx)
+    }
+
+    if (ctx.state === 'suspended') {
+      await ctx.resume()
     }
   }
 
@@ -178,18 +178,14 @@ export class AudioRecorder {
       })
 
       if (this.isAborted) {
-        this.mediaStream.getTracks().forEach(t => t.stop())
-        this.mediaStream = null
+        this.cleanupRecording(true)
         return
       }
 
       await this.prepare()
 
       if (this.isAborted) {
-        if (this.mediaStream) {
-          this.mediaStream.getTracks().forEach(t => t.stop())
-          this.mediaStream = null
-        }
+        this.cleanupRecording(true)
         return
       }
 
@@ -250,16 +246,17 @@ export class AudioRecorder {
   }
 
   abort(): void {
-    this.isAborted = true
-    this.resetRecordingState()
-    this.cleanupRecording(false)
-    this.setState('idle')
+    this.teardown(false)
   }
 
   dispose(): void {
+    this.teardown(true)
+  }
+
+  private teardown(closeAudioContext: boolean): void {
     this.isAborted = true
     this.resetRecordingState()
-    this.cleanupRecording(true)
+    this.cleanupRecording(closeAudioContext)
     this.setState('idle')
   }
 

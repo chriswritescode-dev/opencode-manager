@@ -71,7 +71,7 @@ Any OpenAI-compatible transcription API works:
 
 ### Performance
 
-After the first microphone press, the browser audio pipeline stays prepared so subsequent recordings start faster. The audio context and worklet processor are retained between recordings; only the microphone track is stopped after each use. Resources are released entirely when external STT is disabled or the voice input UI unmounts.
+When external voice input is enabled, the browser audio pipeline is warmed up ahead of time so the first and subsequent recordings start faster. The audio context and worklet processor are prepared without requesting microphone access, and are retained between recordings; only the microphone track is stopped after each use. Resources are released entirely when external STT is disabled or the voice input UI unmounts.
 
 This optimization applies only to the external API provider. It does not affect the initial permission prompt — the browser still asks for microphone access on the first recording.
 
