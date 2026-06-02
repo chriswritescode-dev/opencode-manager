@@ -1,8 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AudioRecorder } from './audioRecorder'
 
-// ── Fake MediaRecorder ─────────────────────────────────────────────────────
-
 class FakeMediaRecorder {
   static _instances: FakeMediaRecorder[] = []
   static _supportedTypes = new Set<string>([
@@ -37,8 +35,6 @@ class FakeMediaRecorder {
   }
 }
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
 function createMockTrack(): MediaStreamTrack {
   return { stop: vi.fn(), kind: 'audio' } as unknown as MediaStreamTrack
 }
@@ -58,8 +54,6 @@ function createMockStream(tracks: MediaStreamTrack[] = [createMockTrack()]): Med
     onremovetrack: null,
   } as unknown as MediaStream
 }
-
-// ── describe: AudioRecorder.isSupported ─────────────────────────────────────
 
 describe('AudioRecorder.isSupported', () => {
   afterEach(() => {
@@ -108,8 +102,6 @@ describe('AudioRecorder.isSupported', () => {
     expect(AudioRecorder.isSupported()).toBe(false)
   })
 })
-
-// ── Describe: AudioRecorder start ───────────────────────────────────────────
 
 describe('AudioRecorder start', () => {
   let mockGetUserMedia: ReturnType<typeof vi.fn>
@@ -189,15 +181,6 @@ describe('AudioRecorder start', () => {
     expect(mr.mimeType).toBe('')
   })
 
-  it('uses configured mimeTypes when provided', async () => {
-    recorder = new AudioRecorder({ mimeTypes: ['audio/wav', 'audio/ogg'] })
-    recorder.setOnStateChange(onStateChange)
-    FakeMediaRecorder._supportedTypes = new Set(['audio/wav', 'audio/ogg'])
-    await recorder.start()
-    const mr = FakeMediaRecorder._instances[0]
-    expect(mr.mimeType).toBe('audio/wav')
-  })
-
   it('transitions to recording state', async () => {
     await recorder.start()
     expect(recorder.getState()).toBe('recording')
@@ -205,8 +188,6 @@ describe('AudioRecorder start', () => {
   })
 
 })
-
-// ── describe: AudioRecorder stop ────────────────────────────────────────────
 
 describe('AudioRecorder stop', () => {
   let mockGetUserMedia: ReturnType<typeof vi.fn>
@@ -307,8 +288,6 @@ describe('AudioRecorder stop', () => {
   })
 })
 
-// ── describe: AudioRecorder no-speech ───────────────────────────────────────
-
 describe('AudioRecorder no-speech', () => {
   let mockGetUserMedia: ReturnType<typeof vi.fn>
   let mockTrack: ReturnType<typeof createMockTrack>
@@ -365,8 +344,6 @@ describe('AudioRecorder no-speech', () => {
     expect(onDataAvailable).not.toHaveBeenCalled()
   })
 })
-
-// ── describe: AudioRecorder abort and dispose ───────────────────────────────
 
 describe('AudioRecorder abort and dispose', () => {
   let mockGetUserMedia: ReturnType<typeof vi.fn>
@@ -430,8 +407,6 @@ describe('AudioRecorder abort and dispose', () => {
     expect(recorder.getState()).toBe('idle')
   })
 })
-
-// ── describe: AudioRecorder error handling ──────────────────────────────────
 
 describe('AudioRecorder error handling', () => {
   let recorder: AudioRecorder
@@ -502,43 +477,5 @@ describe('AudioRecorder error handling', () => {
 
     await expect(recorder.start()).rejects.toThrow()
     expect(onStateChange).toHaveBeenCalledWith('error')
-  })
-})
-
-// ── describe: AudioRecorder.prepare ─────────────────────────────────────────
-
-describe('AudioRecorder.prepare', () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  it('resolves when supported', async () => {
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: { getUserMedia: vi.fn() },
-      writable: true,
-      configurable: true,
-    })
-    Object.defineProperty(window, 'MediaRecorder', {
-      value: FakeMediaRecorder,
-      writable: true,
-      configurable: true,
-    })
-    const recorder = new AudioRecorder()
-    await expect(recorder.prepare()).resolves.toBeUndefined()
-  })
-
-  it('throws when not supported', async () => {
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: {},
-      writable: true,
-      configurable: true,
-    })
-    Object.defineProperty(window, 'MediaRecorder', {
-      value: undefined,
-      writable: true,
-      configurable: true,
-    })
-    const recorder = new AudioRecorder()
-    await expect(recorder.prepare()).rejects.toThrow('Audio recording is not supported in this browser')
   })
 })

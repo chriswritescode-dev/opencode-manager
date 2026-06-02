@@ -1,10 +1,5 @@
 export type AudioRecorderState = 'idle' | 'recording' | 'stopped' | 'error'
 
-export interface AudioRecorderOptions {
-  mimeTypes?: string[]
-  audioConstraints?: MediaTrackConstraints
-}
-
 const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
   echoCancellation: true,
   noiseSuppression: true,
@@ -20,9 +15,8 @@ const PREFERRED_MIME_TYPES = [
   'audio/wav',
 ]
 
-function selectMimeType(configured?: string[]): string | undefined {
-  const candidates = configured && configured.length > 0 ? configured : PREFERRED_MIME_TYPES
-  return candidates.find(type => MediaRecorder.isTypeSupported(type))
+function selectMimeType(): string | undefined {
+  return PREFERRED_MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type))
 }
 
 export class AudioRecorder {
@@ -32,17 +26,12 @@ export class AudioRecorder {
   private chunks: Blob[] = []
   private firstChunkType = ''
   private isAborted = false
-  private options: AudioRecorderOptions
   private outputType = ''
 
   private onStateChange?: (state: AudioRecorderState) => void
   private onError?: (error: string) => void
   private onDataAvailable?: (blob: Blob) => void
   private onNoSpeech?: () => void
-
-  constructor(options: AudioRecorderOptions = {}) {
-    this.options = options
-  }
 
   static isSupported(): boolean {
     return !!(
@@ -52,12 +41,6 @@ export class AudioRecorder {
       typeof window !== 'undefined' &&
       typeof window.MediaRecorder !== 'undefined'
     )
-  }
-
-  async prepare(): Promise<void> {
-    if (!AudioRecorder.isSupported()) {
-      throw new Error('Audio recording is not supported in this browser')
-    }
   }
 
   getState(): AudioRecorderState {
@@ -97,19 +80,14 @@ export class AudioRecorder {
       this.chunks = []
       this.firstChunkType = ''
 
-      const audioConstraints = {
-        ...DEFAULT_AUDIO_CONSTRAINTS,
-        ...this.options.audioConstraints,
-      }
-
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: DEFAULT_AUDIO_CONSTRAINTS })
 
       if (this.isAborted) {
-        this.cleanup()
+        this.releaseResources()
         return
       }
 
-      const selectedMimeType = selectMimeType(this.options.mimeTypes)
+      const selectedMimeType = selectMimeType()
       this.mediaRecorder = new MediaRecorder(
         this.mediaStream,
         selectedMimeType ? { mimeType: selectedMimeType } : undefined,
@@ -131,16 +109,14 @@ export class AudioRecorder {
       }
 
       this.mediaRecorder.onerror = () => {
-        this.setState('error')
+        this.reset('error')
         this.onError?.('MediaRecorder error')
-        this.cleanup()
       }
 
       this.mediaRecorder.start()
       this.setState('recording')
     } catch (error) {
-      this.setState('error')
-      this.cleanup()
+      this.reset('error')
 
       if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
@@ -179,11 +155,7 @@ export class AudioRecorder {
       this.onDataAvailable?.(combinedBlob)
     }
 
-    this.stopTracks()
-    this.mediaRecorder = null
-    this.mediaStream = null
-    this.chunks = []
-    this.setState('stopped')
+    this.reset('stopped')
   }
 
   abort(): void {
@@ -199,12 +171,7 @@ export class AudioRecorder {
     if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
       this.mediaRecorder.stop()
     }
-    this.stopTracks()
-    this.mediaRecorder = null
-    this.mediaStream = null
-    this.chunks = []
-    this.firstChunkType = ''
-    this.setState('idle')
+    this.reset('idle')
   }
 
   private stopTracks(): void {
@@ -213,11 +180,17 @@ export class AudioRecorder {
     }
   }
 
-  private cleanup(): void {
+  private releaseResources(): void {
     this.stopTracks()
     this.mediaRecorder = null
     this.mediaStream = null
     this.chunks = []
     this.firstChunkType = ''
+    this.outputType = ''
+  }
+
+  private reset(nextState: AudioRecorderState): void {
+    this.releaseResources()
+    this.setState(nextState)
   }
 }

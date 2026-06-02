@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useSettings } from '@/hooks/useSettings'
-import { getWebSpeechRecognizer, isWebRecognitionSupported, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState } from '@/lib/webSpeechRecognizer'
+import { getWebSpeechRecognizer, isWebRecognitionSupported, appendTranscriptSegment, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState } from '@/lib/webSpeechRecognizer'
 import { AudioRecorder } from '@/lib/audioRecorder'
 import { sttApi } from '@/api/stt'
 import { FetchError } from '@/api/fetchWrapper'
@@ -42,6 +42,24 @@ export function useSTT(userId = 'default') {
     ? AudioRecorder.isSupported()
     : isWebRecognitionSupported()
 
+  const flashError = useCallback((message: string) => {
+    setIsError(true)
+    setError(message)
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
+    errorTimeoutRef.current = setTimeout(() => {
+      setIsError(false)
+      setError(null)
+      errorTimeoutRef.current = null
+    }, 3000)
+  }, [])
+
+  const resetToIdle = useCallback((clearInterim = false) => {
+    setIsRecording(false)
+    setIsProcessing(false)
+    setState('idle')
+    if (clearInterim) setInterimTranscript('')
+  }, [])
+
   useEffect(() => {
     if (!isEnabled || isExternalProvider) {
       return
@@ -55,11 +73,7 @@ export function useSTT(userId = 'default') {
 
     rec.onResult((result: SpeechRecognitionResult) => {
       setIsProcessing(false)
-      setTranscript((prev) => {
-        const prevTrimmed = prev.trim()
-        const next = result.transcript.trim()
-        return prevTrimmed ? `${prevTrimmed} ${next}` : next
-      })
+      setTranscript((prev) => appendTranscriptSegment(prev, result.transcript))
     })
 
     rec.onInterimResult((interim: string) => {
@@ -74,21 +88,11 @@ export function useSTT(userId = 'default') {
     rec.onError((errorMessage: string) => {
       setIsProcessing(false)
       setIsRecording(false)
-      setIsError(true)
-      setError(errorMessage)
-
-      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
-      errorTimeoutRef.current = setTimeout(() => {
-        setIsError(false)
-        setError(null)
-        errorTimeoutRef.current = null
-      }, 3000)
+      flashError(errorMessage)
     })
 
     rec.onEnd(() => {
-      setIsRecording(false)
-      setIsProcessing(false)
-      setState('idle')
+      resetToIdle()
     })
 
     rec.onStart(() => {
@@ -105,7 +109,7 @@ export function useSTT(userId = 'default') {
         interimRafRef.current = null
       }
     }
-  }, [isEnabled, isExternalProvider])
+  }, [isEnabled, isExternalProvider, flashError, resetToIdle])
 
   const setupAudioRecorder = useCallback((recorder: AudioRecorder) => {
     recorder.setOnStateChange((recState) => {
@@ -117,9 +121,7 @@ export function useSTT(userId = 'default') {
       } else if (recState === 'stopped') {
         setIsRecording(false)
       } else if (recState === 'error') {
-        setIsRecording(false)
-        setIsProcessing(false)
-        setState('idle')
+        resetToIdle()
       } else if (recState === 'idle') {
         setState('idle')
       }
@@ -128,22 +130,11 @@ export function useSTT(userId = 'default') {
     recorder.setOnError((errorMessage) => {
       setIsProcessing(false)
       setIsRecording(false)
-      setIsError(true)
-      setError(errorMessage)
-
-      if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
-      errorTimeoutRef.current = setTimeout(() => {
-        setIsError(false)
-        setError(null)
-        errorTimeoutRef.current = null
-      }, 3000)
+      flashError(errorMessage)
     })
 
     recorder.setOnNoSpeech(() => {
-      setIsProcessing(false)
-      setIsRecording(false)
-      setInterimTranscript('')
-      setState('idle')
+      resetToIdle(true)
     })
 
     recorder.setOnDataAvailable(async (blob) => {
@@ -163,11 +154,7 @@ export function useSTT(userId = 'default') {
           abortControllerRef.current.signal
         )
         
-        setTranscript((prev) => {
-          const prevTrimmed = prev.trim()
-          const newText = result.text.trim()
-          return prevTrimmed ? `${prevTrimmed} ${newText}` : newText
-        })
+        setTranscript((prev) => appendTranscriptSegment(prev, result.text))
         setInterimTranscript('')
       } catch (err) {
         if (err instanceof Error && (
@@ -177,23 +164,14 @@ export function useSTT(userId = 'default') {
           return
         }
         
-        setIsError(true)
-        const errorMessage = err instanceof Error ? err.message : 'Transcription failed'
-        setError(errorMessage)
-        
-        if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current)
-        errorTimeoutRef.current = setTimeout(() => {
-          setIsError(false)
-          setError(null)
-          errorTimeoutRef.current = null
-        }, 3000)
+        flashError(err instanceof Error ? err.message : 'Transcription failed')
       } finally {
         setIsProcessing(false)
         setState('idle')
         abortControllerRef.current = null
       }
     })
-  }, [])
+  }, [flashError, resetToIdle])
 
   const ensureAudioRecorder = useCallback((): AudioRecorder => {
     if (!audioRecorder.current) {
@@ -233,12 +211,10 @@ export function useSTT(userId = 'default') {
     } else {
       recognizer.current.abort()
     }
-    setIsRecording(false)
-    setIsProcessing(false)
-    setState('idle')
+    resetToIdle()
     setIsError(true)
     setError('Microphone start timed out')
-  }, [isExternalProvider, disposeAudioRecorder])
+  }, [isExternalProvider, disposeAudioRecorder, resetToIdle])
 
   const runStartupWithTimeout = useCallback(
     async (startup: () => Promise<void>, startOpId: number): Promise<boolean> => {
@@ -340,21 +316,15 @@ export function useSTT(userId = 'default') {
     }
 
     setTranscript('')
-    setInterimTranscript('')
-    setIsRecording(false)
-    setIsProcessing(false)
-    setState('idle')
-  }, [isExternalProvider])
+    resetToIdle(true)
+  }, [isExternalProvider, resetToIdle])
 
   const reset = useCallback(() => {
     setTranscript('')
-    setInterimTranscript('')
     setIsError(false)
     setError(null)
-    setIsRecording(false)
-    setIsProcessing(false)
-    setState('idle')
-  }, [])
+    resetToIdle(true)
+  }, [resetToIdle])
 
   const clear = useCallback(() => {
     setTranscript('')

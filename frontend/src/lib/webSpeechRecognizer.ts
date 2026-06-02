@@ -67,6 +67,12 @@ declare global {
 
 const WEB_SPEECH_INACTIVITY_TIMEOUT_MS = 2000;
 
+export function appendTranscriptSegment(current: string, segment: string): string {
+  const trimmedCurrent = current.trim();
+  const trimmedSegment = segment.trim();
+  return trimmedCurrent ? `${trimmedCurrent} ${trimmedSegment}` : trimmedSegment;
+}
+
 export class WebSpeechRecognizer {
   private recognition: SpeechRecognition | null = null;
   private isListening = false;
@@ -78,12 +84,6 @@ export class WebSpeechRecognizer {
   private onStartCallbacks: (() => void)[] = [];
   private finalTranscript = '';
   private inactivityTimeoutRef: ReturnType<typeof setTimeout> | null = null;
-
-  private appendTranscriptSegment(current: string, segment: string): string {
-    const trimmedCurrent = current.trim();
-    const trimmedSegment = segment.trim();
-    return trimmedCurrent ? `${trimmedCurrent} ${trimmedSegment}` : trimmedSegment;
-  }
 
   private clearInactivityTimeout(): void {
     if (this.inactivityTimeoutRef !== null) {
@@ -128,7 +128,7 @@ export class WebSpeechRecognizer {
 
           if (result.isFinal) {
             const segment = result[0].transcript;
-            this.finalTranscript = this.appendTranscriptSegment(this.finalTranscript, segment);
+            this.finalTranscript = appendTranscriptSegment(this.finalTranscript, segment);
 
             const finalResult: SpeechRecognitionResult = {
               transcript: segment,

@@ -30,10 +30,14 @@ vi.mock('@/lib/audioRecorder', () => ({
   AudioRecorder: mocks.AudioRecorder,
 }))
 
-vi.mock('@/lib/webSpeechRecognizer', () => ({
-  getWebSpeechRecognizer: mocks.getWebSpeechRecognizer,
-  isWebRecognitionSupported: mocks.isWebRecognitionSupported,
-}))
+vi.mock('@/lib/webSpeechRecognizer', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/webSpeechRecognizer')>()
+  return {
+    appendTranscriptSegment: actual.appendTranscriptSegment,
+    getWebSpeechRecognizer: mocks.getWebSpeechRecognizer,
+    isWebRecognitionSupported: mocks.isWebRecognitionSupported,
+  }
+})
 
 vi.mock('@/api/stt', () => ({
   sttApi: mocks.sttApi,
