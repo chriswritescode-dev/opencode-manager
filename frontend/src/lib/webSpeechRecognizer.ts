@@ -65,6 +65,8 @@ declare global {
   }
 }
 
+const WEB_SPEECH_INACTIVITY_TIMEOUT_MS = 2000;
+
 export class WebSpeechRecognizer {
   private recognition: SpeechRecognition | null = null;
   private isListening = false;
@@ -75,6 +77,31 @@ export class WebSpeechRecognizer {
   private onEndCallbacks: (() => void)[] = [];
   private onStartCallbacks: (() => void)[] = [];
   private finalTranscript = '';
+  private inactivityTimeoutRef: ReturnType<typeof setTimeout> | null = null;
+
+  private appendTranscriptSegment(current: string, segment: string): string {
+    const trimmedCurrent = current.trim();
+    const trimmedSegment = segment.trim();
+    return trimmedCurrent ? `${trimmedCurrent} ${trimmedSegment}` : trimmedSegment;
+  }
+
+  private clearInactivityTimeout(): void {
+    if (this.inactivityTimeoutRef !== null) {
+      clearTimeout(this.inactivityTimeoutRef);
+      this.inactivityTimeoutRef = null;
+    }
+  }
+
+  private resetInactivityTimeout(): void {
+    this.clearInactivityTimeout();
+    if (this.isListening) {
+      this.inactivityTimeoutRef = setTimeout(() => {
+        if (this.isListening) {
+          this.stop();
+        }
+      }, WEB_SPEECH_INACTIVITY_TIMEOUT_MS);
+    }
+  }
 
   constructor() {
     if (typeof window === 'undefined') return;
@@ -83,7 +110,7 @@ export class WebSpeechRecognizer {
 
     if (RecognitionClass) {
       this.recognition = new RecognitionClass();
-      this.recognition.continuous = false;
+      this.recognition.continuous = true;
       this.recognition.interimResults = true;
       this.recognition.maxAlternatives = 1;
 
@@ -100,13 +127,15 @@ export class WebSpeechRecognizer {
           const result = event.results[i];
 
           if (result.isFinal) {
+            const segment = result[0].transcript;
+            this.finalTranscript = this.appendTranscriptSegment(this.finalTranscript, segment);
+
             const finalResult: SpeechRecognitionResult = {
-              transcript: result[0].transcript,
+              transcript: segment,
               isFinal: true,
               confidence: result[0].confidence || 1.0,
             };
 
-            this.finalTranscript = result[0].transcript;
             this.onResultCallbacks.forEach((cb) => cb(finalResult));
           } else {
             interimTranscript += result[0].transcript;
@@ -116,9 +145,12 @@ export class WebSpeechRecognizer {
         if (interimTranscript) {
           this.onInterimResultCallbacks.forEach((cb) => cb(this.finalTranscript + ' ' + interimTranscript));
         }
+
+        this.resetInactivityTimeout();
       };
 
       this.recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+        this.clearInactivityTimeout();
         this.state = 'error';
         this.isListening = false;
 
@@ -146,10 +178,9 @@ export class WebSpeechRecognizer {
       };
 
       this.recognition.onend = () => {
+        this.clearInactivityTimeout();
         this.isListening = false;
-        if (this.state !== 'error') {
-          this.state = 'idle';
-        }
+        this.state = 'idle';
         this.onEndCallbacks.forEach((cb) => cb());
       };
     }
@@ -192,13 +223,23 @@ export class WebSpeechRecognizer {
         this.recognition.maxAlternatives = options.maxAlternatives;
       }
 
-      const onStartOnce = () => {
+      let settled = false;
+
+      const cleanup = () => {
+        settled = true;
         this.onStartCallbacks = this.onStartCallbacks.filter(cb => cb !== onStartOnce);
+        this.onErrorCallbacks = this.onErrorCallbacks.filter(cb => cb !== onErrorOnce);
+      };
+
+      const onStartOnce = () => {
+        if (settled) return;
+        cleanup();
         resolve();
       };
 
       const onErrorOnce = (error: string) => {
-        this.onErrorCallbacks = this.onErrorCallbacks.filter(cb => cb !== onErrorOnce);
+        if (settled) return;
+        cleanup();
         reject(new Error(error));
       };
 
@@ -217,6 +258,7 @@ export class WebSpeechRecognizer {
   }
 
   stop(): void {
+    this.clearInactivityTimeout();
     if (this.recognition) {
       try {
         this.recognition.stop();
@@ -228,6 +270,7 @@ export class WebSpeechRecognizer {
   }
 
   abort(): void {
+    this.clearInactivityTimeout();
     if (this.recognition) {
       try {
         this.recognition.abort();
@@ -270,6 +313,7 @@ export class WebSpeechRecognizer {
   }
 
   clearCallbacks(): void {
+    this.clearInactivityTimeout();
     this.onResultCallbacks = [];
     this.onInterimResultCallbacks = [];
     this.onErrorCallbacks = [];

@@ -1,112 +1,39 @@
-import { VoiceActivityDetector, type VadOptions } from './voiceActivityDetector'
-
 export type AudioRecorderState = 'idle' | 'recording' | 'stopped' | 'error'
 
 export interface AudioRecorderOptions {
-  sampleRate?: number
-  channelCount?: number
-  vad?: Partial<Omit<VadOptions, 'sampleRate'>>
+  mimeTypes?: string[]
+  audioConstraints?: MediaTrackConstraints
 }
 
-const DEFAULT_OPTIONS: AudioRecorderOptions = {
-  sampleRate: 16000,
-  channelCount: 1,
+const DEFAULT_AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
 }
 
-const workletModulePromises = new WeakMap<AudioContext, Promise<void>>()
+const PREFERRED_MIME_TYPES = [
+  'audio/webm;codecs=opus',
+  'audio/webm',
+  'audio/ogg;codecs=opus',
+  'audio/ogg',
+  'audio/mp4',
+  'audio/wav',
+]
 
-function ensureWorkletLoaded(ctx: AudioContext): Promise<void> {
-  const existingPromise = workletModulePromises.get(ctx)
-
-  if (existingPromise) {
-    return existingPromise
-  }
-
-  const promise = ctx.audioWorklet.addModule('/audio-worklet-processor.js')
-  workletModulePromises.set(ctx, promise)
-  return promise
-}
-
-export function downsampleAndConvert(input: Float32Array, inputRate: number, targetRate: number): Int16Array {
-  const ratio = inputRate / targetRate
-  const outputLength = Math.floor(input.length / ratio)
-  const output = new Int16Array(outputLength)
-  
-  for (let i = 0; i < outputLength; i++) {
-    const index = i * ratio
-    const prevIndex = Math.floor(index)
-    const nextIndex = prevIndex + 1
-    const t = index - prevIndex
-    
-    let sample: number
-    if (nextIndex >= input.length) {
-      sample = input[prevIndex]
-    } else {
-      sample = input[prevIndex] * (1 - t) + input[nextIndex] * t
-    }
-    
-    const clamped = Math.max(-1, Math.min(1, sample))
-    output[i] = clamped < 0 ? clamped * 32768 : clamped * 32767
-  }
-  
-  return output
-}
-
-export function computeRms(samples: Int16Array): number {
-  if (samples.length === 0) {
-    return 0
-  }
-  let sumSquares = 0
-  for (let i = 0; i < samples.length; i++) {
-    const normalized = samples[i] / 32768
-    sumSquares += normalized * normalized
-  }
-  return Math.sqrt(sumSquares / samples.length)
-}
-
-export function encodeWavFromInt16(samples: Int16Array, sampleRate: number, channels: number): Blob {
-  const dataLength = samples.length * 2
-  const bufferSize = 44 + dataLength
-  const buffer = new ArrayBuffer(bufferSize)
-  const view = new DataView(buffer)
-  
-  writeString(view, 0, 'RIFF')
-  view.setUint32(4, 36 + dataLength, true)
-  writeString(view, 8, 'WAVE')
-  writeString(view, 12, 'fmt ')
-  view.setUint32(16, 16, true)
-  view.setUint16(20, 1, true)
-  view.setUint16(22, channels, true)
-  view.setUint32(24, sampleRate, true)
-  view.setUint32(28, sampleRate * channels * 2, true)
-  view.setUint16(32, channels * 2, true)
-  view.setUint16(34, 16, true)
-  writeString(view, 36, 'data')
-  view.setUint32(40, dataLength, true)
-  
-  new Int16Array(buffer, 44).set(samples)
-  
-  return new Blob([buffer], { type: 'audio/wav' })
-}
-
-function writeString(view: DataView, offset: number, string: string): void {
-  for (let i = 0; i < string.length; i++) {
-    view.setUint8(offset + i, string.charCodeAt(i))
-  }
+function selectMimeType(configured?: string[]): string | undefined {
+  const candidates = configured && configured.length > 0 ? configured : PREFERRED_MIME_TYPES
+  return candidates.find(type => MediaRecorder.isTypeSupported(type))
 }
 
 export class AudioRecorder {
-  private audioContext: AudioContext | null = null
-  private mediaStream: MediaStream | null = null
-  private source: MediaStreamAudioSourceNode | null = null
-  private processor: ScriptProcessorNode | null = null
-  private workletNode: AudioWorkletNode | null = null
-  private chunks: Int16Array[] = []
-  private totalSamples: number = 0
   private state: AudioRecorderState = 'idle'
+  private mediaStream: MediaStream | null = null
+  private mediaRecorder: MediaRecorder | null = null
+  private chunks: Blob[] = []
+  private firstChunkType = ''
+  private isAborted = false
   private options: AudioRecorderOptions
-  private isAborted: boolean = false
-  private vad: VoiceActivityDetector | null = null
+  private outputType = ''
 
   private onStateChange?: (state: AudioRecorderState) => void
   private onError?: (error: string) => void
@@ -114,7 +41,7 @@ export class AudioRecorder {
   private onNoSpeech?: () => void
 
   constructor(options: AudioRecorderOptions = {}) {
-    this.options = { ...DEFAULT_OPTIONS, ...options }
+    this.options = options
   }
 
   static isSupported(): boolean {
@@ -123,7 +50,7 @@ export class AudioRecorder {
       navigator.mediaDevices &&
       typeof navigator.mediaDevices.getUserMedia === 'function' &&
       typeof window !== 'undefined' &&
-      typeof window.AudioContext !== 'undefined'
+      typeof window.MediaRecorder !== 'undefined'
     )
   }
 
@@ -131,26 +58,6 @@ export class AudioRecorder {
     if (!AudioRecorder.isSupported()) {
       throw new Error('Audio recording is not supported in this browser')
     }
-
-    const ctx = this.getReusableAudioContext()
-
-    if (ctx.audioWorklet) {
-      await ensureWorkletLoaded(ctx)
-    }
-
-    if (ctx.state === 'suspended') {
-      await ctx.resume()
-    }
-  }
-
-  private getReusableAudioContext(): AudioContext {
-    if (this.audioContext && this.audioContext.state !== 'closed') {
-      return this.audioContext
-    }
-    this.audioContext = new AudioContext({
-      sampleRate: this.options.sampleRate,
-    })
-    return this.audioContext
   }
 
   getState(): AudioRecorderState {
@@ -188,65 +95,52 @@ export class AudioRecorder {
     try {
       this.isAborted = false
       this.chunks = []
-      this.totalSamples = 0
-      this.vad = new VoiceActivityDetector({
-        sampleRate: this.options.sampleRate ?? 16000,
-        ...this.options.vad,
-      })
+      this.firstChunkType = ''
 
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      })
+      const audioConstraints = {
+        ...DEFAULT_AUDIO_CONSTRAINTS,
+        ...this.options.audioConstraints,
+      }
+
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
 
       if (this.isAborted) {
-        this.cleanupRecording(true)
+        this.cleanup()
         return
       }
 
-      await this.prepare()
+      const selectedMimeType = selectMimeType(this.options.mimeTypes)
+      this.mediaRecorder = new MediaRecorder(
+        this.mediaStream,
+        selectedMimeType ? { mimeType: selectedMimeType } : undefined,
+      )
 
-      if (this.isAborted) {
-        this.cleanupRecording(true)
-        return
+      this.outputType = this.mediaRecorder.mimeType || selectedMimeType || ''
+
+      this.mediaRecorder.ondataavailable = (e: BlobEvent) => {
+        if (e.data.size > 0) {
+          if (this.chunks.length === 0 && e.data.type) {
+            this.firstChunkType = e.data.type
+          }
+          this.chunks.push(e.data)
+        }
       }
 
-      const ctx = this.audioContext!
-      this.source = ctx.createMediaStreamSource(this.mediaStream)
-
-      if (ctx.audioWorklet) {
-        this.workletNode = new AudioWorkletNode(ctx, 'recorder-processor', {
-          processorOptions: { targetSampleRate: this.options.sampleRate },
-        })
-        this.workletNode.port.onmessage = (e: MessageEvent<{ samples: Int16Array; rms: number }>) => {
-          const { samples, rms } = e.data
-          this.chunks.push(samples)
-          this.totalSamples += samples.length
-          this.handleVadFrame(rms, samples.length)
-        }
-        this.source.connect(this.workletNode)
-      } else {
-        const bufferSize = 4096
-        this.processor = ctx.createScriptProcessor(bufferSize, 1, 1)
-        const targetRate = this.options.sampleRate ?? 16000
-        const inputRate = ctx.sampleRate
-        this.processor.onaudioprocess = (e) => {
-          const inputData = e.inputBuffer.getChannelData(0)
-          const int16Chunk = downsampleAndConvert(inputData, inputRate, targetRate)
-          this.chunks.push(int16Chunk)
-          this.totalSamples += int16Chunk.length
-          this.handleVadFrame(computeRms(int16Chunk), int16Chunk.length)
-        }
-        this.source.connect(this.processor)
+      this.mediaRecorder.onstop = () => {
+        this.finishRecording()
       }
 
+      this.mediaRecorder.onerror = () => {
+        this.setState('error')
+        this.onError?.('MediaRecorder error')
+        this.cleanup()
+      }
+
+      this.mediaRecorder.start()
       this.setState('recording')
     } catch (error) {
       this.setState('error')
-      this.cleanupRecording(true)
+      this.cleanup()
 
       if (error instanceof DOMException) {
         if (error.name === 'NotAllowedError') {
@@ -265,99 +159,65 @@ export class AudioRecorder {
   }
 
   stop(): void {
-    if (this.processor || this.workletNode) {
-      this.processRecording()
-    }
-    this.resetRecordingState()
-    this.cleanupRecording(false)
-    this.setState('stopped')
-  }
-
-  abort(): void {
-    this.teardown(false)
-  }
-
-  dispose(): void {
-    this.teardown(true)
-  }
-
-  private teardown(closeAudioContext: boolean): void {
-    this.isAborted = true
-    this.resetRecordingState()
-    this.cleanupRecording(closeAudioContext)
-    this.setState('idle')
-  }
-
-  private handleVadFrame(rms: number, frameSamples: number): void {
-    if (!this.vad) {
+    if (!this.mediaRecorder || this.mediaRecorder.state !== 'recording') {
       return
     }
-    const { shouldAutoStop } = this.vad.process(rms, frameSamples)
-    if (shouldAutoStop) {
-      this.stop()
-    }
+    this.mediaRecorder.stop()
   }
 
-  private processRecording(): void {
+  private finishRecording(): void {
     if (this.isAborted) {
       return
     }
 
-    const hasAudio = this.chunks.length > 0 && this.totalSamples > 0
-    const hasSpeech = !this.vad || this.vad.hasSpeech
+    const type = this.outputType || this.firstChunkType || ''
+    const combinedBlob = new Blob(this.chunks, { type })
 
-    if (!hasAudio || !hasSpeech) {
+    if (this.chunks.length === 0 || combinedBlob.size === 0) {
       this.onNoSpeech?.()
-      return
+    } else {
+      this.onDataAvailable?.(combinedBlob)
     }
 
-    try {
-      const merged = new Int16Array(this.totalSamples)
-      let offset = 0
-      for (const chunk of this.chunks) {
-        merged.set(chunk, offset)
-        offset += chunk.length
-      }
-      const wavBlob = encodeWavFromInt16(merged, this.options.sampleRate ?? 16000, 1)
-      this.onDataAvailable?.(wavBlob)
-    } catch {
-      this.onError?.('Failed to process recording')
-      this.setState('error')
-    }
+    this.stopTracks()
+    this.mediaRecorder = null
+    this.mediaStream = null
+    this.chunks = []
+    this.setState('stopped')
   }
 
-  private cleanupRecording(closeAudioContext: boolean): void {
-    if (this.workletNode) {
-      this.workletNode.port.onmessage = null
-      this.workletNode.port.postMessage('stop')
-      this.workletNode.disconnect()
-      this.workletNode = null
-    }
+  abort(): void {
+    this.teardown()
+  }
 
-    if (this.processor) {
-      this.processor.onaudioprocess = null
-      this.processor.disconnect()
-      this.processor = null
-    }
+  dispose(): void {
+    this.teardown()
+  }
 
-    if (this.source) {
-      this.source.disconnect()
-      this.source = null
+  private teardown(): void {
+    this.isAborted = true
+    if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+      this.mediaRecorder.stop()
     }
+    this.stopTracks()
+    this.mediaRecorder = null
+    this.mediaStream = null
+    this.chunks = []
+    this.firstChunkType = ''
+    this.setState('idle')
+  }
 
+  private stopTracks(): void {
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => track.stop())
-      this.mediaStream = null
-    }
-
-    if (closeAudioContext && this.audioContext && this.audioContext.state !== 'closed') {
-      this.audioContext.close()
-      this.audioContext = null
     }
   }
 
-  private resetRecordingState(): void {
+  private cleanup(): void {
+    this.stopTracks()
+    this.mediaRecorder = null
+    this.mediaStream = null
     this.chunks = []
-    this.totalSamples = 0
+    this.firstChunkType = ''
   }
 }

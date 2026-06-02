@@ -1,469 +1,544 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { AudioRecorder, downsampleAndConvert, encodeWavFromInt16 } from './audioRecorder'
+import { AudioRecorder } from './audioRecorder'
 
-const blobToArrayBuffer = (blob: Blob): Promise<ArrayBuffer> =>
-  new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as ArrayBuffer)
-    reader.onerror = () => reject(reader.error)
-    reader.readAsArrayBuffer(blob)
-  })
+// ── Fake MediaRecorder ─────────────────────────────────────────────────────
 
-describe('downsampleAndConvert', () => {
-  it('should produce correct output length for 48kHz to 16kHz', () => {
-    const inputLength = 4800
-    const input = new Float32Array(inputLength)
-    const output = downsampleAndConvert(input, 48000, 16000)
-    
-    const expectedLength = Math.floor(inputLength * 16000 / 48000)
-    expect(output.length).toBe(expectedLength)
-    expect(output.length).toBe(inputLength / 3)
-  })
+class FakeMediaRecorder {
+  static _instances: FakeMediaRecorder[] = []
+  static _supportedTypes = new Set<string>([
+    'audio/webm;codecs=opus',
+    'audio/webm',
+  ])
 
-  it('should produce correct output length for 44.1kHz to 16kHz', () => {
-    const inputLength = 4410
-    const input = new Float32Array(inputLength)
-    const output = downsampleAndConvert(input, 44100, 16000)
-    
-    const expectedLength = Math.floor(inputLength * 16000 / 44100)
-    expect(output.length).toBeCloseTo(expectedLength, 0)
-  })
-
-  it('should clamp values in range [-1, 1] to Int16 range', () => {
-    const input = new Float32Array([1.0, -1.0, 0.5, -0.5, 0.0])
-    const output = downsampleAndConvert(input, 16000, 16000)
-    
-    expect(output[0]).toBe(32767)
-    expect(output[1]).toBe(-32768)
-    expect(output[2]).toBeCloseTo(16383, 0)
-    expect(output[3]).toBeCloseTo(-16384, 0)
-    expect(output[4]).toBe(0)
-  })
-
-  it('should clamp values outside [-1, 1] range', () => {
-    const input = new Float32Array([1.5, -1.5, 2.0, -2.0])
-    const output = downsampleAndConvert(input, 16000, 16000)
-    
-    expect(output[0]).toBe(32767)
-    expect(output[1]).toBe(-32768)
-    expect(output[2]).toBe(32767)
-    expect(output[3]).toBe(-32768)
-  })
-
-  it('should return Int16Array type', () => {
-    const input = new Float32Array(100)
-    const output = downsampleAndConvert(input, 48000, 16000)
-    
-    expect(output instanceof Int16Array).toBe(true)
-  })
-})
-
-describe('encodeWavFromInt16', () => {
-  it('should create a Blob with audio/wav type', () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 1)
-    
-    expect(blob.type).toBe('audio/wav')
-  })
-
-  it('should have RIFF header at offset 0', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    const view = new DataView(arrayBuffer)
-    
-    const riff = String.fromCharCode(
-      view.getUint8(0),
-      view.getUint8(1),
-      view.getUint8(2),
-      view.getUint8(3)
-    )
-    expect(riff).toBe('RIFF')
-  })
-
-  it('should have WAVE identifier at offset 8', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    const view = new DataView(arrayBuffer)
-    
-    const wave = String.fromCharCode(
-      view.getUint8(8),
-      view.getUint8(9),
-      view.getUint8(10),
-      view.getUint8(11)
-    )
-    expect(wave).toBe('WAVE')
-  })
-
-  it('should have sample rate at offset 24', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    const view = new DataView(arrayBuffer)
-    
-    const sampleRate = view.getUint32(24, true)
-    expect(sampleRate).toBe(16000)
-  })
-
-  it('should have data identifier at offset 36', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    const view = new DataView(arrayBuffer)
-    
-    const data = String.fromCharCode(
-      view.getUint8(36),
-      view.getUint8(37),
-      view.getUint8(38),
-      view.getUint8(39)
-    )
-    expect(data).toBe('data')
-  })
-
-  it('should have correct file size for 1000 samples', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 1)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    
-    expect(arrayBuffer.byteLength).toBe(44 + 1000 * 2)
-  })
-
-  it('should handle different sample rates', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 44100, 1)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    const view = new DataView(arrayBuffer)
-    
-    const sampleRate = view.getUint32(24, true)
-    expect(sampleRate).toBe(44100)
-  })
-
-  it('should handle stereo channels', async () => {
-    const samples = new Int16Array(1000)
-    const blob = encodeWavFromInt16(samples, 16000, 2)
-    const arrayBuffer = await blobToArrayBuffer(blob)
-    const view = new DataView(arrayBuffer)
-    
-    const channels = view.getUint16(22, true)
-    expect(channels).toBe(2)
-  })
-})
-
-describe('AudioRecorder.isSupported', () => {
-  it('should return boolean without throwing', () => {
-    expect(() => {
-      const result = AudioRecorder.isSupported()
-      expect(typeof result).toBe('boolean')
-    }).not.toThrow()
-  })
-})
-
-describe('AudioRecorder.prepare', () => {
-  let originalAudioContext: typeof window.AudioContext
-  let originalAudioWorkletNode: unknown
-  let originalGetUserMedia: (typeof navigator.mediaDevices)['getUserMedia'] | undefined
-  let mockAddModule: ReturnType<typeof vi.fn>
-  let mockClose: ReturnType<typeof vi.fn>
-  let mockTrack: { stop: ReturnType<typeof vi.fn>; kind: string }
-  let mockGetUserMedia: ReturnType<typeof vi.fn>
-  let MockAudioContext: ReturnType<typeof vi.fn>
-
-  beforeEach(() => {
-    originalAudioContext = window.AudioContext
-    originalAudioWorkletNode = (window as any).AudioWorkletNode
-    originalGetUserMedia = navigator.mediaDevices?.getUserMedia
-
-    mockAddModule = vi.fn().mockResolvedValue(undefined)
-    mockClose = vi.fn().mockResolvedValue(undefined)
-    mockTrack = { stop: vi.fn(), kind: 'audio' }
-    const mockSource = { connect: vi.fn(), disconnect: vi.fn() }
-
-    MockAudioContext = vi.fn().mockImplementation(() => ({
-      state: 'running',
-      sampleRate: 16000,
-      audioWorklet: { addModule: mockAddModule },
-      createMediaStreamSource: vi.fn().mockReturnValue(mockSource),
-      createScriptProcessor: vi.fn().mockReturnValue({
-        connect: vi.fn(),
-        disconnect: vi.fn(),
-        onaudioprocess: null,
-      }),
-      resume: vi.fn().mockResolvedValue(undefined),
-      close: mockClose,
-    }))
-    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
-
-    ;(window as any).AudioWorkletNode = vi.fn().mockImplementation(() => ({
-      port: { onmessage: null, postMessage: vi.fn() },
-      disconnect: vi.fn(),
-    }))
-
-    mockGetUserMedia = vi.fn().mockResolvedValue({
-      getTracks: () => [mockTrack],
-      getAudioTracks: () => [mockTrack],
-    })
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: { getUserMedia: mockGetUserMedia },
-      writable: true,
-      configurable: true,
-    })
-  })
-
-  afterEach(() => {
-    window.AudioContext = originalAudioContext
-    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
-    if (originalGetUserMedia) {
-      Object.defineProperty(navigator, 'mediaDevices', {
-        value: { getUserMedia: originalGetUserMedia },
-        writable: true,
-        configurable: true,
-      })
-    }
-  })
-
-  it('prepares the audio context and worklet without requesting microphone access', async () => {
-    const recorder = new AudioRecorder()
-    await recorder.prepare()
-
-    expect(mockGetUserMedia).not.toHaveBeenCalled()
-    expect(MockAudioContext).toHaveBeenCalledTimes(1)
-    expect(mockAddModule).toHaveBeenCalledOnce()
-    expect(mockAddModule).toHaveBeenCalledWith('/audio-worklet-processor.js')
-  })
-
-  it('reuses the same AudioContext and worklet when prepare() precedes start()', async () => {
-    const recorder = new AudioRecorder()
-    await recorder.prepare()
-
-    mockAddModule.mockClear()
-
-    await recorder.start()
-
-    expect(mockAddModule).not.toHaveBeenCalled()
-    expect(MockAudioContext).toHaveBeenCalledTimes(1)
-    expect(mockGetUserMedia).toHaveBeenCalledTimes(1)
-
-    recorder.stop()
-  })
-
-  it('reuses the prepared audio context and loaded worklet across recordings', async () => {
-    const recorder = new AudioRecorder()
-
-    await recorder.start()
-    recorder.stop()
-
-    await recorder.start()
-    recorder.stop()
-
-    recorder.dispose()
-
-    expect(mockGetUserMedia).toHaveBeenCalledTimes(2)
-    expect(MockAudioContext).toHaveBeenCalledTimes(1)
-    expect(mockAddModule).toHaveBeenCalledTimes(1)
-    expect(mockTrack.stop).toHaveBeenCalledTimes(2)
-    expect(mockClose).toHaveBeenCalledTimes(1)
-  })
-})
-
-describe('AudioRecorder lifecycle cancellation', () => {
-  let originalAudioContext: typeof window.AudioContext
-  let originalAudioWorkletNode: unknown
-  let originalGetUserMedia: (typeof navigator.mediaDevices)['getUserMedia'] | undefined
-  let mockTrack: { stop: ReturnType<typeof vi.fn>; kind: string }
-
-  beforeEach(() => {
-    originalAudioContext = window.AudioContext
-    originalAudioWorkletNode = (window as any).AudioWorkletNode
-    originalGetUserMedia = navigator.mediaDevices?.getUserMedia
-
-    mockTrack = { stop: vi.fn(), kind: 'audio' }
-
-    const MockAudioContext = vi.fn().mockImplementation(() => ({
-      state: 'running',
-      sampleRate: 16000,
-      audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
-      createMediaStreamSource: vi.fn(),
-      createScriptProcessor: vi.fn(),
-      resume: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-    }))
-
-    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
-    ;(window as any).AudioWorkletNode = vi.fn().mockImplementation(() => ({
-      port: { onmessage: null, postMessage: vi.fn() },
-      disconnect: vi.fn(),
-    }))
-  })
-
-  afterEach(() => {
-    window.AudioContext = originalAudioContext
-    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
-    if (originalGetUserMedia) {
-      Object.defineProperty(navigator, 'mediaDevices', {
-        value: { getUserMedia: originalGetUserMedia },
-        writable: true,
-        configurable: true,
-      })
-    }
-  })
-
-  it('cleans up and does not enter recording state when dispose is called during async startup', async () => {
-    let resolveGetUserMedia: (stream: MediaStream) => void
-    const deferredGetUserMedia = new Promise<MediaStream>((resolve) => {
-      resolveGetUserMedia = resolve
-    })
-
-    const mockGetUserMedia = vi.fn().mockReturnValue(deferredGetUserMedia)
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: { getUserMedia: mockGetUserMedia },
-      writable: true,
-      configurable: true,
-    })
-
-    const recorder = new AudioRecorder()
-
-    const startPromise = recorder.start()
-
-    recorder.dispose()
-
-    const stream = { getTracks: () => [mockTrack], getAudioTracks: () => [mockTrack] } as unknown as MediaStream
-    resolveGetUserMedia!(stream)
-
-    await startPromise
-
-    expect(recorder.getState()).toBe('idle')
-    expect(mockTrack.stop).toHaveBeenCalled()
-    expect(window.AudioContext).not.toHaveBeenCalled()
-  })
-})
-
-describe('AudioRecorder voice activity detection', () => {
-  const SAMPLE_RATE = 16000
-  const msToSamples = (ms: number): number => Math.round((ms / 1000) * SAMPLE_RATE)
-
-  let originalAudioContext: typeof window.AudioContext
-  let originalAudioWorkletNode: unknown
-  let originalGetUserMedia: (typeof navigator.mediaDevices)['getUserMedia'] | undefined
-  let mockWorkletNode: { port: { onmessage: ((e: MessageEvent) => void) | null; postMessage: ReturnType<typeof vi.fn> }; disconnect: ReturnType<typeof vi.fn> }
-
-  type Frame = { samples: Int16Array; rms: number }
-  const feed = (rms: number, ms: number): void => {
-    const frame: Frame = { samples: new Int16Array(msToSamples(ms)), rms }
-    mockWorkletNode.port.onmessage?.({ data: frame } as MessageEvent)
+  static isTypeSupported(type: string): boolean {
+    return FakeMediaRecorder._supportedTypes.has(type)
   }
 
-  beforeEach(() => {
-    originalAudioContext = window.AudioContext
-    originalAudioWorkletNode = (window as any).AudioWorkletNode
-    originalGetUserMedia = navigator.mediaDevices?.getUserMedia
+  state: 'inactive' | 'recording' = 'inactive'
+  stream: MediaStream
+  mimeType: string
+  ondataavailable: ((event: BlobEvent) => void) | null = null
+  onstop: (() => void) | null = null
+  onerror: ((event: Event) => void) | null = null
 
-    const mockSource = { connect: vi.fn(), disconnect: vi.fn() }
-    mockWorkletNode = {
-      port: { onmessage: null, postMessage: vi.fn() },
-      disconnect: vi.fn(),
-    }
+  constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+    this.stream = stream
+    this.mimeType = options?.mimeType ?? ''
+    FakeMediaRecorder._instances.push(this)
+  }
 
-    const MockAudioContext = vi.fn().mockImplementation(() => ({
-      state: 'running',
-      sampleRate: SAMPLE_RATE,
-      audioWorklet: { addModule: vi.fn().mockResolvedValue(undefined) },
-      createMediaStreamSource: vi.fn().mockReturnValue(mockSource),
-      createScriptProcessor: vi.fn(),
-      resume: vi.fn().mockResolvedValue(undefined),
-      close: vi.fn().mockResolvedValue(undefined),
-    }))
-    window.AudioContext = MockAudioContext as unknown as typeof window.AudioContext
+  start(): void {
+    this.state = 'recording'
+  }
 
-    ;(window as any).AudioWorkletNode = vi.fn().mockImplementation(() => mockWorkletNode)
+  stop(): void {
+    this.state = 'inactive'
+    this.onstop?.()
+  }
+}
 
-    const mockTrack = { stop: vi.fn(), kind: 'audio' }
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function createMockTrack(): MediaStreamTrack {
+  return { stop: vi.fn(), kind: 'audio' } as unknown as MediaStreamTrack
+}
+
+function createMockStream(tracks: MediaStreamTrack[] = [createMockTrack()]): MediaStream {
+  return {
+    getTracks: () => tracks,
+    getAudioTracks: () => tracks.filter(t => t.kind === 'audio'),
+    getVideoTracks: () => [],
+    addTrack: vi.fn(),
+    removeTrack: vi.fn(),
+    clone: vi.fn(),
+    getTrackById: vi.fn(),
+    active: true,
+    id: 'mock-stream',
+    onaddtrack: null,
+    onremovetrack: null,
+  } as unknown as MediaStream
+}
+
+// ── describe: AudioRecorder.isSupported ─────────────────────────────────────
+
+describe('AudioRecorder.isSupported', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('returns true when navigator.mediaDevices.getUserMedia and window.MediaRecorder exist', () => {
     Object.defineProperty(navigator, 'mediaDevices', {
-      value: {
-        getUserMedia: vi.fn().mockResolvedValue({
-          getTracks: () => [mockTrack],
-          getAudioTracks: () => [mockTrack],
-        }),
-      },
+      value: { getUserMedia: vi.fn() },
       writable: true,
       configurable: true,
     })
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+    expect(AudioRecorder.isSupported()).toBe(true)
+  })
+
+  it('returns false when navigator.mediaDevices.getUserMedia is missing', () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: {},
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+    expect(AudioRecorder.isSupported()).toBe(false)
+  })
+
+  it('returns false when window.MediaRecorder is undefined', () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn() },
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    })
+    expect(AudioRecorder.isSupported()).toBe(false)
+  })
+})
+
+// ── Describe: AudioRecorder start ───────────────────────────────────────────
+
+describe('AudioRecorder start', () => {
+  let mockGetUserMedia: ReturnType<typeof vi.fn>
+  let mockTrack: ReturnType<typeof createMockTrack>
+  let mockStream: MediaStream
+  let recorder: AudioRecorder
+  let onStateChange: ReturnType<typeof vi.fn>
+  let onError: ReturnType<typeof vi.fn>
+  let onDataAvailable: ReturnType<typeof vi.fn>
+  let onNoSpeech: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    FakeMediaRecorder._instances = []
+    FakeMediaRecorder._supportedTypes = new Set([
+      'audio/webm;codecs=opus',
+      'audio/webm',
+    ])
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+
+    mockTrack = createMockTrack()
+    mockStream = createMockStream([mockTrack])
+    mockGetUserMedia = vi.fn().mockResolvedValue(mockStream)
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    })
+
+    onStateChange = vi.fn()
+    onError = vi.fn()
+    onDataAvailable = vi.fn()
+    onNoSpeech = vi.fn()
+
+    recorder = new AudioRecorder()
+    recorder.setOnStateChange(onStateChange)
+    recorder.setOnError(onError)
+    recorder.setOnDataAvailable(onDataAvailable)
+    recorder.setOnNoSpeech(onNoSpeech)
   })
 
   afterEach(() => {
-    window.AudioContext = originalAudioContext
-    ;(window as any).AudioWorkletNode = originalAudioWorkletNode
-    if (originalGetUserMedia) {
-      Object.defineProperty(navigator, 'mediaDevices', {
-        value: { getUserMedia: originalGetUserMedia },
-        writable: true,
-        configurable: true,
-      })
-    }
+    vi.restoreAllMocks()
   })
 
-  it('does not emit audio and signals no-speech when the recording is silent', async () => {
-    const onDataAvailable = vi.fn()
-    const onNoSpeech = vi.fn()
-    const recorder = new AudioRecorder()
+  it('requests microphone with echoCancellation, noiseSuppression, and autoGainControl', async () => {
+    await recorder.start()
+    expect(mockGetUserMedia).toHaveBeenCalledWith({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
+  })
+
+  it('selects the first supported MIME type from the preferred list', async () => {
+    await recorder.start()
+    const mr = FakeMediaRecorder._instances[0]
+    expect(mr.mimeType).toBe('audio/webm;codecs=opus')
+  })
+
+  it('selects a lower-priority MIME when higher ones are unsupported', async () => {
+    FakeMediaRecorder._supportedTypes = new Set(['audio/ogg;codecs=opus'])
+    await recorder.start()
+    const mr = FakeMediaRecorder._instances[0]
+    expect(mr.mimeType).toBe('audio/ogg;codecs=opus')
+  })
+
+  it('constructs MediaRecorder without options when no MIME type is supported', async () => {
+    FakeMediaRecorder._supportedTypes = new Set()
+    await recorder.start()
+    const mr = FakeMediaRecorder._instances[0]
+    expect(mr.mimeType).toBe('')
+  })
+
+  it('uses configured mimeTypes when provided', async () => {
+    recorder = new AudioRecorder({ mimeTypes: ['audio/wav', 'audio/ogg'] })
+    recorder.setOnStateChange(onStateChange)
+    FakeMediaRecorder._supportedTypes = new Set(['audio/wav', 'audio/ogg'])
+    await recorder.start()
+    const mr = FakeMediaRecorder._instances[0]
+    expect(mr.mimeType).toBe('audio/wav')
+  })
+
+  it('transitions to recording state', async () => {
+    await recorder.start()
+    expect(recorder.getState()).toBe('recording')
+    expect(onStateChange).toHaveBeenCalledWith('recording')
+  })
+
+})
+
+// ── describe: AudioRecorder stop ────────────────────────────────────────────
+
+describe('AudioRecorder stop', () => {
+  let mockGetUserMedia: ReturnType<typeof vi.fn>
+  let mockTrack: ReturnType<typeof createMockTrack>
+  let mockStream: MediaStream
+  let recorder: AudioRecorder
+  let onStateChange: ReturnType<typeof vi.fn>
+  let onDataAvailable: ReturnType<typeof vi.fn>
+  let onNoSpeech: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    FakeMediaRecorder._instances = []
+    FakeMediaRecorder._supportedTypes = new Set(['audio/webm;codecs=opus'])
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+
+    mockTrack = createMockTrack()
+    mockStream = createMockStream([mockTrack])
+    mockGetUserMedia = vi.fn().mockResolvedValue(mockStream)
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    })
+
+    onStateChange = vi.fn()
+    onDataAvailable = vi.fn()
+    onNoSpeech = vi.fn()
+
+    recorder = new AudioRecorder()
+    recorder.setOnStateChange(onStateChange)
     recorder.setOnDataAvailable(onDataAvailable)
     recorder.setOnNoSpeech(onNoSpeech)
+  })
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('emits one combined blob via setOnDataAvailable and transitions to stopped', async () => {
     await recorder.start()
-    for (let i = 0; i < 5; i++) {
-      feed(0.0005, 100)
-    }
+
+    const mr = FakeMediaRecorder._instances[0]
+    const chunk1 = new Blob(['part1'], { type: 'audio/webm;codecs=opus' })
+    const chunk2 = new Blob(['part2'], { type: 'audio/webm;codecs=opus' })
+    mr.ondataavailable?.({ data: chunk1 } as BlobEvent)
+    mr.ondataavailable?.({ data: chunk2 } as BlobEvent)
+
     recorder.stop()
 
-    expect(onNoSpeech).toHaveBeenCalledTimes(1)
-    expect(onDataAvailable).not.toHaveBeenCalled()
+    expect(mockTrack.stop).toHaveBeenCalled()
     expect(recorder.getState()).toBe('stopped')
-  })
-
-  it('signals no-speech when stopped before any audio frame is captured', async () => {
-    const onDataAvailable = vi.fn()
-    const onNoSpeech = vi.fn()
-    const recorder = new AudioRecorder()
-    recorder.setOnDataAvailable(onDataAvailable)
-    recorder.setOnNoSpeech(onNoSpeech)
-
-    await recorder.start()
-    recorder.stop()
-
-    expect(onNoSpeech).toHaveBeenCalledTimes(1)
-    expect(onDataAvailable).not.toHaveBeenCalled()
-    expect(recorder.getState()).toBe('stopped')
-  })
-
-  it('emits audio when speech is detected', async () => {
-    const onDataAvailable = vi.fn()
-    const onNoSpeech = vi.fn()
-    const recorder = new AudioRecorder()
-    recorder.setOnDataAvailable(onDataAvailable)
-    recorder.setOnNoSpeech(onNoSpeech)
-
-    await recorder.start()
-    for (let i = 0; i < 3; i++) {
-      feed(0.2, 100)
-    }
-    recorder.stop()
+    expect(onStateChange).toHaveBeenCalledWith('stopped')
 
     expect(onDataAvailable).toHaveBeenCalledTimes(1)
+    const emittedBlob = onDataAvailable.mock.calls[0][0] as Blob
+    expect(emittedBlob).toBeInstanceOf(Blob)
+    expect(emittedBlob.type).toBe('audio/webm;codecs=opus')
+  })
+
+  it('stops all tracks after stopping', async () => {
+    const track2 = createMockTrack()
+    const stream2 = createMockStream([mockTrack, track2])
+    mockGetUserMedia.mockResolvedValue(stream2)
+
+    await recorder.start()
+    recorder.stop()
+
+    expect(mockTrack.stop).toHaveBeenCalledTimes(1)
+    expect(track2.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('does nothing when not recording', async () => {
+    recorder.stop()
+    expect(onDataAvailable).not.toHaveBeenCalled()
     expect(onNoSpeech).not.toHaveBeenCalled()
+    expect(recorder.getState()).toBe('idle')
   })
 
-  it('auto-stops after trailing silence once speech has been detected', async () => {
-    const onDataAvailable = vi.fn()
-    const recorder = new AudioRecorder({ vad: { minSpeechMs: 50, silenceTimeoutMs: 200 } })
-    recorder.setOnDataAvailable(onDataAvailable)
-
+  it('uses first chunk type as fallback when no MIME type is configured or available', async () => {
+    FakeMediaRecorder._supportedTypes = new Set()
     await recorder.start()
-    feed(0.2, 100)
-    feed(0.0005, 100)
-    feed(0.0005, 100)
 
-    expect(recorder.getState()).toBe('stopped')
+    const mr = FakeMediaRecorder._instances[0]
+    expect(mr.mimeType).toBe('')
+
+    const chunk1 = new Blob(['audio-data'], { type: 'audio/ogg' })
+    mr.ondataavailable?.({ data: chunk1 } as BlobEvent)
+
+    recorder.stop()
+
     expect(onDataAvailable).toHaveBeenCalledTimes(1)
-    expect(mockWorkletNode.port.onmessage).toBeNull()
+    const emittedBlob = onDataAvailable.mock.calls[0][0] as Blob
+    expect(emittedBlob.type).toBe('audio/ogg')
+  })
+})
+
+// ── describe: AudioRecorder no-speech ───────────────────────────────────────
+
+describe('AudioRecorder no-speech', () => {
+  let mockGetUserMedia: ReturnType<typeof vi.fn>
+  let mockTrack: ReturnType<typeof createMockTrack>
+  let recorder: AudioRecorder
+  let onDataAvailable: ReturnType<typeof vi.fn>
+  let onNoSpeech: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    FakeMediaRecorder._instances = []
+    FakeMediaRecorder._supportedTypes = new Set(['audio/webm;codecs=opus'])
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+
+    mockTrack = createMockTrack()
+    mockGetUserMedia = vi.fn().mockResolvedValue(createMockStream([mockTrack]))
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    })
+
+    onDataAvailable = vi.fn()
+    onNoSpeech = vi.fn()
+
+    recorder = new AudioRecorder()
+    recorder.setOnDataAvailable(onDataAvailable)
+    recorder.setOnNoSpeech(onNoSpeech)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('calls setOnNoSpeech when no chunks were collected', async () => {
+    await recorder.start()
+    recorder.stop()
+
+    expect(onNoSpeech).toHaveBeenCalledTimes(1)
+    expect(onDataAvailable).not.toHaveBeenCalled()
+  })
+
+  it('calls setOnNoSpeech when the combined blob is zero size', async () => {
+    await recorder.start()
+
+    const mr = FakeMediaRecorder._instances[0]
+    mr.ondataavailable?.({ data: new Blob([], { type: 'audio/webm;codecs=opus' }) } as BlobEvent)
+
+    recorder.stop()
+
+    expect(onNoSpeech).toHaveBeenCalledTimes(1)
+    expect(onDataAvailable).not.toHaveBeenCalled()
+  })
+})
+
+// ── describe: AudioRecorder abort and dispose ───────────────────────────────
+
+describe('AudioRecorder abort and dispose', () => {
+  let mockGetUserMedia: ReturnType<typeof vi.fn>
+  let mockTrack: ReturnType<typeof createMockTrack>
+  let recorder: AudioRecorder
+  let onDataAvailable: ReturnType<typeof vi.fn>
+  let onStateChange: ReturnType<typeof vi.fn>
+
+  beforeEach(async () => {
+    FakeMediaRecorder._instances = []
+    FakeMediaRecorder._supportedTypes = new Set(['audio/webm;codecs=opus'])
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+
+    mockTrack = createMockTrack()
+    mockGetUserMedia = vi.fn().mockResolvedValue(createMockStream([mockTrack]))
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: mockGetUserMedia },
+      writable: true,
+      configurable: true,
+    })
+
+    onDataAvailable = vi.fn()
+    onStateChange = vi.fn()
+
+    recorder = new AudioRecorder()
+    recorder.setOnDataAvailable(onDataAvailable)
+    recorder.setOnStateChange(onStateChange)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('abort stops tracks and transitions to idle', async () => {
+    await recorder.start()
+
+    const mr = FakeMediaRecorder._instances[0]
+    mr.ondataavailable?.({ data: new Blob(['audio-data']) } as BlobEvent)
+
+    recorder.abort()
+
+    expect(mockTrack.stop).toHaveBeenCalled()
+    expect(onDataAvailable).not.toHaveBeenCalled()
+    expect(recorder.getState()).toBe('idle')
+  })
+
+  it('dispose stops tracks and transitions to idle', async () => {
+    await recorder.start()
+
+    const mr = FakeMediaRecorder._instances[0]
+    mr.ondataavailable?.({ data: new Blob(['audio-data']) } as BlobEvent)
+
+    recorder.dispose()
+
+    expect(mockTrack.stop).toHaveBeenCalled()
+    expect(onDataAvailable).not.toHaveBeenCalled()
+    expect(recorder.getState()).toBe('idle')
+  })
+})
+
+// ── describe: AudioRecorder error handling ──────────────────────────────────
+
+describe('AudioRecorder error handling', () => {
+  let recorder: AudioRecorder
+  let onError: ReturnType<typeof vi.fn>
+  let onStateChange: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn() },
+      writable: true,
+      configurable: true,
+    })
+
+    onError = vi.fn()
+    onStateChange = vi.fn()
+
+    recorder = new AudioRecorder()
+    recorder.setOnError(onError)
+    recorder.setOnStateChange(onStateChange)
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('maps NotAllowedError to Microphone permission denied', async () => {
+    const error = new DOMException('Permission denied', 'NotAllowedError')
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(error)
+
+    await expect(recorder.start()).rejects.toThrow()
+    expect(onError).toHaveBeenCalledWith('Microphone permission denied')
+    expect(recorder.getState()).toBe('error')
+  })
+
+  it('maps NotFoundError to No microphone found', async () => {
+    const error = new DOMException('No device found', 'NotFoundError')
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(error)
+
+    await expect(recorder.start()).rejects.toThrow()
+    expect(onError).toHaveBeenCalledWith('No microphone found')
+    expect(recorder.getState()).toBe('error')
+  })
+
+  it('maps other DOMException to formatted message', async () => {
+    const error = new DOMException('Something else', 'SecurityError')
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(error)
+
+    await expect(recorder.start()).rejects.toThrow()
+    expect(onError).toHaveBeenCalledWith('Microphone error: Something else')
+    expect(recorder.getState()).toBe('error')
+  })
+
+  it('maps non-DOMException errors to Failed to start recording', async () => {
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new Error('Network error'))
+
+    await expect(recorder.start()).rejects.toThrow()
+    expect(onError).toHaveBeenCalledWith('Failed to start recording')
+    expect(recorder.getState()).toBe('error')
+  })
+
+  it('transitions to error state on microphone failure', async () => {
+    navigator.mediaDevices.getUserMedia = vi.fn().mockRejectedValue(new Error('fail'))
+
+    await expect(recorder.start()).rejects.toThrow()
+    expect(onStateChange).toHaveBeenCalledWith('error')
+  })
+})
+
+// ── describe: AudioRecorder.prepare ─────────────────────────────────────────
+
+describe('AudioRecorder.prepare', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('resolves when supported', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn() },
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: FakeMediaRecorder,
+      writable: true,
+      configurable: true,
+    })
+    const recorder = new AudioRecorder()
+    await expect(recorder.prepare()).resolves.toBeUndefined()
+  })
+
+  it('throws when not supported', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: {},
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(window, 'MediaRecorder', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    })
+    const recorder = new AudioRecorder()
+    await expect(recorder.prepare()).rejects.toThrow('Audio recording is not supported in this browser')
   })
 })

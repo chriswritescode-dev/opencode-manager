@@ -3,6 +3,7 @@ import { useSettings } from '@/hooks/useSettings'
 import { getWebSpeechRecognizer, isWebRecognitionSupported, type SpeechRecognitionOptions, type SpeechRecognitionResult, type RecognitionState } from '@/lib/webSpeechRecognizer'
 import { AudioRecorder } from '@/lib/audioRecorder'
 import { sttApi } from '@/api/stt'
+import { FetchError } from '@/api/fetchWrapper'
 import { DEFAULT_STT_CONFIG } from '@/api/types/settings'
 
 const STT_START_TIMEOUT_MS = 10_000
@@ -38,7 +39,7 @@ export function useSTT(userId = 'default') {
   const isExternalProvider = config.provider === 'external'
 
   const isSupported = isExternalProvider 
-    ? true
+    ? AudioRecorder.isSupported()
     : isWebRecognitionSupported()
 
   useEffect(() => {
@@ -59,7 +60,6 @@ export function useSTT(userId = 'default') {
         const next = result.transcript.trim()
         return prevTrimmed ? `${prevTrimmed} ${next}` : next
       })
-      setIsRecording(false)
     })
 
     rec.onInterimResult((interim: string) => {
@@ -170,7 +170,10 @@ export function useSTT(userId = 'default') {
         })
         setInterimTranscript('')
       } catch (err) {
-        if (err instanceof Error && err.name === 'CanceledError') {
+        if (err instanceof Error && (
+          err.name === 'CanceledError' ||
+          (err instanceof FetchError && (err.code === 'CANCELED' || err.statusCode === 499))
+        )) {
           return
         }
         
@@ -212,16 +215,10 @@ export function useSTT(userId = 'default') {
   }, [])
 
   useEffect(() => {
-    if (!isEnabled || !isExternalProvider) {
-      return
-    }
-
-    void ensureAudioRecorder().prepare().catch(() => undefined)
-
     return () => {
       disposeAudioRecorder()
     }
-  }, [isEnabled, isExternalProvider, ensureAudioRecorder, disposeAudioRecorder])
+  }, [isEnabled, isExternalProvider, disposeAudioRecorder])
 
   const clearStartupTimeout = useCallback(() => {
     if (startupTimeoutRef.current) {
