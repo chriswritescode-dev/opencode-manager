@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { sttApi } from './stt'
+import { FetchError } from './fetchWrapper'
 
 describe('WAV extension selection logic', () => {
   const originalFetch = global.fetch
@@ -69,6 +70,18 @@ describe('WAV extension selection logic', () => {
     expect(audioFile.name).toBe('recording.m4a')
   })
 
+  it('should return webm for audio/webm;codecs=opus blob', async () => {
+    const blob = new Blob([], { type: 'audio/webm;codecs=opus' })
+    mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
+
+    await sttApi.transcribe(blob, 'test-user')
+
+    const callArgs = mockFetch.mock.calls[0]
+    const formData = callArgs[1]?.body as FormData
+    const audioFile = formData.get('audio') as File
+    expect(audioFile.name).toBe('recording.webm')
+  })
+
   it('should default to wav for unknown types', async () => {
     const blob = new Blob([], { type: 'audio/unknown' })
     mockFetch.mockResolvedValueOnce(createMockResponse(true, { text: 'test' }))
@@ -121,5 +134,87 @@ describe('WAV extension selection logic', () => {
     const callArgs = mockFetch.mock.calls[0]
     const formData = callArgs[1]?.body as FormData
     expect(formData.get('audio')).toBeInstanceOf(File)
+  })
+})
+
+describe('sttApi.transcribe cancellation and timeout', () => {
+  const originalFetch = global.fetch
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    global.fetch = originalFetch
+  })
+
+  it('throws 499 CANCELED when caller aborts', async () => {
+    const blob = new Blob([], { type: 'audio/webm;codecs=opus' })
+    const abortController = new AbortController()
+
+    const mockFetch = global.fetch as ReturnType<typeof vi.fn>
+    mockFetch.mockImplementation((_url: string, options: RequestInit) => {
+      const signal = options.signal as AbortSignal
+      return new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+          return
+        }
+        signal.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+        }, { once: true })
+      })
+    })
+
+    const promise = sttApi.transcribe(blob, 'test-user', abortController.signal)
+
+    abortController.abort()
+
+    await expect(promise).rejects.toThrow(FetchError)
+    await expect(promise).rejects.toMatchObject({
+      statusCode: 499,
+      code: 'CANCELED',
+    })
+  })
+
+  it('throws 408 TIMEOUT when transcription times out', async () => {
+    vi.useFakeTimers()
+
+    const blob = new Blob([], { type: 'audio/webm;codecs=opus' })
+
+    const mockFetch = global.fetch as ReturnType<typeof vi.fn>
+    mockFetch.mockImplementation((_url: string, options: RequestInit) => {
+      const signal = options.signal as AbortSignal
+      return new Promise((_resolve, reject) => {
+        if (signal.aborted) {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+          return
+        }
+        signal.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted')
+          err.name = 'AbortError'
+          reject(err)
+        }, { once: true })
+      })
+    })
+
+    const promise = sttApi.transcribe(blob, 'test-user')
+
+    vi.advanceTimersByTime(60000)
+
+    await expect(promise).rejects.toThrow(FetchError)
+    await expect(promise).rejects.toMatchObject({
+      statusCode: 408,
+      code: 'TIMEOUT',
+    })
+
+    vi.useRealTimers()
   })
 })

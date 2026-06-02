@@ -54,18 +54,27 @@ export const sttApi = {
     urlObj.searchParams.set('userId', userId)
 
     const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 60000)
+    let timeoutFired = false
+    const timeoutId = setTimeout(() => {
+      timeoutFired = true
+      controller.abort()
+    }, 60000)
 
-    const abortSignal = signal || controller.signal
+    if (signal?.aborted) {
+      controller.abort()
+    }
+    const onAbort = () => controller.abort()
+    signal?.addEventListener('abort', onAbort, { once: true })
 
     try {
       const response = await fetch(urlObj.toString(), {
         method: 'POST',
         body: formData,
-        signal: abortSignal,
+        signal: controller.signal,
       })
 
       clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', onAbort)
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({ error: 'Transcription failed' }))
@@ -75,7 +84,12 @@ export const sttApi = {
       return response.json()
     } catch (error) {
       clearTimeout(timeoutId)
+      signal?.removeEventListener('abort', onAbort)
+
       if (error instanceof Error && error.name === 'AbortError') {
+        if (signal?.aborted && !timeoutFired) {
+          throw new FetchError('Transcription canceled', 499, 'CANCELED')
+        }
         throw new FetchError('Transcription timeout', 408, 'TIMEOUT')
       }
       throw error

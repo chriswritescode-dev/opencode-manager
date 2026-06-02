@@ -128,6 +128,15 @@ body {
   animation: page-slide-in-from-left 300ms cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
 }
 
+@keyframes voice-overlay-in {
+  from { transform: translateY(12px) scale(0.97); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.animate-voice-overlay-in {
+  animation: voice-overlay-in 180ms cubic-bezier(0.2, 0.9, 0.3, 1);
+}
+
 @keyframes shine-loading {
   0% {
     background-position: -200% 0;
