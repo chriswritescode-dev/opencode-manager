@@ -497,6 +497,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       return
     }
 
+    event.preventDefault()
     voiceGestureStartYRef.current = event.clientY
     voiceSwipeArmedRef.current = false
     setIsVoiceSwipeArmed(false)
@@ -511,6 +512,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       return
     }
 
+    event.preventDefault()
     const deltaY = voiceGestureStartYRef.current - event.clientY
     const nextIsSwipeArmed = voiceSwipeArmedRef.current
       ? deltaY >= VOICE_SEND_SWIPE_DISARM_THRESHOLD
@@ -535,6 +537,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       return
     }
 
+    event.preventDefault()
     voiceGestureStartYRef.current = null
 
     if (canceled || !voiceSwipeArmedRef.current) {
@@ -1099,7 +1102,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
           : 'bg-muted hover:bg-muted-foreground/20 text-muted-foreground hover:text-foreground border-border active:bg-muted-foreground/30 active:scale-95'
       }`
 
-    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full'
+    const containerClassName = isDesktop ? 'relative hidden md:block' : 'relative flex w-full touch-none select-none'
 
     return (
       <div
@@ -1107,6 +1110,9 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         className={containerClassName}
         {...voiceGestureHandlers}
       >
+        {!isDesktop && showVoiceFeedback && (
+          <div aria-hidden="true" className="absolute inset-x-0 bottom-full z-20 h-44 touch-none" />
+        )}
         <VoiceStatusOverlay show={!isDesktop && showVoiceFeedback} label={voiceFeedbackLabel} state={voiceFeedbackState} />
         <button
           type="button"
