@@ -299,11 +299,14 @@ export class AudioRecorder {
   }
 
   private processRecording(): void {
-    if (this.isAborted || this.chunks.length === 0 || this.totalSamples === 0) {
+    if (this.isAborted) {
       return
     }
 
-    if (this.vad && !this.vad.hasSpeech) {
+    const hasAudio = this.chunks.length > 0 && this.totalSamples > 0
+    const hasSpeech = !this.vad || this.vad.hasSpeech
+
+    if (!hasAudio || !hasSpeech) {
       this.onNoSpeech?.()
       return
     }

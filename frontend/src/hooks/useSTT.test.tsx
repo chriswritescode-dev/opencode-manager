@@ -8,6 +8,7 @@ type MockRecorder = {
   abort: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
   prepare: ReturnType<typeof vi.fn>
+  getState: ReturnType<typeof vi.fn>
   setOnStateChange: ReturnType<typeof vi.fn>
   setOnError: ReturnType<typeof vi.fn>
   setOnDataAvailable: ReturnType<typeof vi.fn>
@@ -59,6 +60,7 @@ describe('useSTT external provider lifecycle', () => {
       abort: vi.fn(),
       dispose: vi.fn(),
       prepare: vi.fn().mockResolvedValue(undefined),
+      getState: vi.fn().mockReturnValue('recording'),
       setOnStateChange: vi.fn(),
       setOnError: vi.fn(),
       setOnDataAvailable: vi.fn(),
@@ -144,6 +146,23 @@ describe('useSTT external provider lifecycle', () => {
     expect(result.current.isProcessing).toBe(false)
     expect(result.current.isRecording).toBe(false)
     expect(result.current.isError).toBe(false)
+  })
+
+  it('ignores stopRecording when the recorder is not recording', async () => {
+    const { result } = renderHook(() => useSTT())
+
+    await waitFor(() => {
+      expect(mocks.AudioRecorder).toHaveBeenCalledTimes(1)
+    })
+
+    mockRecorder.getState.mockReturnValue('stopped')
+
+    act(() => {
+      result.current.stopRecording()
+    })
+
+    expect(mockRecorder.stop).not.toHaveBeenCalled()
+    expect(result.current.isProcessing).toBe(false)
   })
 
   it('disposes external recorder resources on unmount', async () => {

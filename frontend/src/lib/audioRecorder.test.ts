@@ -420,6 +420,21 @@ describe('AudioRecorder voice activity detection', () => {
     expect(recorder.getState()).toBe('stopped')
   })
 
+  it('signals no-speech when stopped before any audio frame is captured', async () => {
+    const onDataAvailable = vi.fn()
+    const onNoSpeech = vi.fn()
+    const recorder = new AudioRecorder()
+    recorder.setOnDataAvailable(onDataAvailable)
+    recorder.setOnNoSpeech(onNoSpeech)
+
+    await recorder.start()
+    recorder.stop()
+
+    expect(onNoSpeech).toHaveBeenCalledTimes(1)
+    expect(onDataAvailable).not.toHaveBeenCalled()
+    expect(recorder.getState()).toBe('stopped')
+  })
+
   it('emits audio when speech is detected', async () => {
     const onDataAvailable = vi.fn()
     const onNoSpeech = vi.fn()
