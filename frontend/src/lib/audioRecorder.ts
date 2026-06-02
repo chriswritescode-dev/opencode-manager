@@ -14,9 +14,48 @@ const PREFERRED_MIME_TYPES = [
   'audio/mp4',
   'audio/wav',
 ]
+const SPEECH_RMS_THRESHOLD = 0.005
+const SPEECH_PEAK_THRESHOLD = 0.02
+
+type AudioContextConstructor = new () => AudioContext
 
 function selectMimeType(): string | undefined {
   return PREFERRED_MIME_TYPES.find(type => MediaRecorder.isTypeSupported(type))
+}
+
+function getAudioContextConstructor(): AudioContextConstructor | null {
+  if (typeof window === 'undefined') return null
+  return window.AudioContext ?? (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext ?? null
+}
+
+async function blobHasSpeech(blob: Blob, AudioContextClass: AudioContextConstructor): Promise<boolean> {
+  let context: AudioContext | null = null
+  try {
+    context = new AudioContextClass()
+    const audioBuffer = await context.decodeAudioData(await blob.arrayBuffer())
+    let peak = 0
+    let sumSquares = 0
+    let sampleCount = 0
+
+    for (let channel = 0; channel < audioBuffer.numberOfChannels; channel++) {
+      const samples = audioBuffer.getChannelData(channel)
+      for (let i = 0; i < samples.length; i++) {
+        const sample = samples[i]
+        const amplitude = Math.abs(sample)
+        peak = Math.max(peak, amplitude)
+        sumSquares += sample * sample
+        sampleCount++
+      }
+    }
+
+    if (sampleCount === 0) return false
+    const rms = Math.sqrt(sumSquares / sampleCount)
+    return rms >= SPEECH_RMS_THRESHOLD || peak >= SPEECH_PEAK_THRESHOLD
+  } catch {
+    return true
+  } finally {
+    await context?.close().catch(() => undefined)
+  }
 }
 
 export class AudioRecorder {
@@ -151,8 +190,30 @@ export class AudioRecorder {
 
     if (this.chunks.length === 0 || combinedBlob.size === 0) {
       this.onNoSpeech?.()
-    } else {
+      this.reset('stopped')
+      return
+    }
+
+    const AudioContextClass = getAudioContextConstructor()
+    if (!AudioContextClass) {
       this.onDataAvailable?.(combinedBlob)
+      this.reset('stopped')
+      return
+    }
+
+    void this.finishRecordingWithSpeechDetection(combinedBlob, AudioContextClass)
+  }
+
+  private async finishRecordingWithSpeechDetection(combinedBlob: Blob, AudioContextClass: AudioContextConstructor): Promise<void> {
+    const hasSpeech = await blobHasSpeech(combinedBlob, AudioContextClass)
+    if (this.isAborted) {
+      return
+    }
+
+    if (hasSpeech) {
+      this.onDataAvailable?.(combinedBlob)
+    } else {
+      this.onNoSpeech?.()
     }
 
     this.reset('stopped')

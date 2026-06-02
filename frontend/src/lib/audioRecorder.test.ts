@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { AudioRecorder } from './audioRecorder'
 
 class FakeMediaRecorder {
@@ -57,7 +58,9 @@ function createMockStream(tracks: MediaStreamTrack[] = [createMockTrack()]): Med
 
 describe('AudioRecorder.isSupported', () => {
   afterEach(() => {
+    vi.unstubAllGlobals()
     vi.restoreAllMocks()
+    delete (Blob.prototype as { arrayBuffer?: unknown }).arrayBuffer
   })
 
   it('returns true when navigator.mediaDevices.getUserMedia and window.MediaRecorder exist', () => {
@@ -341,6 +344,36 @@ describe('AudioRecorder no-speech', () => {
     recorder.stop()
 
     expect(onNoSpeech).toHaveBeenCalledTimes(1)
+    expect(onDataAvailable).not.toHaveBeenCalled()
+  })
+
+  it('calls setOnNoSpeech when decoded audio has no energy', async () => {
+    class FakeAudioContext {
+      decodeAudioData = vi.fn().mockResolvedValue({
+        numberOfChannels: 1,
+        getChannelData: () => new Float32Array([0, 0, 0, 0]),
+      })
+
+      close = vi.fn().mockResolvedValue(undefined)
+    }
+
+    Object.defineProperty(window, 'AudioContext', {
+      value: FakeAudioContext,
+      writable: true,
+      configurable: true,
+    })
+    Object.defineProperty(Blob.prototype, 'arrayBuffer', {
+      value: vi.fn().mockResolvedValue(new ArrayBuffer(8)),
+      configurable: true,
+    })
+    await recorder.start()
+
+    const mr = FakeMediaRecorder._instances[0]
+    mr.ondataavailable?.({ data: new Blob(['encoded-silence'], { type: 'audio/webm;codecs=opus' }) } as BlobEvent)
+
+    recorder.stop()
+
+    await waitFor(() => expect(onNoSpeech).toHaveBeenCalledTimes(1))
     expect(onDataAvailable).not.toHaveBeenCalled()
   })
 })
