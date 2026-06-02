@@ -47,7 +47,8 @@ const revokeBlobUrls = (attachments: ImageAttachment[]) => {
 
 const ACCEPTED_FILE_TYPES = [...ACCEPTED_IMAGE_TYPES, "application/pdf"]
 
-const VOICE_SEND_SWIPE_THRESHOLD = 30
+const VOICE_SEND_SWIPE_ARM_THRESHOLD = 24
+const VOICE_SEND_SWIPE_DISARM_THRESHOLD = 8
 type VoiceButtonVariant = 'desktop' | 'mobile'
 
 
@@ -511,7 +512,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     }
 
     const deltaY = voiceGestureStartYRef.current - event.clientY
-    const nextIsSwipeArmed = deltaY >= VOICE_SEND_SWIPE_THRESHOLD
+    const nextIsSwipeArmed = voiceSwipeArmedRef.current
+      ? deltaY >= VOICE_SEND_SWIPE_DISARM_THRESHOLD
+      : deltaY >= VOICE_SEND_SWIPE_ARM_THRESHOLD
 
     if (nextIsSwipeArmed !== voiceSwipeArmedRef.current) {
       voiceSwipeArmedRef.current = nextIsSwipeArmed
