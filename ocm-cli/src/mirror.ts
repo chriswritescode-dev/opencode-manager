@@ -1,5 +1,5 @@
 import { spawnSync, spawn } from 'child_process'
-import { existsSync, statSync } from 'fs'
+import { existsSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { Readable } from 'stream'
 import { join, dirname } from 'path'
@@ -11,6 +11,7 @@ import { ManagerApiError } from './manager-api.js'
 const HARDCODED_EXCLUDES = ['node_modules', 'dist', '.next', '.venv', '__pycache__', '.turbo', '.DS_Store', '._*']
 const PART_RETRIES = 3
 const PART_BACKOFF_MS = [500, 2000, 8000]
+const MIRROR_GZIP = true
 
 function getGitignoreExclusions(repoRoot: string): string[] {
   const res = spawnSync('git', ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'], {
@@ -32,32 +33,6 @@ async function carryOverIgnored(fromDir: string, toDir: string): Promise<void> {
     await fsp.mkdir(dirname(dest), { recursive: true })
     await fsp.rename(src, dest).catch(() => {})
   }
-}
-
-function listIncludedFiles(repoRoot: string): string[] {
-  const tracked = spawnSync('git', ['ls-files', '-z'], { cwd: repoRoot, encoding: 'utf-8' })
-  const untracked = spawnSync('git', ['ls-files', '--others', '--exclude-standard', '-z'], { cwd: repoRoot, encoding: 'utf-8' })
-  const split = (out: string | null): string[] => (out ?? '').split('\0').filter((p) => p.length > 0)
-  const all = [...split(tracked.stdout), ...split(untracked.stdout)]
-  return all.filter((p) => {
-    const top = p.split('/')[0] ?? p
-    return !HARDCODED_EXCLUDES.includes(top)
-  })
-}
-
-export function estimateTarSize(repoRoot: string): number {
-  const files = listIncludedFiles(repoRoot)
-  let total = 0
-  for (const rel of files) {
-    let size = 0
-    try {
-      size = statSync(join(repoRoot, rel)).size
-    } catch {
-      continue
-    }
-    total += 512 + Math.ceil(size / 512) * 512
-  }
-  return total + 1024
 }
 
 export class MirrorAbort extends Error {
@@ -95,7 +70,6 @@ export function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): Mirror
 export interface MirrorProgress {
   phase: 'uploading' | 'committing'
   bytesSent: number
-  totalBytes: number
 }
 
 export interface MirrorUpOpts {
@@ -192,10 +166,10 @@ export async function mirrorUp(
 
   const begin = await opts.api.mirrorBegin(repoId, { force: opts.force, create: opts.create })
 
-  const totalBytes = estimateTarSize(plan.repoRoot)
   let bytesSent = 0
 
-  const tarArgs = ['-c', '-z', '-C', plan.repoRoot]
+  const tarArgs = ['-c', '-C', plan.repoRoot]
+  if (MIRROR_GZIP) tarArgs.unshift('-z')
   for (const dir of HARDCODED_EXCLUDES) tarArgs.push('--exclude', dir)
 
   const ignoredPaths = getGitignoreExclusions(plan.repoRoot)
@@ -234,12 +208,12 @@ export async function mirrorUp(
     for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
       await flusher.push(chunk)
       bytesSent += chunk.length
-      opts.onProgress?.({ phase: 'uploading', bytesSent, totalBytes })
+      opts.onProgress?.({ phase: 'uploading', bytesSent })
     }
     await tarExit
     const totalParts = await flusher.finish()
-    opts.onProgress?.({ phase: 'committing', bytesSent, totalBytes })
-    const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts, true)
+    opts.onProgress?.({ phase: 'committing', bytesSent })
+    const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts, MIRROR_GZIP)
     return result
   } catch (err) {
     if (!child.killed) child.kill('SIGKILL')
@@ -266,9 +240,11 @@ export async function mirrorDown(
   await fsp.mkdir(staging, { recursive: true })
 
   try {
-    const tarball = await api.mirrorDown(repoId)
+    const tarball = await api.mirrorDown(repoId, MIRROR_GZIP)
 
-    const child = spawn('tar', ['-x', '-z', '-f', '-', '-C', staging], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const tarArgs = ['-x', '-f', '-', '-C', staging]
+    if (MIRROR_GZIP) tarArgs.unshift('-z')
+    const child = spawn('tar', tarArgs, { stdio: ['pipe', 'pipe', 'pipe'] })
 
     const stderrChunks: Buffer[] = []
     child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))

@@ -106,8 +106,9 @@ export class ManagerApi {
     await fetch(url, { method: 'DELETE', headers: this.headers() }).catch(() => { /* best-effort */ })
   }
 
-  async mirrorDown(repoId: number): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror?compress=gzip`, {
+  async mirrorDown(repoId: number, gzip: boolean): Promise<ReadableStream<Uint8Array>> {
+    const query = gzip ? '?compress=gzip' : ''
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror${query}`, {
       headers: this.headers(),
     })
 

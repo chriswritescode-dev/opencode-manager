@@ -296,11 +296,7 @@ export async function cmdPush(args: string[]): Promise<void> {
   const repos = await fetchRepos(state.managerUrl, token)
 
   const progress = createProgressReporter('push')
-  const onProgress = (p: MirrorProgress) => {
-    if (p.phase === 'committing') progress.tick(p.bytesSent)
-    else if (p.totalBytes > 0) progress.update(p.bytesSent, p.totalBytes)
-    else progress.tick(p.bytesSent)
-  }
+  const onProgress = (p: MirrorProgress) => progress.tick(p.bytesSent)
 
   const remotes: RemoteRepoSummary[] = repos.map((r) => ({
     repoId: r.repoId,

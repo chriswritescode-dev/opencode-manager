@@ -69,6 +69,6 @@ export default [ocm]
 ## Requirements
 
 - `opencode` available on `PATH`
-- `git` and `tar` available on `PATH`
+- `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
 - macOS `security` CLI for Keychain-backed token storage
 - An OpenCode Manager URL and bearer token
