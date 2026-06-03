@@ -182,6 +182,35 @@ describe('internal-repo-mirror routes', () => {
       expect(readFileSync(join(extractDir, 'test.txt'), 'utf-8')).toBe('hello world')
     })
 
+    it('returns gzip-compressed stream when ?compress=gzip', async () => {
+      const repoDir = join(getTmpRoot(), 'test-repo')
+      mkdirSync(repoDir, { recursive: true })
+      writeFileSync(join(repoDir, 'test.txt'), 'hello world')
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+
+      const res = await app.request('/api/internal/repos/1/mirror?compress=gzip')
+      expect(res.status).toBe(200)
+      expect(res.headers.get('content-type')).toBe('application/gzip')
+      expect(res.headers.get('content-encoding')).toBeNull()
+
+      const body = Buffer.from(await res.arrayBuffer())
+      expect(body.length).toBeGreaterThan(0)
+
+      // Verify the body is gzip-compressed (starts with gzip magic bytes)
+      expect(body[0]).toBe(0x1f)
+      expect(body[1]).toBe(0x8b)
+
+      // Verify it extracts correctly via tar -xz
+      const extractDir = join(getTmpRoot(), 'extract-compressed')
+      mkdirSync(extractDir, { recursive: true })
+      const tarFile = join(getTmpRoot(), 'test.tar.gz')
+      writeFileSync(tarFile, body)
+      spawnSync('tar', ['-xz', '-C', extractDir, '-f', tarFile], { stdio: 'inherit' })
+      expect(existsSync(join(extractDir, 'test.txt'))).toBe(true)
+      expect(readFileSync(join(extractDir, 'test.txt'), 'utf-8')).toBe('hello world')
+    })
+
     it('returns 404 for non-existent repo', async () => {
       mockGetRepoById.mockReturnValue(null)
 

@@ -90,12 +90,12 @@ export class ManagerApi {
     if (!res.ok) throw await formatErrorResponse(res, `mirror part ${index}`)
   }
 
-  async mirrorCommit(repoId: number, uploadId: string, totalParts: number): Promise<MirrorCommitResult> {
+  async mirrorCommit(repoId: number, uploadId: string, totalParts: number, gzip: boolean): Promise<MirrorCommitResult> {
     const url = `${this.baseUrl}/api/internal/repos/${repoId}/mirror/commit`
     const res = await fetch(url, {
       method: 'POST',
       headers: { ...this.headers(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uploadId, totalParts }),
+      body: JSON.stringify({ uploadId, totalParts, gzip }),
     })
     if (!res.ok) throw await formatErrorResponse(res, 'mirror commit')
     return (await res.json()) as MirrorCommitResult
@@ -107,7 +107,7 @@ export class ManagerApi {
   }
 
   async mirrorDown(repoId: number): Promise<ReadableStream<Uint8Array>> {
-    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror`, {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror?compress=gzip`, {
       headers: this.headers(),
     })
 

@@ -273,8 +273,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
 
     return new Response(stream, {
       headers: {
-        'Content-Type': 'application/x-tar',
-        ...(compress ? { 'Content-Encoding': 'gzip' } : {}),
+        ...(compress ? { 'Content-Type': 'application/gzip' } : { 'Content-Type': 'application/x-tar' }),
       },
     })
   })

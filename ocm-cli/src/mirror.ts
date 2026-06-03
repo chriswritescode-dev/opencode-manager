@@ -195,7 +195,7 @@ export async function mirrorUp(
   const totalBytes = estimateTarSize(plan.repoRoot)
   let bytesSent = 0
 
-  const tarArgs = ['-c', '-C', plan.repoRoot]
+  const tarArgs = ['-c', '-z', '-C', plan.repoRoot]
   for (const dir of HARDCODED_EXCLUDES) tarArgs.push('--exclude', dir)
 
   const ignoredPaths = getGitignoreExclusions(plan.repoRoot)
@@ -239,7 +239,7 @@ export async function mirrorUp(
     await tarExit
     const totalParts = await flusher.finish()
     opts.onProgress?.({ phase: 'committing', bytesSent, totalBytes })
-    const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts)
+    const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts, true)
     return result
   } catch (err) {
     if (!child.killed) child.kill('SIGKILL')
@@ -268,7 +268,7 @@ export async function mirrorDown(
   try {
     const tarball = await api.mirrorDown(repoId)
 
-    const child = spawn('tar', ['-x', '-f', '-', '-C', staging], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn('tar', ['-x', '-z', '-f', '-', '-C', staging], { stdio: ['pipe', 'pipe', 'pipe'] })
 
     const stderrChunks: Buffer[] = []
     child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))

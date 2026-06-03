@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
 import { prepareMirror, MirrorAbort, estimateTarSize, mirrorDown, mirrorUp } from '../src/mirror'
 
@@ -174,9 +175,9 @@ describe('mirrorDown', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  function createTarball(dir: string): Buffer {
-    const tarFile = join(tmpDir, 'test.tar')
-    execSync(`tar -cf "${tarFile}" -C "${dir}" .`)
+  function createGzipTarball(dir: string): Buffer {
+    const tarFile = join(tmpDir, 'test.tar.gz')
+    execSync(`tar -czf "${tarFile}" -C "${dir}" .`)
     return require('fs').readFileSync(tarFile)
   }
 
@@ -189,7 +190,7 @@ describe('mirrorDown', () => {
     mkdirSync(contentDir)
     writeFileSync(join(contentDir, 'file.txt'), 'hello')
 
-    const tarData = createTarball(contentDir)
+    const tarData = createGzipTarball(contentDir)
 
     const mockApi = {
       mirrorDown: vi.fn().mockResolvedValue(
@@ -220,7 +221,7 @@ describe('mirrorDown', () => {
     mkdirSync(contentDir)
     writeFileSync(join(contentDir, 'new-file.txt'), 'new content')
 
-    const tarData = createTarball(contentDir)
+    const tarData = createGzipTarball(contentDir)
 
     const mockApi = {
       mirrorDown: vi.fn().mockResolvedValue(
@@ -277,7 +278,7 @@ describe('mirrorDown', () => {
     writeFileSync(join(contentDir, 'new-file.txt'), 'new content')
     writeFileSync(join(contentDir, 'updated.txt'), 'updated content')
 
-    const tarData = createTarball(contentDir)
+    const tarData = createGzipTarball(contentDir)
 
     const mockApi = {
       mirrorDown: vi.fn().mockResolvedValue(
@@ -317,7 +318,7 @@ describe('mirrorDown', () => {
     mkdirSync(contentDir)
     writeFileSync(join(contentDir, 'new-file.txt'), 'new content')
 
-    const tarData = createTarball(contentDir)
+    const tarData = createGzipTarball(contentDir)
 
     const mockApi = {
       mirrorDown: vi.fn().mockResolvedValue(
@@ -361,7 +362,7 @@ describe('mirrorDown', () => {
     writeFileSync(join(contentDir, 'tracked.txt'), 'new tracked')
     writeFileSync(join(contentDir, 'added.txt'), 'added')
 
-    const tarData = createTarball(contentDir)
+    const tarData = createGzipTarball(contentDir)
 
     const mockApi = {
       mirrorDown: vi.fn().mockResolvedValue(
@@ -395,7 +396,7 @@ describe('mirrorDown', () => {
     mkdirSync(contentDir)
     writeFileSync(join(contentDir, 'file.txt'), 'hello')
 
-    const tarData = createTarball(contentDir)
+    const tarData = createGzipTarball(contentDir)
 
     const mockApi = {
       mirrorDown: vi.fn().mockResolvedValue(
@@ -421,6 +422,37 @@ describe('mirrorDown', () => {
       expect(v).toBeGreaterThanOrEqual(prev)
       prev = v
     }
+  })
+
+  it('extracts a gzipped tarball produced by tar -czf', async () => {
+    const repoRoot = join(tmpDir, 'repo-gzip')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const contentDir = join(tmpDir, 'content-gzip')
+    mkdirSync(contentDir)
+    writeFileSync(join(contentDir, 'file.txt'), 'hello from gzip')
+
+    const tarData = createGzipTarball(contentDir)
+
+    const mockApi = {
+      mirrorDown: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(tarData))
+            controller.close()
+          },
+        })
+      ),
+    } as any
+
+    await mirrorDown(1, repoRoot, mockApi, { force: true })
+
+    expect(existsSync(join(repoRoot, 'file.txt'))).toBe(true)
+    expect(readFileSync(join(repoRoot, 'file.txt'), 'utf-8')).toBe('hello from gzip')
+
+    const entries = readdirSync(tmpDir).filter((e) => e.startsWith('repo-gzip.ocm-recv-'))
+    expect(entries.length).toBe(0)
   })
 })
 
@@ -450,7 +482,7 @@ describe('mirrorUp chunked upload', () => {
         }
         partsReceived[index] = Buffer.from(chunk)
       }),
-      mirrorCommit: vi.fn().mockImplementation(async (_repoId: number, _uploadId: string, totalParts: number) => {
+      mirrorCommit: vi.fn().mockImplementation(async (_repoId: number, _uploadId: string, totalParts: number, _gzip: boolean) => {
         committed = true
         commitTotalParts = totalParts
         return { repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false }
@@ -491,8 +523,8 @@ describe('mirrorUp chunked upload', () => {
     const repoRoot = join(tmpDir, 'repo-multi')
     mkdirSync(repoRoot)
     spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
-    writeFileSync(join(repoRoot, 'a.bin'), Buffer.alloc(200 * 1024, 0xab))
-    writeFileSync(join(repoRoot, 'b.bin'), Buffer.alloc(200 * 1024, 0xcd))
+    writeFileSync(join(repoRoot, 'a.bin'), randomBytes(200 * 1024))
+    writeFileSync(join(repoRoot, 'b.bin'), randomBytes(200 * 1024))
 
     const ctx = makeMockApi({ chunkSize: 128 * 1024 })
     const plan = {
@@ -578,5 +610,27 @@ describe('mirrorUp chunked upload', () => {
     expect(committingCalls.length).toBe(1)
     expect(committingCalls[0][0].totalBytes).toBeGreaterThan(0)
     expect(committingCalls[0][0].bytesSent).toBeGreaterThanOrEqual(0)
+  })
+
+  it('commits with gzip=true and produces a gzip-magic tar stream', async () => {
+    const repoRoot = join(tmpDir, 'repo-small')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'tracked content')
+
+    const ctx = makeMockApi()
+    const plan = {
+      repoRoot,
+      localOrigin: 'https://github.com/test/repo.git',
+      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+    }
+
+    await mirrorUp(plan, { api: ctx.api as any, force: false })
+
+    expect(ctx.api.mirrorCommit.mock.calls[0]![3]).toBe(true)
+
+    const combined = Buffer.concat(ctx.partsReceived)
+    expect(combined[0]).toBe(0x1f)
+    expect(combined[1]).toBe(0x8b)
   })
 })
