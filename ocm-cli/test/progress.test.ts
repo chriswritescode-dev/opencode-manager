@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { formatBytes, createProgressReporter } from '../src/progress'
-import type { ProgressSink, ProgressReporter } from '../src/progress'
+import type { ProgressSink } from '../src/progress'
 
 describe('formatBytes', () => {
   it('returns "0 B" for 0', () => {
@@ -40,111 +40,6 @@ describe('createProgressReporter', () => {
     }
     return { sink, writes }
   }
-
-  describe('non-TTY update', () => {
-    it('emits a line only when the 10%-bucket advances', () => {
-      let fakeTime = 100_000
-      const now = () => fakeTime
-      const { sink, writes } = createSink(false)
-      const reporter = createProgressReporter('Test', sink, now)
-
-      // 0% — bucket 0, previous bucket -1, writes
-      reporter.update(0, 100)
-      expect(writes).toHaveLength(1)
-      expect(writes[0]).toBe('Test: 0% (0 B / 100 B)\n')
-      fakeTime += 1000
-
-      // 5% — bucket 0, same bucket, no write
-      reporter.update(5, 100)
-      expect(writes).toHaveLength(1)
-
-      // 15% — bucket 1, advances, writes
-      reporter.update(15, 100)
-      expect(writes).toHaveLength(2)
-      expect(writes[1]).toBe('Test: 15% (15 B / 100 B)\n')
-      fakeTime += 1000
-
-      // 25% — bucket 2, advances, writes
-      reporter.update(25, 100)
-      expect(writes).toHaveLength(3)
-      expect(writes[2]).toBe('Test: 25% (25 B / 100 B)\n')
-      fakeTime += 1000
-
-      // 100% — pct clamped to 99, bucket 9, advances, writes
-      reporter.update(100, 100)
-      expect(writes).toHaveLength(4)
-      expect(writes[3]).toContain('99%')
-    })
-
-    it('never renders a percentage above 99 even when current exceeds total', () => {
-      const { sink, writes } = createSink(false)
-      const reporter = createProgressReporter('Test', sink)
-
-      reporter.update(200, 100)
-      expect(writes.length).toBeGreaterThanOrEqual(1)
-      for (const w of writes) {
-        expect(w).toMatch(/\d+%/)
-        const pct = parseInt(w.match(/(\d+)%/)![1]!, 10)
-        expect(pct).toBeLessThanOrEqual(99)
-      }
-    })
-
-    it('emits a line on the first update even at 0%', () => {
-      const { sink, writes } = createSink(false)
-      const reporter = createProgressReporter('Test', sink)
-
-      reporter.update(0, 100)
-      expect(writes).toHaveLength(1)
-      expect(writes[0]).toBe('Test: 0% (0 B / 100 B)\n')
-    })
-  })
-
-  describe('TTY update', () => {
-    it('output begins with carriage return and clear line', () => {
-      let fakeTime = 100_000
-      const now = () => fakeTime
-      const { sink, writes } = createSink(true)
-      const reporter = createProgressReporter('Test', sink, now)
-
-      reporter.update(10, 100)
-      expect(writes).toHaveLength(1)
-      expect(writes[0]).toMatch(/^\r\x1b\[K/)
-      expect(writes[0]).toContain('Test: 10%')
-      expect(writes[0]).toContain('10 B')
-      expect(writes[0]).toContain('100 B')
-    })
-
-    it('throttles renders to at least 80ms apart', () => {
-      let fakeTime = 100_000
-      const now = () => fakeTime
-      const { sink, writes } = createSink(true)
-      const reporter = createProgressReporter('Test', sink, now)
-
-      // First render
-      reporter.update(10, 100)
-      expect(writes).toHaveLength(1)
-
-      // Too soon — 40ms later
-      fakeTime += 40
-      reporter.update(20, 100)
-      expect(writes).toHaveLength(1)
-
-      // After 80ms — should render
-      fakeTime += 40
-      reporter.update(30, 100)
-      expect(writes).toHaveLength(2)
-    })
-
-    it('clamps percentage at 99', () => {
-      let fakeTime = 100_000
-      const now = () => fakeTime
-      const { sink, writes } = createSink(true)
-      const reporter = createProgressReporter('Test', sink, now)
-
-      reporter.update(200, 100)
-      expect(writes[0]).toContain('99%')
-    })
-  })
 
   describe('TTY tick', () => {
     it('output begins with carriage return and clear line and uses spinner frames', () => {
@@ -266,19 +161,6 @@ describe('createProgressReporter', () => {
   })
 
   describe('finished guard', () => {
-    it('update is a no-op after done()', () => {
-      let fakeTime = 100_000
-      const now = () => fakeTime
-      const { sink, writes } = createSink(true)
-      const reporter = createProgressReporter('Test', sink, now)
-
-      reporter.done()
-      const before = writes.length
-
-      reporter.update(50, 100)
-      expect(writes.length).toBe(before)
-    })
-
     it('tick is a no-op after done()', () => {
       let fakeTime = 100_000
       const now = () => fakeTime

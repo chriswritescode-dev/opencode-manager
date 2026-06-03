@@ -492,7 +492,7 @@ describe('mirrorUp chunked upload', () => {
     expect(ctx.api.mirrorAbort).toHaveBeenCalledWith(1, 'upload-1')
   })
 
-  it('calls onProgress with monotonically non-decreasing bytesSent and a terminal committing phase', async () => {
+  it('calls onProgress with monotonically non-decreasing bytesSent', async () => {
     const repoRoot = join(tmpDir, 'repo-progress')
     mkdirSync(repoRoot)
     spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
@@ -510,18 +510,11 @@ describe('mirrorUp chunked upload', () => {
 
     expect(onProgress).toHaveBeenCalled()
 
-    const uploadingCalls = onProgress.mock.calls.filter(([p]) => p.phase === 'uploading')
-    expect(uploadingCalls.length).toBeGreaterThanOrEqual(1)
-
     let prevBytes = -1
-    for (const [p] of uploadingCalls) {
+    for (const [p] of onProgress.mock.calls) {
       expect(p.bytesSent).toBeGreaterThanOrEqual(prevBytes)
       prevBytes = p.bytesSent
     }
-
-    const committingCalls = onProgress.mock.calls.filter(([p]) => p.phase === 'committing')
-    expect(committingCalls.length).toBe(1)
-    expect(committingCalls[0][0].bytesSent).toBeGreaterThanOrEqual(0)
   })
 
   it('commits with gzip=true and produces a gzip-magic tar stream', async () => {

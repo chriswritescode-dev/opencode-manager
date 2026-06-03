@@ -68,7 +68,6 @@ export function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): Mirror
 }
 
 export interface MirrorProgress {
-  phase: 'uploading' | 'committing'
   bytesSent: number
 }
 
@@ -208,11 +207,11 @@ export async function mirrorUp(
     for await (const chunk of child.stdout as AsyncIterable<Buffer>) {
       await flusher.push(chunk)
       bytesSent += chunk.length
-      opts.onProgress?.({ phase: 'uploading', bytesSent })
+      opts.onProgress?.({ bytesSent })
     }
     await tarExit
     const totalParts = await flusher.finish()
-    opts.onProgress?.({ phase: 'committing', bytesSent })
+    opts.onProgress?.({ bytesSent })
     const result = await opts.api.mirrorCommit(begin.repoId, begin.uploadId, totalParts, MIRROR_GZIP)
     return result
   } catch (err) {

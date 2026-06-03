@@ -19,7 +19,6 @@ export interface ProgressSink {
 }
 
 export interface ProgressReporter {
-  update(current: number, total: number): void
   tick(bytes: number): void
   done(): void
 }
@@ -31,30 +30,11 @@ export function createProgressReporter(
 ): ProgressReporter {
   let finished = false
   let lastRenderAt = -Infinity
-  let lastBucket = -1
   let lastNonTtyTickAt = -Infinity
   let frameIndex = 0
   const isTTY = out.isTTY === true
 
   return {
-    update(current: number, total: number): void {
-      if (finished) return
-
-      if (isTTY) {
-        const t = now()
-        if (t - lastRenderAt < 80) return
-        lastRenderAt = t
-        const pct = total > 0 ? Math.min(99, Math.floor((current / total) * 100)) : 0
-        out.write(`\r\x1b[K${label}: ${pct}% (${formatBytes(current)} / ${formatBytes(total)})`)
-      } else {
-        const pct = total > 0 ? Math.min(99, Math.floor((current / total) * 100)) : 0
-        const bucket = Math.floor(pct / 10)
-        if (bucket === lastBucket) return
-        lastBucket = bucket
-        out.write(`${label}: ${pct}% (${formatBytes(current)} / ${formatBytes(total)})\n`)
-      }
-    },
-
     tick(bytes: number): void {
       if (finished) return
       const t = now()
