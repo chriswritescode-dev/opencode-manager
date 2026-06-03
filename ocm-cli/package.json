@@ -1,6 +1,6 @@
 {
   "name": "@opencode-manager/ocm-cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "OpenCode Manager CLI: attach a local OpenCode TUI to a Manager-hosted repo.",
   "license": "MIT",
   "repository": {
