@@ -64,6 +64,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
   const [isUpdating, setIsUpdating] = useState(false)
   const [editingConfig, setEditingConfig] = useState<OpenCodeConfig | null>(null)
   const [selectedConfig, setSelectedConfig] = useState<OpenCodeConfig | null>(null)
+  const [activeConfigName, setActiveConfigName] = useState<string>('')
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     agentsMd: false,
     commands: false,
@@ -292,6 +293,18 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
   }, [])
 
   useEffect(() => {
+    if (configs.length === 0) {
+      setActiveConfigName('')
+      return
+    }
+    const stillExists = configs.some((c) => c.name === activeConfigName)
+    if (!stillExists) {
+      const fallback = configs.find((c) => c.isDefault) ?? configs[0]
+      setActiveConfigName(fallback.name)
+    }
+  }, [configs, activeConfigName])
+
+  useEffect(() => {
     if (configs.length > 0 && !selectedConfig) {
       const defaultConfig = configs.find(config => config.isDefault)
       setSelectedConfig(defaultConfig || configs[0])
@@ -408,6 +421,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
 
   const isUnhealthy = health?.opencode !== 'healthy'
   const canImportFromHost = Boolean(importStatus?.configSourcePath || importStatus?.stateSourcePath)
+  const activeConfig = configs.find((c) => c.name === activeConfigName) ?? null
 
   return (
     <div className="space-y-6 overflow-y-auto">
@@ -490,13 +504,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                 >
                   <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                   <span className="text-xs sm:text-sm">Versions</span>
-                </Button>
-                <Button 
-                  size="sm"
-                  onClick={() => setIsCreateDialogOpen(true)}
-                >
-                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  <span className="text-xs sm:text-sm">New Config</span>
                 </Button>
               </div>
             </div>
@@ -621,73 +628,96 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
           </CardContent>
         </Card>
       ) : (
-        <div className="flex flex-col gap-4 md:grid md:grid-cols-2 lg:grid-cols">
-          {configs
-            .sort((a, b) => {
-              if (a.isDefault) return -1
-              if (b.isDefault) return 1
-              return 0
-            })
-            .map((config) => (
-              <Card key={config.id} className={cn('border-transparent', config.isDefault && 'border-green-500')}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <CardTitle className="text-sm sm:text-base">{config.name}</CardTitle>
-                      {!config.isValid && (
-                        <Badge variant="destructive">
-                          Invalid Config
-                        </Badge>
-                      )}
-                      {config.isDefault && (
-                        <Badge variant="default" className="text-green-500 bg-green-500/10">
-                          Current
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => downloadConfig(config)}
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => startEdit(config)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDefaultConfig(config)}
-                        disabled={config.isDefault || isUpdating}
-                      >
-                        <StarOff className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setDeleteConfirmConfig(config)}
-                        className="text-red-500 hover:text-red-600"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-sm text-muted-foreground break-words">
-                    <p className="truncate">Updated: {new Date(config.updatedAt).toLocaleString()}</p>
-                    <p className="truncate">Created: {new Date(config.createdAt).toLocaleString()}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-        </div>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm sm:text-base">OpenCode Configurations</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Select
+                value={activeConfigName}
+                onValueChange={(value) => {
+                  setActiveConfigName(value)
+                  const next = configs.find((c) => c.name === value)
+                  if (next && !next.isDefault) {
+                    void setDefaultConfig(next)
+                  }
+                }}
+              >
+                <SelectTrigger className="w-full sm:max-w-xs">
+                  <SelectValue placeholder="Select a configuration..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {configs.map((config) => (
+                    <SelectItem key={config.id} value={config.name}>
+                      {config.name}
+                      {config.isDefault && ' (Current)'}
+                      {!config.isValid && ' (Invalid)'}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <div className="flex items-center gap-2">
+                {activeConfig?.isDefault && (
+                  <Badge variant="default" className="text-green-500 bg-green-500/10">
+                    Current
+                  </Badge>
+                )}
+                {activeConfig && !activeConfig.isValid && (
+                  <Badge variant="destructive">Invalid Config</Badge>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!activeConfig}
+                  onClick={() => activeConfig && downloadConfig(activeConfig)}
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!activeConfig}
+                  onClick={() => activeConfig && startEdit(activeConfig)}
+                >
+                  <Edit className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!activeConfig || activeConfig.isDefault || isUpdating}
+                  onClick={() => activeConfig && setDefaultConfig(activeConfig)}
+                >
+                  <StarOff className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!activeConfig}
+                  className="text-red-500 hover:text-red-600"
+                  onClick={() => activeConfig && setDeleteConfirmConfig(activeConfig)}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+                <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  <span className="text-xs sm:text-sm">New Config</span>
+                </Button>
+              </div>
+            </div>
+
+            {activeConfig && (
+              <div className="text-sm text-muted-foreground break-words">
+                <p className="truncate">Updated: {new Date(activeConfig.updatedAt).toLocaleString()}</p>
+                <p className="truncate">Created: {new Date(activeConfig.createdAt).toLocaleString()}</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
       {/* Edit Dialog */}
