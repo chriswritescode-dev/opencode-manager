@@ -17,6 +17,77 @@ type PromptTabProps = {
   onNewTemplate: () => void
 }
 
+type PromptTemplateCardProps = {
+  template: PromptTemplate
+  selected?: boolean
+  onApply?: (template: PromptTemplate) => void
+  onEdit: (template: PromptTemplate) => void
+  onDelete: (templateId: number) => void
+}
+
+export function PromptTemplateCard({ template, selected = false, onApply, onEdit, onDelete }: PromptTemplateCardProps) {
+  const cardClassName = `w-full rounded-xl border-2 p-4 text-left transition-all ${
+    selected
+      ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
+      : 'border-border bg-card hover:bg-accent/40'
+  }`
+
+  const content = (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge className="border-transparent bg-orange-500 text-[10px] uppercase tracking-wide text-white">
+          {template.category}
+        </Badge>
+        <Badge className="border-transparent bg-slate-600 text-[10px] uppercase tracking-wide text-white">
+          {template.cadenceHint}
+        </Badge>
+      </div>
+      <div className="mt-3">
+        <p className="text-sm font-semibold">{template.title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
+      </div>
+      <p className="mt-3 line-clamp-3 text-xs text-muted-foreground">{template.suggestedDescription}</p>
+      {selected && (
+        <div className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full bg-primary">
+          <Check className="h-3 w-3 text-primary-foreground" />
+        </div>
+      )}
+    </>
+  )
+
+  return (
+    <div className="group relative">
+      {onApply ? (
+        <button type="button" onClick={() => onApply(template)} className={cardClassName}>
+          {content}
+        </button>
+      ) : (
+        <div className={cardClassName}>{content}</div>
+      )}
+      <div className={`absolute top-2 flex gap-1 transition-opacity ${selected || onApply ? 'right-10' : 'right-2'} ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6"
+          onClick={(e) => { e.stopPropagation(); onEdit(template) }}
+        >
+          <Pencil className="h-3 w-3" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 text-destructive hover:text-destructive"
+          onClick={(e) => { e.stopPropagation(); onDelete(template.id) }}
+        >
+          <Trash2 className="h-3 w-3" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function PromptTab({
   prompt,
   onPromptChange,
@@ -50,56 +121,14 @@ export function PromptTab({
               const isSelected = selectedPromptTemplateId === template.id
 
               return (
-                <div key={template.id} className="relative group">
-                  <button
-                    type="button"
-                    onClick={() => onApplyTemplate(template)}
-                    className={`w-full rounded-xl border-2 p-4 text-left transition-all ${
-                      isSelected
-                        ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
-                        : 'border-border bg-card hover:bg-accent/40'
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Badge className="text-[10px] uppercase tracking-wide border-transparent bg-orange-500 text-white">
-                        {template.category}
-                      </Badge>
-                      <Badge className="text-[10px] uppercase tracking-wide border-transparent bg-slate-600 text-white">
-                        {template.cadenceHint}
-                      </Badge>
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-sm font-semibold">{template.title}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
-                    </div>
-                    <p className="mt-3 text-xs text-muted-foreground line-clamp-3">{template.suggestedDescription}</p>
-                    {isSelected && (
-                      <div className="absolute top-2 right-2 h-5 w-5 rounded-full bg-primary flex items-center justify-center">
-                        <Check className="h-3 w-3 text-primary-foreground" />
-                      </div>
-                    )}
-                  </button>
-                  <div className={`absolute top-2 right-10 flex gap-1 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={(e) => { e.stopPropagation(); onEditTemplate(template) }}
-                    >
-                      <Pencil className="h-3 w-3" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive hover:text-destructive"
-                      onClick={(e) => { e.stopPropagation(); onDeleteTemplate(template.id) }}
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
-                  </div>
-                </div>
+                <PromptTemplateCard
+                  key={template.id}
+                  template={template}
+                  selected={isSelected}
+                  onApply={onApplyTemplate}
+                  onEdit={onEditTemplate}
+                  onDelete={onDeleteTemplate}
+                />
               )
             })}
           </div>

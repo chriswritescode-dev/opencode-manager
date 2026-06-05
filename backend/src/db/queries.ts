@@ -209,7 +209,8 @@ export function updateRepoBranch(db: Database, id: number, branch: string): void
 }
 
 export function deleteRepo(db: Database, id: number): void {
+  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ?').run(id)
+  db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ?').run(id)
   const stmt = db.prepare('DELETE FROM repos WHERE id = ?')
   stmt.run(id)
 }
-

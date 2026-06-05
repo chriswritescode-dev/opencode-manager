@@ -273,6 +273,8 @@ app.get('/', async (c) => {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
+      scheduleService.prepareRepoDelete(id)
+      
       await repoService.deleteRepoFiles(database, id)
       
       return c.json({ success: true })

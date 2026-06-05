@@ -37,6 +37,7 @@ function createTestApp(db: Database, openCodeClient: OpenCodeClient = createStub
     listSchedules: () => [],
     updateSchedule: () => {},
     deleteSchedule: () => {},
+    prepareRepoDelete: () => {},
   } as any
   app.route('/repos', createRepoRoutes(db, stubGitAuthService, scheduleService, openCodeClient))
   return app

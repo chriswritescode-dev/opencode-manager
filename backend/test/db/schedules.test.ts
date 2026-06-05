@@ -72,6 +72,19 @@ describe('schedule database queries', () => {
     })
   })
 
+  it('lists schedule job ids without loading full job rows', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([{ id: 7 }, { id: 8 }]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const jobIds = schedulesDb.listScheduleJobIdsByRepo(mockDb, 42)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+    expect(stmt.all).toHaveBeenCalledWith(42)
+    expect(jobIds).toEqual([7, 8])
+  })
+
   it('creates a schedule job and reloads the inserted row', () => {
     const insertStmt = {
       run: vi.fn().mockReturnValue({ lastInsertRowid: 7 }),
@@ -171,6 +184,27 @@ describe('schedule database queries', () => {
       enabled: false,
       skillMetadata: null,
     })
+  })
+
+  it('deletes schedule runs before deleting a schedule job', () => {
+    const deleteRunsStmt = {
+      run: vi.fn().mockReturnValue({ changes: 2 }),
+    }
+    const deleteJobStmt = {
+      run: vi.fn().mockReturnValue({ changes: 1 }),
+    }
+
+    mockDb.prepare
+      .mockReturnValueOnce(deleteRunsStmt)
+      .mockReturnValueOnce(deleteJobStmt)
+
+    const deleted = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
+
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?')
+    expect(deleteRunsStmt.run).toHaveBeenCalledWith(42, 7)
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(deleteJobStmt.run).toHaveBeenCalledWith(42, 7)
+    expect(deleted).toBe(true)
   })
 
   it('returns null when updating metadata for a missing run', () => {

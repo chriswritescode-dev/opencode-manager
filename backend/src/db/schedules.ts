@@ -116,6 +116,12 @@ export function listScheduleJobsByRepo(db: Database, repoId: number): ScheduleJo
   return rows.map(rowToScheduleJob)
 }
 
+export function listScheduleJobIdsByRepo(db: Database, repoId: number): number[] {
+  const stmt = db.prepare('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+  const rows = stmt.all(repoId) as Array<{ id: number }>
+  return rows.map((row) => row.id)
+}
+
 export function listEnabledScheduleJobs(db: Database): ScheduleJob[] {
   const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE enabled = 1 ORDER BY id ASC')
   const rows = stmt.all() as ScheduleJobRow[]
@@ -200,9 +206,27 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
 }
 
 export function deleteScheduleJob(db: Database, repoId: number, jobId: number): boolean {
+  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?').run(repoId, jobId)
   const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
   const result = stmt.run(repoId, jobId)
   return result.changes > 0
+}
+
+export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {
+  const runStmt = db.prepare(`
+    DELETE FROM schedule_runs
+    WHERE (repo_id != ? AND repo_id NOT IN (SELECT id FROM repos))
+       OR job_id NOT IN (SELECT id FROM schedule_jobs)
+  `)
+  const orphanedRuns = runStmt.run(ASSISTANT_REPO_ID).changes
+
+  const jobStmt = db.prepare(`
+    DELETE FROM schedule_jobs
+    WHERE repo_id != ? AND repo_id NOT IN (SELECT id FROM repos)
+  `)
+  const orphanedJobs = jobStmt.run(ASSISTANT_REPO_ID).changes
+
+  return { orphanedJobs, orphanedRuns }
 }
 
 export function updateScheduleJobRunState(db: Database, repoId: number, jobId: number, values: { lastRunAt: number; nextRunAt?: number | null }): void {

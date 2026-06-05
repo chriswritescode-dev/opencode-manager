@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite'
 import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import {
+  cleanupOrphanedSchedules,
   listAllScheduleJobsWithRepos,
   listAllScheduleRuns,
 } from '../../src/db/schedules'
@@ -100,5 +101,15 @@ describe('assistant repo (repo_id=0) in global aggregate queries', () => {
     expect(run.repoId).toBe(0)
     expect(run.repoName).toBe('Assistant')
     expect(run.repoPath).toBe('assistant')
+  })
+
+  it('cleanupOrphanedSchedules keeps assistant schedules while deleting real repo orphans', () => {
+    db.exec('DELETE FROM repos WHERE id = 1')
+
+    const result = cleanupOrphanedSchedules(db)
+
+    expect(result).toEqual({ orphanedJobs: 1, orphanedRuns: 1 })
+    expect(listAllScheduleJobsWithRepos(db).map((job) => job.repoId)).toEqual([0])
+    expect(listAllScheduleRuns(db, {}).map((run) => run.repoId)).toEqual([0])
   })
 })
