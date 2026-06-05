@@ -1,5 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { createPortal } from 'react-dom'
+import { useState, useEffect, useCallback } from 'react'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -12,7 +11,7 @@ import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
-import { VersionSelectContent } from '@/components/settings/VersionSelectContent'
+import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
@@ -22,18 +21,12 @@ import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
 
 export function SettingsDialog() {
-  const { isOpen, close: originalClose, activeTab, setActiveTab } = useSettingsDialog()
+  const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
   const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
-  const versionDialogOpenRef = useRef(false)
-  versionDialogOpenRef.current = isVersionDialogOpen
-  const close = useCallback(() => {
-    if (versionDialogOpenRef.current) return
-    originalClose()
-  }, [originalClose])
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -106,13 +99,15 @@ export function SettingsDialog() {
   }
 
    return (
-      <>
       <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && close()}>
         <DialogContent 
           className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col !gap-0"
           fullscreen
           canSwipeBack={() => mobileView !== 'menu'}
           onSwipeBack={handleSettingsBack}
+          onInteractOutside={(e) => e.preventDefault()}
+          onFocusOutside={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
         >
          <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
@@ -253,11 +248,10 @@ export function SettingsDialog() {
         </div>
 
       </DialogContent>
+      <VersionSelectDialog
+        open={isVersionDialogOpen}
+        onOpenChange={setIsVersionDialogOpen}
+      />
     </Dialog>
-    {typeof document !== 'undefined' && createPortal(
-      <VersionSelectContent onClose={() => setIsVersionDialogOpen(false)} />,
-      document.body,
-    )}
-    </>
   )
 }
