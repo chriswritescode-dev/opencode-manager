@@ -84,6 +84,16 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
       <BottomSheet isOpen={isOpen} onClose={onClose} heightClass="h-[70dvh]" ariaLabel="Switch repo">
         <BottomSheetHeader>
           <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={handleHomeClick}
+              className="flex-shrink-0"
+            >
+              <House className="h-4 w-4" />
+              <span className="hidden sm:inline">Home</span>
+              <span className="sr-only">Home</span>
+            </Button>
             <Input
               type="text"
               placeholder="Search projects..."
@@ -94,15 +104,6 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
               autoComplete="off"
               name="repo-quick-switch"
             />
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="outline"
-              onClick={handleHomeClick}
-            >
-              <House className="h-4 w-4" />
-              <span className="sr-only">Home</span>
-            </Button>
             <Button
               type="button"
               size="sm"
