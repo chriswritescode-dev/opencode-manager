@@ -258,18 +258,31 @@ describe('Database Queries', () => {
   })
 
   describe('deleteRepo', () => {
-    it('should delete repo by ID', () => {
-      const stmt = {
+    it('should delete repo schedules before deleting repo by ID', () => {
+      const deleteRunsStmt = {
+        run: vi.fn().mockReturnValue({ changes: 2 })
+      }
+      const deleteJobsStmt = {
         run: vi.fn().mockReturnValue({ changes: 1 })
       }
-      mockDb.prepare.mockReturnValue(stmt)
+      const deleteRepoStmt = {
+        run: vi.fn().mockReturnValue({ changes: 1 })
+      }
+      mockDb.prepare
+        .mockReturnValueOnce(deleteRunsStmt)
+        .mockReturnValueOnce(deleteJobsStmt)
+        .mockReturnValueOnce(deleteRepoStmt)
 
       db.deleteRepo(mockDb, 1)
 
-      expect(mockDb.prepare).toHaveBeenCalledWith(
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id = ?')
+      expect(deleteRunsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
+      expect(deleteJobsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(3,
         'DELETE FROM repos WHERE id = ?'
       )
-      expect(stmt.run).toHaveBeenCalledWith(1)
+      expect(deleteRepoStmt.run).toHaveBeenCalledWith(1)
     })
   })
 

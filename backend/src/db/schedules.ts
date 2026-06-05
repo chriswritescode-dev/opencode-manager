@@ -200,13 +200,13 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
 }
 
 export function deleteScheduleJob(db: Database, repoId: number, jobId: number): boolean {
+  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?').run(repoId, jobId)
   const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
   const result = stmt.run(repoId, jobId)
   return result.changes > 0
 }
 
 export function deleteScheduleJobsByRepo(db: Database, repoId: number): number {
-  // Delete runs first in case FK enforcement is off (e.g. during migration)
   db.prepare('DELETE FROM schedule_runs WHERE repo_id = ?').run(repoId)
   const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ?')
   const result = stmt.run(repoId)
@@ -216,16 +216,16 @@ export function deleteScheduleJobsByRepo(db: Database, repoId: number): number {
 export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {
   const runStmt = db.prepare(`
     DELETE FROM schedule_runs
-    WHERE repo_id NOT IN (SELECT id FROM repos)
+    WHERE (repo_id != ? AND repo_id NOT IN (SELECT id FROM repos))
        OR job_id NOT IN (SELECT id FROM schedule_jobs)
   `)
-  const orphanedRuns = runStmt.run().changes
+  const orphanedRuns = runStmt.run(ASSISTANT_REPO_ID).changes
 
   const jobStmt = db.prepare(`
     DELETE FROM schedule_jobs
-    WHERE repo_id NOT IN (SELECT id FROM repos)
+    WHERE repo_id != ? AND repo_id NOT IN (SELECT id FROM repos)
   `)
-  const orphanedJobs = jobStmt.run().changes
+  const orphanedJobs = jobStmt.run(ASSISTANT_REPO_ID).changes
 
   return { orphanedJobs, orphanedRuns }
 }

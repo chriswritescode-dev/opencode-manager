@@ -173,6 +173,27 @@ describe('schedule database queries', () => {
     })
   })
 
+  it('deletes schedule runs before deleting a schedule job', () => {
+    const deleteRunsStmt = {
+      run: vi.fn().mockReturnValue({ changes: 2 }),
+    }
+    const deleteJobStmt = {
+      run: vi.fn().mockReturnValue({ changes: 1 }),
+    }
+
+    mockDb.prepare
+      .mockReturnValueOnce(deleteRunsStmt)
+      .mockReturnValueOnce(deleteJobStmt)
+
+    const deleted = schedulesDb.deleteScheduleJob(mockDb, 42, 7)
+
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ?')
+    expect(deleteRunsStmt.run).toHaveBeenCalledWith(42, 7)
+    expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
+    expect(deleteJobStmt.run).toHaveBeenCalledWith(42, 7)
+    expect(deleted).toBe(true)
+  })
+
   it('returns null when updating metadata for a missing run', () => {
     const selectStmt = {
       get: vi.fn().mockReturnValue(undefined),

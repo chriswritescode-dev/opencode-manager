@@ -3,12 +3,12 @@ import type { CreatePromptTemplateRequest } from '@opencode-manager/shared/types
 import type { PromptDialog } from '@/hooks/useScheduleUrlState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Loader2, FileText, Plus, Upload, Pencil, Trash2 } from 'lucide-react'
+import { Loader2, FileText, Plus, Upload } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { parseMarkdownTemplate } from '@/lib/schedules/markdownTemplate'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { PromptTemplateCard } from './PromptTab'
 
 interface PromptsTabProps {
   promptDialog: PromptDialog
@@ -130,41 +130,12 @@ export function PromptsTab({ promptDialog, templateId, onNew, onEdit, onDelete, 
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
             {templates.map((template) => (
-              <div key={template.id} className="group relative rounded-xl border-2 border-border bg-card p-4 text-left transition-all hover:bg-accent/40">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge className="border-transparent bg-orange-500 text-[10px] uppercase tracking-wide text-white">
-                    {template.category}
-                  </Badge>
-                  <Badge className="border-transparent bg-slate-600 text-[10px] uppercase tracking-wide text-white">
-                    {template.cadenceHint}
-                  </Badge>
-                </div>
-                <div className="mt-3">
-                  <p className="text-sm font-semibold">{template.title}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">{template.description}</p>
-                </div>
-                <p className="mt-3 line-clamp-3 text-xs text-muted-foreground">{template.suggestedDescription}</p>
-                <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6"
-                    onClick={() => onEdit(template.id)}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-6 w-6 text-destructive hover:text-destructive"
-                    onClick={() => onDelete(template.id)}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </div>
-              </div>
+              <PromptTemplateCard
+                key={template.id}
+                template={template}
+                onEdit={(item) => onEdit(item.id)}
+                onDelete={onDelete}
+              />
             ))}
           </div>
         )}
