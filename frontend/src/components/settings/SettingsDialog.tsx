@@ -100,6 +100,7 @@ export function SettingsDialog() {
   }
 
    return (
+      <>
       <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && close()}>
         <DialogContent 
           className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col !gap-0"
@@ -245,11 +246,12 @@ export function SettingsDialog() {
            </div>
         </div>
       </DialogContent>
-
-      <VersionSelectDialog
-        open={isVersionDialogOpen}
-        onOpenChange={setIsVersionDialogOpen}
-      />
     </Dialog>
+
+    <VersionSelectDialog
+      open={isVersionDialogOpen}
+      onOpenChange={setIsVersionDialogOpen}
+    />
+    </>
   )
 }
