@@ -23,42 +23,67 @@ type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['ap
 type LspStatus = LspStatusResponse[number]
 
 type LegacySession = SessionListResponse[number]
-type SessionV2Info = {
+
+/** Pre-v1.16.0 session shape returned by /api/session */
+type SessionV2InfoV1 = {
+  id: string
+  parentID?: string
+  projectID: string
+  workspaceID?: string
+  title: string
+  time: { created: number; updated: number; compacting?: number; archived?: number }
+  path?: unknown
+}
+
+/** v1.16.0+ session shape returned by /api/session */
+type SessionV2InfoV2 = {
   id: string
   parentID?: string
   projectID: string
   title: string
-  time: {
-    created: number
-    updated: number
-    archived?: number
-  }
-  location: {
-    directory: string
-    workspaceID?: string
-  }
+  time: { created: number; updated: number; archived?: number }
+  location: { directory: string; workspaceID?: string }
   agent?: string
   model?: { id: string; providerID: string; variant?: string }
   cost: number
-  tokens: {
-    input: number
-    output: number
-    reasoning: number
-    cache: { read: number; write: number }
-  }
+  tokens: { input: number; output: number; reasoning: number; cache: { read: number; write: number } }
   subpath?: string
 }
+
+type SessionV2Info = SessionV2InfoV1 | SessionV2InfoV2
 type SessionPageCursor = { previous?: string; next?: string }
-type SessionPageResponse = { data: SessionV2Info[]; cursor?: SessionPageCursor }
+
+/** Response from /api/session — may be old (items) or new (data) format */
+type SessionPageResponse = {
+  data?: SessionV2InfoV2[]
+  items?: SessionV2InfoV1[]
+  cursor?: SessionPageCursor
+}
 type SessionPageParams = { limit?: number; order?: 'asc' | 'desc'; search?: string; cursor?: string }
 type SessionPage = { items: LegacySession[]; nextCursor?: string }
 
+function isNewSession(session: SessionV2Info): session is SessionV2InfoV2 {
+  return 'location' in session && session.location !== undefined
+}
+
 function toLegacySession(session: SessionV2Info, directory?: string): LegacySession {
+  if (isNewSession(session)) {
+    return {
+      id: session.id,
+      projectID: session.projectID,
+      workspaceID: session.location.workspaceID,
+      directory: directory ?? session.location.directory ?? '',
+      parentID: session.parentID,
+      title: session.title || 'Untitled Session',
+      version: 'v2',
+      time: session.time,
+    } as LegacySession
+  }
   return {
     id: session.id,
     projectID: session.projectID,
-    workspaceID: session.location.workspaceID,
-    directory: directory ?? session.location.directory ?? '',
+    workspaceID: session.workspaceID,
+    directory: directory ?? '',
     parentID: session.parentID,
     title: session.title || 'Untitled Session',
     version: 'v2',
@@ -104,8 +129,9 @@ export class OpenCodeClient {
     const response = await fetchWrapper<SessionPageResponse>(`${this.baseURL}/api/session`, {
       params: queryParams,
     })
+    const rawItems = response.data ?? response.items ?? []
     return {
-      items: response.data.map((item) => toLegacySession(item, this.directory)),
+      items: rawItems.map((item) => toLegacySession(item, this.directory)),
       nextCursor: response.cursor?.next,
     }
   }

@@ -44,6 +44,45 @@ describe('OpenCodeClient', () => {
   })
 
   describe('listSessionsPage', () => {
+    it('handles v1.16.0+ API response format with data envelope and nested location', async () => {
+      fetchMock.mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: [
+              {
+                id: 'ses_v2_1',
+                projectID: 'proj_v2',
+                parentID: 'parent_v2',
+                title: 'V2 Session',
+                time: { created: 3000, updated: 4000 },
+                location: { directory: '/my-repo', workspaceID: 'ws_v2' },
+                agent: 'default',
+                model: { id: 'gpt-4', providerID: 'openai' },
+                cost: 0.05,
+                tokens: { input: 100, output: 50, reasoning: 10, cache: { read: 0, write: 0 } },
+              },
+            ],
+            cursor: { next: 'v2_cursor' },
+          }),
+          { status: 200 },
+        ),
+      )
+
+      const result = await new OpenCodeClient('/api/opencode', '/repo').listSessionsPage({ limit: 10 })
+
+      expect(result.items).toHaveLength(1)
+      expect(result.items[0]).toMatchObject({
+        id: 'ses_v2_1',
+        projectID: 'proj_v2',
+        workspaceID: 'ws_v2',
+        directory: '/repo',
+        parentID: 'parent_v2',
+        title: 'V2 Session',
+        version: 'v2',
+      })
+      expect(result.nextCursor).toBe('v2_cursor')
+    })
+
     it('sends first-page params to /api/session with directory and returns adapted sessions', async () => {
       fetchMock.mockResolvedValue(
         new Response(
