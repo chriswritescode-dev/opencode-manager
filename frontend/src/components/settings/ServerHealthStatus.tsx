@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Loader2, ArrowUpCircle, RotateCcw, History, Plus } from 'lucide-react'
+import { Loader2, ArrowUpCircle, RotateCcw, History } from 'lucide-react'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
@@ -9,11 +9,10 @@ import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
 
 interface ServerHealthStatusProps {
-  onCreateConfig?: () => void
   onOpenVersionDialog?: () => void
 }
 
-export function ServerHealthStatus({ onCreateConfig, onOpenVersionDialog }: ServerHealthStatusProps) {
+export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
 
@@ -162,13 +161,6 @@ export function ServerHealthStatus({ onCreateConfig, onOpenVersionDialog }: Serv
             >
               <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               <span className="text-xs sm:text-sm">Versions</span>
-            </Button>
-            <Button
-              size="sm"
-              onClick={onCreateConfig}
-            >
-              <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              <span className="text-xs sm:text-sm">New Config</span>
             </Button>
           </div>
         </div>
