@@ -27,13 +27,29 @@ type SessionV2Info = {
   id: string
   parentID?: string
   projectID: string
-  workspaceID?: string
   title: string
-  time: LegacySession['time']
-  path?: unknown
+  time: {
+    created: number
+    updated: number
+    archived?: number
+  }
+  location: {
+    directory: string
+    workspaceID?: string
+  }
+  agent?: string
+  model?: { id: string; providerID: string; variant?: string }
+  cost: number
+  tokens: {
+    input: number
+    output: number
+    reasoning: number
+    cache: { read: number; write: number }
+  }
+  subpath?: string
 }
 type SessionPageCursor = { previous?: string; next?: string }
-type SessionPageResponse = { items: SessionV2Info[]; cursor?: SessionPageCursor }
+type SessionPageResponse = { data: SessionV2Info[]; cursor?: SessionPageCursor }
 type SessionPageParams = { limit?: number; order?: 'asc' | 'desc'; search?: string; cursor?: string }
 type SessionPage = { items: LegacySession[]; nextCursor?: string }
 
@@ -41,8 +57,8 @@ function toLegacySession(session: SessionV2Info, directory?: string): LegacySess
   return {
     id: session.id,
     projectID: session.projectID,
-    workspaceID: session.workspaceID,
-    directory: directory ?? '',
+    workspaceID: session.location.workspaceID,
+    directory: directory ?? session.location.directory ?? '',
     parentID: session.parentID,
     title: session.title || 'Untitled Session',
     version: 'v2',
@@ -89,7 +105,7 @@ export class OpenCodeClient {
       params: queryParams,
     })
     return {
-      items: response.items.map((item) => toLegacySession(item, this.directory)),
+      items: response.data.map((item) => toLegacySession(item, this.directory)),
       nextCursor: response.cursor?.next,
     }
   }
