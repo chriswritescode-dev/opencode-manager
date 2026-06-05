@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -11,7 +12,7 @@ import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
-import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
+import { VersionSelectContent } from '@/components/settings/VersionSelectContent'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
@@ -21,12 +22,18 @@ import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
 
 export function SettingsDialog() {
-  const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
+  const { isOpen, close: originalClose, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
   const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
+  const versionDialogOpenRef = useRef(false)
+  versionDialogOpenRef.current = isVersionDialogOpen
+  const close = useCallback(() => {
+    if (versionDialogOpenRef.current) return
+    originalClose()
+  }, [originalClose])
 
   const pushSectionHistory = useCallback((view: SettingsView) => {
     if (view === 'menu') return
@@ -66,14 +73,13 @@ export function SettingsDialog() {
       return
     }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
+      if (e.key === 'Escape' && !isVersionDialogOpen) {
         close()
       }
     }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, close])
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [isOpen, close, isVersionDialogOpen])
 
   const menuItems = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
@@ -245,13 +251,13 @@ export function SettingsDialog() {
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
            </div>
         </div>
+
       </DialogContent>
     </Dialog>
-
-    <VersionSelectDialog
-      open={isVersionDialogOpen}
-      onOpenChange={setIsVersionDialogOpen}
-    />
+    {typeof document !== 'undefined' && createPortal(
+      <VersionSelectContent onClose={() => setIsVersionDialogOpen(false)} />,
+      document.body,
+    )}
     </>
   )
 }
