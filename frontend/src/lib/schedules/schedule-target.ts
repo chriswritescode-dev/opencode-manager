@@ -1,9 +1,10 @@
 import type { Repo } from '@/api/types'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME } from '@opencode-manager/shared/utils'
 import { getRepoDisplayName } from '@/lib/utils'
 import { getAssistantPath } from '@/lib/navigation'
 
-export interface Workspace {
+export interface ScheduleTarget {
   repoId: number
   kind: 'assistant' | 'repo'
   name: string
@@ -12,13 +13,11 @@ export interface Workspace {
   backHref: string
 }
 
-export const ASSISTANT_REPO_ID = 0
-
 export function isAssistantRepoId(repoId: number | undefined): boolean {
   return repoId === ASSISTANT_REPO_ID
 }
 
-export function workspaceFromRepo(repo: Repo): Workspace {
+export function scheduleTargetFromRepo(repo: Repo): ScheduleTarget {
   return {
     repoId: repo.id,
     kind: 'repo',
@@ -29,12 +28,12 @@ export function workspaceFromRepo(repo: Repo): Workspace {
   }
 }
 
-export function workspaceFromAssistant(status: AssistantModeStatus): Workspace {
+export function scheduleTargetFromAssistant(status: AssistantModeStatus): ScheduleTarget {
   return {
     repoId: ASSISTANT_REPO_ID,
     kind: 'assistant',
-    name: 'Assistant',
-    subtitle: 'Assistant Workspace',
+    name: ASSISTANT_REPO_NAME,
+    subtitle: 'Built-in assistant',
     fullPath: status.directory,
     backHref: getAssistantPath(),
   }

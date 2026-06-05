@@ -5,7 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Schedules } from '../Schedules'
 
 const mocks = vi.hoisted(() => ({
-  useWorkspace: vi.fn(),
+  useScheduleTarget: vi.fn(),
   useRepoSchedules: vi.fn(),
   useRepoSchedule: vi.fn(),
   useRepoScheduleRuns: vi.fn(),
@@ -25,8 +25,8 @@ vi.mock('react-router-dom', async (importOriginal) => ({
   useNavigate: () => mockNavigate,
 }))
 
-vi.mock('@/hooks/useWorkspace', () => ({
-  useWorkspace: mocks.useWorkspace,
+vi.mock('@/hooks/useScheduleTarget', () => ({
+  useScheduleTarget: mocks.useScheduleTarget,
 }))
 
 vi.mock('@/hooks/useSchedules', () => ({
@@ -101,14 +101,14 @@ describe('Schedules', () => {
     mocks.useCancelRepoScheduleRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
-  describe('assistant workspace (repoId=0)', () => {
+  describe('assistant schedule target (repoId=0)', () => {
     it('renders assistant title and subtitle', () => {
-      mocks.useWorkspace.mockReturnValue({
-        workspace: {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
           repoId: 0,
           kind: 'assistant',
           name: 'Assistant',
-          subtitle: 'Assistant Workspace',
+          subtitle: 'Built-in assistant',
           fullPath: '/abs/assistant',
           backHref: '/assistant',
         },
@@ -123,16 +123,16 @@ describe('Schedules', () => {
       renderSchedules('0')
 
       expect(screen.getByText('Assistant')).toBeInTheDocument()
-      expect(screen.getByText('Assistant Workspace')).toBeInTheDocument()
+      expect(screen.getByText('Built-in assistant')).toBeInTheDocument()
     })
 
     it('does not render Repository not found', () => {
-      mocks.useWorkspace.mockReturnValue({
-        workspace: {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
           repoId: 0,
           kind: 'assistant',
           name: 'Assistant',
-          subtitle: 'Assistant Workspace',
+          subtitle: 'Built-in assistant',
           fullPath: '/abs/assistant',
           backHref: '/assistant',
         },
@@ -152,12 +152,12 @@ describe('Schedules', () => {
     it('renders back button with correct href', () => {
       mockNavigate.mockClear()
 
-      mocks.useWorkspace.mockReturnValue({
-        workspace: {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
           repoId: 0,
           kind: 'assistant',
           name: 'Assistant',
-          subtitle: 'Assistant Workspace',
+          subtitle: 'Built-in assistant',
           fullPath: '/abs/assistant',
           backHref: '/assistant',
         },
@@ -179,12 +179,12 @@ describe('Schedules', () => {
 
     it('calls runMutation with repoId=0 when Run Now is clicked', () => {
       const mutateMock = vi.fn()
-      mocks.useWorkspace.mockReturnValue({
-        workspace: {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
           repoId: 0,
           kind: 'assistant',
           name: 'Assistant',
-          subtitle: 'Assistant Workspace',
+          subtitle: 'Built-in assistant',
           fullPath: '/abs/assistant',
           backHref: '/assistant',
         },
@@ -228,10 +228,10 @@ describe('Schedules', () => {
     })
   })
 
-  describe('repo workspace (repoId=5)', () => {
+  describe('repo schedule target (repoId=5)', () => {
     it('renders repo name and subtitle', () => {
-      mocks.useWorkspace.mockReturnValue({
-        workspace: {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
           repoId: 5,
           kind: 'repo',
           name: 'my-repo',
@@ -256,8 +256,8 @@ describe('Schedules', () => {
     it('renders back button with correct href', () => {
       mockNavigate.mockClear()
 
-      mocks.useWorkspace.mockReturnValue({
-        workspace: {
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
           repoId: 5,
           kind: 'repo',
           name: 'my-repo',
@@ -282,10 +282,10 @@ describe('Schedules', () => {
     })
   })
 
-  describe('workspace not found', () => {
+  describe('schedule target not found', () => {
     it('renders not found fallback for real repo', () => {
-      mocks.useWorkspace.mockReturnValue({
-        workspace: undefined,
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: undefined,
         isLoading: false,
         isError: true,
       })
@@ -300,8 +300,8 @@ describe('Schedules', () => {
     })
 
     it('renders not found fallback for assistant', () => {
-      mocks.useWorkspace.mockReturnValue({
-        workspace: undefined,
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: undefined,
         isLoading: false,
         isError: true,
       })
@@ -312,7 +312,7 @@ describe('Schedules', () => {
 
       renderSchedules('0')
 
-      expect(screen.getByText('Workspace not found')).toBeInTheDocument()
+      expect(screen.getByText('Assistant not found')).toBeInTheDocument()
     })
   })
 })

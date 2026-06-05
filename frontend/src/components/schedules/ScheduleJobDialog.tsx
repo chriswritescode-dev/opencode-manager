@@ -18,7 +18,7 @@ import {
   type SchedulePreset,
 } from '@/components/schedules/schedule-utils'
 import { getRepoDisplayName } from '@/lib/utils'
-import { ASSISTANT_REPO_ID } from '@/lib/schedules/workspace'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME } from '@opencode-manager/shared/utils'
 import { Loader2 } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
@@ -111,8 +111,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const repoOptions = useMemo<ComboboxOption[]>(() => {
     const assistantOption: ComboboxOption = {
       value: ASSISTANT_REPO_ID.toString(),
-      label: 'Assistant',
-      description: 'Assistant Workspace',
+      label: ASSISTANT_REPO_NAME,
+      description: 'Built-in assistant',
     }
     const repoEntries = repos
       .filter((repo) => repo.cloneStatus === 'ready')

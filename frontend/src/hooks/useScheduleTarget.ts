@@ -1,11 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
 import { useAssistantMode } from '@/hooks/useAssistantMode'
-import { isAssistantRepoId, workspaceFromAssistant, workspaceFromRepo } from '@/lib/schedules/workspace'
-import type { Workspace } from '@/lib/schedules/workspace'
+import { isAssistantRepoId, scheduleTargetFromAssistant, scheduleTargetFromRepo } from '@/lib/schedules/schedule-target'
+import type { ScheduleTarget } from '@/lib/schedules/schedule-target'
 
-export function useWorkspace(repoId: number | undefined): {
-  workspace: Workspace | undefined
+export function useScheduleTarget(repoId: number | undefined): {
+  scheduleTarget: ScheduleTarget | undefined
   isLoading: boolean
   isError: boolean
 } {
@@ -19,14 +19,14 @@ export function useWorkspace(repoId: number | undefined): {
 
   if (isAssistantRepoId(repoId)) {
     return {
-      workspace: assistantQuery.status ? workspaceFromAssistant(assistantQuery.status) : undefined,
+      scheduleTarget: assistantQuery.status ? scheduleTargetFromAssistant(assistantQuery.status) : undefined,
       isLoading: assistantQuery.isLoading,
       isError: assistantQuery.isError,
     }
   }
 
   return {
-    workspace: repoQuery.data ? workspaceFromRepo(repoQuery.data) : undefined,
+    scheduleTarget: repoQuery.data ? scheduleTargetFromRepo(repoQuery.data) : undefined,
     isLoading: repoQuery.isLoading,
     isError: repoQuery.isError,
   }

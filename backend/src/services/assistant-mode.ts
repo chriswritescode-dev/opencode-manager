@@ -13,6 +13,7 @@ import {
   ensureDirectoryExists,
 } from './file-operations'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH } from '@opencode-manager/shared/utils'
 import { getReposPath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
 import { getOrCreateInternalToken } from './internal-token'
@@ -21,7 +22,7 @@ import { logger } from '../utils/logger'
 
 const ASSISTANT_WARMUP_OPENCODE_TIMEOUT_MS = 90000
 
-const ASSISTANT_MODE_DIR = 'assistant'
+const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
 const ASSISTANT_MODE_RELATIVE_PATH = 'repos/assistant'
 const ASSISTANT_AGENTS_MD_FILENAME = 'AGENTS.md'
 const ASSISTANT_OPENCODE_CONFIG_FILENAME = 'opencode.json'
@@ -52,7 +53,7 @@ export function getAssistantModeDirectory(): string {
 
 export function buildAssistantRepo(): Repo {
   return {
-    id: 0,
+    id: ASSISTANT_REPO_ID,
     localPath: ASSISTANT_MODE_DIR,
     fullPath: getAssistantModeDirectory(),
     defaultBranch: 'main',

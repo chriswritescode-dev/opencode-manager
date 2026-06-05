@@ -35,6 +35,10 @@ vi.mock('@/components/settings/NotificationSettings', () => ({
   NotificationSettings: () => <div data-testid="notification-settings">Notification Settings Content</div>,
 }))
 
+vi.mock('@/components/settings/VersionSelectDialog', () => ({
+  VersionSelectDialog: () => <div data-testid="version-select-dialog">Version Select Dialog</div>,
+}))
+
 vi.mock('@/hooks/useMobile', () => ({
   useSwipeBack: vi.fn(() => ({
     bind: vi.fn(),

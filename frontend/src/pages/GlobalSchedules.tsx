@@ -16,6 +16,8 @@ import { CalendarClock, Loader2, Plus, ArrowLeft, Play, Pencil, Trash2, Pause, P
 
 import type { ScheduleJobWithRepo, ScheduleRunWithContext } from '@/api/schedules'
 import { Combobox } from '@/components/ui/combobox'
+import { isAssistantRepoId } from '@/lib/schedules/schedule-target'
+import { getAssistantPath } from '@/lib/navigation'
 
 type StatusFilter = 'all' | 'enabled' | 'disabled'
 type ScheduleModeFilter = 'all' | 'cron' | 'interval'
@@ -285,9 +287,8 @@ export function GlobalSchedules() {
 
   const handleNavigateToRepo = (repoPath: string) => {
     const repoId = jobs.find((j) => j.repoPath === repoPath)?.repoId
-    if (repoId) {
-      navigate(`/repos/${repoId}`)
-    }
+    if (repoId === undefined) return
+    navigate(isAssistantRepoId(repoId) ? getAssistantPath() : `/repos/${repoId}`)
   }
 
   if (isLoading) {

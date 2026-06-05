@@ -9,11 +9,8 @@ import {
   type ScheduleRunStatus,
   type ScheduleRunTriggerSource,
 } from '@opencode-manager/shared/schemas'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME, ASSISTANT_REPO_PATH } from '@opencode-manager/shared/utils'
 import type { ScheduleJobPersistenceInput } from '../services/schedule-config'
-
-const ASSISTANT_REPO_ID = 0
-const ASSISTANT_REPO_NAME = 'Assistant'
-const ASSISTANT_REPO_PATH = 'assistant'
 
 interface ScheduleJobRow {
   id: number
@@ -389,15 +386,17 @@ function repoNameFromPath(repoPath: string): string {
   return repoPath.split(/[\\/]/).pop() ?? repoPath
 }
 
-function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithRepo {
-  const job = rowToScheduleJob(row)
-  if (row.repo_id === ASSISTANT_REPO_ID) {
-    return { ...job, repoName: ASSISTANT_REPO_NAME, repoPath: ASSISTANT_REPO_PATH, repoUrl: '' }
+function resolveRepoDisplay(repoId: number, repoPath: string | null): { repoName: string; repoPath: string } {
+  if (repoId === ASSISTANT_REPO_ID) {
+    return { repoName: ASSISTANT_REPO_NAME, repoPath: ASSISTANT_REPO_PATH }
   }
+  return { repoName: repoNameFromPath(repoPath ?? ''), repoPath: repoPath ?? '' }
+}
+
+function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithRepo {
   return {
-    ...job,
-    repoName: repoNameFromPath(row.repo_path ?? ''),
-    repoPath: row.repo_path ?? '',
+    ...rowToScheduleJob(row),
+    ...resolveRepoDisplay(row.repo_id, row.repo_path),
     repoUrl: row.repo_url ?? '',
   }
 }
@@ -425,15 +424,10 @@ interface ScheduleRunWithContextRow extends ScheduleRunRow {
 }
 
 function rowToScheduleRunWithContext(row: ScheduleRunWithContextRow): ScheduleRunWithContext {
-  const run = rowToScheduleRun(row)
-  if (row.repo_id === ASSISTANT_REPO_ID) {
-    return { ...run, jobName: row.job_name, repoName: ASSISTANT_REPO_NAME, repoPath: ASSISTANT_REPO_PATH }
-  }
   return {
-    ...run,
+    ...rowToScheduleRun(row),
     jobName: row.job_name,
-    repoName: repoNameFromPath(row.repo_path ?? ''),
-    repoPath: row.repo_path ?? '',
+    ...resolveRepoDisplay(row.repo_id, row.repo_path),
   }
 }
 

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import {
   isAssistantRepoId,
-  workspaceFromRepo,
-  workspaceFromAssistant,
-} from './workspace'
+  scheduleTargetFromRepo,
+  scheduleTargetFromAssistant,
+} from './schedule-target'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
 
 describe('isAssistantRepoId', () => {
@@ -20,8 +20,8 @@ describe('isAssistantRepoId', () => {
   })
 })
 
-describe('workspaceFromRepo', () => {
-  it('returns correct workspace for a repo', () => {
+describe('scheduleTargetFromRepo', () => {
+  it('returns correct schedule target for a repo', () => {
     const repo = {
       id: 5,
       repoUrl: 'https://x/y',
@@ -33,9 +33,9 @@ describe('workspaceFromRepo', () => {
       clonedAt: 0,
     }
 
-    const workspace = workspaceFromRepo(repo)
+    const target = scheduleTargetFromRepo(repo)
 
-    expect(workspace).toEqual({
+    expect(target).toEqual({
       repoId: 5,
       kind: 'repo',
       name: 'y',
@@ -46,8 +46,8 @@ describe('workspaceFromRepo', () => {
   })
 })
 
-describe('workspaceFromAssistant', () => {
-  it('returns correct workspace for assistant', () => {
+describe('scheduleTargetFromAssistant', () => {
+  it('returns correct schedule target for assistant', () => {
     const status: AssistantModeStatus = {
       repoId: 0,
       directory: '/abs/assistant',
@@ -59,13 +59,13 @@ describe('workspaceFromAssistant', () => {
       schedulesSkill: { path: '', exists: false, created: false },
     }
 
-    const workspace = workspaceFromAssistant(status)
+    const target = scheduleTargetFromAssistant(status)
 
-    expect(workspace).toEqual({
+    expect(target).toEqual({
       repoId: 0,
       kind: 'assistant',
       name: 'Assistant',
-      subtitle: 'Assistant Workspace',
+      subtitle: 'Built-in assistant',
       fullPath: '/abs/assistant',
       backHref: '/assistant',
     })

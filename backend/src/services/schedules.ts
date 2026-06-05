@@ -39,6 +39,7 @@ import { sseAggregator, type SSEEvent } from './sse-aggregator'
 import { getErrorMessage } from '../utils/error-utils'
 import { logger } from '../utils/logger'
 import { buildAssistantRepo } from './assistant-mode'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 class ScheduleServiceError extends Error {
   status: number
@@ -1056,7 +1057,7 @@ export class ScheduleService {
   }
 
   private assertRepo(repoId: number) {
-    if (repoId === 0) {
+    if (repoId === ASSISTANT_REPO_ID) {
       return { ...buildAssistantRepo(), lastAccessedAt: Date.now(), isLocal: true, currentBranch: undefined }
     }
     const repo = getRepoById(this.db, repoId)

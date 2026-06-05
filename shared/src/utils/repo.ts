@@ -1,3 +1,7 @@
+export const ASSISTANT_REPO_ID = 0
+export const ASSISTANT_REPO_NAME = 'Assistant'
+export const ASSISTANT_REPO_PATH = 'assistant'
+
 function trimTrailingChar(value: string, char: string): string {
   let end = value.length
   while (end > 0 && value[end - 1] === char) end--

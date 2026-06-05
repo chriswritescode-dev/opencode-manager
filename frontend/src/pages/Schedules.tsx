@@ -13,7 +13,7 @@ import {
   useUpdateRepoSchedule,
 } from '@/hooks/useSchedules'
 import { useRepoActivity } from '@/hooks/useRepoActivity'
-import { useWorkspace } from '@/hooks/useWorkspace'
+import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
 import { useScheduleTab } from '@/hooks/useMobileTabBar'
 import { toUpdateScheduleRequest, getJobStatusTone } from '@/components/schedules/schedule-utils'
@@ -35,9 +35,9 @@ export function Schedules() {
   const [deleteJobId, setDeleteJobId] = useState<number | null>(null)
   const { scheduleTab: activeTab, setScheduleTab: setActiveTab } = useScheduleTab()
 
-  const { workspace, isLoading: workspaceLoading } = useWorkspace(repoId)
+  const { scheduleTarget, isLoading: scheduleTargetLoading } = useScheduleTarget(repoId)
 
-  useRepoActivity(repoId ?? 0, Boolean(workspace) && workspace?.kind === 'repo')
+  useRepoActivity(repoId ?? 0, Boolean(scheduleTarget) && scheduleTarget?.kind === 'repo')
 
   const { data: jobs, isLoading: jobsLoading } = useRepoSchedules(repoId)
   const { data: selectedJob, isFetching: isJobFetching } = useRepoSchedule(repoId, selectedJobId)
@@ -82,7 +82,7 @@ export function Schedules() {
   const activeRun = selectedRunDetails ?? activeRunSummary
   const runningRun = useMemo(() => runs?.find((run) => run.status === 'running') ?? null, [runs])
 
-  if (workspaceLoading || jobsLoading) {
+  if (scheduleTargetLoading || jobsLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
@@ -90,11 +90,11 @@ export function Schedules() {
     )
   }
 
-  if (!workspace || repoId === undefined) {
+  if (!scheduleTarget || repoId === undefined) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <p className="text-muted-foreground">
-          {repoId === 0 ? 'Workspace not found' : 'Repository not found'}
+          {repoId === 0 ? 'Assistant not found' : 'Repository not found'}
         </p>
       </div>
     )
@@ -192,10 +192,10 @@ export function Schedules() {
   return (
     <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
-        <Header.BackButton to={workspace.backHref} />
+        <Header.BackButton to={scheduleTarget.backHref} />
         <div className="min-w-0 flex-1 px-3">
-          <Header.Title className="truncate">{workspace.name}</Header.Title>
-          <p className="text-xs text-muted-foreground truncate">{workspace.subtitle}</p>
+          <Header.Title className="truncate">{scheduleTarget.name}</Header.Title>
+          <p className="text-xs text-muted-foreground truncate">{scheduleTarget.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="h-6 rounded-full px-2 text-xs">{jobs?.length ?? 0} jobs</Badge>

@@ -84,8 +84,8 @@ describe('ScheduleJobDialog — assistant create guard', () => {
     await waitFor(() => {
       expect(screen.getByText('Assistant')).toBeInTheDocument()
     })
-    // Assistant Workspace description should also be visible
-    expect(screen.getByText('Assistant Workspace')).toBeInTheDocument()
+    // Assistant description should also be visible
+    expect(screen.getByText('Built-in assistant')).toBeInTheDocument()
   })
 
   it('disables submit when no repo is selected, enables when Assistant repo is selected', async () => {
