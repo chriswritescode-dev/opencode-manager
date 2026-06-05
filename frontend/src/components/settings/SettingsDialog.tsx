@@ -11,6 +11,7 @@ import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
+import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
@@ -22,6 +23,7 @@ type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'pro
 export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
+  const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
   const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
@@ -64,14 +66,13 @@ export function SettingsDialog() {
       return
     }
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
+      if (e.key === 'Escape' && !isVersionDialogOpen) {
         close()
       }
     }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, close])
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [isOpen, close, isVersionDialogOpen])
 
   const menuItems = [
     { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
@@ -104,6 +105,9 @@ export function SettingsDialog() {
           fullscreen
           canSwipeBack={() => mobileView !== 'menu'}
           onSwipeBack={handleSettingsBack}
+          onInteractOutside={(e) => e.preventDefault()}
+          onFocusOutside={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
         >
          <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
@@ -159,7 +163,7 @@ export function SettingsDialog() {
                 <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
                 <TabsContent key="opencode" value="opencode" className="mt-0">
                   <div className="space-y-6">
-                    <ServerHealthStatus />
+                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
@@ -232,7 +236,7 @@ export function SettingsDialog() {
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
                 {mobileView === 'opencode' && (
                   <div key="opencode" className="space-y-6">
-                    <ServerHealthStatus />
+                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
@@ -242,7 +246,12 @@ export function SettingsDialog() {
               {mobileView === 'providers' && <div key="providers"><ProviderSettings /></div>}
            </div>
         </div>
+
       </DialogContent>
+      <VersionSelectDialog
+        open={isVersionDialogOpen}
+        onOpenChange={setIsVersionDialogOpen}
+      />
     </Dialog>
   )
 }
