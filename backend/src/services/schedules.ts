@@ -10,9 +10,11 @@ import {
 import { getRepoById } from '../db/queries'
 import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
+  cleanupOrphanedSchedules,
   createScheduleJob,
   createScheduleRun,
   deleteScheduleJob,
+  deleteScheduleJobsByRepo,
   getScheduleJobById,
   getRunningScheduleRunByJob,
   getScheduleRunById,
@@ -442,6 +444,33 @@ export class ScheduleService {
       throw new ScheduleServiceError('Schedule not found', 404)
     }
     this.onJobChange?.(null, jobId)
+  }
+
+  /**
+   * Deletes all schedule jobs (and their runs) for a repo and notifies the
+   * ScheduleRunner so in-memory cron timers are removed. This should be called
+   * **before** the repo row itself is deleted.
+   */
+  deleteJobsByRepo(repoId: number): void {
+    // Notify the runner for each job so in-memory timers are cleaned up.
+    const jobs = listScheduleJobsByRepo(this.db, repoId)
+    for (const job of jobs) {
+      this.onJobChange?.(null, job.id)
+    }
+    deleteScheduleJobsByRepo(this.db, repoId)
+  }
+
+  /**
+   * Removes any schedule_jobs and schedule_runs whose repo_id (or job_id for
+   * runs) no longer exists in the repos / schedule_jobs table.  Safe to call
+   * on every startup — no-op when there are no orphans.
+   */
+  cleanupOrphanedSchedules(): { orphanedJobs: number; orphanedRuns: number } {
+    const result = cleanupOrphanedSchedules(this.db)
+    if (result.orphanedJobs > 0 || result.orphanedRuns > 0) {
+      logger.info(`Cleaned up ${result.orphanedJobs} orphaned schedule job(s) and ${result.orphanedRuns} run(s)`)
+    }
+    return result
   }
 
   listRuns(repoId: number, jobId: number, limit: number = 20): ScheduleRun[] {
@@ -1119,6 +1148,11 @@ export class ScheduleRunner {
         this.unregisterJob(jobId)
       }
     })
+
+    // Clean up any schedule records whose repo no longer exists.  This handles
+    // leftovers from before foreign-key enforcement was enabled, and guards
+    // against edge cases where a repo row was removed outside the normal flow.
+    this.scheduleService.cleanupOrphanedSchedules()
 
     await this.scheduleService.recoverRunningRuns()
     this.registerAllEnabledJobs()

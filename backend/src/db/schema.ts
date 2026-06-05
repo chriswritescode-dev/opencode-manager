@@ -10,6 +10,10 @@ export function initializeDatabase(dbPath: string = './data/opencode.db'): Datab
   mkdirSync(dirname(dbPath), { recursive: true })
   const db = new Database(dbPath)
 
+  // Enable foreign key enforcement so ON DELETE CASCADE works.
+  // SQLite defaults to OFF, and bun:sqlite inherits this default.
+  db.exec('PRAGMA foreign_keys = ON')
+
   migrate(db, allMigrations)
   ensureOpenCodeModelStateTable(db)
 

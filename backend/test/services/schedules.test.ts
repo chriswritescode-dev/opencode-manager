@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   createScheduleJob: vi.fn(),
   createScheduleRun: vi.fn(),
   deleteScheduleJob: vi.fn(),
+  deleteScheduleJobsByRepo: vi.fn(),
+  cleanupOrphanedSchedules: vi.fn(),
   getScheduleJobById: vi.fn(),
   getRunningScheduleRunByJob: vi.fn(),
   getScheduleRunById: vi.fn(),
@@ -35,6 +37,8 @@ vi.mock('../../src/db/schedules', () => ({
   createScheduleJob: mocks.createScheduleJob,
   createScheduleRun: mocks.createScheduleRun,
   deleteScheduleJob: mocks.deleteScheduleJob,
+  deleteScheduleJobsByRepo: mocks.deleteScheduleJobsByRepo,
+  cleanupOrphanedSchedules: mocks.cleanupOrphanedSchedules,
   getScheduleJobById: mocks.getScheduleJobById,
   getRunningScheduleRunByJob: mocks.getRunningScheduleRunByJob,
   getScheduleRunById: mocks.getScheduleRunById,
@@ -998,6 +1002,7 @@ describe('ScheduleRunner', () => {
   beforeEach(() => {
     mockCronInstances.length = 0
     mockCronStop.mockClear()
+    mocks.cleanupOrphanedSchedules.mockReturnValue({ orphanedJobs: 0, orphanedRuns: 0 })
   })
 
   it('recovers running runs and registers all enabled jobs on start', async () => {

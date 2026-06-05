@@ -12,9 +12,10 @@ interface PromptTemplateDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   template?: PromptTemplate
+  initialValues?: Partial<CreatePromptTemplateRequest>
 }
 
-export function PromptTemplateDialog({ open, onOpenChange, template }: PromptTemplateDialogProps) {
+export function PromptTemplateDialog({ open, onOpenChange, template, initialValues }: PromptTemplateDialogProps) {
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
   const [cadenceHint, setCadenceHint] = useState('')
@@ -29,13 +30,13 @@ export function PromptTemplateDialog({ open, onOpenChange, template }: PromptTem
 
   useEffect(() => {
     if (open) {
-      setTitle(template?.title ?? '')
-      setCategory(template?.category ?? '')
-      setCadenceHint(template?.cadenceHint ?? '')
-      setSuggestedName(template?.suggestedName ?? '')
-      setSuggestedDescription(template?.suggestedDescription ?? '')
-      setDescription(template?.description ?? '')
-      setPrompt(template?.prompt ?? '')
+      setTitle(template?.title ?? initialValues?.title ?? '')
+      setCategory(template?.category ?? initialValues?.category ?? '')
+      setCadenceHint(template?.cadenceHint ?? initialValues?.cadenceHint ?? '')
+      setSuggestedName(template?.suggestedName ?? initialValues?.suggestedName ?? '')
+      setSuggestedDescription(template?.suggestedDescription ?? initialValues?.suggestedDescription ?? '')
+      setDescription(template?.description ?? initialValues?.description ?? '')
+      setPrompt(template?.prompt ?? initialValues?.prompt ?? '')
     } else {
       setTitle('')
       setCategory('')
@@ -45,7 +46,7 @@ export function PromptTemplateDialog({ open, onOpenChange, template }: PromptTem
       setDescription('')
       setPrompt('')
     }
-  }, [template, open])
+  }, [template, open, initialValues])
 
   const handleSubmit = () => {
     const data: CreatePromptTemplateRequest = {

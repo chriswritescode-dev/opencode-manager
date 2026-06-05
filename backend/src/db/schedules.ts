@@ -205,6 +205,31 @@ export function deleteScheduleJob(db: Database, repoId: number, jobId: number): 
   return result.changes > 0
 }
 
+export function deleteScheduleJobsByRepo(db: Database, repoId: number): number {
+  // Delete runs first in case FK enforcement is off (e.g. during migration)
+  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ?').run(repoId)
+  const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ?')
+  const result = stmt.run(repoId)
+  return result.changes
+}
+
+export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {
+  const runStmt = db.prepare(`
+    DELETE FROM schedule_runs
+    WHERE repo_id NOT IN (SELECT id FROM repos)
+       OR job_id NOT IN (SELECT id FROM schedule_jobs)
+  `)
+  const orphanedRuns = runStmt.run().changes
+
+  const jobStmt = db.prepare(`
+    DELETE FROM schedule_jobs
+    WHERE repo_id NOT IN (SELECT id FROM repos)
+  `)
+  const orphanedJobs = jobStmt.run().changes
+
+  return { orphanedJobs, orphanedRuns }
+}
+
 export function updateScheduleJobRunState(db: Database, repoId: number, jobId: number, values: { lastRunAt: number; nextRunAt?: number | null }): void {
   const stmt = db.prepare('UPDATE schedule_jobs SET last_run_at = ?, next_run_at = ?, updated_at = ? WHERE repo_id = ? AND id = ?')
   stmt.run(values.lastRunAt, values.nextRunAt ?? null, Date.now(), repoId, jobId)
