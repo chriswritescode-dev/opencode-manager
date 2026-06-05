@@ -18,6 +18,12 @@ describe('buildSchedulesSkill', () => {
     expect(skill).toContain(`http://localhost:${ENV.SERVER.PORT}/api/internal`)
     expect(skill).not.toContain(':443')
   })
+
+  it('documents repoId 0 for Assistant schedules', () => {
+    const skill = buildSchedulesSkill('http://localhost:5003/api/internal')
+    expect(skill).toContain('Use repo ID `0` for the built-in Assistant')
+    expect(skill).toContain('/repos/0/schedules')
+  })
 })
 
 describe('buildReposSkill', () => {
@@ -224,6 +230,8 @@ describe('ensureAssistantMode', () => {
     const schedulesSkillContent = await readFile(schedulesSkillPath, 'utf8')
     expect(schedulesSkillContent).toContain('name: schedule-management')
     expect(schedulesSkillContent).toContain('Manage schedule jobs')
+    expect(schedulesSkillContent).toContain('Use repo ID `0` for the built-in Assistant')
+    expect(schedulesSkillContent).toContain('/repos/0/schedules')
 
     const notificationsSkillContent = await readFile(notificationsSkillPath, 'utf8')
     expect(notificationsSkillContent).toContain('name: notifications')

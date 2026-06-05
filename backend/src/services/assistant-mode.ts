@@ -340,6 +340,10 @@ Authorization: Bearer <token>
 
 \`${internalBaseUrl}\`
 
+## Assistant Schedules
+
+Use repo ID \`0\` for the built-in Assistant. For example, use \`/repos/0/schedules\` to list or create schedule jobs that run in the Assistant workspace.
+
 ## Endpoints
 
 ### GET /schedules/all
