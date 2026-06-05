@@ -75,6 +75,7 @@ export function buildNavModel(pathname: string): NavModel {
       { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
       { key: 'lsp', label: 'LSP', icon: Code2, dialog: 'lsp' },
       { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
+      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${sessionDetailMatch[1]}/schedules` },
       { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]

@@ -33,16 +33,18 @@ describe('buildMoreItems', () => {
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
     const items = buildMoreItems('/repos/42/sessions/abc')
-    expect(items).toHaveLength(8)
+    expect(items).toHaveLength(9)
     expect(items[0].key).toBe('files')
     expect(items[1].key).toBe('mcp')
     expect(items[2].key).toBe('skills')
     expect(items[3].key).toBe('lsp')
     expect(items[3].dialog).toBe('lsp')
     expect(items[4].key).toBe('reset-permissions')
-    expect(items[5].key).toBe('source-control')
-    expect(items[6].key).toBe('settings')
-    expect(items[7].key).toBe('logout')
+    expect(items[5].key).toBe('schedules')
+    expect(items[5].to).toBe('/repos/42/schedules')
+    expect(items[6].key).toBe('source-control')
+    expect(items[7].key).toBe('settings')
+    expect(items[8].key).toBe('logout')
   })
 
   it('returns assistant workspace items for /repos/:id/assistant', () => {
