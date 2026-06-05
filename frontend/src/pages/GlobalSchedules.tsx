@@ -254,7 +254,7 @@ export function GlobalSchedules() {
   }
 
   const handleCreate = (data: CreateScheduleJobRequest) => {
-    if (!selectedRepoId) return
+    if (selectedRepoId === undefined) return
     createMutation.mutate(
       { repoId: selectedRepoId, data },
       {

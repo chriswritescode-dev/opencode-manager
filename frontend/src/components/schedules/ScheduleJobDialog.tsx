@@ -18,6 +18,7 @@ import {
   type SchedulePreset,
 } from '@/components/schedules/schedule-utils'
 import { getRepoDisplayName } from '@/lib/utils'
+import { ASSISTANT_REPO_ID } from '@/lib/schedules/workspace'
 import { Loader2 } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
@@ -107,16 +108,21 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     staleTime: 5 * 60 * 1000,
   })
 
-  const repoOptions = useMemo<ComboboxOption[]>(() =>
-    repos
+  const repoOptions = useMemo<ComboboxOption[]>(() => {
+    const assistantOption: ComboboxOption = {
+      value: ASSISTANT_REPO_ID.toString(),
+      label: 'Assistant',
+      description: 'Assistant Workspace',
+    }
+    const repoEntries = repos
       .filter((repo) => repo.cloneStatus === 'ready')
       .map((repo) => ({
         value: repo.id.toString(),
         label: getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath),
         description: repo.localPath,
-      })),
-    [repos]
-  )
+      }))
+    return [assistantOption, ...repoEntries]
+  }, [repos])
 
   const modelOptions = useMemo<ComboboxOption[]>(() => {
     const configuredModels: ComboboxOption[] = []
@@ -335,7 +341,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
 
         <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row gap-2 sm:justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">Cancel</Button>
-          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && !selectedRepoId)} className="flex-1 sm:flex-none">
+          <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && selectedRepoId === undefined)} className="flex-1 sm:flex-none">
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             {isSaving ? 'Saving...' : job ? 'Save changes' : 'Create schedule'}
           </Button>
