@@ -72,6 +72,19 @@ describe('schedule database queries', () => {
     })
   })
 
+  it('lists schedule job ids without loading full job rows', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([{ id: 7 }, { id: 8 }]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const jobIds = schedulesDb.listScheduleJobIdsByRepo(mockDb, 42)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+    expect(stmt.all).toHaveBeenCalledWith(42)
+    expect(jobIds).toEqual([7, 8])
+  })
+
   it('creates a schedule job and reloads the inserted row', () => {
     const insertStmt = {
       run: vi.fn().mockReturnValue({ lastInsertRowid: 7 }),

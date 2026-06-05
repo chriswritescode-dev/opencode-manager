@@ -116,6 +116,12 @@ export function listScheduleJobsByRepo(db: Database, repoId: number): ScheduleJo
   return rows.map(rowToScheduleJob)
 }
 
+export function listScheduleJobIdsByRepo(db: Database, repoId: number): number[] {
+  const stmt = db.prepare('SELECT id FROM schedule_jobs WHERE repo_id = ? ORDER BY created_at DESC')
+  const rows = stmt.all(repoId) as Array<{ id: number }>
+  return rows.map((row) => row.id)
+}
+
 export function listEnabledScheduleJobs(db: Database): ScheduleJob[] {
   const stmt = db.prepare('SELECT * FROM schedule_jobs WHERE enabled = 1 ORDER BY id ASC')
   const rows = stmt.all() as ScheduleJobRow[]
@@ -204,13 +210,6 @@ export function deleteScheduleJob(db: Database, repoId: number, jobId: number): 
   const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
   const result = stmt.run(repoId, jobId)
   return result.changes > 0
-}
-
-export function deleteScheduleJobsByRepo(db: Database, repoId: number): number {
-  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ?').run(repoId)
-  const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ?')
-  const result = stmt.run(repoId)
-  return result.changes
 }
 
 export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {

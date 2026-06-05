@@ -90,7 +90,6 @@ function createMockScheduleUrlState(overrides: Record<string, unknown> = {}) {
     openImportTemplate: vi.fn(),
     closeDialog: vi.fn(),
     closePromptDialog: vi.fn(),
-    selectJob: vi.fn(),
     selectRun: vi.fn(),
     selectJobAndView: vi.fn(),
     selectJobAndCloseDialog: vi.fn(),

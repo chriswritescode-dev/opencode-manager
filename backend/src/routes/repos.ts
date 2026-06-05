@@ -273,10 +273,7 @@ app.get('/', async (c) => {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      // Unregister and delete all schedule jobs/runs for this repo first,
-      // so the ScheduleRunner doesn't hold stale cron timers and the DB
-      // cascade (or explicit delete) cleans up schedule data cleanly.
-      scheduleService.deleteJobsByRepo(id)
+      scheduleService.prepareRepoDelete(id)
       
       await repoService.deleteRepoFiles(database, id)
       

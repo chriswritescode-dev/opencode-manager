@@ -6,13 +6,13 @@ const mocks = vi.hoisted(() => ({
   createScheduleJob: vi.fn(),
   createScheduleRun: vi.fn(),
   deleteScheduleJob: vi.fn(),
-  deleteScheduleJobsByRepo: vi.fn(),
   cleanupOrphanedSchedules: vi.fn(),
   getScheduleJobById: vi.fn(),
   getRunningScheduleRunByJob: vi.fn(),
   getScheduleRunById: vi.fn(),
   listEnabledScheduleJobs: vi.fn(),
   listRunningScheduleRuns: vi.fn(),
+  listScheduleJobIdsByRepo: vi.fn(),
   listScheduleJobsByRepo: vi.fn(),
   listScheduleRunsByJob: vi.fn(),
   updateScheduleJob: vi.fn(),
@@ -37,13 +37,13 @@ vi.mock('../../src/db/schedules', () => ({
   createScheduleJob: mocks.createScheduleJob,
   createScheduleRun: mocks.createScheduleRun,
   deleteScheduleJob: mocks.deleteScheduleJob,
-  deleteScheduleJobsByRepo: mocks.deleteScheduleJobsByRepo,
   cleanupOrphanedSchedules: mocks.cleanupOrphanedSchedules,
   getScheduleJobById: mocks.getScheduleJobById,
   getRunningScheduleRunByJob: mocks.getRunningScheduleRunByJob,
   getScheduleRunById: mocks.getScheduleRunById,
   listEnabledScheduleJobs: mocks.listEnabledScheduleJobs,
   listRunningScheduleRuns: mocks.listRunningScheduleRuns,
+  listScheduleJobIdsByRepo: mocks.listScheduleJobIdsByRepo,
   listScheduleJobsByRepo: mocks.listScheduleJobsByRepo,
   listScheduleRunsByJob: mocks.listScheduleRunsByJob,
   updateScheduleJob: mocks.updateScheduleJob,
@@ -726,6 +726,20 @@ describe('ScheduleService', () => {
 
     expect(() => service.deleteJob(42, 7)).toThrow('Schedule not found')
     expect(() => service.getRun(42, 7, 5)).toThrow('Run not found')
+  })
+
+  it('prepares repo deletion by unregistering repo jobs without deleting records', () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub())
+    const onJobChange = vi.fn()
+    service.setJobChangeHandler(onJobChange)
+    mocks.listScheduleJobIdsByRepo.mockReturnValue([7, 8])
+
+    service.prepareRepoDelete(42)
+
+    expect(mocks.listScheduleJobIdsByRepo).toHaveBeenCalledWith(expect.anything(), 42)
+    expect(onJobChange).toHaveBeenCalledWith(null, 7)
+    expect(onJobChange).toHaveBeenCalledWith(null, 8)
+    expect(onJobChange).toHaveBeenCalledTimes(2)
   })
 
   it('cancels by finalizing the run when the assistant already completed', async () => {
