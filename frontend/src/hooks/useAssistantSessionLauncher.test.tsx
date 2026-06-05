@@ -6,6 +6,7 @@ import { initializeAssistantMode } from '@/api/repos'
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
+  listSessionsPage: vi.fn(),
   createSession: vi.fn(),
   sendPromptAsync: vi.fn(),
   initializeAssistantMode: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('@/api/repos', () => ({
 vi.mock('@/api/opencode', () => ({
   OpenCodeClient: vi.fn(() => ({
     listSessions: mocks.listSessions,
+    listSessionsPage: mocks.listSessionsPage,
     createSession: mocks.createSession,
     sendPromptAsync: mocks.sendPromptAsync,
   })),
@@ -35,12 +37,14 @@ describe('useAssistantSessionLauncher', () => {
   })
 
   it('opens the latest root session in the assistant directory', async () => {
-    mocks.listSessions.mockResolvedValue([
-      { id: 'older', directory: '/assistant', time: { updated: 10 } },
-      { id: 'newest-child', parentID: 'newest', directory: '/assistant', time: { updated: 40 } },
-      { id: 'different-directory', directory: '/other', time: { updated: 50 } },
-      { id: 'newest', directory: '/assistant', time: { updated: 30 } },
-    ])
+    mocks.listSessionsPage.mockResolvedValue({
+      items: [
+        { id: 'older', directory: '/assistant', time: { updated: 10 } },
+        { id: 'newest-child', parentID: 'newest', directory: '/assistant', time: { updated: 40 } },
+        { id: 'different-directory', directory: '/other', time: { updated: 50 } },
+        { id: 'newest', directory: '/assistant', time: { updated: 30 } },
+      ],
+    })
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
       repoId: 123,
@@ -54,11 +58,42 @@ describe('useAssistantSessionLauncher', () => {
 
     expect(initializeAssistantMode).toHaveBeenCalledWith(123)
     expect(OpenCodeClient).toHaveBeenCalledWith('http://localhost:5551', '/assistant')
-    expect(mocks.listSessions).toHaveBeenCalledWith({ limit: 1, roots: true })
+    expect(mocks.listSessionsPage).toHaveBeenCalledWith({ limit: 25, order: 'desc' })
+    expect(mocks.listSessions).not.toHaveBeenCalled()
     expect(onNavigate).toHaveBeenCalledWith('newest')
     expect(localStorage.getItem('ocm:assistant:last-session:123:/assistant')).toBe('newest')
     expect(mocks.createSession).not.toHaveBeenCalled()
     expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
+  })
+
+  it('paginates assistant sessions instead of making an unbounded session list request', async () => {
+    mocks.listSessionsPage
+      .mockResolvedValueOnce({
+        items: [
+          { id: 'newest-child', parentID: 'newest', directory: '/assistant', time: { updated: 40 } },
+        ],
+        nextCursor: 'next-page',
+      })
+      .mockResolvedValueOnce({
+        items: [
+          { id: 'newest', directory: '/assistant', time: { updated: 30 } },
+        ],
+      })
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(mocks.listSessionsPage).toHaveBeenNthCalledWith(1, { limit: 25, order: 'desc' })
+    expect(mocks.listSessionsPage).toHaveBeenNthCalledWith(2, { cursor: 'next-page' })
+    expect(mocks.listSessions).not.toHaveBeenCalled()
+    expect(onNavigate).toHaveBeenCalledWith('newest')
   })
 
   it('notifies an existing assistant session when some generated updates were preserved', async () => {
@@ -72,9 +107,11 @@ describe('useAssistantSessionLauncher', () => {
         },
       ],
     })
-    mocks.listSessions.mockResolvedValue([
-      { id: 'existing', directory: '/assistant', time: { updated: 10 } },
-    ])
+    mocks.listSessionsPage.mockResolvedValue({
+      items: [
+        { id: 'existing', directory: '/assistant', time: { updated: 10 } },
+      ],
+    })
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
       repoId: 123,
@@ -87,7 +124,7 @@ describe('useAssistantSessionLauncher', () => {
     })
 
     expect(onNavigate).toHaveBeenCalledWith('existing')
-    expect(mocks.listSessions).toHaveBeenCalledWith({ limit: 1, roots: true })
+    expect(mocks.listSessionsPage).toHaveBeenCalledWith({ limit: 25, order: 'desc' })
     expect(mocks.sendPromptAsync).toHaveBeenCalledWith('existing', {
       parts: [
         expect.objectContaining({
@@ -101,9 +138,11 @@ describe('useAssistantSessionLauncher', () => {
   })
 
   it('creates a session when the assistant directory has no root sessions', async () => {
-    mocks.listSessions.mockResolvedValue([
-      { id: 'other', directory: '/other', time: { updated: 50 } },
-    ])
+    mocks.listSessionsPage.mockResolvedValue({
+      items: [
+        { id: 'other', directory: '/other', time: { updated: 50 } },
+      ],
+    })
     mocks.createSession.mockResolvedValue({ id: 'created' })
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
@@ -141,7 +180,7 @@ describe('useAssistantSessionLauncher', () => {
   })
 
   it('navigates after creating a session without waiting for the welcome prompt to complete', async () => {
-    mocks.listSessions.mockResolvedValue([])
+    mocks.listSessionsPage.mockResolvedValue({ items: [] })
     let resolvePrompt: () => void
     const promptPromise = new Promise<void>((resolve) => {
       resolvePrompt = resolve
@@ -172,7 +211,7 @@ describe('useAssistantSessionLauncher', () => {
   })
 
   it('navigates even when welcome prompt fails', async () => {
-    mocks.listSessions.mockResolvedValue([])
+    mocks.listSessionsPage.mockResolvedValue({ items: [] })
     mocks.createSession.mockResolvedValue({ id: 'created' })
     mocks.sendPromptAsync.mockRejectedValueOnce(new Error('provider unavailable'))
     const onNavigate = vi.fn()

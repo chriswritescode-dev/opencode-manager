@@ -12,6 +12,8 @@ interface UseAssistantSessionLauncherOptions {
 
 type OpenCodeSession = components['schemas']['Session']
 
+const ASSISTANT_SESSION_LOOKUP_PAGE_SIZE = 25
+
 const LAST_ASSISTANT_SESSION_KEY_PREFIX = 'ocm:assistant:last-session'
 
 function getLastAssistantSessionKey(repoId: number, directory: string): string {
@@ -40,12 +42,15 @@ async function getLatestAssistantSession(
   client: OpenCodeClient,
   assistantDirectory: string,
 ): Promise<OpenCodeSession | undefined> {
-  const latestSessions = await client.listSessions({ limit: 1, roots: true })
-  const latestRootSession = findNewestRootAssistantSession(latestSessions, assistantDirectory)
-  if (latestRootSession || latestSessions.length === 0) return latestRootSession
+  let page = await client.listSessionsPage({ limit: ASSISTANT_SESSION_LOOKUP_PAGE_SIZE, order: 'desc' })
+  let latestRootSession = findNewestRootAssistantSession(page.items, assistantDirectory)
 
-  const sessions = await client.listSessions()
-  return findNewestRootAssistantSession(sessions, assistantDirectory)
+  while (!latestRootSession && page.nextCursor) {
+    page = await client.listSessionsPage({ cursor: page.nextCursor })
+    latestRootSession = findNewestRootAssistantSession(page.items, assistantDirectory)
+  }
+
+  return latestRootSession
 }
 
 const ASSISTANT_WELCOME_PROMPT = `Welcome to OpenCode Manager! I'm your assistant and I'm here to help you work with your code.
