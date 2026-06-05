@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { renderHook, act, render } from '@testing-library/react'
+import { renderHook, act } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useScheduleUrlState } from '../useScheduleUrlState'
@@ -206,20 +206,6 @@ describe('useScheduleUrlState', () => {
     expect(result.current.jobId).toBeNull()
   })
 
-  it('selectJob sets and clears jobId without affecting dialog', () => {
-    const { result } = renderScheduleUrlState()
-    act(() => {
-      result.current.selectJob(10)
-    })
-    expect(result.current.jobId).toBe(10)
-    expect(result.current.dialog).toBeNull()
-
-    act(() => {
-      result.current.selectJob(null)
-    })
-    expect(result.current.jobId).toBeNull()
-  })
-
   it('selectRun sets and clears runId', () => {
     const { result } = renderScheduleUrlState()
     act(() => {
@@ -288,7 +274,6 @@ describe('useScheduleUrlState', () => {
     const firstOpenEditJob = result.current.openEditJob
     const firstCloseDialog = result.current.closeDialog
     const firstClosePromptDialog = result.current.closePromptDialog
-    const firstSelectJob = result.current.selectJob
     const firstSelectJobAndView = result.current.selectJobAndView
     const firstSelectJobAndCloseDialog = result.current.selectJobAndCloseDialog
     const firstReplaceUrlParams = result.current.replaceUrlParams
@@ -299,7 +284,6 @@ describe('useScheduleUrlState', () => {
     expect(result.current.openEditJob).toBe(firstOpenEditJob)
     expect(result.current.closeDialog).toBe(firstCloseDialog)
     expect(result.current.closePromptDialog).toBe(firstClosePromptDialog)
-    expect(result.current.selectJob).toBe(firstSelectJob)
     expect(result.current.selectJobAndView).toBe(firstSelectJobAndView)
     expect(result.current.selectJobAndCloseDialog).toBe(firstSelectJobAndCloseDialog)
     expect(result.current.replaceUrlParams).toBe(firstReplaceUrlParams)
@@ -387,57 +371,6 @@ describe('useScheduleUrlState', () => {
       expect(result.current.scheduleTab).toBe('detail')
       expect(capturedSearch.current).toContain('jobId=5')
       expect(capturedSearch.current).toContain('scheduleTab=detail')
-    })
-  })
-
-  describe('regression: sequential individual navigations', () => {
-    /**
-     * Regression test: When two URL mutations fire synchronously (before React
-     * processes the first navigation), the second function reads stale
-     * searchRef.current and overwrites the first change. This simulates what
-     * handleSelectJob in Schedules.tsx used to do before the fix.
-     */
-    it('calling selectJob then setScheduleTab in same synchronous block loses state without combined method', () => {
-      // Use a real component so we can call both methods synchronously in an effect
-      // (simulating the old buggy pattern in the component)
-      const spy = { search: '' }
-      function TestComponent() {
-        const { selectJob, setScheduleTab, jobId, scheduleTab } = useScheduleUrlState()
-        const loc = useLocation()
-        useEffect(() => {
-          spy.search = loc.search
-        }, [loc.search])
-
-        // Simulate the old buggy handleSelectJob pattern: call both synchronously
-        useEffect(() => {
-          // This mimics the old: selectJob(id) then setScheduleTab('detail')
-          // without an intervening render — both read the same stale ref
-          selectJob(42)
-          setScheduleTab('detail')
-        }, [selectJob, setScheduleTab])
-        return <div data-testid="state">{`${jobId}|${scheduleTab}`}</div>
-      }
-
-      render(
-        <MemoryRouter initialEntries={['/']}>
-          <TestComponent />
-        </MemoryRouter>,
-      )
-
-      // After effects flush, the second navigation (setScheduleTab) may have
-      // overwritten jobId because it read stale searchRef.current.
-      // If the component still has both, the test passes (fix works);
-      // if jobId is lost, the test reveals the old bug.
-      // With the combined methods (selectJobAndView) now used in the component,
-      // this test documents why the combined methods are needed.
-      // The individual methods themselves are not broken — the breakage only
-      // occurs when two consumers fire synchronously. The fix is to use
-      // the combined methods in component code.
-      const el = document.querySelector('[data-testid="state"]')
-      expect(el).toBeTruthy()
-      // The actual state after flush may have both if the second navigation
-      // happened to include the first param's value from the stale ref,
-      // or may lack jobId. Either way, this documents the risk.
     })
   })
 })

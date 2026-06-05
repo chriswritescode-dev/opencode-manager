@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
-import { useMobileTabBar, useScheduleTab, type ScheduleTabKey } from '@/hooks/useMobileTabBar'
+import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
 import { useUIState } from '@/stores/uiStateStore'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
@@ -124,7 +125,7 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
   ]
 }
 
-function buildScheduleTabs(scheduleTab: ScheduleTabKey, setScheduleTab: (tab: ScheduleTabKey) => void): TabDef[] {
+function buildScheduleTabs(scheduleTab: ScheduleTab, setScheduleTab: (tab: ScheduleTab) => void): TabDef[] {
   return [
     {
       key: 'jobs',
@@ -189,7 +190,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
   const { pathname, search } = useLocation()
   const navigate = useNavigate()
   const { openSheet, open, close } = useMobileTabBar()
-  const { scheduleTab, setScheduleTab } = useScheduleTab()
+  const { scheduleTab, setScheduleTab } = useScheduleUrlState()
   const isMobile = useMobile()
   const isMoreDrawerOpen = useUIState((state) => state.isMoreDrawerOpen)
   const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)

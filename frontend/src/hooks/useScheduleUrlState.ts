@@ -22,7 +22,6 @@ export interface UseScheduleUrlStateReturn {
   openImportTemplate: () => void
   closeDialog: () => void
   closePromptDialog: () => void
-  selectJob: (jobId: number | null) => void
   selectRun: (runId: number | null) => void
   selectJobAndView: (jobId: number) => void
   selectJobAndCloseDialog: (jobId: number) => void
@@ -74,98 +73,88 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   const runId = useMemo<number | null>(() => parseNullableInt(searchParams.get('runId')), [searchParams])
   const templateId = useMemo<number | null>(() => parseNullableInt(searchParams.get('templateId')), [searchParams])
 
-  const setScheduleTab = useCallback((tab: ScheduleTab) => {
-    const p = new URLSearchParams(searchRef.current)
-    if (tab === 'jobs') {
-      p.delete('scheduleTab')
-    } else {
-      p.set('scheduleTab', tab)
-    }
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openNewJob = useCallback(() => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('scheduleDialog', 'new')
-    p.delete('jobId')
-    p.delete('templateId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openEditJob = useCallback((id: number) => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('scheduleDialog', 'edit')
-    p.set('jobId', String(id))
-    p.delete('templateId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openDeleteJob = useCallback((id: number) => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('scheduleDialog', 'delete')
-    p.set('jobId', String(id))
-    p.delete('templateId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openNewTemplate = useCallback(() => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('promptDialog', 'new')
-    p.delete('templateId')
-    p.delete('jobId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openEditTemplate = useCallback((id: number) => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('promptDialog', 'edit')
-    p.set('templateId', String(id))
-    p.delete('jobId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openDeleteTemplate = useCallback((id: number) => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('promptDialog', 'delete')
-    p.set('templateId', String(id))
-    p.delete('jobId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const openImportTemplate = useCallback(() => {
-    const p = new URLSearchParams(searchRef.current)
-    p.set('promptDialog', 'import')
-    p.delete('templateId')
-    p.delete('jobId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
   const replaceUrlParams = useCallback((updater: (params: URLSearchParams) => void) => {
     const p = new URLSearchParams(searchRef.current)
     updater(p)
     navigate({ search: p.toString() }, { replace: true })
   }, [navigate])
 
+  const setScheduleTab = useCallback((tab: ScheduleTab) => {
+    replaceUrlParams((p) => {
+      if (tab === 'jobs') {
+        p.delete('scheduleTab')
+      } else {
+        p.set('scheduleTab', tab)
+      }
+    })
+  }, [replaceUrlParams])
+
+  const openNewJob = useCallback(() => {
+    replaceUrlParams((p) => {
+      p.set('scheduleDialog', 'new')
+      p.delete('jobId')
+      p.delete('templateId')
+    })
+  }, [replaceUrlParams])
+
+  const openEditJob = useCallback((id: number) => {
+    replaceUrlParams((p) => {
+      p.set('scheduleDialog', 'edit')
+      p.set('jobId', String(id))
+      p.delete('templateId')
+    })
+  }, [replaceUrlParams])
+
+  const openDeleteJob = useCallback((id: number) => {
+    replaceUrlParams((p) => {
+      p.set('scheduleDialog', 'delete')
+      p.set('jobId', String(id))
+      p.delete('templateId')
+    })
+  }, [replaceUrlParams])
+
+  const openNewTemplate = useCallback(() => {
+    replaceUrlParams((p) => {
+      p.set('promptDialog', 'new')
+      p.delete('templateId')
+      p.delete('jobId')
+    })
+  }, [replaceUrlParams])
+
+  const openEditTemplate = useCallback((id: number) => {
+    replaceUrlParams((p) => {
+      p.set('promptDialog', 'edit')
+      p.set('templateId', String(id))
+      p.delete('jobId')
+    })
+  }, [replaceUrlParams])
+
+  const openDeleteTemplate = useCallback((id: number) => {
+    replaceUrlParams((p) => {
+      p.set('promptDialog', 'delete')
+      p.set('templateId', String(id))
+      p.delete('jobId')
+    })
+  }, [replaceUrlParams])
+
+  const openImportTemplate = useCallback(() => {
+    replaceUrlParams((p) => {
+      p.set('promptDialog', 'import')
+      p.delete('templateId')
+      p.delete('jobId')
+    })
+  }, [replaceUrlParams])
+
   const closeDialog = useCallback(() => {
-    const p = new URLSearchParams(searchRef.current)
-    p.delete('scheduleDialog')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
+    replaceUrlParams((p) => {
+      p.delete('scheduleDialog')
+    })
+  }, [replaceUrlParams])
 
   const closePromptDialog = useCallback(() => {
-    const p = new URLSearchParams(searchRef.current)
-    p.delete('promptDialog')
-    p.delete('templateId')
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
-
-  const selectJob = useCallback((id: number | null) => {
     replaceUrlParams((p) => {
-      if (id === null) {
-        p.delete('jobId')
-      } else {
-        p.set('jobId', String(id))
-      }
+      p.delete('promptDialog')
+      p.delete('templateId')
     })
   }, [replaceUrlParams])
 
@@ -210,7 +199,6 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
     openImportTemplate,
     closeDialog,
     closePromptDialog,
-    selectJob,
     selectRun,
     selectJobAndView,
     selectJobAndCloseDialog,
