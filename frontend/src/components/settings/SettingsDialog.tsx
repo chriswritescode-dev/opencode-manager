@@ -11,6 +11,7 @@ import { ProviderSettings } from '@/components/settings/ProviderSettings'
 import { AccountSettings } from '@/components/settings/AccountSettings'
 import { VoiceSettings } from '@/components/settings/VoiceSettings'
 import { NotificationSettings } from '@/components/settings/NotificationSettings'
+import { VersionSelectDialog } from '@/components/settings/VersionSelectDialog'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Settings2, Keyboard, Code, ChevronLeft, Key, GitBranch, User, Volume2, Bell, X } from 'lucide-react'
@@ -22,6 +23,7 @@ type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'pro
 export function SettingsDialog() {
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
+  const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [sectionHistory, setSectionHistory] = useState<SettingsView[]>([])
   const [authSectionsOpen, setAuthSectionsOpen] = useState(true)
   const toggleAuthSections = useCallback(() => setAuthSectionsOpen((open) => !open), [])
@@ -159,7 +161,7 @@ export function SettingsDialog() {
                 <TabsContent key="shortcuts" value="shortcuts" className="mt-0"><KeyboardShortcuts /></TabsContent>
                 <TabsContent key="opencode" value="opencode" className="mt-0">
                   <div className="space-y-6">
-                    <ServerHealthStatus />
+                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <OpenCodeServerAuthSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
                       <ManagerTokenSettings isOpen={authSectionsOpen} onToggle={toggleAuthSections} />
@@ -232,7 +234,7 @@ export function SettingsDialog() {
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
                 {mobileView === 'opencode' && (
                   <div key="opencode" className="space-y-6">
-                    <ServerHealthStatus />
+                    <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
                     <ServerEnvVarsSettings />
@@ -243,6 +245,11 @@ export function SettingsDialog() {
            </div>
         </div>
       </DialogContent>
+
+      <VersionSelectDialog
+        open={isVersionDialogOpen}
+        onOpenChange={setIsVersionDialogOpen}
+      />
     </Dialog>
   )
 }
