@@ -91,7 +91,7 @@ export function useSessionAgent(
       return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
     }
 
-    if (messagesLoading && (!messages || messages.length === 0)) {
+    if (messagesLoading && !messages) {
       return resolveFallback()
     }
 
