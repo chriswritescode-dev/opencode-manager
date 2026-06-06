@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TOOLS_CACHEBUST: ${TOOLS_CACHEBUST:-0}
     container_name: opencode-manager
     ports:
       - "5003:5003"

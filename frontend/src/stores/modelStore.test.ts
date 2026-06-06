@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useModelStore, modelExists, modelStorePartialize, modelStoreMigrate } from '@/stores/modelStore'
 import type { Provider } from '@/api/providers'
 
@@ -293,6 +293,29 @@ describe('variants', () => {
   it('clearVariant is idempotent', () => {
     const model = { providerID: 'openai', modelID: 'gpt-4o' }
     expect(() => useModelStore.getState().clearVariant(model)).not.toThrow()
+  })
+
+  it('clearVariant does not notify subscribers when variant is already absent', () => {
+    const model = { providerID: 'openai', modelID: 'gpt-4o' }
+    const listener = vi.fn()
+    const unsubscribe = useModelStore.subscribe(listener)
+
+    useModelStore.getState().clearVariant(model)
+
+    unsubscribe()
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('setVariant does not notify subscribers when variant is unchanged', () => {
+    const model = { providerID: 'openai', modelID: 'gpt-4o' }
+    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
+    const listener = vi.fn()
+    const unsubscribe = useModelStore.subscribe(listener)
+
+    useModelStore.getState().setVariant(model, 'gpt-4o-2024-05-13')
+
+    unsubscribe()
+    expect(listener).not.toHaveBeenCalled()
   })
 })
 

@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
 import { showToast } from '@/lib/toast'
+import { messagesQueryKey } from '@/lib/queryInvalidation'
 import type { Message, Part, MessageWithParts } from '@/api/types'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 
@@ -25,7 +26,7 @@ export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveM
       return client.revertMessage(sessionId, { messageID, partID })
     },
     onMutate: async ({ messageID }) => {
-      const queryKey = ['opencode', 'messages', opcodeUrl, sessionId, directory]
+      const queryKey = messagesQueryKey(opcodeUrl, sessionId, directory)
       
       await queryClient.cancelQueries({ queryKey })
       
@@ -44,7 +45,7 @@ export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveM
     onError: (_error, _variables, _context: RemoveMessageContext | undefined) => {
       if (_context?.previousMessages) {
         queryClient.setQueryData(
-          ['opencode', 'messages', opcodeUrl, sessionId, directory],
+          messagesQueryKey(opcodeUrl, sessionId, directory),
           _context.previousMessages
         )
       }
@@ -53,7 +54,7 @@ export function useRemoveMessage({ opcodeUrl, sessionId, directory }: UseRemoveM
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ['opencode', 'messages', opcodeUrl, sessionId, directory]
+        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory)
       })
       queryClient.invalidateQueries({
         queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]
@@ -115,7 +116,7 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
       }
 
       queryClient.setQueryData<MessageWithParts[]>(
-        ['opencode', 'messages', opcodeUrl, sessionId, directory],
+        messagesQueryKey(opcodeUrl, sessionId, directory),
         (old) => [...(old || []), optimisticMessageWithParts]
       )
       
@@ -146,7 +147,7 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
-        queryKey: ['opencode', 'messages', opcodeUrl, sessionId, directory]
+        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory)
       })
       queryClient.invalidateQueries({
         queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]
@@ -156,7 +157,7 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
       void variables
       setSessionStatus(sessionId, { type: 'idle' })
       queryClient.setQueryData<MessageWithParts[]>(
-        ['opencode', 'messages', opcodeUrl, sessionId, directory],
+        messagesQueryKey(opcodeUrl, sessionId, directory),
         (old) => {
           const messages = old || []
           const optimisticIndex = messages.findIndex((m) => m.info.id.startsWith('optimistic_user_'))

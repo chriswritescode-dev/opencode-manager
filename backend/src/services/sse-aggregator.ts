@@ -2,30 +2,24 @@ import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
+import type { SSEEventEnvelope, SSEEventPayload } from '@opencode-manager/shared'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
+import { encodeSSEFrame } from '../utils/sse-frame'
 
 type SSEClientCallback = (event: string, data: string) => void
+type SSEClientFrameWriter = (frame: Uint8Array) => void
 type SSEEventListener = (directory: string, event: SSEEvent) => void
 
 interface SSEClient {
   id: string
   callback: SSEClientCallback
+  writeFrame: SSEClientFrameWriter
   directories: Set<string>
   visible: boolean
   activeSessionId: string | null
 }
 
-export interface SSEEvent {
-  type: string
-  properties: Record<string, unknown>
-}
-
-interface GlobalEventEnvelope {
-  directory?: string
-  project?: string
-  workspace?: string
-  payload: SSEEvent
-}
+export type SSEEvent = SSEEventPayload
 
 export interface PendingActionsFetcher {
   getJson<T>(path: string, opts?: { directory?: string; signal?: AbortSignal }): Promise<T>
@@ -49,6 +43,7 @@ const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 class SSEAggregator {
   private static instance: SSEAggregator
   private clients: Map<string, SSEClient> = new Map()
+  private directoryClients: Map<string, Set<string>> = new Map()
   private activeSessions: Map<string, Set<string>> = new Map()
   private eventListeners: Set<SSEEventListener> = new Set()
   private subagentSessions: Map<string, Set<string>> = new Map()
@@ -95,15 +90,22 @@ class SSEAggregator {
     void this.connectUpstream()
   }
 
-  addClient(id: string, callback: SSEClientCallback, directories: string[]): () => void {
+  addClient(id: string, callback: SSEClientCallback, writeFrame: SSEClientFrameWriter, directories: string[]): () => void {
+    const existing = this.clients.get(id)
+    if (existing) {
+      existing.directories.forEach(dir => this.deindexClientDirectory(id, dir))
+    }
+
     const client: SSEClient = {
       id,
       callback,
+      writeFrame,
       directories: new Set(directories),
       visible: false,
       activeSessionId: null
     }
     this.clients.set(id, client)
+    directories.forEach(dir => this.indexClientDirectory(id, dir))
 
     logger.info(`Client ${id} connected with directories: ${directories.length > 0 ? directories.join(', ') : '(none)'}`)
 
@@ -115,6 +117,10 @@ class SSEAggregator {
   }
 
   removeClient(id: string): void {
+    const client = this.clients.get(id)
+    if (client) {
+      client.directories.forEach(dir => this.deindexClientDirectory(id, dir))
+    }
     this.clients.delete(id)
   }
 
@@ -131,6 +137,7 @@ class SSEAggregator {
       }
       client.directories.add(dir)
     })
+    newDirectories.forEach(dir => this.indexClientDirectory(clientId, dir))
     logger.info(`Client ${clientId} subscribed to: ${directories.join(', ')}`)
 
     if (newDirectories.length > 0) {
@@ -146,9 +153,28 @@ class SSEAggregator {
       logger.warn(`removeDirectories: client ${clientId} not found`)
       return false
     }
-    directories.forEach(dir => client.directories.delete(dir))
+    directories.forEach(dir => {
+      client.directories.delete(dir)
+      this.deindexClientDirectory(clientId, dir)
+    })
     logger.info(`Client ${clientId} unsubscribed from: ${directories.join(', ')}`)
     return true
+  }
+
+  private indexClientDirectory(clientId: string, directory: string): void {
+    let set = this.directoryClients.get(directory)
+    if (!set) {
+      set = new Set()
+      this.directoryClients.set(directory, set)
+    }
+    set.add(clientId)
+  }
+
+  private deindexClientDirectory(clientId: string, directory: string): void {
+    const set = this.directoryClients.get(directory)
+    if (!set) return
+    set.delete(clientId)
+    if (set.size === 0) this.directoryClients.delete(directory)
   }
 
   private async replayPendingActionsForClient(clientId: string, directories: string[]): Promise<void> {
@@ -211,7 +237,7 @@ class SSEAggregator {
     if (!client || !client.directories.has(directory)) return
 
     for (const item of items) {
-      const payload = JSON.stringify({ type, properties: item, directory })
+      const payload = JSON.stringify({ directory, payload: { type, properties: item } })
       try {
         client.callback('message', payload)
       } catch (error) {
@@ -298,9 +324,9 @@ class SSEAggregator {
   }
 
   private handleUpstreamMessage(data: string): void {
-    let envelope: GlobalEventEnvelope
+    let envelope: SSEEventEnvelope
     try {
-      envelope = JSON.parse(data) as GlobalEventEnvelope
+      envelope = JSON.parse(data) as SSEEventEnvelope
     } catch {
       return
     }
@@ -316,16 +342,20 @@ class SSEAggregator {
       try { listener(directory, parsed) } catch { /* ignore listener errors */ }
     })
 
-    const clientData = JSON.stringify({ ...parsed, directory })
-    this.clients.forEach((client) => {
-      if (client.directories.has(directory)) {
+    const subscriberIds = this.directoryClients.get(directory)
+    if (subscriberIds && subscriberIds.size > 0) {
+      let frame: Uint8Array | undefined
+      const getFrame = (): Uint8Array => (frame ??= encodeSSEFrame('message', data))
+      for (const clientId of subscriberIds) {
+        const client = this.clients.get(clientId)
+        if (!client) continue
         try {
-          client.callback('message', clientData)
+          client.writeFrame(getFrame())
         } catch (error) {
           logger.error(`Failed to send to client ${client.id}:`, error)
         }
       }
-    })
+    }
   }
 
   private handleEvent(directory: string, event: SSEEvent): void {
@@ -461,6 +491,7 @@ class SSEAggregator {
 
     this.activeSessions.clear()
     this.subagentSessions.clear()
+    this.directoryClients.clear()
     this.clients.clear()
     this.eventListeners.clear()
   }
@@ -478,8 +509,10 @@ export const sseAggregator = SSEAggregator.getInstance()
 
 export function broadcastSSHHostKeyRequest(data: Record<string, unknown>): void {
   const event = JSON.stringify({
-    type: 'ssh.host-key-request',
-    properties: data,
+    payload: {
+      type: 'ssh.host-key-request',
+      properties: data,
+    },
   })
   sseAggregator.broadcastToAll('message', event)
 }

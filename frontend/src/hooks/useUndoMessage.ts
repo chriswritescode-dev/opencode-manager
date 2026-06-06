@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
 import { showToast } from '@/lib/toast'
+import { messagesQueryKey } from '@/lib/queryInvalidation'
 import type { MessageWithParts } from '@/api/types'
 
 interface UseUndoMessageOptions {
@@ -31,7 +32,7 @@ export function useUndoMessage({
       return messageContent
     },
     onMutate: async ({ messageID }) => {
-      const queryKey = ['opencode', 'messages', opcodeUrl, sessionId, directory]
+      const queryKey = messagesQueryKey(opcodeUrl, sessionId, directory)
       
       await queryClient.cancelQueries({ queryKey })
       
@@ -50,7 +51,7 @@ export function useUndoMessage({
     onError: (_error, _variables, _context: UndoMessageContext | undefined) => {
       if (_context?.previousMessages) {
         queryClient.setQueryData(
-          ['opencode', 'messages', opcodeUrl, sessionId, directory],
+          messagesQueryKey(opcodeUrl, sessionId, directory),
           _context.previousMessages
         )
       }
@@ -59,7 +60,7 @@ export function useUndoMessage({
     },
     onSuccess: (restoredPrompt) => {
       queryClient.invalidateQueries({
-        queryKey: ['opencode', 'messages', opcodeUrl, sessionId, directory]
+        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory)
       })
       queryClient.invalidateQueries({
         queryKey: ['opencode', 'session', opcodeUrl, sessionId, directory]

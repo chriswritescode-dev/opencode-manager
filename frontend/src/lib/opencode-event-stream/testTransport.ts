@@ -2,11 +2,13 @@ import type { EventStreamConnection, EventStreamTransport, EventStreamTransportH
 
 export class TestEventStreamTransport implements EventStreamTransport {
   readonly posts: Array<{ path: string; body: unknown }> = []
+  readonly openedUrls: string[] = []
   closeCount = 0
   private handlers: EventStreamTransportHandlers | null = null
   private connection: EventStreamConnection | null = null
 
-  open(_url: string, handlers: EventStreamTransportHandlers): EventStreamConnection {
+  open(url: string, handlers: EventStreamTransportHandlers): EventStreamConnection {
+    this.openedUrls.push(url)
     this.handlers = handlers
     this.connection = {
       close: () => {
@@ -29,7 +31,11 @@ export class TestEventStreamTransport implements EventStreamTransport {
   }
 
   connected(clientId = 'test-client'): void {
-    this.handlers?.onConnected(JSON.stringify({ clientId }))
+    this.connectedPayload({ clientId })
+  }
+
+  connectedPayload(payload: unknown): void {
+    this.handlers?.onConnected(JSON.stringify(payload))
   }
 
   message(data: unknown): void {

@@ -1,5 +1,13 @@
 import type { QueryClient } from '@tanstack/react-query'
 
+export function messagesQueryKey(
+  opcodeUrl: string | null | undefined,
+  sessionID: string | null | undefined,
+  directory: string | null | undefined,
+) {
+  return ['opencode', 'messages', opcodeUrl, sessionID, directory]
+}
+
 export function invalidateProviderCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['provider-credentials'] })
   queryClient.invalidateQueries({ queryKey: ['provider-auth-methods'] })

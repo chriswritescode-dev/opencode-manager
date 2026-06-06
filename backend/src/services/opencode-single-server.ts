@@ -29,6 +29,7 @@ import { writeFileContent } from './file-operations'
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 const HEALTH_CHECK_TIMEOUT_MS = 3000
+const PLUGIN_INSTALL_TIMEOUT_MS = 120000
 const DEPRECATED_PLUGIN_PACKAGES = ['opencode-openai-codex-auth', 'opencode-copilot-auth']
 
 type StartupValidationIssue = {
@@ -585,16 +586,21 @@ class OpenCodeServerManager {
 
       await fs.mkdir(installDir, { recursive: true })
       if (!await fs.access(path.join(installDir, 'package.json')).then(() => true).catch(() => false)) {
-        const init = spawnSync('bun', ['init', '-y'], { cwd: installDir, encoding: 'utf8' })
+        const init = spawnSync('bun', ['init', '-y'], { cwd: installDir, encoding: 'utf8', timeout: 30000 })
         if (init.status !== 0) {
           logger.warn(`Failed to initialize OpenCode plugin cache for ${plugin}: ${init.stderr || init.stdout}`)
           continue
         }
       }
 
-      const result = spawnSync('bun', ['add', '--ignore-scripts', installSpec], { cwd: installDir, encoding: 'utf8' })
+      const result = spawnSync('bun', ['add', '--ignore-scripts', installSpec], { cwd: installDir, encoding: 'utf8', timeout: PLUGIN_INSTALL_TIMEOUT_MS })
       if (result.status === 0) {
         logger.info(`Installed OpenCode plugin: ${plugin}`)
+        continue
+      }
+
+      if (result.error) {
+        logger.warn(`Failed to install OpenCode plugin ${plugin}: ${result.error.message}`)
         continue
       }
 

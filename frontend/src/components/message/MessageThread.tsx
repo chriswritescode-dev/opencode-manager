@@ -135,8 +135,7 @@ const findLastMessageByRole = (
 
 interface MessageRowProps {
   msgWithParts: MessageWithParts
-  index: number
-  messages: MessageWithParts[]
+  nextAssistantMessage: MessageWithParts | undefined
   pendingAssistantId: string | undefined
   lastUserMessageId: string | undefined
   isSessionBusy: boolean
@@ -157,8 +156,7 @@ interface MessageRowProps {
 
 const MessageRow = memo(function MessageRow({
   msgWithParts,
-  index,
-  messages,
+  nextAssistantMessage,
   pendingAssistantId,
   lastUserMessageId,
   isSessionBusy,
@@ -183,7 +181,6 @@ const MessageRow = memo(function MessageRow({
   const isLastUserMessage = msg.role === 'user' && msg.id === lastUserMessageId
   const messageTextContent = getMessageTextContent(parts)
 
-  const nextAssistantMessage = messages.slice(index + 1).find(m => m.info.role === 'assistant')
   const nextAssistantMsg = nextAssistantMessage?.info
   const isUserBeforeAssistant = msg.role === 'user' && nextAssistantMessage
   const canEditUserMessage = isLastUserMessage && isUserBeforeAssistant && !isSessionBusy
@@ -352,6 +349,20 @@ export const MessageThread = memo(function MessageThread({
     return findLastMessageByRole(messages, 'user')
   }, [messages])
 
+  const nextAssistantByMessageId = useMemo(() => {
+    const map = new Map<string, MessageWithParts | undefined>()
+    if (!messages) return map
+    let next: MessageWithParts | undefined
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      map.set(msg.info.id, next)
+      if (msg.info.role === 'assistant') {
+        next = msg
+      }
+    }
+    return map
+  }, [messages])
+
   const isSessionBusy = !!pendingAssistantId || isSessionInRetry(sessionStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
 
@@ -415,12 +426,11 @@ export const MessageThread = memo(function MessageThread({
 
   return (
     <div className="flex flex-col space-y-2 p-2 overflow-x-hidden">
-      {messages.map((msgWithParts, index) => (
+      {messages.map((msgWithParts) => (
         <MessageRow
           key={msgWithParts.info.id}
           msgWithParts={msgWithParts}
-          index={index}
-          messages={messages}
+          nextAssistantMessage={nextAssistantByMessageId.get(msgWithParts.info.id)}
           pendingAssistantId={pendingAssistantId}
           lastUserMessageId={lastUserMessageId}
           isSessionBusy={isSessionBusy}
