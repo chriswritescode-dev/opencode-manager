@@ -35,6 +35,7 @@ export function OpenCodeConfigEditor({
   const [editErrorLine, setEditErrorLine] = useState<number | null>(null)
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [removedFields, setRemovedFields] = useState<string[]>([])
+  const [isTextareaFocused, setIsTextareaFocused] = useState(false)
   const editTextareaRef = useRef<HTMLTextAreaElement>(null)
   const backdropRef = useRef<HTMLDivElement>(null)
   const { query, setQuery, matches, currentMatchIndex, hasMatches, next, prev } = useFindInText(editConfigContent)
@@ -85,8 +86,8 @@ export function OpenCodeConfigEditor({
     }
   }
 
-  const renderHighlightedContent = () => {
-    if (matches.length === 0) {
+  const renderHighlightedContent = (focused: boolean) => {
+    if (matches.length === 0 || focused) {
       return editConfigContent
     }
     const segments: React.ReactNode[] = []
@@ -235,9 +236,9 @@ export function OpenCodeConfigEditor({
             <div
               ref={backdropRef}
               aria-hidden="true"
-              className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-[16px] sm:text-xs md:text-sm px-3 py-2 border border-transparent rounded-none sm:rounded-md ${hasMatches ? 'text-foreground' : 'text-transparent'}`}
+              className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-[16px] sm:text-xs md:text-sm px-3 py-2 border border-transparent rounded-none sm:rounded-md ${hasMatches && !isTextareaFocused ? 'text-foreground' : 'text-transparent'}`}
             >
-              {renderHighlightedContent()}
+              {renderHighlightedContent(isTextareaFocused)}
             </div>
             <Textarea
               id="edit-config-content"
@@ -248,8 +249,10 @@ export function OpenCodeConfigEditor({
                 resetErrors()
               }}
               onScroll={syncBackdropScroll}
+              onFocus={() => setIsTextareaFocused(true)}
+              onBlur={() => setIsTextareaFocused(false)}
               spellCheck={false}
-              className={`relative bg-transparent font-mono text-[16px] sm:text-xs md:text-sm resize-none h-full w-full rounded-none sm:rounded-md ${hasMatches ? 'text-transparent caret-foreground' : ''} ${editErrorLine ? 'error-highlight' : ''}`}
+              className={`relative bg-transparent font-mono text-[16px] sm:text-xs md:text-sm resize-none h-full w-full rounded-none sm:rounded-md ${hasMatches && !isTextareaFocused ? 'text-transparent caret-foreground' : ''} ${editErrorLine ? 'error-highlight' : ''}`}
             />
           </div>
           {editError && (
