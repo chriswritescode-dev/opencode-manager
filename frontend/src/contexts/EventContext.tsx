@@ -8,7 +8,6 @@ import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, 
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
-import { invalidateSessionListCachesDebounced } from '@/lib/queryInvalidation'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
@@ -497,24 +496,6 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
               queryKey: ['opencode', 'messages'],
               predicate: (query) => query.queryKey.includes(sessionID)
             })
-          }
-          break
-        case 'session.updated':
-          if ('info' in event.properties) {
-            const sessionInfo = event.properties.info as { id: string }
-            // Update single-session cache entries
-            const cache = queryClient.getQueryCache()
-            for (const query of cache.getAll()) {
-              const key = query.queryKey
-              if (key[0] === 'opencode' && key[1] === 'session' && key.length >= 5) {
-                const sessionData = query.state.data as { id: string } | undefined
-                if (sessionData?.id === sessionInfo.id) {
-                  queryClient.setQueryData(key, sessionInfo)
-                }
-              }
-            }
-            // Invalidate session list caches instead of mutating infinite-query data
-            invalidateSessionListCachesDebounced(queryClient)
           }
           break
         case 'lsp.updated':

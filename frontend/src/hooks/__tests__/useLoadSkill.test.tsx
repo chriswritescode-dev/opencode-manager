@@ -8,7 +8,6 @@ import { showToast } from '../../lib/toast'
 
 const mocks = vi.hoisted(() => ({
   sendCommand: vi.fn(),
-  setStatus: vi.fn(),
 }))
 
 vi.mock('../../api/opencode', () => ({
@@ -23,10 +22,6 @@ vi.mock('../../lib/toast', () => ({
     success: vi.fn(),
     info: vi.fn(),
   },
-}))
-
-vi.mock('../../stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn((selector) => selector({ setStatus: mocks.setStatus })),
 }))
 
 const createWrapper = () => {
@@ -187,8 +182,6 @@ describe('useLoadSkill', () => {
       expect(result.current.isError).toBe(true)
     })
 
-    expect(mocks.setStatus).toHaveBeenCalledWith('test-session-id', { type: 'busy' })
-    expect(mocks.setStatus).toHaveBeenCalledWith('test-session-id', { type: 'idle' })
   })
 
   it('removes optimistic message from cache on error', async () => {

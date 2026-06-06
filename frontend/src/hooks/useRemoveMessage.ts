@@ -3,7 +3,6 @@ import { createOpenCodeClient } from '@/api/opencode'
 import { showToast } from '@/lib/toast'
 import { messagesQueryKey } from '@/lib/queryInvalidation'
 import type { Message, Part, MessageWithParts } from '@/api/types'
-import { useSessionStatus } from '@/stores/sessionStatusStore'
 
 interface UseRemoveMessageOptions {
   opcodeUrl: string | null
@@ -72,7 +71,6 @@ interface UseRefreshMessageOptions {
 export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefreshMessageOptions) {
   const queryClient = useQueryClient()
   const removeMessage = useRemoveMessage({ opcodeUrl, sessionId, directory })
-  const setSessionStatus = useSessionStatus((state) => state.setStatus)
 
   return useMutation({
     mutationFn: async ({ 
@@ -87,8 +85,6 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
       agent?: string
     }) => {
       if (!opcodeUrl) throw new Error('OpenCode URL not available')
-      
-      setSessionStatus(sessionId, { type: 'busy' })
       
       await removeMessage.mutateAsync({ messageID: assistantMessageID })
       
@@ -155,7 +151,6 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
     },
     onError: (_, variables) => {
       void variables
-      setSessionStatus(sessionId, { type: 'idle' })
       queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey(opcodeUrl, sessionId, directory),
         (old) => {

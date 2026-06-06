@@ -40,8 +40,7 @@ import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog
 import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
-import { useSessionStatus, useSessionStatusForSession } from "@/stores/sessionStatusStore";
-import { usePermissions, useQuestions, useSSEHealth } from "@/contexts/EventContext";
+import { usePermissions, useQuestions } from "@/contexts/EventContext";
 import type { QuestionRequest } from "@/api/types";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
@@ -128,11 +127,8 @@ export function SessionDetail() {
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
-  const sseHealth = useSSEHealth();
-  const sessionStatus = useSessionStatusForSession(sessionId);
-  const isSessionActive = sessionStatus.type === 'busy' || sessionStatus.type === 'compact' || sessionStatus.type === 'retry';
 
-  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory, { fallbackPoll: !sseHealth.isHealthy && isSessionActive });
+  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
   const { data: session, isLoading: sessionLoading } = useSession(
     opcodeUrl,
     sessionId,
@@ -166,13 +162,21 @@ export function SessionDetail() {
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
-  const setSessionStatus = useSessionStatus((state) => state.setStatus);
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
 
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
   const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
+  
+  const isSessionActive = useMemo(() => {
+    if (session?.time?.compacting) return true
+    if (!messages || messages.length === 0) return false
+    const last = messages[messages.length - 1]
+    if (last.info.role === 'user') return true
+    if (last.info.role === 'assistant' && !('completed' in last.info.time)) return true
+    return false
+  }, [messages, session?.time?.compacting])
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
   const assistantFileBasePath = assistantMode?.directory.split('/').filter(Boolean).at(-1);
@@ -228,7 +232,7 @@ export function SessionDetail() {
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
-    refetchInterval: !sseHealth.isHealthy && (isSessionActive || hasIncompleteMessages) ? PENDING_ACTION_SYNC_INTERVAL_MS : false,
+    refetchInterval: !isConnected && (isSessionActive || hasIncompleteMessages) ? PENDING_ACTION_SYNC_INTERVAL_MS : false,
     retry: false,
   })
 
@@ -255,16 +259,14 @@ export function SessionDetail() {
     }
 
     showToast.loading('Compacting session...', { id: `compact-${sessionId}` });
-    setSessionStatus(sessionId, { type: 'compact' });
 
     try {
       const client = createOpenCodeClient(opcodeUrl, repoDirectory);
       await client.summarizeSession(sessionId, model.providerID, model.modelID);
     } catch (error) {
       showToast.error(`Compact failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      setSessionStatus(sessionId, { type: 'idle' });
     }
-  }, [opcodeUrl, sessionId, model, repoDirectory, setSessionStatus]);
+  }, [opcodeUrl, sessionId, model, repoDirectory]);
 
   const handleUndo = useCallback(async () => {
     if (!opcodeUrl || !sessionId) return;
