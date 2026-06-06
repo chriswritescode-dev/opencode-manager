@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useCallback, useMemo } from 'react'
+import { useUrlParams } from './useUrlParams'
 
 export type ScheduleTab = 'jobs' | 'detail' | 'runs' | 'prompts'
 export type ScheduleDialog = 'new' | 'edit' | 'delete' | null
@@ -35,15 +35,9 @@ function parseNullableInt(value: string | null): number | null {
 }
 
 export function useScheduleUrlState(): UseScheduleUrlStateReturn {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const searchRef = useRef(location.search)
+  const { search, updateParams } = useUrlParams()
 
-  useEffect(() => {
-    searchRef.current = location.search
-  }, [location.search])
-
-  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
+  const searchParams = useMemo(() => new URLSearchParams(search), [search])
 
   const scheduleTab = useMemo<ScheduleTab>(() => {
     const tabParam = searchParams.get('scheduleTab')
@@ -73,11 +67,15 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   const runId = useMemo<number | null>(() => parseNullableInt(searchParams.get('runId')), [searchParams])
   const templateId = useMemo<number | null>(() => parseNullableInt(searchParams.get('templateId')), [searchParams])
 
-  const replaceUrlParams = useCallback((updater: (params: URLSearchParams) => void) => {
-    const p = new URLSearchParams(searchRef.current)
-    updater(p)
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
+  const replaceUrlParams = useCallback(
+    (updater: (params: URLSearchParams) => void) => updateParams(updater, 'replace'),
+    [updateParams],
+  )
+
+  const pushUrlParams = useCallback(
+    (updater: (params: URLSearchParams) => void) => updateParams(updater, 'push'),
+    [updateParams],
+  )
 
   const setScheduleTab = useCallback((tab: ScheduleTab) => {
     replaceUrlParams((p) => {
@@ -90,60 +88,60 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   }, [replaceUrlParams])
 
   const openNewJob = useCallback(() => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('scheduleDialog', 'new')
       p.delete('jobId')
       p.delete('templateId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const openEditJob = useCallback((id: number) => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('scheduleDialog', 'edit')
       p.set('jobId', String(id))
       p.delete('templateId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const openDeleteJob = useCallback((id: number) => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('scheduleDialog', 'delete')
       p.set('jobId', String(id))
       p.delete('templateId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const openNewTemplate = useCallback(() => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('promptDialog', 'new')
       p.delete('templateId')
       p.delete('jobId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const openEditTemplate = useCallback((id: number) => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('promptDialog', 'edit')
       p.set('templateId', String(id))
       p.delete('jobId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const openDeleteTemplate = useCallback((id: number) => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('promptDialog', 'delete')
       p.set('templateId', String(id))
       p.delete('jobId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const openImportTemplate = useCallback(() => {
-    replaceUrlParams((p) => {
+    pushUrlParams((p) => {
       p.set('promptDialog', 'import')
       p.delete('templateId')
       p.delete('jobId')
     })
-  }, [replaceUrlParams])
+  }, [pushUrlParams])
 
   const closeDialog = useCallback(() => {
     replaceUrlParams((p) => {

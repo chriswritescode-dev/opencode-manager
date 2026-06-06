@@ -1,6 +1,6 @@
-import { useEffect } from 'react'
-import { renderHook, act } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { renderHook, act, render, screen } from '@testing-library/react'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useScheduleUrlState } from '../useScheduleUrlState'
 
@@ -371,6 +371,109 @@ describe('useScheduleUrlState', () => {
       expect(result.current.scheduleTab).toBe('detail')
       expect(capturedSearch.current).toContain('jobId=5')
       expect(capturedSearch.current).toContain('scheduleTab=detail')
+    })
+  })
+
+  describe('push/replace history mode', () => {
+    it('openNewJob uses push so navigate(-1) closes the dialog', () => {
+      function PushHarness() {
+        const { dialog, openNewJob } = useScheduleUrlState()
+        const navigate = useNavigate()
+        const [step, setStep] = useState<'start' | 'opened' | 'back'>('start')
+        const handled = useRef(false)
+
+        useEffect(() => {
+          if (handled.current) return
+          if (step === 'opened') {
+            handled.current = true
+            openNewJob()
+          } else if (step === 'back') {
+            handled.current = true
+            navigate(-1)
+          }
+        }, [step, openNewJob, navigate])
+
+        return (
+          <div>
+            <span data-testid="dialog">{dialog ?? 'null'}</span>
+            <button onClick={() => { handled.current = false; setStep('opened') }}>
+              open
+            </button>
+            <button onClick={() => { handled.current = false; setStep('back') }}>
+              back
+            </button>
+          </div>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/other', '/']}>
+          <PushHarness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('dialog').textContent).toBe('null')
+
+      act(() => { screen.getByText('open').click() })
+      expect(screen.getByTestId('dialog').textContent).toBe('new')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('dialog').textContent).toBe('null')
+    })
+
+    it('setScheduleTab uses replace so navigate(-1) does not step through tab changes', () => {
+      function ReplaceHarness() {
+        const { scheduleTab, setScheduleTab } = useScheduleUrlState()
+        const navigate = useNavigate()
+        const [step, setStep] = useState<'start' | 'switched' | 'back'>('start')
+        const handled = useRef(false)
+
+        useEffect(() => {
+          if (handled.current) return
+          if (step === 'switched') {
+            handled.current = true
+            setScheduleTab('runs')
+          } else if (step === 'back') {
+            handled.current = true
+            navigate(-1)
+          }
+        }, [step, setScheduleTab, navigate])
+
+        return (
+          <div>
+            <span data-testid="scheduleTab">{scheduleTab}</span>
+            <button onClick={() => { handled.current = false; setStep('switched') }}>
+              switch
+            </button>
+            <button onClick={() => { handled.current = false; setStep('back') }}>
+              back
+            </button>
+          </div>
+        )
+      }
+
+      render(
+        <MemoryRouter initialEntries={['/other', '/']}>
+          <ReplaceHarness />
+        </MemoryRouter>,
+      )
+
+      expect(screen.getByTestId('scheduleTab').textContent).toBe('jobs')
+
+      act(() => { screen.getByText('switch').click() })
+      expect(screen.getByTestId('scheduleTab').textContent).toBe('runs')
+
+      act(() => { screen.getByText('back').click() })
+      expect(screen.getByTestId('scheduleTab').textContent).toBe('jobs')
+    })
+
+    it('openEditTemplate(7) sets promptDialog=edit and templateId=7', () => {
+      const { result } = renderScheduleUrlState()
+      act(() => {
+        result.current.openEditTemplate(7)
+      })
+      expect(result.current.promptDialog).toBe('edit')
+      expect(result.current.templateId).toBe(7)
     })
   })
 })

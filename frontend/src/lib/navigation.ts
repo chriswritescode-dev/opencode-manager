@@ -16,7 +16,7 @@ export function getSessionListPath(repoId: string | number, isAssistantSession: 
   }
   const base = `/repos/${String(repoId)}`;
   if (tab && tab !== 'repo') {
-    return `${base}?tab=${tab}`;
+    return `${base}?repoTab=${tab}`;
   }
   return base;
 }
@@ -29,7 +29,7 @@ export function getSwipeBackTarget(pathname: string, search = ''): string | null
     const repoId = match[1];
     const params = new URLSearchParams(search);
     const isAssistant = params.get('assistant') === '1';
-    const tab = params.get('tab') ?? undefined;
+    const tab = params.get('repoTab') ?? undefined;
     return getSessionListPath(repoId, isAssistant, tab);
   }
 

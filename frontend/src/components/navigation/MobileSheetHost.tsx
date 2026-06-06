@@ -4,13 +4,10 @@ import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
 import { NotificationsSheet } from '@/components/navigation/NotificationsSheet'
 import { MoreDrawer } from '@/components/navigation/MoreDrawer'
-import { useUIState } from '@/stores/uiStateStore'
 
 export function MobileSheetHost() {
   const isMobile = useMobile()
   const { openSheet, close } = useMobileTabBar()
-  const isMoreDrawerOpen = useUIState((state) => state.isMoreDrawerOpen)
-  const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)
 
   if (!isMobile) return null
 
@@ -27,7 +24,7 @@ export function MobileSheetHost() {
         />
       )}
       {openSheet === 'notifications' && <NotificationsSheet isOpen onClose={close} />}
-      <MoreDrawer isOpen={isMoreDrawerOpen} onClose={() => setMoreDrawerOpen(false)} />
+      <MoreDrawer isOpen={openSheet === 'more'} onClose={close} />
     </>
   )
 }

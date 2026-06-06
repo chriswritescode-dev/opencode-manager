@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X, GitBran
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
 import { useCommands } from '@/hooks/useCommands'
+import { useUrlParams } from '@/hooks/useUrlParams'
 import { useUIState } from '@/stores/uiStateStore'
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
@@ -31,13 +32,13 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
   const swipeRef = useRef<HTMLDivElement>(null)
-  const skipHistoryBackOnCloseRef = useRef(false)
   const { bind } = useSwipeBack(onClose, { enabled: isOpen, suspendsRouteSwipe: true })
+  const { search, updateParams } = useUrlParams()
   const { logout } = useAuth()
   const { data: health } = useServerHealth()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
-  const isAssistantSession = isSessionDetail && new URLSearchParams(location.search).get('assistant') === '1'
+  const isAssistantSession = isSessionDetail && new URLSearchParams(search).get('assistant') === '1'
   const { filterCommands } = useCommands(isSessionDetail ? OPENCODE_API_ENDPOINT : null)
   const activePromptFileBasePath = useUIState((state) => state.activePromptFileBasePath)
   const selectPromptCommand = useUIState((state) => state.selectPromptCommand)
@@ -49,37 +50,6 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
       return cleanup
     }
   }, [isOpen, bind])
-
-  const onCloseRef = useRef(onClose)
-  useEffect(() => {
-    onCloseRef.current = onClose
-  }, [onClose])
-
-  useEffect(() => {
-    if (!isOpen) return
-    skipHistoryBackOnCloseRef.current = false
-    let sentinelActive = true
-    const baseState = window.history.state
-    const baseUrl = window.location.href
-    window.history.pushState({ ...(baseState ?? {}), moreDrawerSentinel: true }, '', baseUrl)
-    const onPop = () => {
-      if (!sentinelActive) return
-      sentinelActive = false
-      onCloseRef.current()
-    }
-    window.addEventListener('popstate', onPop)
-    return () => {
-      window.removeEventListener('popstate', onPop)
-      // Only go back if sentinel is still active AND we haven't navigated away
-      if (sentinelActive && !skipHistoryBackOnCloseRef.current) {
-        sentinelActive = false
-        const top = window.history.state as { moreDrawerSentinel?: boolean } | null
-        if (top?.moreDrawerSentinel && window.location.href === baseUrl) {
-          window.history.back()
-        }
-      }
-    }
-  }, [isOpen])
 
   const { data: repo } = useQuery({
     queryKey: ['repo', repoId],
@@ -93,13 +63,11 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     : repo ? getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath) : null
 
   const handleSettingsClick = () => {
-    const newParams = new URLSearchParams(location.search)
-    newParams.delete('mobileTab')
-    newParams.set('settings', 'open')
-    newParams.set('tab', 'account')
-    skipHistoryBackOnCloseRef.current = true
-    navigate({ search: newParams.toString() }, { replace: true })
-    onClose()
+    updateParams((p) => {
+      p.delete('mobileTab')
+      p.set('settings', 'open')
+      p.set('settingsTab', 'account')
+    }, 'replace')
   }
 
   const handleLogoutClick = async () => {
@@ -112,16 +80,13 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   const handleItemClick = (item: ReturnType<typeof buildMoreItems>[0]) => {
     if (item.to) {
-      skipHistoryBackOnCloseRef.current = true
       navigate(item.to)
     } else if (item.dialog) {
-      const newParams = new URLSearchParams(location.search)
-      newParams.set('dialog', item.dialog)
-      newParams.delete('mobileTab')
-      skipHistoryBackOnCloseRef.current = true
-      navigate({ search: newParams.toString() }, { replace: true })
+      updateParams((p) => {
+        p.set('dialog', item.dialog!)
+        p.delete('mobileTab')
+      }, 'replace')
     }
-    onClose()
   }
 
   const handleCommandClick = (command: CommandType) => {

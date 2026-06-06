@@ -303,7 +303,7 @@ export function SessionDetail() {
   }, [opcodeUrl, sessionId, repoDirectory, navigate, repoId, sessionRouteSuffix]);
 
   const handleCloseSession = useCallback(() => {
-    const tab = new URLSearchParams(location.search).get('tab') ?? undefined;
+    const tab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
     navigate(getSessionListPath(repoId, isAssistantSession, tab))
   }, [navigate, repoId, isAssistantSession, location.search])
 
@@ -428,7 +428,7 @@ export function SessionDetail() {
   const workspaceDisplayName = isAssistantSession || !repo
     ? 'Assistant'
     : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
-  const tabFromUrl = new URLSearchParams(location.search).get('tab') ?? undefined;
+  const tabFromUrl = new URLSearchParams(location.search).get('repoTab') ?? undefined;
   const sessionBackPath = getSessionListPath(repoId, isAssistantSession, tabFromUrl);
 
   return (

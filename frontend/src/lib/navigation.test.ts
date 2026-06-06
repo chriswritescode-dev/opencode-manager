@@ -47,7 +47,7 @@ describe('getSessionListPath', () => {
   });
 
   it('includes tab param when tab is workspaces', () => {
-    expect(getSessionListPath(42, false, 'workspaces')).toBe('/repos/42?tab=workspaces');
+    expect(getSessionListPath(42, false, 'workspaces')).toBe('/repos/42?repoTab=workspaces');
   });
 
   it('omits tab param for repo/default tab', () => {
@@ -82,8 +82,8 @@ describe('getSwipeBackTarget', () => {
     });
 
     it('preserves tab param in back target', () => {
-      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?tab=workspaces')).toBe('/repos/42?tab=workspaces');
-      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?tab=workspaces&assistant=1')).toBe(
+      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces')).toBe('/repos/42?repoTab=workspaces');
+      expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces&assistant=1')).toBe(
         '/assistant?view=sessions'
       );
     });

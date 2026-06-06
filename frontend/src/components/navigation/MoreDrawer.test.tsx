@@ -162,7 +162,7 @@ describe('MoreDrawer', () => {
     renderMoreDrawer({ onClose: handleClose })
     fireEvent.click(screen.getByText('Settings'))
     expect(navigateMock).toHaveBeenCalledWith(
-      { search: 'settings=open&tab=account' },
+      { search: 'settings=open&settingsTab=account' },
       { replace: true },
     )
   })

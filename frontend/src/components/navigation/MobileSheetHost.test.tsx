@@ -27,7 +27,6 @@ import { MemoryRouter } from 'react-router-dom'
 import { MobileSheetHost } from './MobileSheetHost'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
-import { useUIState } from '@/stores/uiStateStore'
 
 describe('MobileSheetHost', () => {
   beforeEach(() => {
@@ -104,15 +103,18 @@ describe('MobileSheetHost', () => {
     expect(screen.getByTestId('notifications-sheet')).toBeInTheDocument()
   })
 
-  it('renders MoreDrawer when isMoreDrawerOpen is true', () => {
-    useUIState.setState({ isMoreDrawerOpen: true })
+  it('renders MoreDrawer when mobileTab=more', () => {
+    vi.mocked(useMobileTabBar).mockReturnValue({
+      openSheet: 'more',
+      open: vi.fn(),
+      close: vi.fn(),
+    })
     render(
-      <MemoryRouter initialEntries={['/']}>
+      <MemoryRouter initialEntries={['/?mobileTab=more']}>
         <MobileSheetHost />
       </MemoryRouter>,
     )
     expect(screen.getByTestId('more-drawer')).toBeInTheDocument()
-    useUIState.setState({ isMoreDrawerOpen: false })
   })
 
   it('closes sheet when onClose is called', () => {

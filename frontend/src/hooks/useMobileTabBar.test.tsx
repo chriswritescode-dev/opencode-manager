@@ -1,5 +1,6 @@
-import { renderHook, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { renderHook, act, render, screen } from '@testing-library/react'
+import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useMobileTabBar, type MobileSheetKey } from './useMobileTabBar'
 
@@ -110,5 +111,51 @@ describe('useMobileTabBar', () => {
     const firstOpen = result.current.open
     rerender()
     expect(result.current.open).toBe(firstOpen)
+  })
+
+  it('open (push) then navigate(-1) sets openSheet to null', () => {
+    function Harness() {
+      const { openSheet, open } = useMobileTabBar()
+      const navigate = useNavigate()
+      const [step, setStep] = useState<'start' | 'pushed' | 'back'>('start')
+      const handled = useRef(false)
+
+      useEffect(() => {
+        if (handled.current) return
+        if (step === 'pushed') {
+          handled.current = true
+          open('files')
+        } else if (step === 'back') {
+          handled.current = true
+          navigate(-1)
+        }
+      }, [step, open, navigate])
+
+      return (
+        <div>
+          <span data-testid="openSheet">{openSheet}</span>
+          <button onClick={() => { handled.current = false; setStep('pushed') }}>
+            open
+          </button>
+          <button onClick={() => { handled.current = false; setStep('back') }}>
+            back
+          </button>
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <Harness />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('openSheet').textContent).toBe('')
+
+    act(() => { screen.getByText('open').click() })
+    expect(screen.getByTestId('openSheet').textContent).toBe('files')
+
+    act(() => { screen.getByText('back').click() })
+    expect(screen.getByTestId('openSheet').textContent).toBe('')
   })
 })

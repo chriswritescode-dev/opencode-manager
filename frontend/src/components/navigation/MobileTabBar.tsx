@@ -4,8 +4,8 @@ import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { useUrlParams } from '@/hooks/useUrlParams'
 import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
-import { useUIState } from '@/stores/uiStateStore'
 import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
 interface TabDef {
@@ -19,15 +19,13 @@ interface TabDef {
 
 interface GlobalTabsArgs {
   pathname: string
-  search: string
   openSheet: ReturnType<typeof useMobileTabBar>['openSheet']
   open: ReturnType<typeof useMobileTabBar>['open']
   close: ReturnType<typeof useMobileTabBar>['close']
   navigate: ReturnType<typeof useNavigate>
   isInsideRepo: boolean
   repoId: string | null
-  isMoreDrawerOpen: boolean
-  setMoreDrawerOpen: (open: boolean) => void
+  updateParams: ReturnType<typeof useUrlParams>['updateParams']
 }
 
 type TabBarMode = 'hidden' | 'global' | 'schedule'
@@ -65,17 +63,10 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
   }
 }
 
-function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, isInsideRepo, repoId, isMoreDrawerOpen, setMoreDrawerOpen }: GlobalTabsArgs): TabDef[] {
-  const navigateWithSearch = (params: URLSearchParams) => {
-    const nextSearch = params.toString()
-    navigate(nextSearch ? `${pathname}?${nextSearch}` : pathname, { replace: true })
-  }
-
+function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, updateParams }: GlobalTabsArgs): TabDef[] {
   const handleFilesClick = () => {
     if (isInsideRepo && repoId) {
-      const newParams = new URLSearchParams(search)
-      newParams.set('dialog', 'files')
-      navigateWithSearch(newParams)
+      updateParams((p) => { p.set('dialog', 'files'); p.delete('mobileTab') }, 'push')
     } else {
       open('files')
     }
@@ -119,8 +110,8 @@ function buildGlobalTabs({ pathname, search, openSheet, open, close, navigate, i
       key: 'more',
       label: 'More',
       icon: Menu,
-      onClick: () => setMoreDrawerOpen(true),
-      active: isMoreDrawerOpen,
+      onClick: () => open('more'),
+      active: openSheet === 'more',
     },
   ]
 }
@@ -187,13 +178,12 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
 })
 
 export const MobileTabBar = memo(function MobileTabBar() {
-  const { pathname, search } = useLocation()
+  const { pathname } = useLocation()
   const navigate = useNavigate()
   const { openSheet, open, close } = useMobileTabBar()
+  const { updateParams } = useUrlParams()
   const { scheduleTab, setScheduleTab } = useScheduleUrlState()
   const isMobile = useMobile()
-  const isMoreDrawerOpen = useUIState((state) => state.isMoreDrawerOpen)
-  const setMoreDrawerOpen = useUIState((state) => state.setMoreDrawerOpen)
   const routeState = useMemo(() => getMobileTabRouteState(pathname), [pathname])
 
   const tabs = useMemo<TabDef[]>(
@@ -201,28 +191,24 @@ export const MobileTabBar = memo(function MobileTabBar() {
       ? buildScheduleTabs(scheduleTab, setScheduleTab)
       : buildGlobalTabs({
         pathname,
-        search,
         openSheet,
         open,
         close,
         navigate,
         isInsideRepo: routeState.isInsideRepo,
         repoId: routeState.repoId,
-        isMoreDrawerOpen,
-        setMoreDrawerOpen,
+        updateParams,
       })),
     [
       routeState,
       scheduleTab,
       setScheduleTab,
       pathname,
-      search,
       openSheet,
       open,
       close,
       navigate,
-      isMoreDrawerOpen,
-      setMoreDrawerOpen,
+      updateParams,
     ],
   )
 

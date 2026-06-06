@@ -1,5 +1,6 @@
-import { renderHook, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { renderHook, act, render, screen } from '@testing-library/react'
+import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { useDialogParam } from './useDialogParam'
 import { describe, it, expect } from 'vitest'
 
@@ -66,5 +67,51 @@ describe('useDialogParam', () => {
 
     expect(result1.current[0]).toBe(true)
     expect(result2.current[0]).toBe(false)
+  })
+
+  it('open pushes so browser back closes the dialog', () => {
+    function DialogPushHarness() {
+      const [isOpen, setOpen] = useDialogParam('test')
+      const navigate = useNavigate()
+      const [step, setStep] = useState<'start' | 'opened' | 'back'>('start')
+      const handled = useRef(false)
+
+      useEffect(() => {
+        if (handled.current) return
+        if (step === 'opened') {
+          handled.current = true
+          setOpen(true)
+        } else if (step === 'back') {
+          handled.current = true
+          navigate(-1)
+        }
+      }, [step, setOpen, navigate])
+
+      return (
+        <div>
+          <span data-testid="dialog-state">{isOpen ? 'open' : 'closed'}</span>
+          <button onClick={() => { handled.current = false; setStep('opened') }}>
+            open
+          </button>
+          <button onClick={() => { handled.current = false; setStep('back') }}>
+            back
+          </button>
+        </div>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <DialogPushHarness />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
+
+    act(() => { screen.getByText('open').click() })
+    expect(screen.getByTestId('dialog-state').textContent).toBe('open')
+
+    act(() => { screen.getByText('back').click() })
+    expect(screen.getByTestId('dialog-state').textContent).toBe('closed')
   })
 })
