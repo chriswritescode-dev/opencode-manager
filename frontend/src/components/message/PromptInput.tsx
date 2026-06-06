@@ -10,7 +10,7 @@ import { useSessionAgent } from '@/hooks/useSessionAgent'
 import { useSTT } from '@/hooks/useSTT'
 
 import { useUserBash } from '@/stores/userBashStore'
-import { useModelStore, formatModelKey } from '@/stores/modelStore'
+import { useModelStore } from '@/stores/modelStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useUIState } from '@/stores/uiStateStore'
 import { useMobile } from '@/hooks/useMobile'
@@ -436,9 +436,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setStoredAgent(sessionID, agentName)
     const agent = agents.find(a => a.name === agentName)
     if (agent?.model) {
-      if (sessionModelSyncKey) {
-        userModelOverrideRef.current[sessionModelSyncKey] = true
-      }
       setStoredModel({ providerID: agent.model.providerID, modelID: agent.model.modelID })
     }
   }
@@ -994,7 +991,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
   const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
   const currentMode = localMode ?? sessionAgent.agent
   const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
-  const userModelOverrideRef = useRef<Record<string, boolean>>({})
+  const syncedSessionModelRef = useRef<string | undefined>(undefined)
 
   const client = useOpenCodeClient(opcodeUrl, directory)
   const { data: providersData } = useQuery({
@@ -1012,28 +1009,19 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
   useEffect(() => {
     if (!sessionModelSyncKey) return
+    if (syncedSessionModelRef.current === sessionModelSyncKey) return
     if (!sessionAgent.model) return
 
-    const sessionModelKey = formatModelKey(sessionAgent.model)
-    const activeModelKey = model ? formatModelKey(model) : undefined
-    const hasUserOverride = userModelOverrideRef.current[sessionModelSyncKey]
+    restoreSessionModel(sessionAgent.model)
 
-    if (hasUserOverride && activeModelKey !== sessionModelKey) return
-
-    if (hasUserOverride) {
-      delete userModelOverrideRef.current[sessionModelSyncKey]
-    }
-
-    if (activeModelKey !== sessionModelKey) {
-      restoreSessionModel(sessionAgent.model)
-    }
+    syncedSessionModelRef.current = sessionModelSyncKey
 
     if (sessionAgent.variant) {
       setStoreVariant(sessionAgent.model, sessionAgent.variant)
     } else {
       clearStoreVariant(sessionAgent.model)
     }
-  }, [clearStoreVariant, model, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, restoreSessionModel, setStoreVariant])
+  }, [clearStoreVariant, sessionAgent.model, sessionAgent.variant, sessionModelSyncKey, restoreSessionModel, setStoreVariant])
 
   const currentModel = modelString || ''
   const displayModelName = useMemo(() => {
@@ -1270,11 +1258,6 @@ return (
                   <ModelQuickSelect
                     opcodeUrl={opcodeUrl}
                     directory={directory}
-                    onModelChange={() => {
-                      if (sessionModelSyncKey) {
-                        userModelOverrideRef.current[sessionModelSyncKey] = true
-                      }
-                    }}
                   >
 <button
                       className="px-2.5 py-0.5 md:px-3 min-h-[36px] min-w-0 rounded-lg text-xs md:text-sm font-medium border bg-muted border-border text-muted-foreground hover:bg-muted-foreground/10 hover:border-foreground/30 transition-colors cursor-pointer flex-1 md:flex-initial md:w-auto max-w-[110px] md:max-w-[220px] dark:border-white/30 flex flex-col items-start justify-center overflow-hidden"

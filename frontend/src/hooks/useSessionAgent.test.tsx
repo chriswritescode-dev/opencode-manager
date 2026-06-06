@@ -175,7 +175,7 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('keeps cached message-derived configuration while refetching', async () => {
+  it('does not restore model from cached messages while refetching', async () => {
     vi.mocked(useMessages).mockReturnValue({
       data: [
         {
@@ -194,10 +194,7 @@ describe('useSessionAgent', () => {
       data: { default_agent: 'code' },
     } as ReturnType<typeof useConfig>)
     vi.mocked(useAgents).mockReturnValue({
-      data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'assistant', mode: 'primary' },
-      ],
+      data: [{ name: 'code', mode: 'primary' }],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
@@ -206,35 +203,7 @@ describe('useSessionAgent', () => {
     )
 
     await waitFor(() => {
-      expect(result.current.agent).toBe('assistant')
-      expect(result.current.model).toEqual({ providerID: 'provider', modelID: 'stale-model' })
-      expect(result.current.variant).toBe('stale-variant')
-    })
-  })
-
-  it('uses stored session agent while initial messages are loading', async () => {
-    useSessionAgentStore.setState({ agents: { 'session-1': 'assistant' } })
-    vi.mocked(useMessages).mockReturnValue({
-      data: undefined,
-      isLoading: true,
-    } as ReturnType<typeof useMessages>)
-    vi.mocked(useConfig).mockReturnValue({
-      data: { default_agent: 'code' },
-    } as ReturnType<typeof useConfig>)
-    vi.mocked(useAgents).mockReturnValue({
-      data: [
-        { name: 'code', mode: 'primary' },
-        { name: 'assistant', mode: 'primary' },
-      ],
-      isSuccess: true,
-    } as ReturnType<typeof useAgents>)
-
-    const { result } = renderHook(() =>
-      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
-    )
-
-    await waitFor(() => {
-      expect(result.current.agent).toBe('assistant')
+      expect(result.current.agent).toBe('code')
       expect(result.current.model).toBeUndefined()
       expect(result.current.variant).toBeUndefined()
     })
