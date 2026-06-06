@@ -26,6 +26,10 @@ interface ModelStore {
   clearVariant: (model: ModelSelection) => void
 }
 
+export function formatModelKey(model: ModelSelection): string {
+  return `${model.providerID}/${model.modelID}`
+}
+
 export function modelExists(model: ModelSelection | null, providers: Provider[]): boolean {
   if (!model) return false
   return providers.some(
