@@ -59,8 +59,11 @@ FROM base AS runner
 
 ARG UV_VERSION=latest
 ARG OPENCODE_VERSION=latest
+# Bump TOOLS_CACHEBUST (e.g. via --build-arg) to force a fresh uv/opencode
+# install without invalidating the rest of the build cache.
+ARG TOOLS_CACHEBUST=0
 
-RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION}" && \
+RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${TOOLS_CACHEBUST})" && \
     curl -LsSf https://astral.sh/uv/install.sh | UV_NO_MODIFY_PATH=1 sh && \
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
