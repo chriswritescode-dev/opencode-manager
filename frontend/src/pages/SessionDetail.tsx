@@ -32,6 +32,7 @@ import { useEffect, useRef, useCallback, useMemo } from "react";
 import { MessageSkeleton } from "@/components/message/MessageSkeleton";
 import { exportSession, downloadMarkdown } from "@/lib/exportSession";
 import type { MessageWithParts } from "@/api/types";
+import { getMessagesContentVersion } from "./sessionContentVersion";
 import { showToast } from "@/lib/toast";
 import { getRepoDisplayName } from "@/lib/utils";
 import { RepoMcpDialog } from "@/components/repo/RepoMcpDialog";
@@ -61,21 +62,6 @@ const compareMessageIds = (id1: string, id2: string): number => {
 
 const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
 const PROMPT_OVERLAY_CLEARANCE_PX = 16
-
-const getMessagesContentVersion = (messages?: MessageWithParts[]): number => {
-  if (!messages) return 0
-  return messages.reduce((sum, message) => {
-    return sum + message.parts.reduce((partSum, part) => {
-      if ('text' in part && typeof part.text === 'string') {
-        return partSum + part.text.length
-      }
-      if (part.type === 'tool') {
-        return partSum + JSON.stringify(part.state).length
-      }
-      return partSum + 1
-    }, 0)
-  }, messages.length)
-}
 
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
@@ -164,11 +150,13 @@ export function SessionDetail() {
     return messages
   }, [messages])
 
+  const messagesContentVersion = useMemo(() => getMessagesContentVersion(messages), [messages]);
+
   const { scrollToBottom } = useAutoScroll({
     containerRef: messageContainerRef,
     messages: messages?.map(m => m.info),
     sessionId,
-    contentVersion: getMessagesContentVersion(messages),
+    contentVersion: messagesContentVersion,
     onScrollStateChange: setShowScrollButton
   });
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);

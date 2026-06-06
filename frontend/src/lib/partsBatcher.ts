@@ -2,10 +2,10 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { Part, MessageWithParts } from '@/api/types'
 
 interface PartsBatcher {
-  queuePartUpdate: (sessionID: string, part: Part) => void
-  queuePartDelta: (sessionID: string, messageID: string, partID: string, field: string, delta: string) => void
-  queuePartRemoval: (sessionID: string, messageID: string, partID: string) => void
-  flush: () => void
+  queuePartUpdate: (sessionID: string, part: Part, directory?: string) => void
+  queuePartDelta: (sessionID: string, messageID: string, partID: string, field: string, delta: string, directory?: string) => void
+  queuePartRemoval: (sessionID: string, messageID: string, partID: string, directory?: string) => void
+  flush: (target?: { sessionID?: string; directory?: string }) => void
   destroy: () => void
 }
 
@@ -14,12 +14,21 @@ type PartOperation =
   | { type: 'delta'; messageID: string; partID: string; field: string; delta: string }
   | { type: 'remove'; messageID: string; partID: string }
 
+type OperationGroup = {
+  sessionID: string
+  directory?: string
+  operations: PartOperation[]
+}
+
+function groupKey(sessionID: string, directory?: string): string {
+  return `${directory ?? ''}\0${sessionID}`
+}
+
 export function createPartsBatcher(
   queryClient: QueryClient,
   opcodeUrl: string,
-  directory?: string
 ): PartsBatcher {
-  const pendingOperations = new Map<string, PartOperation[]>()
+  const pendingOperations = new Map<string, OperationGroup>()
   let pendingFrameId: number | null = null
 
   const scheduleFlush = () => {
@@ -30,78 +39,185 @@ export function createPartsBatcher(
     })
   }
 
-  const flush = () => {
+  const flush = (target?: { sessionID?: string; directory?: string }) => {
     if (pendingOperations.size === 0) return
 
-    for (const [sessionID, operations] of pendingOperations.entries()) {
+    const groupsToDelete: string[] = []
+    const invalidatedGroupKeys = new Set<string>()
+
+    for (const [key, group] of pendingOperations.entries()) {
+      if (target) {
+        if (target.sessionID !== undefined && group.sessionID !== target.sessionID) continue
+        if (target.directory !== undefined && group.directory !== target.directory) continue
+      }
+
+      if (group.operations.length === 0) {
+        groupsToDelete.push(key)
+        continue
+      }
+
+      const { sessionID, directory } = group
       const queryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
       const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
 
-      if (!currentData) continue
-
-      let updatedData = [...currentData]
-
-      for (const operation of operations) {
-        updatedData = updatedData.map((msgWithParts) => {
-          if (operation.type === 'upsert') {
-            if (msgWithParts.info.id !== operation.part.messageID) return msgWithParts
-
-            const existingIdx = msgWithParts.parts.findIndex((part) => part.id === operation.part.id)
-            const parts = [...msgWithParts.parts]
-            if (existingIdx >= 0) {
-              parts[existingIdx] = operation.part
-            } else {
-              parts.push(operation.part)
-            }
-
-            return { ...msgWithParts, parts }
-          }
-
-          if (msgWithParts.info.id !== operation.messageID) return msgWithParts
-
-          if (operation.type === 'remove') {
-            return {
-              ...msgWithParts,
-              parts: msgWithParts.parts.filter((part) => part.id !== operation.partID),
-            }
-          }
-
-          return {
-            ...msgWithParts,
-            parts: msgWithParts.parts.map((part) => {
-              if (part.id !== operation.partID) return part
-
-              const currentValue = (part as Record<string, unknown>)[operation.field]
-              const nextValue = `${typeof currentValue === 'string' ? currentValue : ''}${operation.delta}`
-              return { ...part, [operation.field]: nextValue } as Part
-            }),
-          }
-        })
+      if (!currentData) {
+        if (!invalidatedGroupKeys.has(key)) {
+          invalidatedGroupKeys.add(key)
+          queryClient.invalidateQueries({ queryKey })
+        }
+        groupsToDelete.push(key)
+        continue
       }
 
-      queryClient.setQueryData(queryKey, updatedData)
+      let updatedData = currentData
+      let dataMutated = false
+      const unapplied: PartOperation[] = []
+      const supersededPartIDs = new Set<string>()
+
+      const messageIdxById = new Map<string, number>()
+      for (let i = 0; i < currentData.length; i++) {
+        messageIdxById.set(currentData[i].info.id, i)
+      }
+
+      const partIdxCache = new Map<number, Map<string, number>>()
+
+      const ensurePartIdx = (msgIdx: number, parts: Part[]): Map<string, number> => {
+        let cache = partIdxCache.get(msgIdx)
+        if (!cache) {
+          cache = new Map()
+          for (let i = 0; i < parts.length; i++) {
+            cache.set(parts[i].id, i)
+          }
+          partIdxCache.set(msgIdx, cache)
+        }
+        return cache
+      }
+
+      for (const operation of group.operations) {
+        if (operation.type === 'upsert') {
+          const msgIdx = messageIdxById.get(operation.part.messageID)
+          if (msgIdx === undefined) {
+            unapplied.push(operation)
+            continue
+          }
+          if (!dataMutated) {
+            updatedData = [...currentData]
+            dataMutated = true
+          }
+          const msg = updatedData[msgIdx]
+          const pIdx = ensurePartIdx(msgIdx, msg.parts)
+          const existingPartIdx = pIdx.get(operation.part.id)
+          let nextParts: Part[]
+          if (existingPartIdx !== undefined) {
+            nextParts = [...msg.parts]
+            nextParts[existingPartIdx] = operation.part
+          } else {
+            nextParts = [...msg.parts, operation.part]
+            pIdx.set(operation.part.id, nextParts.length - 1)
+          }
+          updatedData[msgIdx] = { ...msg, parts: nextParts }
+          supersededPartIDs.add(operation.part.id)
+          continue
+        }
+
+        if (operation.type === 'remove') {
+          const msgIdx = messageIdxById.get(operation.messageID)
+          if (msgIdx === undefined) {
+            unapplied.push(operation)
+            continue
+          }
+          if (!dataMutated) {
+            updatedData = [...currentData]
+            dataMutated = true
+          }
+          const msg = updatedData[msgIdx]
+          const pIdx = ensurePartIdx(msgIdx, msg.parts)
+          if (pIdx.get(operation.partID) === undefined) {
+            unapplied.push(operation)
+            continue
+          }
+          const nextParts = msg.parts.filter((part) => part.id !== operation.partID)
+          updatedData[msgIdx] = { ...msg, parts: nextParts }
+          partIdxCache.delete(msgIdx)
+          supersededPartIDs.add(operation.partID)
+          continue
+        }
+
+        const msgIdx = messageIdxById.get(operation.messageID)
+        if (msgIdx === undefined) {
+          unapplied.push(operation)
+          continue
+        }
+        if (!dataMutated) {
+          updatedData = [...currentData]
+          dataMutated = true
+        }
+        const msg = updatedData[msgIdx]
+        const pIdx = ensurePartIdx(msgIdx, msg.parts)
+        const pIdxResult = pIdx.get(operation.partID)
+        if (pIdxResult === undefined) {
+          unapplied.push(operation)
+          continue
+        }
+        const targetPart = msg.parts[pIdxResult]
+        if (!targetPart) {
+          unapplied.push(operation)
+          continue
+        }
+        const nextParts = [...msg.parts]
+        const currentValue = (targetPart as Record<string, unknown>)[operation.field]
+        const nextValue = `${typeof currentValue === 'string' ? currentValue : ''}${operation.delta}`
+        nextParts[pIdxResult] = { ...targetPart, [operation.field]: nextValue } as Part
+        updatedData[msgIdx] = { ...msg, parts: nextParts }
+      }
+
+      if (dataMutated) {
+        queryClient.setQueryData(queryKey, updatedData)
+      }
+
+      const filteredUnapplied = unapplied.filter((op) => {
+        if (op.type === 'delta' || op.type === 'remove') {
+          return !supersededPartIDs.has(op.partID)
+        }
+        return true
+      })
+
+      if (filteredUnapplied.length > 0) {
+        if (!invalidatedGroupKeys.has(key)) {
+          invalidatedGroupKeys.add(key)
+          queryClient.invalidateQueries({ queryKey })
+        }
+      }
+
+      groupsToDelete.push(key)
     }
 
-    pendingOperations.clear()
+    for (const key of groupsToDelete) {
+      pendingOperations.delete(key)
+    }
   }
 
-  const queueOperation = (sessionID: string, operation: PartOperation) => {
-    const operations = pendingOperations.get(sessionID) ?? []
-    operations.push(operation)
-    pendingOperations.set(sessionID, operations)
+  const queueOperation = (sessionID: string, operation: PartOperation, directory?: string) => {
+    const key = groupKey(sessionID, directory)
+    let group = pendingOperations.get(key)
+    if (!group) {
+      group = { sessionID, directory, operations: [] }
+      pendingOperations.set(key, group)
+    }
+    group.operations.push(operation)
     scheduleFlush()
   }
 
-  const queuePartUpdate = (sessionID: string, part: Part) => {
-    queueOperation(sessionID, { type: 'upsert', part })
+  const queuePartUpdate = (sessionID: string, part: Part, directory?: string) => {
+    queueOperation(sessionID, { type: 'upsert', part }, directory)
   }
 
-  const queuePartDelta = (sessionID: string, messageID: string, partID: string, field: string, delta: string) => {
-    queueOperation(sessionID, { type: 'delta', messageID, partID, field, delta })
+  const queuePartDelta = (sessionID: string, messageID: string, partID: string, field: string, delta: string, directory?: string) => {
+    queueOperation(sessionID, { type: 'delta', messageID, partID, field, delta }, directory)
   }
 
-  const queuePartRemoval = (sessionID: string, messageID: string, partID: string) => {
-    queueOperation(sessionID, { type: 'remove', messageID, partID })
+  const queuePartRemoval = (sessionID: string, messageID: string, partID: string, directory?: string) => {
+    queueOperation(sessionID, { type: 'remove', messageID, partID }, directory)
   }
 
   const destroy = () => {

@@ -23,10 +23,15 @@ interface CapturedEvent {
 
 function createCapturingClient() {
   const events: CapturedEvent[] = []
+  const frames: string[] = []
+  const decoder = new TextDecoder()
   const callback = (event: string, data: string) => {
     events.push({ event, data })
   }
-  return { callback, events }
+  const writeFrame = (frame: Uint8Array) => {
+    frames.push(decoder.decode(frame))
+  }
+  return { callback, writeFrame, events, frames }
 }
 
 function makeFetcher(map: Record<string, { permissions?: unknown[]; questions?: unknown[] }>): PendingActionsFetcher {
@@ -69,29 +74,29 @@ describe('SSEAggregator pending replay on connect', () => {
     })
     sseAggregator.setPendingActionsFetcher(fetcher)
 
-    const { callback, events } = createCapturingClient()
-    sseAggregator.addClient('client-1', callback, ['/repo/a', '/repo/b'])
+    const { callback, writeFrame, events } = createCapturingClient()
+    sseAggregator.addClient('client-1', callback, writeFrame, ['/repo/a', '/repo/b'])
 
     await flushReplay()
 
     expect(events).toHaveLength(4)
 
-    const parsed = events.map(e => JSON.parse(e.data) as { type: string; properties: { id: string }; directory: string })
+    const parsed = events.map(e => JSON.parse(e.data) as { directory: string; payload: { type: string; properties: { id: string } } })
 
-    expect(parsed.filter(p => p.type === 'permission.asked' && p.directory === '/repo/a').map(p => p.properties.id)).toEqual([
+    expect(parsed.filter(p => p.payload.type === 'permission.asked' && p.directory === '/repo/a').map(p => p.payload.properties.id)).toEqual([
       'perm-1',
       'perm-2',
     ])
-    expect(parsed.filter(p => p.type === 'question.asked' && p.directory === '/repo/a').map(p => p.properties.id)).toEqual(['q-1'])
-    expect(parsed.filter(p => p.type === 'permission.asked' && p.directory === '/repo/b').map(p => p.properties.id)).toEqual([
+    expect(parsed.filter(p => p.payload.type === 'question.asked' && p.directory === '/repo/a').map(p => p.payload.properties.id)).toEqual(['q-1'])
+    expect(parsed.filter(p => p.payload.type === 'permission.asked' && p.directory === '/repo/b').map(p => p.payload.properties.id)).toEqual([
       'perm-3',
     ])
-    expect(parsed.filter(p => p.type === 'question.asked' && p.directory === '/repo/b')).toHaveLength(0)
+    expect(parsed.filter(p => p.payload.type === 'question.asked' && p.directory === '/repo/b')).toHaveLength(0)
   })
 
   it('does not replay when no fetcher is configured', async () => {
-    const { callback, events } = createCapturingClient()
-    sseAggregator.addClient('client-2', callback, ['/repo/a'])
+    const { callback, writeFrame, events } = createCapturingClient()
+    sseAggregator.addClient('client-2', callback, writeFrame, ['/repo/a'])
 
     await flushReplay()
 
@@ -107,8 +112,8 @@ describe('SSEAggregator pending replay on connect', () => {
     const clientA = createCapturingClient()
     const clientB = createCapturingClient()
 
-    sseAggregator.addClient('a', clientA.callback, ['/repo/a'])
-    sseAggregator.addClient('b', clientB.callback, [])
+    sseAggregator.addClient('a', clientA.callback, clientA.writeFrame, ['/repo/a'])
+    sseAggregator.addClient('b', clientB.callback, clientB.writeFrame, [])
 
     await flushReplay()
 
@@ -123,8 +128,8 @@ describe('SSEAggregator pending replay on connect', () => {
     })
     sseAggregator.setPendingActionsFetcher(fetcher)
 
-    const { callback, events } = createCapturingClient()
-    sseAggregator.addClient('client-3', callback, ['/repo/a'])
+    const { callback, writeFrame, events } = createCapturingClient()
+    sseAggregator.addClient('client-3', callback, writeFrame, ['/repo/a'])
     await flushReplay()
 
     const initialCount = events.length
@@ -134,11 +139,11 @@ describe('SSEAggregator pending replay on connect', () => {
     await flushReplay()
 
     const newEvents = events.slice(initialCount)
-    const parsed = newEvents.map(e => JSON.parse(e.data) as { type: string; directory: string; properties: { id: string } })
+    const parsed = newEvents.map(e => JSON.parse(e.data) as { directory: string; payload: { type: string; properties: { id: string } } })
     expect(parsed).toHaveLength(1)
     const [first] = parsed
     expect(first?.directory).toBe('/repo/b')
-    expect(first?.properties.id).toBe('perm-2')
+    expect(first?.payload.properties.id).toBe('perm-2')
   })
 
   it('survives upstream fetch failures for one directory and still replays the others', async () => {
@@ -155,15 +160,15 @@ describe('SSEAggregator pending replay on connect', () => {
     }
     sseAggregator.setPendingActionsFetcher(fetcher)
 
-    const { callback, events } = createCapturingClient()
-    sseAggregator.addClient('client-4', callback, ['/repo/broken', '/repo/ok'])
+    const { callback, writeFrame, events } = createCapturingClient()
+    sseAggregator.addClient('client-4', callback, writeFrame, ['/repo/broken', '/repo/ok'])
     await flushReplay()
 
-    const parsed = events.map(e => JSON.parse(e.data) as { directory: string; properties: { id: string } })
+    const parsed = events.map(e => JSON.parse(e.data) as { directory: string; payload: { properties: { id: string } } })
     expect(parsed).toHaveLength(1)
     const [first] = parsed
     expect(first?.directory).toBe('/repo/ok')
-    expect(first?.properties.id).toBe('perm-ok')
+    expect(first?.payload.properties.id).toBe('perm-ok')
   })
 
   it('does not deliver replay events to a client that no longer subscribes to that directory', async () => {
@@ -180,8 +185,8 @@ describe('SSEAggregator pending replay on connect', () => {
     }
     sseAggregator.setPendingActionsFetcher(fetcher)
 
-    const { callback, events } = createCapturingClient()
-    sseAggregator.addClient('client-5', callback, ['/repo/a'])
+    const { callback, writeFrame, events } = createCapturingClient()
+    sseAggregator.addClient('client-5', callback, writeFrame, ['/repo/a'])
 
     sseAggregator.removeDirectories('client-5', ['/repo/a'])
     resolvePermissions([{ id: 'late', sessionID: 's' }])
@@ -189,5 +194,80 @@ describe('SSEAggregator pending replay on connect', () => {
     await flushReplay()
 
     expect(events).toHaveLength(0)
+  })
+})
+
+describe('SSEAggregator directory-indexed broadcast', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+  })
+
+  it('delivers only to clients subscribed to the event directory', () => {
+    const clientA = createCapturingClient()
+    const clientB = createCapturingClient()
+    sseAggregator.addClient('index-a', clientA.callback, clientA.writeFrame, ['/a'])
+    sseAggregator.addClient('index-b', clientB.callback, clientB.writeFrame, ['/b'])
+
+    const data = JSON.stringify({ directory: '/a', payload: { type: 'test', properties: {} } })
+    ;(sseAggregator as any).handleUpstreamMessage(data)
+
+    expect(clientA.frames).toHaveLength(1)
+    expect(clientB.frames).toHaveLength(0)
+  })
+
+  it('does not encode a frame when no client subscribes', () => {
+    const clientA = createCapturingClient()
+    sseAggregator.addClient('index-c', clientA.callback, clientA.writeFrame, ['/a'])
+
+    const data = JSON.stringify({ directory: '/z', payload: { type: 'test', properties: {} } })
+    ;(sseAggregator as any).handleUpstreamMessage(data)
+
+    expect(clientA.frames).toHaveLength(0)
+  })
+
+  it('removeClient deindexes', () => {
+    const clientA = createCapturingClient()
+    sseAggregator.addClient('index-d', clientA.callback, clientA.writeFrame, ['/a'])
+    sseAggregator.removeClient('index-d')
+
+    const data = JSON.stringify({ directory: '/a', payload: { type: 'test', properties: {} } })
+    ;(sseAggregator as any).handleUpstreamMessage(data)
+
+    expect(clientA.frames).toHaveLength(0)
+  })
+
+  it('addDirectories then delivery', () => {
+    const clientA = createCapturingClient()
+    sseAggregator.addClient('index-e', clientA.callback, clientA.writeFrame, [])
+    sseAggregator.addDirectories('index-e', ['/a'])
+
+    const data = JSON.stringify({ directory: '/a', payload: { type: 'test', properties: {} } })
+    ;(sseAggregator as any).handleUpstreamMessage(data)
+
+    expect(clientA.frames).toHaveLength(1)
+  })
+
+  it('replacing a client ID deindexes old directories', () => {
+    const clientA = createCapturingClient()
+    const clientB = createCapturingClient()
+
+    // Add client with id 'index-f' subscribed to /a
+    sseAggregator.addClient('index-f', clientA.callback, clientA.writeFrame, ['/a'])
+
+    // Replace same client ID with different directories (no /a)
+    sseAggregator.addClient('index-f', clientB.callback, clientB.writeFrame, ['/b'])
+
+    // Message for /a should NOT reach either client
+    const dataA = JSON.stringify({ directory: '/a', payload: { type: 'test', properties: {} } })
+    ;(sseAggregator as any).handleUpstreamMessage(dataA)
+
+    expect(clientA.frames).toHaveLength(0)
+    expect(clientB.frames).toHaveLength(0)
+
+    // Message for /b should reach clientB
+    const dataB = JSON.stringify({ directory: '/b', payload: { type: 'test', properties: {} } })
+    ;(sseAggregator as any).handleUpstreamMessage(dataB)
+
+    expect(clientB.frames).toHaveLength(1)
   })
 })

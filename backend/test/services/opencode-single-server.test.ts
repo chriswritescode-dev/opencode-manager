@@ -17,6 +17,8 @@ const spawnMock = vi.hoisted(() => vi.fn(() => ({
   on: vi.fn(),
 })))
 
+const spawnSyncMock = vi.hoisted(() => vi.fn())
+
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
 }))
@@ -62,6 +64,7 @@ vi.mock('fs', () => ({
 vi.mock('child_process', () => ({
   execSync: vi.fn(),
   spawn: spawnMock,
+  spawnSync: spawnSyncMock,
 }))
 
 vi.mock('../../src/services/opencode/config-recovery', () => ({
@@ -73,7 +76,7 @@ vi.mock('../../src/services/opencode/client', () => ({
 }))
 
 import { promises as fs } from 'fs'
-import { execSync } from 'child_process'
+import { execSync, spawnSync } from 'child_process'
 import { ConfigReloadError } from '../../src/services/opencode-single-server'
 import { encryptSecret } from '../../src/utils/crypto'
 import { ENV } from '@opencode-manager/shared/config/env'
@@ -89,6 +92,7 @@ vi.mock('../../src/utils/logger', () => ({
 const mkdirMock = fs.mkdir as any
 const accessMock = fs.access as any
 const execSyncMock = execSync as any
+const childSpawnSyncMock = spawnSync as any
 
 // Reset singleton before any tests run to clear any polluted state from previous test files
 beforeAll(async () => {
@@ -412,4 +416,41 @@ describe('OpenCodeServerManager - checkHealth', () => {
     expect(capturedSignal).toBeDefined()
     expect(aborted).toBe(true)
   }, 5000)
+})
+
+describe('OpenCodeServerManager - configured plugin install', () => {
+  beforeEach(async () => {
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+    vi.clearAllMocks()
+  })
+
+  afterEach(async () => {
+    const { OpenCodeServerManager } = await import('../../src/services/opencode-single-server')
+    OpenCodeServerManager.resetInstance()
+    vi.clearAllMocks()
+  })
+
+  it('bounds first-run plugin installation with a timeout', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { logger } = await import('../../src/utils/logger')
+
+    accessMock.mockImplementation((filePath: string) => {
+      const error = new Error('Not found') as NodeJS.ErrnoException
+      error.code = 'ENOENT'
+      return filePath.includes('package.json') ? Promise.reject(error) : Promise.resolve()
+    })
+    childSpawnSyncMock
+      .mockReturnValueOnce({ status: 0, stdout: '', stderr: '' })
+      .mockReturnValueOnce({ status: null, stdout: '', stderr: '', error: new Error('spawnSync bun ETIMEDOUT') })
+
+    await (opencodeServerManager as any).installConfiguredPlugins(['test-plugin'])
+
+    expect(childSpawnSyncMock).toHaveBeenCalledWith(
+      'bun',
+      ['add', '--ignore-scripts', 'test-plugin@latest'],
+      expect.objectContaining({ timeout: 120000 }),
+    )
+    expect(logger.warn).toHaveBeenCalledWith('Failed to install OpenCode plugin test-plugin: spawnSync bun ETIMEDOUT')
+  })
 })
