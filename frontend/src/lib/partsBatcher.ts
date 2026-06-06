@@ -64,6 +64,7 @@ export function createPartsBatcher(
 
       if (!currentData) {
         invalidateOnce(queryKey)
+        groupsToDelete.push(key)
         continue
       }
 
@@ -141,11 +142,10 @@ export function createPartsBatcher(
       })
 
       if (filteredUnapplied.length > 0) {
-        group.operations = filteredUnapplied
         invalidateOnce(queryKey)
-      } else {
-        groupsToDelete.push(key)
       }
+
+      groupsToDelete.push(key)
     }
 
     for (const key of groupsToDelete) {
