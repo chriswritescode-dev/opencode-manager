@@ -35,6 +35,8 @@ export class OpenCodeEventStream {
   private clientId: string | null = null
   private lastEventAt: number | null = null
   private watchdogTimer: ReturnType<typeof setInterval> | null = null
+  private upstreamConnectedCount: number | null = null
+  private upstreamTotalCount: number | null = null
 
   constructor(options: OpenCodeEventStreamOptions = {}) {
     this.transport = options.transport ?? createBrowserEventStreamTransport()
@@ -46,8 +48,7 @@ export class OpenCodeEventStream {
     onStatusChange?: EventStreamStatusHandler
     onHealthChange?: (state: EventStreamHealthState) => void
   }): GlobalMonitorSubscription {
-    const id = this.addSubscriber(input.onEvent, input.onStatusChange, input.onHealthChange)
-    this.updateSubscriberDirectories(id, input.directories)
+    const id = this.addSubscriber(input.onEvent, input.onStatusChange, input.onHealthChange, input.directories)
 
     return {
       updateDirectories: (directories) => this.updateSubscriberDirectories(id, directories),
@@ -65,14 +66,31 @@ export class OpenCodeEventStream {
     onEvent: OpenCodeEventHandler,
     onStatusChange?: EventStreamStatusHandler,
     onHealthChange?: (state: EventStreamHealthState) => void,
+    directories: string[] = [],
   ): string {
     const id = `sub_${++this.subscriberIdCounter}`
+
+    const initialDirectories = new Set(directories.filter(Boolean))
+    const newDirectories: string[] = []
+
+    for (const directory of initialDirectories) {
+      const currentCount = this.directoryRefCounts.get(directory) ?? 0
+      this.directoryRefCounts.set(directory, currentCount + 1)
+      if (currentCount === 0) {
+        if (this.clientId && this.connected) {
+          newDirectories.push(directory)
+        } else {
+          this.pendingDirectories.add(directory)
+        }
+      }
+    }
+
     this.subscribers.set(id, {
       id,
       onEvent,
       onStatusChange,
       onHealthChange,
-      directories: new Set(),
+      directories: initialDirectories,
     })
 
     onStatusChange?.(this.connected)
@@ -80,6 +98,8 @@ export class OpenCodeEventStream {
 
     if (this.subscribers.size === 1) {
       this.connect()
+    } else if (newDirectories.length > 0) {
+      void this.subscribeToRemoteDirectories(newDirectories)
     }
 
     return id
@@ -186,6 +206,8 @@ export class OpenCodeEventStream {
   private handleError(): void {
     this.connected = false
     this.clientId = null
+    this.upstreamConnectedCount = null
+    this.upstreamTotalCount = null
     this.stopWatchdog()
     this.lastEventAt = null
 
@@ -213,9 +235,15 @@ export class OpenCodeEventStream {
 
   private handleConnected(data: string): void {
     try {
-      const parsed = JSON.parse(data) as { clientId?: unknown }
+      const parsed = JSON.parse(data) as { clientId?: unknown; connected?: unknown; total?: unknown }
       if (typeof parsed.clientId === 'string') {
         this.clientId = parsed.clientId
+      }
+      if (typeof parsed.connected === 'number') {
+        this.upstreamConnectedCount = parsed.connected
+      }
+      if (typeof parsed.total === 'number') {
+        this.upstreamTotalCount = parsed.total
       }
     } catch {
       this.clientId = null
@@ -239,6 +267,8 @@ export class OpenCodeEventStream {
     this.connection = null
     this.connected = false
     this.clientId = null
+    this.upstreamConnectedCount = null
+    this.upstreamTotalCount = null
     this.lastEventAt = null
     this.pendingDirectories.clear()
     this.notifyHealth()
@@ -263,6 +293,8 @@ export class OpenCodeEventStream {
     this.connection = null
     this.connected = false
     this.clientId = null
+    this.upstreamConnectedCount = null
+    this.upstreamTotalCount = null
     this.lastEventAt = null
     this.pendingDirectories = new Set(this.directoryRefCounts.keys())
     this.notifyStatusChange(false)
@@ -308,9 +340,10 @@ export class OpenCodeEventStream {
 
   private buildHealth(): EventStreamHealthState {
     const isStalled = this.connected && this.lastEventAt != null && Date.now() - this.lastEventAt > STALL_THRESHOLD_MS
+    const upstreamDisconnected = this.upstreamTotalCount != null && this.upstreamTotalCount > 0 && this.upstreamConnectedCount === 0
     return {
       isConnected: this.connected,
-      isHealthy: this.connected && this.lastEventAt != null && !isStalled,
+      isHealthy: this.connected && this.lastEventAt != null && !isStalled && !upstreamDisconnected,
       lastEventAt: this.lastEventAt,
       isStalled,
     }

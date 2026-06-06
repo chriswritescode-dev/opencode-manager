@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useSessionStatus } from '../stores/sessionStatusStore'
+import type { Part, MessageWithParts } from '@/api/types'
 
 const mocks = vi.hoisted(() => ({
   getSessionStatuses: vi.fn(),
@@ -274,4 +275,181 @@ describe('useSSE', () => {
 
     unmount()
   })
+
+  it('routes streamed part deltas to the event directory in multi-directory subscriptions', async () => {
+    const origRAF = window.requestAnimationFrame
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+
+    try {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+
+      // Seed both directory caches before rendering the hook
+      queryClient.setQueryData(
+        ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-a'],
+        [{
+          ...assistantMessage('session-1', 'message-1'),
+          parts: [textPart('session-1', 'message-1', 'part-1', 'A')],
+        }],
+      )
+      queryClient.setQueryData(
+        ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-b'],
+        [{
+          ...assistantMessage('session-1', 'message-1'),
+          parts: [textPart('session-1', 'message-1', 'part-1', 'B')],
+        }],
+      )
+
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+
+      // Use stable reference to avoid re-render loop with inline array
+      const directories = ['/repo-a', '/repo-b']
+      const { result, unmount } = renderHook(
+        () => useSSE('http://localhost:5551', directories, 'session-1'),
+        { wrapper },
+      )
+
+      await waitFor(() => {
+        expect(MockEventSource.instances.length).toBeGreaterThanOrEqual(1)
+      })
+
+      const eventSource = MockEventSource.instances[MockEventSource.instances.length - 1]
+
+      act(() => {
+        eventSource.emit('connected', { clientId: 'client-1' })
+      })
+
+      await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+      act(() => {
+        eventSource.emit('message', {
+          type: 'message.part.delta',
+          directory: '/repo-b',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            partID: 'part-1',
+            field: 'text',
+            delta: ' + streamed',
+          },
+        })
+      })
+
+      const repoBData = queryClient.getQueryData<MessageWithParts[]>([
+        'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-b',
+      ])
+      expect(repoBData![0].parts[0]).toHaveProperty('text', 'B + streamed')
+
+      const repoAData = queryClient.getQueryData<MessageWithParts[]>([
+        'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-a',
+      ])
+      expect(repoAData![0].parts[0]).toHaveProperty('text', 'A')
+
+      unmount()
+    } finally {
+      window.requestAnimationFrame = origRAF
+    }
+  })
+
+  it('processes part deltas when directory transitions from undefined to a real value', async () => {
+    const origRAF = window.requestAnimationFrame
+    window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(0)
+      return 0
+    }) as typeof window.requestAnimationFrame
+
+    try {
+      const queryClient = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      })
+      const wrapper = ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      )
+
+      // Seed cache with an empty part
+      queryClient.setQueryData(
+        ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+        [{
+          ...assistantMessage('session-1', 'message-1'),
+          parts: [textPart('session-1', 'message-1', 'part-1', '')],
+        }],
+      )
+
+      // Initial render with directory=undefined — batcher should be created eagerly
+      const { rerender, unmount } = renderHook(
+        ({ directory }) => useSSE('http://localhost:5551', directory, 'session-1'),
+        { wrapper, initialProps: { directory: undefined as string | undefined } },
+      )
+
+      // No SSE subscription yet because directoriesList is empty
+      expect(MockEventSource.instances).toHaveLength(0)
+
+      // Re-render with a real directory to start the SSE subscription
+      rerender({ directory: '/repo' })
+
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+      const eventSource = MockEventSource.instances[0]
+
+      act(() => {
+        eventSource.emit('connected', { clientId: 'client-1' })
+      })
+
+      // Emit a part delta — the batcher was created on the initial mount,
+      // so it should process the event even though directory was undefined at mount time
+      act(() => {
+        eventSource.emit('message', {
+          type: 'message.part.delta',
+          directory: '/repo',
+          properties: {
+            sessionID: 'session-1',
+            messageID: 'message-1',
+            partID: 'part-1',
+            field: 'text',
+            delta: 'streamed content',
+          },
+        })
+      })
+
+      await waitFor(() => {
+        const data = queryClient.getQueryData<MessageWithParts[]>([
+          'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo',
+        ])
+        expect(data![0].parts[0]).toHaveProperty('text', 'streamed content')
+      })
+
+      unmount()
+    } finally {
+      window.requestAnimationFrame = origRAF
+    }
+  })
 })
+
+function assistantMessage(sessionID: string, messageID: string): MessageWithParts {
+  return {
+    info: {
+      id: messageID,
+      sessionID,
+      role: 'assistant',
+      time: { created: Date.now() },
+      parentID: '',
+      modelID: 'test-model',
+      providerID: 'test-provider',
+      mode: 'test',
+      agent: 'test-agent',
+      path: { cwd: '/test', root: '/test' },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [],
+  }
+}
+
+function textPart(sessionID: string, messageID: string, partID: string, text: string): Part {
+  return { id: partID, sessionID, messageID, type: 'text', text } as Part
+}

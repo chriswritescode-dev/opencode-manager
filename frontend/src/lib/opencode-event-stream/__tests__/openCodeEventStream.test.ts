@@ -79,6 +79,56 @@ describe('OpenCodeEventStream', () => {
     })
   })
 
+  it('opens the initial EventSource URL with first subscriber directories', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent: vi.fn() })
+
+    expect(transport.openedUrls).toHaveLength(1)
+    const url = transport.openedUrls[0]
+    expect(url).toContain('/api/sse/stream')
+    expect(url).toContain(encodeURIComponent('/repo'))
+  })
+
+  it('opens the initial EventSource URL with all first subscriber directories', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    stream.subscribeGlobalMonitor({ directories: ['/repo-a', '/repo-b'], onEvent: vi.fn() })
+
+    expect(transport.openedUrls).toHaveLength(1)
+    const url = transport.openedUrls[0]
+    expect(url).toContain('/api/sse/stream')
+    expect(url).toContain(encodeURIComponent('/repo-a'))
+    expect(url).toContain(encodeURIComponent('/repo-b'))
+  })
+
+  it('marks health unhealthy when backend connected event reports no upstream connection', () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+    const healthStates: EventStreamHealthState[] = []
+
+    stream.subscribeGlobalMonitor({
+      directories: [],
+      onEvent: vi.fn(),
+      onHealthChange: (health) => healthStates.push(health),
+    })
+
+    transport.openConnection()
+    transport.connectedPayload({ clientId: 'client-1', connected: 0, total: 1 })
+
+    const unhealthyState = healthStates.at(-1)
+    expect(unhealthyState?.isConnected).toBe(true)
+    expect(unhealthyState?.isHealthy).toBe(false)
+
+    transport.connectedPayload({ clientId: 'client-1', connected: 1, total: 1 })
+
+    const healthyState = healthStates.at(-1)
+    expect(healthyState?.isConnected).toBe(true)
+    expect(healthyState?.isHealthy).toBe(true)
+  })
+
   it('reports visibility through the transport adapter', async () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })

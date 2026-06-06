@@ -73,19 +73,21 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
   const batcherRef = useRef<ReturnType<typeof createPartsBatcher> | null>(null)
 
   useEffect(() => {
-    if (!opcodeUrl || !primaryDirectory) {
+    if (!opcodeUrl) {
       batcherRef.current?.destroy()
       batcherRef.current = null
       return
     }
 
-    batcherRef.current = createPartsBatcher(queryClient, opcodeUrl, primaryDirectory)
+    if (!batcherRef.current) {
+      batcherRef.current = createPartsBatcher(queryClient, opcodeUrl)
+    }
 
     return () => {
       batcherRef.current?.destroy()
       batcherRef.current = null
     }
-  }, [queryClient, opcodeUrl, primaryDirectory])
+  }, [queryClient, opcodeUrl])
 
   const resolveCacheDirectory = useCallback(
     (eventDirectory: string | undefined): string | undefined => {
@@ -134,14 +136,14 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
       case 'messagev2.part.updated': {
         if (!('part' in event.properties)) break
         const { part } = event.properties
-        batcherRef.current?.queuePartUpdate(part.sessionID, part)
+        batcherRef.current?.queuePartUpdate(part.sessionID, part, cacheDirectory)
         break
       }
 
       case 'message.part.delta': {
         if (!('sessionID' in event.properties && 'messageID' in event.properties && 'partID' in event.properties && 'field' in event.properties && 'delta' in event.properties)) break
         const { sessionID, messageID, partID, field, delta } = event.properties
-        batcherRef.current?.queuePartDelta(sessionID, messageID, partID, field, delta)
+        batcherRef.current?.queuePartDelta(sessionID, messageID, partID, field, delta, cacheDirectory)
         break
       }
 
@@ -166,15 +168,15 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
             ? currentData.filter(msgWithParts => !msgWithParts.info.id.startsWith('optimistic_'))
             : currentData
           queryClient.setQueryData(messagesQueryKey, [...filteredData, { info, parts: [] }])
-          return
+        } else {
+          const updated = currentData.map(msgWithParts => {
+            if (msgWithParts.info.id !== info.id) return msgWithParts
+            return { ...msgWithParts, info: { ...info } }
+          })
+          queryClient.setQueryData(messagesQueryKey, updated)
         }
         
-        const updated = currentData.map(msgWithParts => {
-          if (msgWithParts.info.id !== info.id) return msgWithParts
-          return { ...msgWithParts, info: { ...info } }
-        })
-        
-        queryClient.setQueryData(messagesQueryKey, updated)
+        batcherRef.current?.flush({ sessionID, directory: cacheDirectory })
         break
       }
 
@@ -200,7 +202,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         
         const { sessionID, messageID, partID } = event.properties
         
-        batcherRef.current?.queuePartRemoval(sessionID, messageID, partID)
+        batcherRef.current?.queuePartRemoval(sessionID, messageID, partID, cacheDirectory)
         break
       }
 
@@ -224,11 +226,14 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         
         setSessionStatus(sessionID, { type: 'idle' })
         
-        batcherRef.current?.flush()
+        batcherRef.current?.flush({ sessionID, directory: cacheDirectory })
         
         const messagesQueryKey = ['opencode', 'messages', opcodeUrl, sessionID, cacheDirectory]
         const currentData = queryClient.getQueryData<MessageWithParts[]>(messagesQueryKey)
-        if (!currentData) break
+        if (!currentData) {
+          queryClient.invalidateQueries({ queryKey: messagesQueryKey })
+          break
+        }
         
         const now = Date.now()
         const updated = currentData.map(msgWithParts => {
@@ -267,6 +272,8 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         })
         
         queryClient.setQueryData(messagesQueryKey, updated)
+        
+        queryClient.invalidateQueries({ queryKey: messagesQueryKey })
         break
       }
 
