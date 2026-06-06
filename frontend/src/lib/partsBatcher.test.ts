@@ -100,7 +100,6 @@ describe('createPartsBatcher', () => {
 
   it('does not replay unapplied deltas onto refetched authoritative data', () => {
     const queryClient = new QueryClient()
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
     const batcher = createPartsBatcher(queryClient, 'http://localhost:5551')
 
     queryClient.setQueryData(
@@ -111,9 +110,10 @@ describe('createPartsBatcher', () => {
     batcher.queuePartDelta('session-1', 'message-1', 'part-1', 'text', ' stale', '/repo')
     batcher.flush()
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
-    })
+    let data = queryClient.getQueryData<MessageWithParts[]>([
+      'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo',
+    ])
+    expect(data![0].parts[0]).toHaveProperty('text', ' stale')
 
     queryClient.setQueryData(
       ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
@@ -122,10 +122,47 @@ describe('createPartsBatcher', () => {
 
     batcher.flush()
 
-    const data = queryClient.getQueryData<MessageWithParts[]>([
+    data = queryClient.getQueryData<MessageWithParts[]>([
       'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo',
     ])
     expect(data![0].parts[0]).toHaveProperty('text', 'fresh')
+  })
+
+  it('keeps text deltas pending until a later message update creates the assistant message', () => {
+    const queryClient = new QueryClient()
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const batcher = createPartsBatcher(queryClient, 'http://localhost:5551')
+
+    queryClient.setQueryData(
+      ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+      [assistantMessage('session-1', 'message-old')],
+    )
+
+    batcher.queuePartDelta('session-1', 'message-new', 'part-1', 'text', 'streamed', '/repo')
+    batcher.flush()
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+    })
+
+    queryClient.setQueryData(
+      ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+      [assistantMessage('session-1', 'message-old'), assistantMessage('session-1', 'message-new')],
+    )
+
+    batcher.flush({ sessionID: 'session-1', directory: '/repo' })
+
+    const data = queryClient.getQueryData<MessageWithParts[]>([
+      'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo',
+    ])
+    expect(data![1].parts).toHaveLength(1)
+    expect(data![1].parts[0]).toMatchObject({
+      id: 'part-1',
+      sessionID: 'session-1',
+      messageID: 'message-new',
+      type: 'text',
+      text: 'streamed',
+    })
   })
 
   it('applies deltas queued after an authoritative upsert in the same batch', () => {

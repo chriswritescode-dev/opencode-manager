@@ -11,8 +11,8 @@ interface PartsBatcher {
 }
 
 type PartOperation =
-  | { type: 'upsert'; part: Part }
-  | { type: 'delta'; messageID: string; partID: string; field: string; delta: string }
+  | { type: 'upsert'; part: Part; deferred?: boolean }
+  | { type: 'delta'; messageID: string; partID: string; field: string; delta: string; deferred?: boolean }
   | { type: 'remove'; messageID: string; partID: string }
 
 type OperationGroup = {
@@ -23,6 +23,15 @@ type OperationGroup = {
 
 function groupKey(sessionID: string, directory?: string): string {
   return `${directory ?? ''}\0${sessionID}`
+}
+
+function deferOperation(operation: PartOperation): PartOperation | undefined {
+  if (operation.type === 'remove') return undefined
+  return { ...operation, deferred: true }
+}
+
+function createTextPart(sessionID: string, messageID: string, partID: string, text: string): Part {
+  return { id: partID, sessionID, messageID, type: 'text', text } as Part
 }
 
 export function createPartsBatcher(
@@ -66,7 +75,12 @@ export function createPartsBatcher(
           invalidatedGroupKeys.add(key)
           queryClient.invalidateQueries({ queryKey })
         }
-        groupsToDelete.push(key)
+        group.operations = group.operations
+          .map(deferOperation)
+          .filter((operation): operation is PartOperation => Boolean(operation))
+        if (group.operations.length === 0) {
+          groupsToDelete.push(key)
+        }
         continue
       }
 
@@ -74,6 +88,7 @@ export function createPartsBatcher(
       let dataMutated = false
       const unapplied: PartOperation[] = []
       const supersededPartIDs = new Set<string>()
+      const removedPartIDs = new Set<string>()
 
       const messageIdxById = new Map<string, number>()
       for (let i = 0; i < currentData.length; i++) {
@@ -98,7 +113,8 @@ export function createPartsBatcher(
         if (operation.type === 'upsert') {
           const msgIdx = messageIdxById.get(operation.part.messageID)
           if (msgIdx === undefined) {
-            unapplied.push(operation)
+            const deferred = deferOperation(operation)
+            if (deferred) unapplied.push(deferred)
             continue
           }
           if (!dataMutated) {
@@ -108,6 +124,10 @@ export function createPartsBatcher(
           const msg = updatedData[msgIdx]
           const pIdx = ensurePartIdx(msgIdx, msg.parts)
           const existingPartIdx = pIdx.get(operation.part.id)
+          if (operation.deferred && existingPartIdx !== undefined) {
+            supersededPartIDs.add(operation.part.id)
+            continue
+          }
           let nextParts: Part[]
           if (existingPartIdx !== undefined) {
             nextParts = [...msg.parts]
@@ -140,13 +160,15 @@ export function createPartsBatcher(
           const nextParts = msg.parts.filter((part) => part.id !== operation.partID)
           updatedData[msgIdx] = { ...msg, parts: nextParts }
           partIdxCache.delete(msgIdx)
+          removedPartIDs.add(operation.partID)
           supersededPartIDs.add(operation.partID)
           continue
         }
 
         const msgIdx = messageIdxById.get(operation.messageID)
         if (msgIdx === undefined) {
-          unapplied.push(operation)
+          const deferred = deferOperation(operation)
+          if (deferred) unapplied.push(deferred)
           continue
         }
         if (!dataMutated) {
@@ -155,9 +177,24 @@ export function createPartsBatcher(
         }
         const msg = updatedData[msgIdx]
         const pIdx = ensurePartIdx(msgIdx, msg.parts)
+        if (removedPartIDs.has(operation.partID)) {
+          continue
+        }
         const pIdxResult = pIdx.get(operation.partID)
         if (pIdxResult === undefined) {
-          unapplied.push(operation)
+          if (operation.field === 'text') {
+            const nextParts = [...msg.parts, createTextPart(sessionID, operation.messageID, operation.partID, operation.delta)]
+            updatedData[msgIdx] = { ...msg, parts: nextParts }
+            pIdx.set(operation.partID, nextParts.length - 1)
+            supersededPartIDs.add(operation.partID)
+          } else {
+            const deferred = deferOperation(operation)
+            if (deferred) unapplied.push(deferred)
+          }
+          continue
+        }
+        if (operation.deferred) {
+          supersededPartIDs.add(operation.partID)
           continue
         }
         const targetPart = msg.parts[pIdxResult]
@@ -176,17 +213,27 @@ export function createPartsBatcher(
         queryClient.setQueryData(queryKey, updatedData)
       }
 
-      const filteredUnapplied = unapplied.filter((op) => {
-        if (op.type === 'delta' || op.type === 'remove') {
+      const retainedUnapplied = unapplied.filter((op) => {
+        if (op.type === 'remove') return false
+        if (op.type === 'delta') {
           return !supersededPartIDs.has(op.partID)
+        }
+        if (op.type === 'upsert') {
+          return !supersededPartIDs.has(op.part.id)
         }
         return true
       })
 
-      if (filteredUnapplied.length > 0) {
+      const shouldInvalidate = retainedUnapplied.length > 0 || unapplied.some((op) => op.type === 'remove')
+
+      if (shouldInvalidate) {
         if (!invalidatedGroupKeys.has(key)) {
           invalidatedGroupKeys.add(key)
           queryClient.invalidateQueries({ queryKey })
+        }
+        if (retainedUnapplied.length > 0) {
+          group.operations = retainedUnapplied
+          continue
         }
       }
 
