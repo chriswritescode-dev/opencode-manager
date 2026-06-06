@@ -11,7 +11,6 @@ import type {
 import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
-import { useSessionStatus } from "../stores/sessionStatusStore";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
 
@@ -370,7 +369,6 @@ const createOptimisticUserMessageInfo = (
 export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: string) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
-  const setSessionStatus = useSessionStatus((state) => state.setStatus);
 
   return useMutation({
     mutationFn: async ({
@@ -391,8 +389,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       queued?: boolean;
     }) => {
       if (!client) throw new Error("No client available");
-
-      setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
 
@@ -485,7 +481,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       const { sessionID } = variables;
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
-      setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageWithParts[]>(
         queryKey,
         (old) => old?.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_")),
@@ -534,7 +529,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         },
       );
 
-      setSessionStatus(sessionID, { type: "idle" });
     },
   });
 };
@@ -691,7 +685,6 @@ export const useAbortSession = (
 export const useSendShell = (opcodeUrl: string | null | undefined, directory?: string) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
-  const setSessionStatus = useSessionStatus((state) => state.setStatus);
 
   return useMutation({
     mutationFn: async ({
@@ -704,8 +697,6 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       agent?: string;
     }) => {
       if (!client) throw new Error("No client available");
-
-      setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
 
@@ -737,7 +728,6 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
     },
     onError: (_, variables) => {
       const { sessionID } = variables;
-      setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey(opcodeUrl, sessionID, directory),
         (old) => {
@@ -745,8 +735,6 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
           return old.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_"));
         },
       );
-
-      setSessionStatus(sessionID!, { type: "idle" });
     },
     onSuccess: (data, variables) => {
       const { sessionID } = variables;
@@ -796,7 +784,6 @@ export const useLoadSkill = (
 ) => {
   const client = useOpenCodeClient(opcodeUrl, directory);
   const queryClient = useQueryClient();
-  const setSessionStatus = useSessionStatus((state) => state.setStatus);
 
   return useMutation<
     { optimisticUserID: string; response: SendCommandResponse },
@@ -806,8 +793,6 @@ export const useLoadSkill = (
     mutationFn: async ({ skillName }: { skillName: string }) => {
       if (!client) throw new Error("No OpenCode client available");
       if (!sessionID) throw new Error("No active session");
-
-      setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
@@ -835,7 +820,6 @@ export const useLoadSkill = (
     onError: (error) => {
       if (sessionID) {
         const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
-        setSessionStatus(sessionID!, { type: "idle" });
         queryClient.setQueryData<MessageWithParts[]>(
           queryKey,
           (old) => old?.filter((m) => !m.info.id.startsWith("optimistic_")),
@@ -862,8 +846,6 @@ export const useLoadSkill = (
           return [...old, { info: response.info, parts: response.parts }];
         },
       );
-
-      setSessionStatus(sessionID!, { type: "idle" });
     },
   });
 };
