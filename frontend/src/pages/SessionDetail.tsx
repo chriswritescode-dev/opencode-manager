@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getRepo, initializeAssistantMode } from "@/api/repos";
+import { getRepo, getAssistantModeStatus } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
@@ -116,7 +116,7 @@ export function SessionDetail() {
 
   const { data: assistantMode, isLoading: assistantModeLoading } = useQuery({
     queryKey: ["repo", repoId, "assistant-mode"],
-    queryFn: () => initializeAssistantMode(repoId),
+    queryFn: () => getAssistantModeStatus(repoId),
     enabled: isAssistantSession,
   });
 

@@ -163,6 +163,8 @@ describe('Repo Routes', () => {
       const body = await res.json() as typeof mockStatus
       expect(body.repoId).toBe(1)
       expect(body.relativePath).toBe('repos/assistant')
+
+      expect(ensureAssistantMode).not.toHaveBeenCalled()
     })
   })
 
@@ -217,6 +219,17 @@ describe('Repo Routes', () => {
       })
 
       expect(res.status).toBe(200)
+
+      const body = await res.json() as typeof mockStatus
+      expect(body).toEqual(mockStatus)
+
+      expect(ensureAssistantMode).toHaveBeenCalledTimes(1)
+      expect(ensureAssistantMode).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 1, localPath: 'repos/test-repo' }),
+        expect.objectContaining({ db: mockDb, apiBaseUrl: 'http://localhost:5003/api/internal' }),
+        expect.objectContaining({ overwriteAgentsMd: true }),
+      )
+
       expect(opencodeServerManager.clearStartupError).not.toHaveBeenCalled()
       expect(opencodeServerManager.restart).not.toHaveBeenCalled()
     })

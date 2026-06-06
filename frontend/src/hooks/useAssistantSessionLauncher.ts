@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { initializeAssistantMode } from '@/api/repos'
+import { getAssistantModeStatus } from '@/api/repos'
 import { OpenCodeClient } from '@/api/opencode'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
 import type { components } from '@/api/opencode-types'
@@ -113,13 +113,21 @@ async function sendAssistantModeWarningsPrompt(client: OpenCodeClient, sessionId
   }).catch(() => undefined)
 }
 
+function assertAssistantReady(assistant: AssistantModeStatus): void {
+  if (!assistant.files.agentsMd.exists || !assistant.files.opencodeJson.exists || !assistant.defaultAgent?.exists) {
+    throw new Error('Assistant workspace is not ready. Restart the server to run Assistant setup.')
+  }
+}
+
 export function useAssistantSessionLauncher({
   repoId,
   opcodeUrl,
   onNavigate,
 }: UseAssistantSessionLauncherOptions) {
   const openAssistant = useCallback(async () => {
-    const assistant = await initializeAssistantMode(repoId)
+    const assistant = await getAssistantModeStatus(repoId)
+    assertAssistantReady(assistant)
+
     const client = new OpenCodeClient(opcodeUrl, assistant.directory)
     const assistantDirectory = assistant.directory
 

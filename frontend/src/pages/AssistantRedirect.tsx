@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { getRepo, initializeAssistantMode } from "@/api/repos"
+import { getRepo, getAssistantModeStatus } from "@/api/repos"
 import { useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
@@ -60,7 +60,7 @@ export function AssistantRedirect() {
 
   const { data: assistantMode, isLoading: assistantModeLoading, error: assistantModeError } = useQuery({
     queryKey: ["repo", repoId, "assistant-mode"],
-    queryFn: () => initializeAssistantMode(repoId),
+    queryFn: () => getAssistantModeStatus(repoId),
     enabled: showSessionList && repoId !== undefined,
   })
 
@@ -204,7 +204,7 @@ export function AssistantRedirect() {
           <>
             <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mx-auto mb-4" />
             <p className="text-muted-foreground">
-              {status === "preparing" && "Preparing Assistant workspace..."}
+              {status === "preparing" && "Opening Assistant..."}
               {status === "creating" && "Opening your last session chat..."}
               {status === "opening" && "Opening your last session chat..."}
             </p>

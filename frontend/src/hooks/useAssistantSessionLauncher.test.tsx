@@ -2,18 +2,18 @@ import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useAssistantSessionLauncher } from './useAssistantSessionLauncher'
 import { OpenCodeClient } from '@/api/opencode'
-import { initializeAssistantMode } from '@/api/repos'
+import { getAssistantModeStatus } from '@/api/repos'
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
   listSessionsPage: vi.fn(),
   createSession: vi.fn(),
   sendPromptAsync: vi.fn(),
-  initializeAssistantMode: vi.fn(),
+  getAssistantModeStatus: vi.fn(),
 }))
 
 vi.mock('@/api/repos', () => ({
-  initializeAssistantMode: mocks.initializeAssistantMode,
+  getAssistantModeStatus: mocks.getAssistantModeStatus,
 }))
 
 vi.mock('@/api/opencode', () => ({
@@ -33,7 +33,14 @@ describe('useAssistantSessionLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
-    mocks.initializeAssistantMode.mockResolvedValue({ directory: '/assistant' })
+    mocks.getAssistantModeStatus.mockResolvedValue({
+      directory: '/assistant',
+      files: {
+        agentsMd: { path: '/assistant/AGENTS.md', exists: true, created: true },
+        opencodeJson: { path: '/assistant/.opencode.json', exists: true, created: true },
+      },
+      defaultAgent: { name: 'assistant', path: '/assistant/.opencode/agents/assistant.md', exists: true, created: true },
+    })
   })
 
   it('opens the latest root session in the assistant directory', async () => {
@@ -56,7 +63,7 @@ describe('useAssistantSessionLauncher', () => {
       await result.current.openAssistant()
     })
 
-    expect(initializeAssistantMode).toHaveBeenCalledWith(123)
+    expect(getAssistantModeStatus).toHaveBeenCalledWith(123)
     expect(OpenCodeClient).toHaveBeenCalledWith('http://localhost:5551', '/assistant')
     expect(mocks.listSessionsPage).toHaveBeenCalledWith({ limit: 25, order: 'desc' })
     expect(mocks.listSessions).not.toHaveBeenCalled()
@@ -97,8 +104,13 @@ describe('useAssistantSessionLauncher', () => {
   })
 
   it('notifies an existing assistant session when some generated updates were preserved', async () => {
-    mocks.initializeAssistantMode.mockResolvedValue({
+    mocks.getAssistantModeStatus.mockResolvedValue({
       directory: '/assistant',
+      files: {
+        agentsMd: { path: '/assistant/AGENTS.md', exists: true, created: true },
+        opencodeJson: { path: '/assistant/.opencode.json', exists: true, created: true },
+      },
+      defaultAgent: { name: 'assistant', path: '/assistant/.opencode/agents/assistant.md', exists: true, created: true },
       warnings: [
         {
           code: 'assistant-agents-md-preserved',
@@ -227,5 +239,83 @@ describe('useAssistantSessionLauncher', () => {
 
     expect(onNavigate).toHaveBeenCalledWith('created')
     expect(mocks.sendPromptAsync).toHaveBeenCalled()
+  })
+
+  it('rejects with readiness error when agentMd is missing', async () => {
+    mocks.getAssistantModeStatus.mockResolvedValue({
+      directory: '/assistant',
+      files: {
+        agentsMd: { path: '/assistant/AGENTS.md', exists: false, created: false },
+        opencodeJson: { path: '/assistant/.opencode.json', exists: true, created: true },
+      },
+      defaultAgent: { name: 'assistant', path: '/assistant/.opencode/agents/assistant.md', exists: true, created: true },
+    })
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await expect(result.current.openAssistant()).rejects.toThrow('Assistant workspace is not ready')
+    })
+
+    expect(OpenCodeClient).not.toHaveBeenCalled()
+    expect(mocks.listSessionsPage).not.toHaveBeenCalled()
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
+  it('rejects with readiness error when opencodeJson is missing', async () => {
+    mocks.getAssistantModeStatus.mockResolvedValue({
+      directory: '/assistant',
+      files: {
+        agentsMd: { path: '/assistant/AGENTS.md', exists: true, created: true },
+        opencodeJson: { path: '/assistant/.opencode.json', exists: false, created: false },
+      },
+      defaultAgent: { name: 'assistant', path: '/assistant/.opencode/agents/assistant.md', exists: true, created: true },
+    })
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await expect(result.current.openAssistant()).rejects.toThrow('Assistant workspace is not ready')
+    })
+
+    expect(OpenCodeClient).not.toHaveBeenCalled()
+    expect(mocks.listSessionsPage).not.toHaveBeenCalled()
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
+  it('rejects with readiness error when defaultAgent is missing', async () => {
+    mocks.getAssistantModeStatus.mockResolvedValue({
+      directory: '/assistant',
+      files: {
+        agentsMd: { path: '/assistant/AGENTS.md', exists: true, created: true },
+        opencodeJson: { path: '/assistant/.opencode.json', exists: true, created: true },
+      },
+      defaultAgent: undefined,
+    })
+    const onNavigate = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      onNavigate,
+    }))
+
+    await act(async () => {
+      await expect(result.current.openAssistant()).rejects.toThrow('Assistant workspace is not ready')
+    })
+
+    expect(OpenCodeClient).not.toHaveBeenCalled()
+    expect(mocks.listSessionsPage).not.toHaveBeenCalled()
+    expect(mocks.createSession).not.toHaveBeenCalled()
+    expect(onNavigate).not.toHaveBeenCalled()
   })
 })

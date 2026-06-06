@@ -2,9 +2,8 @@ import { describe, expect, it, beforeEach, afterEach } from 'bun:test'
 import path from 'path'
 import { readFile, stat, writeFile } from 'fs/promises'
 import { Hono } from 'hono'
-import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, warmAssistantWorkspace } from '../../src/services/assistant-mode'
+import { ensureAssistantMode, getAssistantModeStatus, buildSchedulesSkill, buildReposSkill, buildSettingsSkill, buildAssistantDefaultAgentMd, buildAssistantOpenCodeConfig, buildAssistantRepo, installAssistantWorkspace } from '../../src/services/assistant-mode'
 import { createTempAssistantWorkspace, createTestDb, mockRepo } from '../helpers/assistant-workspace'
-import type { OpenCodeClient } from '../../src/services/opencode/client'
 import { createInternalRoutes } from '../../src/routes/internal'
 import { ScheduleService } from '../../src/services/schedules'
 import { NotificationService } from '../../src/services/notification'
@@ -609,7 +608,7 @@ describe('buildAssistantRepo', () => {
   })
 })
 
-describe('warmAssistantWorkspace', () => {
+describe('installAssistantWorkspace', () => {
   let ws: Awaited<ReturnType<typeof createTempAssistantWorkspace>>
   let db: ReturnType<typeof createTestDb>
   const apiBaseUrl = 'http://localhost:5003/api/internal'
@@ -620,34 +619,50 @@ describe('warmAssistantWorkspace', () => {
   })
   afterEach(async () => { await ws.cleanup() })
 
-  it('provisions the workspace and triggers a bounded directory-scoped session request', async () => {
-    const getJsonCalls: Array<{ path: string; directory?: string }> = []
-    const client = {
-      getJson: async (requestPath: string, opts?: { directory?: string }) => {
-        getJsonCalls.push({ path: requestPath, directory: opts?.directory })
-        return []
-      },
-    } as unknown as OpenCodeClient
-
-    await warmAssistantWorkspace({ db, apiBaseUrl, openCodeClient: client })
+  it('provisions the assistant workspace files without contacting OpenCode', async () => {
+    const result = await installAssistantWorkspace({ db, apiBaseUrl })
 
     const opencodeJson = await readFile(path.join(ws.assistantDir, 'opencode.json'), 'utf8')
     expect(JSON.parse(opencodeJson).default_agent).toBe('assistant')
-    expect(getJsonCalls).toHaveLength(1)
-    expect(getJsonCalls[0]?.path).toBe('/api/session?limit=1&order=desc')
-    expect(getJsonCalls[0]?.directory).toBe(ws.assistantDir)
+
+    const agentsMd = await readFile(path.join(ws.assistantDir, 'AGENTS.md'), 'utf8')
+    expect(agentsMd).toContain('Assistant Mode Workspace')
+
+    const assistantAgent = await readFile(path.join(ws.assistantDir, '.opencode/agents/assistant.md'), 'utf8')
+    expect(assistantAgent).toContain('mode: primary')
+
+    expect(result.files.opencodeJson?.exists).toBe(true)
+    expect(result.files.agentsMd?.exists).toBe(true)
+    expect(result.defaultAgent?.exists).toBe(true)
   })
 
-  it('does not throw and still provisions the workspace when the session request fails', async () => {
-    const client = {
-      getJson: async () => { throw new Error('opencode unavailable') },
-    } as unknown as OpenCodeClient
+  it('is idempotent — second call does not recreate files and content is unchanged', async () => {
+    await installAssistantWorkspace({ db, apiBaseUrl })
 
-    await expect(
-      warmAssistantWorkspace({ db, apiBaseUrl, openCodeClient: client })
-    ).resolves.toBeUndefined()
+    const opencodeJsonPath = path.join(ws.assistantDir, 'opencode.json')
+    const agentsMdPath = path.join(ws.assistantDir, 'AGENTS.md')
+    const assistantAgentPath = path.join(ws.assistantDir, '.opencode/agents/assistant.md')
 
-    const opencodeJson = await stat(path.join(ws.assistantDir, 'opencode.json'))
-    expect(opencodeJson.isFile()).toBe(true)
+    const firstContent = {
+      opencodeJson: await readFile(opencodeJsonPath, 'utf8'),
+      agentsMd: await readFile(agentsMdPath, 'utf8'),
+      assistantAgent: await readFile(assistantAgentPath, 'utf8'),
+    }
+
+    const result = await installAssistantWorkspace({ db, apiBaseUrl })
+
+    const secondContent = {
+      opencodeJson: await readFile(opencodeJsonPath, 'utf8'),
+      agentsMd: await readFile(agentsMdPath, 'utf8'),
+      assistantAgent: await readFile(assistantAgentPath, 'utf8'),
+    }
+
+    expect(secondContent.opencodeJson).toBe(firstContent.opencodeJson)
+    expect(secondContent.agentsMd).toBe(firstContent.agentsMd)
+    expect(secondContent.assistantAgent).toBe(firstContent.assistantAgent)
+
+    expect(result.files.opencodeJson?.created).toBe(false)
+    expect(result.files.agentsMd?.created).toBe(false)
+    expect(result.defaultAgent?.created).toBe(false)
   })
 })

@@ -117,7 +117,7 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
 
 vi.mock('@/api/repos', () => ({
   getRepo: vi.fn(() => Promise.resolve(null)),
-  initializeAssistantMode: vi.fn(() => Promise.resolve({ directory: '/abs/assistant', warnings: [] })),
+  getAssistantModeStatus: vi.fn(() => Promise.resolve({ directory: '/abs/assistant', warnings: [] })),
 }))
 
 vi.mock('@/components/model/ModelSelectDialog', () => ({
