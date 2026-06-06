@@ -27,6 +27,16 @@ function textPart(sessionID: string, messageID: string, partID: string, text: st
   return { id: partID, sessionID, messageID, type: 'text', text } as Part
 }
 
+function createManyCachedMessages(count: number, sessionID: string): MessageWithParts[] {
+  const messages: MessageWithParts[] = []
+  for (let i = 0; i < count; i++) {
+    const msg = assistantMessage(sessionID, `msg-${i}`)
+    msg.parts = [textPart(sessionID, `msg-${i}`, `part-${i}`, `base text ${i}`)]
+    messages.push(msg)
+  }
+  return messages
+}
+
 describe('createPartsBatcher', () => {
   it('invalidates when part deltas arrive before message cache exists and applies a later authoritative upsert', () => {
     const queryClient = new QueryClient()
@@ -136,6 +146,79 @@ describe('createPartsBatcher', () => {
     ])
     expect(data![0].parts).toHaveLength(1)
     expect(data![0].parts[0]).toHaveProperty('text', 'snapshot later')
+  })
+
+  it('applies many queued part deltas with one cache write and no invalidation storm', () => {
+    const queryClient = new QueryClient()
+    const batcher = createPartsBatcher(queryClient, 'http://localhost:5551')
+
+    const sessionID = 'session-1'
+    const directory = '/repo'
+    const messageCount = 1000
+    const deltaCount = 500
+
+    const messages = createManyCachedMessages(messageCount, sessionID)
+    queryClient.setQueryData(
+      ['opencode', 'messages', 'http://localhost:5551', sessionID, directory],
+      messages,
+    )
+
+    const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData')
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+
+    for (let i = 0; i < deltaCount; i++) {
+      batcher.queuePartDelta(sessionID, `msg-${i}`, `part-${i}`, 'text', ` delta ${i}`, directory)
+    }
+
+    batcher.flush()
+
+    expect(invalidateSpy).not.toHaveBeenCalled()
+
+    const data = queryClient.getQueryData<MessageWithParts[]>([
+      'opencode', 'messages', 'http://localhost:5551', sessionID, directory,
+    ])
+    expect(data).toHaveLength(messageCount)
+
+    for (let i = 0; i < deltaCount; i++) {
+      expect(data![i].parts[0]).toHaveProperty('text', `base text ${i} delta ${i}`)
+    }
+
+    for (let i = deltaCount; i < messageCount; i++) {
+      expect(data![i].parts[0]).toHaveProperty('text', `base text ${i}`)
+    }
+
+    const setQueryDataCalls = setQueryDataSpy.mock.calls.filter(
+      ([key]) => JSON.stringify(key).includes('opencode'),
+    )
+    expect(setQueryDataCalls.length).toBe(1)
+  })
+
+  it('does not apply same-batch deltas for removed parts to shifted parts', () => {
+    const queryClient = new QueryClient()
+    const batcher = createPartsBatcher(queryClient, 'http://localhost:5551')
+
+    queryClient.setQueryData(
+      ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+      [{
+        ...assistantMessage('session-1', 'message-1'),
+        parts: [
+          textPart('session-1', 'message-1', 'part-1', 'first'),
+          textPart('session-1', 'message-1', 'part-2', 'second'),
+        ],
+      }],
+    )
+
+    batcher.queuePartRemoval('session-1', 'message-1', 'part-1', '/repo')
+    batcher.queuePartDelta('session-1', 'message-1', 'part-1', 'text', ' stale', '/repo')
+    batcher.flush()
+
+    const data = queryClient.getQueryData<MessageWithParts[]>([
+      'opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo',
+    ])
+
+    expect(data![0].parts).toHaveLength(1)
+    expect(data![0].parts[0]).toHaveProperty('id', 'part-2')
+    expect(data![0].parts[0]).toHaveProperty('text', 'second')
   })
 
   it('applies deltas to the directory they were queued for', () => {

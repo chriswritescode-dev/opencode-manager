@@ -46,17 +46,13 @@ export function useAutoScroll({
     isScrollButtonVisibleRef.current = false
     const scrollRequestId = scrollRequestIdRef.current + 1
     scrollRequestIdRef.current = scrollRequestId
-    const scroll = () => {
-      if (!containerRef?.current) return
-      containerRef.current.scrollTop = containerRef.current.scrollHeight
-    }
 
-    scroll()
     let frameCount = 0
     const scrollAfterLayout = () => {
       if (scrollRequestIdRef.current !== scrollRequestId) return
+      if (!containerRef?.current) return
+      containerRef.current.scrollTop = containerRef.current.scrollHeight
       frameCount += 1
-      scroll()
       if (frameCount < SCROLL_TO_BOTTOM_FRAME_COUNT) {
         requestAnimationFrame(scrollAfterLayout)
       }

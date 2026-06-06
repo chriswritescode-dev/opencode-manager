@@ -131,6 +131,9 @@ describe('useAutoScroll', () => {
         contentVersion: newMessages.length,
         onScrollStateChange,
       })
+    })
+
+    act(() => {
       vi.advanceTimersByTime(100)
     })
 
@@ -162,6 +165,7 @@ describe('useAutoScroll', () => {
         contentVersion: messages.length + 1,
         onScrollStateChange,
       })
+      vi.advanceTimersByTime(100)
     })
 
     expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
@@ -221,6 +225,29 @@ describe('useAutoScroll', () => {
       containerHarness.div.dispatchEvent(
         new PointerEvent('pointerdown', {
           clientY: 200,
+          bubbles: true,
+        })
+      )
+      containerHarness.setScrollTop(userPosition)
+      vi.runOnlyPendingTimers()
+    })
+
+    expect(containerHarness.getScrollTop()).toBe(userPosition)
+  })
+
+  it('cancels pending bottom scroll when user wheel-scrolls up before pending frames complete', () => {
+    const messages = [createMessage('1', 'user'), createMessage('2', 'assistant')]
+    const { renderResult, containerHarness } = setupHook(messages)
+
+    act(() => {
+      renderResult.result.current.scrollToBottom()
+    })
+
+    const userPosition = 150
+    act(() => {
+      containerHarness.div.dispatchEvent(
+        new WheelEvent('wheel', {
+          deltaY: -50,
           bubbles: true,
         })
       )
@@ -431,6 +458,10 @@ describe('useAutoScroll', () => {
       })
     })
 
+    act(() => {
+      vi.advanceTimersByTime(100)
+    })
+
     expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
   })
 
@@ -457,6 +488,10 @@ describe('useAutoScroll', () => {
         contentVersion: newMessages.length,
         onScrollStateChange: vi.fn(),
       })
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(100)
     })
 
     expect(containerHarness.getScrollTop()).toBe(containerHarness.div.scrollHeight - containerHarness.div.clientHeight)
