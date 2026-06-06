@@ -4,7 +4,8 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useSessionStatus } from '../stores/sessionStatusStore'
-import type { Part, MessageWithParts } from '@/api/types'
+import type { MessageWithParts } from '@/api/types'
+import { createTextPart } from '@/lib/partsBatcher'
 
 const mocks = vi.hoisted(() => ({
   getSessionStatuses: vi.fn(),
@@ -293,14 +294,14 @@ describe('useSSE', () => {
         ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-a'],
         [{
           ...assistantMessage('session-1', 'message-1'),
-          parts: [textPart('session-1', 'message-1', 'part-1', 'A')],
+          parts: [createTextPart('session-1', 'message-1', 'part-1', 'A')],
         }],
       )
       queryClient.setQueryData(
         ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo-b'],
         [{
           ...assistantMessage('session-1', 'message-1'),
-          parts: [textPart('session-1', 'message-1', 'part-1', 'B')],
+          parts: [createTextPart('session-1', 'message-1', 'part-1', 'B')],
         }],
       )
 
@@ -377,7 +378,7 @@ describe('useSSE', () => {
         ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
         [{
           ...assistantMessage('session-1', 'message-1'),
-          parts: [textPart('session-1', 'message-1', 'part-1', '')],
+          parts: [createTextPart('session-1', 'message-1', 'part-1', '')],
         }],
       )
 
@@ -450,6 +451,3 @@ function assistantMessage(sessionID: string, messageID: string): MessageWithPart
   }
 }
 
-function textPart(sessionID: string, messageID: string, partID: string, text: string): Part {
-  return { id: partID, sessionID, messageID, type: 'text', text } as Part
-}

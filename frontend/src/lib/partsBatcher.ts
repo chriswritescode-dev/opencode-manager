@@ -19,7 +19,10 @@ type OperationGroup = {
   sessionID: string
   directory?: string
   operations: PartOperation[]
+  firstDeferredAt?: number
 }
+
+export const DEFERRED_OPERATION_TTL_MS = 3000
 
 function groupKey(sessionID: string, directory?: string): string {
   return `${directory ?? ''}\0${sessionID}`
@@ -30,8 +33,30 @@ function deferOperation(operation: PartOperation): PartOperation | undefined {
   return { ...operation, deferred: true }
 }
 
-function createTextPart(sessionID: string, messageID: string, partID: string, text: string): Part {
+function isGroupExpired(group: OperationGroup, now: number): boolean {
+  return group.firstDeferredAt !== undefined && now - group.firstDeferredAt >= DEFERRED_OPERATION_TTL_MS
+}
+
+function stampDeferred(group: OperationGroup, now: number): void {
+  if (group.firstDeferredAt === undefined) group.firstDeferredAt = now
+}
+
+export function createTextPart(sessionID: string, messageID: string, partID: string, text: string): Part {
   return { id: partID, sessionID, messageID, type: 'text', text } as Part
+}
+
+function appendPart(
+  updatedData: MessageWithParts[],
+  msgIdx: number,
+  msg: MessageWithParts,
+  part: Part,
+  pIdx: Map<string, number>,
+  supersededPartIDs: Set<string>,
+): void {
+  const nextParts = [...msg.parts, part]
+  updatedData[msgIdx] = { ...msg, parts: nextParts }
+  pIdx.set(part.id, nextParts.length - 1)
+  supersededPartIDs.add(part.id)
 }
 
 export function createPartsBatcher(
@@ -52,8 +77,8 @@ export function createPartsBatcher(
   const flush = (target?: { sessionID?: string; directory?: string }) => {
     if (pendingOperations.size === 0) return
 
+    const now = Date.now()
     const groupsToDelete: string[] = []
-    const invalidatedGroupKeys = new Set<string>()
 
     for (const [key, group] of pendingOperations.entries()) {
       if (target) {
@@ -71,14 +96,16 @@ export function createPartsBatcher(
       const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
 
       if (!currentData) {
-        if (!invalidatedGroupKeys.has(key)) {
-          invalidatedGroupKeys.add(key)
+        if (group.firstDeferredAt === undefined) {
           queryClient.invalidateQueries({ queryKey })
         }
-        group.operations = group.operations
+        const deferred = group.operations
           .map(deferOperation)
           .filter((operation): operation is PartOperation => Boolean(operation))
-        if (group.operations.length === 0) {
+        if (deferred.length > 0 && !isGroupExpired(group, now)) {
+          stampDeferred(group, now)
+          group.operations = deferred
+        } else {
           groupsToDelete.push(key)
         }
         continue
@@ -128,16 +155,14 @@ export function createPartsBatcher(
             supersededPartIDs.add(operation.part.id)
             continue
           }
-          let nextParts: Part[]
           if (existingPartIdx !== undefined) {
-            nextParts = [...msg.parts]
+            const nextParts = [...msg.parts]
             nextParts[existingPartIdx] = operation.part
+            updatedData[msgIdx] = { ...msg, parts: nextParts }
+            supersededPartIDs.add(operation.part.id)
           } else {
-            nextParts = [...msg.parts, operation.part]
-            pIdx.set(operation.part.id, nextParts.length - 1)
+            appendPart(updatedData, msgIdx, msg, operation.part, pIdx, supersededPartIDs)
           }
-          updatedData[msgIdx] = { ...msg, parts: nextParts }
-          supersededPartIDs.add(operation.part.id)
           continue
         }
 
@@ -183,10 +208,14 @@ export function createPartsBatcher(
         const pIdxResult = pIdx.get(operation.partID)
         if (pIdxResult === undefined) {
           if (operation.field === 'text') {
-            const nextParts = [...msg.parts, createTextPart(sessionID, operation.messageID, operation.partID, operation.delta)]
-            updatedData[msgIdx] = { ...msg, parts: nextParts }
-            pIdx.set(operation.partID, nextParts.length - 1)
-            supersededPartIDs.add(operation.partID)
+            appendPart(
+              updatedData,
+              msgIdx,
+              msg,
+              createTextPart(sessionID, operation.messageID, operation.partID, operation.delta),
+              pIdx,
+              supersededPartIDs,
+            )
           } else {
             const deferred = deferOperation(operation)
             if (deferred) unapplied.push(deferred)
@@ -224,17 +253,17 @@ export function createPartsBatcher(
         return true
       })
 
-      const shouldInvalidate = retainedUnapplied.length > 0 || unapplied.some((op) => op.type === 'remove')
+      const needsInvalidate = retainedUnapplied.length > 0 || unapplied.some((op) => op.type === 'remove')
+      const willRetain = retainedUnapplied.length > 0 && !isGroupExpired(group, now)
 
-      if (shouldInvalidate) {
-        if (!invalidatedGroupKeys.has(key)) {
-          invalidatedGroupKeys.add(key)
-          queryClient.invalidateQueries({ queryKey })
-        }
-        if (retainedUnapplied.length > 0) {
-          group.operations = retainedUnapplied
-          continue
-        }
+      if (needsInvalidate && group.firstDeferredAt === undefined) {
+        queryClient.invalidateQueries({ queryKey })
+      }
+
+      if (willRetain) {
+        stampDeferred(group, now)
+        group.operations = retainedUnapplied
+        continue
       }
 
       groupsToDelete.push(key)
