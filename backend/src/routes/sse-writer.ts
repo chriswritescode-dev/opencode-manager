@@ -5,28 +5,28 @@ export interface QueuedSSEWriterInput {
 
 export interface QueuedSSEWriter {
   writeSSE: (event: string, data: string) => void
+  writeFrame: (frame: Uint8Array) => void
   close: () => void
 }
 
+const sharedEncoder = new TextEncoder()
+
+export function encodeSSEFrame(event: string, data: string): Uint8Array {
+  const head = event ? `event: ${event}\n` : ''
+  return sharedEncoder.encode(`${head}data: ${data}\n\n`)
+}
+
 export function createQueuedSSEWriter(input: QueuedSSEWriterInput): QueuedSSEWriter {
-  const encoder = new TextEncoder()
   let chain = Promise.resolve()
   let closed = false
 
-  const writeSSE = (event: string, data: string) => {
+  const writeFrame = (frame: Uint8Array) => {
     if (closed) return
-
-    const lines: string[] = []
-    if (event) lines.push(`event: ${event}`)
-    lines.push(`data: ${data}`)
-    lines.push('')
-    lines.push('')
-    const encoded = encoder.encode(lines.join('\n'))
 
     chain = chain
       .then(async () => {
         if (closed) return
-        await input.write(encoded)
+        await input.write(frame)
       })
       .catch((error) => {
         if (!closed) {
@@ -36,9 +36,14 @@ export function createQueuedSSEWriter(input: QueuedSSEWriterInput): QueuedSSEWri
       })
   }
 
+  const writeSSE = (event: string, data: string) => {
+    if (closed) return
+    writeFrame(encodeSSEFrame(event, data))
+  }
+
   const close = () => {
     closed = true
   }
 
-  return { writeSSE, close }
+  return { writeSSE, writeFrame, close }
 }

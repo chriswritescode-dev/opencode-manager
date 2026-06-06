@@ -227,7 +227,7 @@ export class OpenCodeEventStream {
   private handleMessage(data: string): void {
     try {
       this.markActivity()
-      this.broadcast(JSON.parse(data))
+      this.broadcast(flattenEventEnvelope(JSON.parse(data)))
     } catch {
       this.markActivity()
     }
@@ -412,6 +412,20 @@ export class OpenCodeEventStream {
       activeSessionId: activeSessionId ?? null,
     })
   }
+}
+
+function flattenEventEnvelope(parsed: unknown): unknown {
+  if (
+    parsed !== null &&
+    typeof parsed === 'object' &&
+    'payload' in parsed &&
+    (parsed as { payload: unknown }).payload !== null &&
+    typeof (parsed as { payload: unknown }).payload === 'object'
+  ) {
+    const { payload, directory } = parsed as { payload: object; directory?: unknown }
+    return { ...payload, directory }
+  }
+  return parsed
 }
 
 export const openCodeEventStream = new OpenCodeEventStream()

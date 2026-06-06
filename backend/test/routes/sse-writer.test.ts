@@ -1,7 +1,35 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createQueuedSSEWriter } from '../../src/routes/sse-writer'
+import { createQueuedSSEWriter, encodeSSEFrame } from '../../src/routes/sse-writer'
+
+describe('encodeSSEFrame', () => {
+  const decoder = new TextDecoder()
+
+  it('encodes an event frame', () => {
+    expect(decoder.decode(encodeSSEFrame('message', '{"n":1}'))).toBe('event: message\ndata: {"n":1}\n\n')
+  })
+
+  it('omits the event line when event is empty', () => {
+    expect(decoder.decode(encodeSSEFrame('', '{"n":1}'))).toBe('data: {"n":1}\n\n')
+  })
+})
 
 describe('createQueuedSSEWriter', () => {
+  describe('writeFrame', () => {
+    it('writes a pre-encoded frame through the serialized chain', async () => {
+      const writes: Uint8Array[] = []
+      const write = vi.fn((chunk: Uint8Array) => { writes.push(chunk) })
+      const onError = vi.fn()
+
+      const writer = createQueuedSSEWriter({ write, onError })
+      const frame = encodeSSEFrame('message', '{"shared":true}')
+      writer.writeFrame(frame)
+
+      await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(1))
+      expect(writes[0]).toBe(frame)
+      expect(onError).not.toHaveBeenCalled()
+    })
+  })
+
   describe('serializes frames in enqueue order', () => {
     it('should not execute second write until first resolves', async () => {
       let firstWriteResolve!: () => void

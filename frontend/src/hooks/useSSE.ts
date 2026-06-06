@@ -272,8 +272,6 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         })
         
         queryClient.setQueryData(messagesQueryKey, updated)
-        
-        queryClient.invalidateQueries({ queryKey: messagesQueryKey })
         break
       }
 

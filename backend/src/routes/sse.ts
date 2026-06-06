@@ -42,6 +42,9 @@ export function createSSERoutes() {
         (event, data) => {
           queuedWriter.writeSSE(event, data)
         },
+        (frame) => {
+          queuedWriter.writeFrame(frame)
+        },
         directories
       )
 

@@ -19,7 +19,7 @@ describe('OpenCodeEventStream', () => {
     stream.subscribeGlobalMonitor({ directories: ['/repo'], onEvent })
     transport.openConnection()
     transport.connected()
-    transport.message({ type: 'permission.asked', properties: { sessionID: 'session-1' }, directory: '/repo' })
+    transport.message({ directory: '/repo', payload: { type: 'permission.asked', properties: { sessionID: 'session-1' } } })
 
     expect(onEvent).toHaveBeenCalledWith({
       type: 'permission.asked',

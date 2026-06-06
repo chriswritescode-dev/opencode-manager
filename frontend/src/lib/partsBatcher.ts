@@ -43,6 +43,14 @@ export function createPartsBatcher(
     if (pendingOperations.size === 0) return
 
     const groupsToDelete: string[] = []
+    const invalidatedKeys = new Set<string>()
+
+    const invalidateOnce = (queryKey: unknown[]) => {
+      const dedupeKey = JSON.stringify(queryKey)
+      if (invalidatedKeys.has(dedupeKey)) return
+      invalidatedKeys.add(dedupeKey)
+      queryClient.invalidateQueries({ queryKey })
+    }
 
     for (const [key, group] of pendingOperations.entries()) {
       if (target) {
@@ -55,7 +63,7 @@ export function createPartsBatcher(
       const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
 
       if (!currentData) {
-        queryClient.invalidateQueries({ queryKey })
+        invalidateOnce(queryKey)
         continue
       }
 
@@ -64,72 +72,60 @@ export function createPartsBatcher(
       const unapplied: PartOperation[] = []
       const supersededPartIDs = new Set<string>()
 
+      const applyToMessage = (
+        messageID: string,
+        operation: PartOperation,
+        transform: (parts: Part[]) => Part[] | null,
+      ): boolean => {
+        const idx = updatedData.findIndex((m) => m.info.id === messageID)
+        if (idx < 0) {
+          unapplied.push(operation)
+          return false
+        }
+        const parts = transform(updatedData[idx].parts)
+        if (parts === null) {
+          unapplied.push(operation)
+          return false
+        }
+        const next = updatedData.slice()
+        next[idx] = { ...updatedData[idx], parts }
+        updatedData = next
+        anyApplied = true
+        return true
+      }
+
       for (const operation of group.operations) {
         if (operation.type === 'upsert') {
-          const targetMsg = updatedData.find((m) => m.info.id === operation.part.messageID)
-          if (!targetMsg) {
-            unapplied.push(operation)
-            continue
-          }
-
-          anyApplied = true
-          const existingIdx = targetMsg.parts.findIndex((part) => part.id === operation.part.id)
-          const parts = [...targetMsg.parts]
-          if (existingIdx >= 0) {
-            parts[existingIdx] = operation.part
-          } else {
-            parts.push(operation.part)
-          }
-
-          updatedData = updatedData.map((m) =>
-            m.info.id === operation.part.messageID ? { ...m, parts } : m,
-          )
-
-          supersededPartIDs.add(operation.part.id)
+          const applied = applyToMessage(operation.part.messageID, operation, (parts) => {
+            const existingIdx = parts.findIndex((part) => part.id === operation.part.id)
+            const nextParts = [...parts]
+            if (existingIdx >= 0) {
+              nextParts[existingIdx] = operation.part
+            } else {
+              nextParts.push(operation.part)
+            }
+            return nextParts
+          })
+          if (applied) supersededPartIDs.add(operation.part.id)
           continue
         }
 
         if (operation.type === 'remove') {
-          const targetMsg = updatedData.find((m) => m.info.id === operation.messageID)
-          if (!targetMsg) {
-            unapplied.push(operation)
-            continue
-          }
-
-          anyApplied = true
-          updatedData = updatedData.map((m) =>
-            m.info.id === operation.messageID
-              ? { ...m, parts: m.parts.filter((part) => part.id !== operation.partID) }
-              : m,
+          const applied = applyToMessage(operation.messageID, operation, (parts) =>
+            parts.filter((part) => part.id !== operation.partID),
           )
-          supersededPartIDs.add(operation.partID)
+          if (applied) supersededPartIDs.add(operation.partID)
           continue
         }
 
-        const targetMsg = updatedData.find((m) => m.info.id === operation.messageID)
-        if (!targetMsg) {
-          unapplied.push(operation)
-          continue
-        }
-
-        const targetPart = targetMsg.parts.find((p) => p.id === operation.partID)
-        if (!targetPart) {
-          unapplied.push(operation)
-          continue
-        }
-
-        anyApplied = true
-        updatedData = updatedData.map((m) => {
-          if (m.info.id !== operation.messageID) return m
-          return {
-            ...m,
-            parts: m.parts.map((part) => {
-              if (part.id !== operation.partID) return part
-              const currentValue = (part as Record<string, unknown>)[operation.field]
-              const nextValue = `${typeof currentValue === 'string' ? currentValue : ''}${operation.delta}`
-              return { ...part, [operation.field]: nextValue } as Part
-            }),
-          }
+        applyToMessage(operation.messageID, operation, (parts) => {
+          if (!parts.some((p) => p.id === operation.partID)) return null
+          return parts.map((part) => {
+            if (part.id !== operation.partID) return part
+            const currentValue = (part as Record<string, unknown>)[operation.field]
+            const nextValue = `${typeof currentValue === 'string' ? currentValue : ''}${operation.delta}`
+            return { ...part, [operation.field]: nextValue } as Part
+          })
         })
       }
 
@@ -146,7 +142,7 @@ export function createPartsBatcher(
 
       if (filteredUnapplied.length > 0) {
         group.operations = filteredUnapplied
-        queryClient.invalidateQueries({ queryKey })
+        invalidateOnce(queryKey)
       } else {
         groupsToDelete.push(key)
       }

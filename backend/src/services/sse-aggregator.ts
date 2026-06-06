@@ -3,13 +3,16 @@ import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
+import { encodeSSEFrame } from '../routes/sse-writer'
 
 type SSEClientCallback = (event: string, data: string) => void
+type SSEClientFrameWriter = (frame: Uint8Array) => void
 type SSEEventListener = (directory: string, event: SSEEvent) => void
 
 interface SSEClient {
   id: string
   callback: SSEClientCallback
+  writeFrame: SSEClientFrameWriter
   directories: Set<string>
   visible: boolean
   activeSessionId: string | null
@@ -95,10 +98,11 @@ class SSEAggregator {
     void this.connectUpstream()
   }
 
-  addClient(id: string, callback: SSEClientCallback, directories: string[]): () => void {
+  addClient(id: string, callback: SSEClientCallback, writeFrame: SSEClientFrameWriter, directories: string[]): () => void {
     const client: SSEClient = {
       id,
       callback,
+      writeFrame,
       directories: new Set(directories),
       visible: false,
       activeSessionId: null
@@ -211,7 +215,7 @@ class SSEAggregator {
     if (!client || !client.directories.has(directory)) return
 
     for (const item of items) {
-      const payload = JSON.stringify({ type, properties: item, directory })
+      const payload = JSON.stringify({ directory, payload: { type, properties: item } })
       try {
         client.callback('message', payload)
       } catch (error) {
@@ -316,11 +320,13 @@ class SSEAggregator {
       try { listener(directory, parsed) } catch { /* ignore listener errors */ }
     })
 
-    const clientData = JSON.stringify({ ...parsed, directory })
+    let frame: Uint8Array | undefined
+    const getFrame = (): Uint8Array => (frame ??= encodeSSEFrame('message', data))
+
     this.clients.forEach((client) => {
       if (client.directories.has(directory)) {
         try {
-          client.callback('message', clientData)
+          client.writeFrame(getFrame())
         } catch (error) {
           logger.error(`Failed to send to client ${client.id}:`, error)
         }
@@ -478,8 +484,10 @@ export const sseAggregator = SSEAggregator.getInstance()
 
 export function broadcastSSHHostKeyRequest(data: Record<string, unknown>): void {
   const event = JSON.stringify({
-    type: 'ssh.host-key-request',
-    properties: data,
+    payload: {
+      type: 'ssh.host-key-request',
+      properties: data,
+    },
   })
   sseAggregator.broadcastToAll('message', event)
 }
