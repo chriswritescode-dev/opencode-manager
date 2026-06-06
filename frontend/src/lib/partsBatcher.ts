@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import type { Part, MessageWithParts } from '@/api/types'
+import { messagesQueryKey } from '@/lib/queryInvalidation'
 
 interface PartsBatcher {
   queuePartUpdate: (sessionID: string, part: Part, directory?: string) => void
@@ -57,7 +58,7 @@ export function createPartsBatcher(
       }
 
       const { sessionID, directory } = group
-      const queryKey = ['opencode', 'messages', opcodeUrl, sessionID, directory]
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory)
       const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
 
       if (!currentData) {

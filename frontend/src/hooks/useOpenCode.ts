@@ -13,7 +13,7 @@ import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { useSendErrorStore } from "../stores/sendErrorStore";
-import { invalidateSessionListCaches } from "../lib/queryInvalidation";
+import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -140,7 +140,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
   const client = useOpenCodeClient(opcodeUrl, directory);
 
   return useQuery({
-    queryKey: ["opencode", "messages", opcodeUrl, sessionID, directory],
+    queryKey: messagesQueryKey(opcodeUrl, sessionID, directory),
     queryFn: async () => {
       const response = await client!.listMessages(sessionID!)
       return response as MessageWithParts[]
@@ -404,15 +404,15 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       );
       const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID, model, agent, variant);
 
-      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
-      await queryClient.cancelQueries({ queryKey: messagesQueryKey });
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
+      await queryClient.cancelQueries({ queryKey });
 
       const optimisticMessageWithParts: MessageWithParts = {
         info: userMessageInfo,
         parts: userMessageParts,
       }
       queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey,
+        queryKey,
         (old) => [...(old || []), optimisticMessageWithParts],
       );
 
@@ -483,11 +483,11 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     },
     onError: (error, variables) => {
       const { sessionID } = variables;
-      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey,
+        queryKey,
         (old) => old?.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_")),
       );
       
@@ -509,17 +509,17 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     onSuccess: async (data, variables) => {
       const { sessionID } = variables;
       const { response } = data;
-      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       useSendErrorStore.getState().clearError(sessionID);
 
       if (data.queued || !response) {
-        queryClient.invalidateQueries({ queryKey: messagesQueryKey });
+        queryClient.invalidateQueries({ queryKey });
         return;
       }
 
       queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey,
+        queryKey,
         (old) => {
           if (!old) return old;
 
@@ -553,7 +553,7 @@ export const useAbortSession = (
   const retryCountRef = useRef(0);
 
   const forceCompleteMessages = useCallback((targetSessionID: string) => {
-    const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
+    const queryKey = messagesQueryKey(opcodeUrl, targetSessionID, directory);
     const now = Date.now();
     
     queryClient.setQueryData<MessageWithParts[]>(queryKey, (old) => {
@@ -616,7 +616,7 @@ export const useAbortSession = (
   }, []);
 
   const isSessionComplete = useCallback((targetSessionID: string) => {
-    const queryKey = ["opencode", "messages", opcodeUrl, targetSessionID, directory];
+    const queryKey = messagesQueryKey(opcodeUrl, targetSessionID, directory);
     const messages = queryClient.getQueryData<MessageWithParts[]>(queryKey);
     
     const hasIncompleteMessages = messages?.some(msgWithParts => {
@@ -632,7 +632,7 @@ export const useAbortSession = (
     if (!sessionID) return;
 
     const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
-      const queryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
       if (event.query.queryKey.join(",") === queryKey.join(",")) {
         if (isSessionComplete(sessionID) && retryIntervalRef.current) {
           stopRetrying();
@@ -716,15 +716,15 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       );
       const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID);
 
-      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
-      await queryClient.cancelQueries({ queryKey: messagesQueryKey });
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
+      await queryClient.cancelQueries({ queryKey });
 
       const optimisticMessageWithParts: MessageWithParts = {
         info: userMessageInfo,
         parts: userMessageParts,
       }
       queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey,
+        queryKey,
         (old) => [...(old || []), optimisticMessageWithParts],
       );
 
@@ -739,7 +739,7 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       const { sessionID } = variables;
       setSessionStatus(sessionID, { type: "idle" });
       queryClient.setQueryData<MessageWithParts[]>(
-        ["opencode", "messages", opcodeUrl, sessionID, directory],
+        messagesQueryKey(opcodeUrl, sessionID, directory),
         (old) => {
           if (!old) return old;
           return old.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_"));
@@ -753,7 +753,7 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
       const { optimisticUserID } = data;
 
       queryClient.setQueryData<MessageWithParts[]>(
-        ["opencode", "messages", opcodeUrl, sessionID, directory],
+        messagesQueryKey(opcodeUrl, sessionID, directory),
         (old) => {
           if (!old) return old;
           return old.filter((msgWithParts) => msgWithParts.info.id !== optimisticUserID);
@@ -810,7 +810,7 @@ export const useLoadSkill = (
       setSessionStatus(sessionID, { type: "busy" });
 
       const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
-      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       const userMessageParts = createOptimisticUserMessageParts(
         sessionID,
@@ -823,9 +823,9 @@ export const useLoadSkill = (
         parts: userMessageParts,
       };
 
-      await queryClient.cancelQueries({ queryKey: messagesQueryKey });
+      await queryClient.cancelQueries({ queryKey });
       queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey,
+        queryKey,
         (old) => [...(old || []), optimisticMessageWithParts],
       );
 
@@ -834,10 +834,10 @@ export const useLoadSkill = (
     },
     onError: (error) => {
       if (sessionID) {
-        const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+        const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
         setSessionStatus(sessionID!, { type: "idle" });
         queryClient.setQueryData<MessageWithParts[]>(
-          messagesQueryKey,
+          queryKey,
           (old) => old?.filter((m) => !m.info.id.startsWith("optimistic_")),
         );
       }
@@ -845,10 +845,10 @@ export const useLoadSkill = (
     },
     onSuccess: (data) => {
       const { response } = data;
-      const messagesQueryKey = ["opencode", "messages", opcodeUrl, sessionID, directory];
+      const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       queryClient.setQueryData<MessageWithParts[]>(
-        messagesQueryKey,
+        queryKey,
         (old) => {
           if (!old) return old;
 

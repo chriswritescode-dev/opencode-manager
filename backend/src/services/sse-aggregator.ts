@@ -2,8 +2,9 @@ import { EventSource } from 'eventsource'
 import { logger } from '../utils/logger'
 import { ENV } from '@opencode-manager/shared/config/env'
 import { DEFAULTS } from '@opencode-manager/shared/config'
+import type { SSEEventEnvelope, SSEEventPayload } from '@opencode-manager/shared'
 import { getOpenCodeBasicAuthHeader, type OpenCodePasswordResolver } from './opencode/auth'
-import { encodeSSEFrame } from '../routes/sse-writer'
+import { encodeSSEFrame } from '../utils/sse-frame'
 
 type SSEClientCallback = (event: string, data: string) => void
 type SSEClientFrameWriter = (frame: Uint8Array) => void
@@ -18,17 +19,7 @@ interface SSEClient {
   activeSessionId: string | null
 }
 
-export interface SSEEvent {
-  type: string
-  properties: Record<string, unknown>
-}
-
-interface GlobalEventEnvelope {
-  directory?: string
-  project?: string
-  workspace?: string
-  payload: SSEEvent
-}
+export type SSEEvent = SSEEventPayload
 
 export interface PendingActionsFetcher {
   getJson<T>(path: string, opts?: { directory?: string; signal?: AbortSignal }): Promise<T>
@@ -333,9 +324,9 @@ class SSEAggregator {
   }
 
   private handleUpstreamMessage(data: string): void {
-    let envelope: GlobalEventEnvelope
+    let envelope: SSEEventEnvelope
     try {
-      envelope = JSON.parse(data) as GlobalEventEnvelope
+      envelope = JSON.parse(data) as SSEEventEnvelope
     } catch {
       return
     }

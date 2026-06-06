@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createQueuedSSEWriter, encodeSSEFrame } from '../../src/routes/sse-writer'
+import { createQueuedSSEWriter } from '../../src/routes/sse-writer'
+import { encodeSSEFrame } from '../../src/utils/sse-frame'
 
 describe('encodeSSEFrame', () => {
   const decoder = new TextDecoder()

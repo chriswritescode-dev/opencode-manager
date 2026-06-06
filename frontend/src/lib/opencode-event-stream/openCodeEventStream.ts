@@ -1,4 +1,5 @@
 import { DEFAULTS } from '@opencode-manager/shared/config'
+import type { SSEEventEnvelope } from '@opencode-manager/shared'
 import { createBrowserEventStreamTransport } from './browserTransport'
 import type {
   EventStreamHealthState,
@@ -422,7 +423,7 @@ function flattenEventEnvelope(parsed: unknown): unknown {
     (parsed as { payload: unknown }).payload !== null &&
     typeof (parsed as { payload: unknown }).payload === 'object'
   ) {
-    const { payload, directory } = parsed as { payload: object; directory?: unknown }
+    const { payload, directory } = parsed as SSEEventEnvelope
     return { ...payload, directory }
   }
   return parsed

@@ -1,3 +1,5 @@
+import { encodeSSEFrame } from '../utils/sse-frame'
+
 export interface QueuedSSEWriterInput {
   write: (chunk: Uint8Array) => Promise<unknown> | void
   onError: (error: unknown) => void
@@ -9,13 +11,7 @@ export interface QueuedSSEWriter {
   close: () => void
 }
 
-const sharedEncoder = new TextEncoder()
 const MAX_QUEUED_FRAMES = 1024
-
-export function encodeSSEFrame(event: string, data: string): Uint8Array {
-  const head = event ? `event: ${event}\n` : ''
-  return sharedEncoder.encode(`${head}data: ${data}\n\n`)
-}
 
 export function createQueuedSSEWriter(input: QueuedSSEWriterInput): QueuedSSEWriter {
   const queue: Uint8Array[] = []
