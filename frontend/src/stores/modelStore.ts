@@ -69,6 +69,18 @@ export function modelStoreMigrate(persistedState: unknown): unknown {
   return next
 }
 
+function mergeVariants(
+  current: Record<string, string | undefined>,
+  incoming: Record<string, string | undefined>
+): Record<string, string | undefined> | undefined {
+  const next = { ...incoming, ...current }
+  const currentKeys = Object.keys(current)
+  const nextKeys = Object.keys(next)
+
+  if (currentKeys.length !== nextKeys.length) return next
+  return nextKeys.some((key) => current[key] !== next[key]) ? next : undefined
+}
+
 export const useModelStore = create<ModelStore>()(
   persist(
     (set, get) => ({
@@ -100,12 +112,10 @@ export const useModelStore = create<ModelStore>()(
     },
 
     syncModelState: (modelState) => {
-      set((state) => ({
-        variants: {
-          ...modelState.variant,
-          ...state.variants,
-        },
-      }))
+      const variants = mergeVariants(get().variants, modelState.variant)
+      if (variants) {
+        set({ variants })
+      }
     },
 
     syncFromConfig: (configModel: string | undefined, force = false) => {
@@ -153,8 +163,10 @@ export const useModelStore = create<ModelStore>()(
     },
 
     setVariant: (model: ModelSelection, variant: string | undefined) => {
+      const key = `${model.providerID}/${model.modelID}`
+      if (get().variants[key] === variant) return
+
       set((state) => {
-        const key = `${model.providerID}/${model.modelID}`
         return {
           variants: {
             ...state.variants,
@@ -171,8 +183,10 @@ export const useModelStore = create<ModelStore>()(
     },
 
     clearVariant: (model: ModelSelection) => {
+      const key = `${model.providerID}/${model.modelID}`
+      if (!(key in get().variants)) return
+
       set((state) => {
-        const key = `${model.providerID}/${model.modelID}`
         const newVariants = { ...state.variants }
         delete newVariants[key]
         return {
