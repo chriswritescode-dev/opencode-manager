@@ -41,6 +41,7 @@ import { RepoLspDialog } from "@/components/repo/RepoLspDialog";
 import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog";
 import { createOpenCodeClient } from "@/api/opencode";
 import { usePermissions, useQuestions } from "@/contexts/EventContext";
+import { useSessionStatusForSession } from "@/stores/sessionStatusStore";
 import type { QuestionRequest } from "@/api/types";
 import { QuestionPrompt } from "@/components/session/QuestionPrompt";
 import { MinimizedQuestionIndicator } from "@/components/session/MinimizedQuestionIndicator";
@@ -162,6 +163,7 @@ export function SessionDetail() {
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
+  const sessionStatus = useSessionStatusForSession(sessionId);
   const { syncForSession: syncPermissionsForSession } = usePermissions();
   const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
 
@@ -171,12 +173,10 @@ export function SessionDetail() {
   
   const isSessionActive = useMemo(() => {
     if (session?.time?.compacting) return true
-    if (!messages || messages.length === 0) return false
-    const last = messages[messages.length - 1]
-    if (last.info.role === 'user') return true
-    if (last.info.role === 'assistant' && !('completed' in last.info.time)) return true
+    if (sessionStatus.type !== 'idle') return true
+    if (lastAssistantMessage && !('completed' in lastAssistantMessage.info.time)) return true
     return false
-  }, [messages, session?.time?.compacting])
+  }, [lastAssistantMessage, session?.time?.compacting, sessionStatus.type])
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
   const assistantFileBasePath = assistantMode?.directory.split('/').filter(Boolean).at(-1);
