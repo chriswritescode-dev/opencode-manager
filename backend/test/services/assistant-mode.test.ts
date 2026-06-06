@@ -620,7 +620,7 @@ describe('warmAssistantWorkspace', () => {
   })
   afterEach(async () => { await ws.cleanup() })
 
-  it('provisions the workspace and triggers a directory-scoped session request', async () => {
+  it('provisions the workspace and triggers a bounded directory-scoped session request', async () => {
     const getJsonCalls: Array<{ path: string; directory?: string }> = []
     const client = {
       getJson: async (requestPath: string, opts?: { directory?: string }) => {
@@ -634,7 +634,7 @@ describe('warmAssistantWorkspace', () => {
     const opencodeJson = await readFile(path.join(ws.assistantDir, 'opencode.json'), 'utf8')
     expect(JSON.parse(opencodeJson).default_agent).toBe('assistant')
     expect(getJsonCalls).toHaveLength(1)
-    expect(getJsonCalls[0]?.path).toBe('/session')
+    expect(getJsonCalls[0]?.path).toBe('/api/session?limit=1&order=desc')
     expect(getJsonCalls[0]?.directory).toBe(ws.assistantDir)
   })
 

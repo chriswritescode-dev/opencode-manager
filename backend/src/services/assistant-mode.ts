@@ -1090,7 +1090,7 @@ export async function warmAssistantWorkspace(deps: {
       db: deps.db,
       apiBaseUrl: deps.apiBaseUrl,
     })
-    await deps.openCodeClient.getJson('/session', {
+    await deps.openCodeClient.getJson('/api/session?limit=1&order=desc', {
       directory: status.directory,
       signal: AbortSignal.timeout(ASSISTANT_WARMUP_OPENCODE_TIMEOUT_MS),
     })
