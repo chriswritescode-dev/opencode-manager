@@ -62,7 +62,7 @@ export function useSessionAgent(
   sessionID: string | undefined,
   directory?: string
 ) {
-  const { data: messages, isLoading: messagesLoading, isFetching: messagesFetching } = useMessages(opcodeUrl, sessionID, directory)
+  const { data: messages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionID, directory)
   const { data: config } = useConfig(opcodeUrl, directory)
   const { data: agents, isSuccess: agentsLoaded } = useAgents(opcodeUrl, directory)
   const storedAgent = useSessionAgentStore((s) => s.agents[sessionID ?? ''] ?? null)
@@ -75,12 +75,28 @@ export function useSessionAgent(
   )
 
   const result = useMemo(() => {
-    if (messagesLoading || messagesFetching) {
+    const resolveFallback = (): SessionAgentResult => {
+      const resolvedStoredAgent = resolveAvailableAgentName(storedAgent, agents, agentsLoaded)
+      if (resolvedStoredAgent) {
+        const prev = prevRef.current
+        if (prev.agent === resolvedStoredAgent && !prev.model && !prev.variant) {
+          return { ...prev, fromMessage: false }
+        }
+
+        const next: SessionAgentResult = { agent: resolvedStoredAgent, model: undefined, variant: undefined, fromMessage: false }
+        prevRef.current = next
+        return next
+      }
+
       return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
     }
 
+    if (messagesLoading && (!messages || messages.length === 0)) {
+      return resolveFallback()
+    }
+
     if (!messages || messages.length === 0) {
-      return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
+      return resolveFallback()
     }
 
     let latestAgent: string | undefined
@@ -140,7 +156,7 @@ export function useSessionAgent(
     }
 
     return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
-  }, [messages, messagesLoading, messagesFetching, storedAgent, defaultAgent, agents, agentsLoaded])
+  }, [messages, messagesLoading, storedAgent, defaultAgent, agents, agentsLoaded])
 
   useEffect(() => {
     if (result.agent && sessionID && result.fromMessage) {
@@ -149,21 +165,4 @@ export function useSessionAgent(
   }, [result.agent, result.fromMessage, sessionID, setAgent])
 
   return { agent: result.agent, model: result.model, variant: result.variant }
-}
-
-export function getSessionAgentFromMessages(
-  messages: Array<{ role: string; agent?: string }> | undefined
-): string | undefined {
-  if (!messages || messages.length === 0) {
-    return undefined
-  }
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role === 'user' && 'agent' in msg && msg.agent) {
-      return msg.agent
-    }
-  }
-
-  return undefined
 }

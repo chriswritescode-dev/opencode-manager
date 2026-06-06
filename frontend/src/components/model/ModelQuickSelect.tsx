@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, Clock, MoreVertical, Search, Star, Trash2, X } from 'lucide-react'
 import { useModelSelection } from '@/hooks/useModelSelection'
+import { formatModelKey } from '@/stores/modelStore'
 import { useVariants } from '@/hooks/useVariants'
 import { formatModelName, formatProviderName, getProviders } from '@/api/providers'
 import { useQuery } from '@tanstack/react-query'
@@ -20,6 +21,7 @@ interface ModelQuickSelectProps {
   opcodeUrl: string | null | undefined
   directory?: string
   disabled?: boolean
+  onModelChange?: () => void
   children: React.ReactNode
 }
 
@@ -75,7 +77,7 @@ function createModelListItem(provider: Provider, modelID: string, model: Model):
   return {
     providerID: provider.id,
     modelID,
-    key: `${provider.id}/${modelID}`,
+    key: formatModelKey({ providerID: provider.id, modelID }),
     displayName,
     providerName,
     searchText: createSearchText(displayName, modelID, providerName, provider.id),
@@ -87,15 +89,11 @@ function createFallbackModelListItem(providerID: string, modelID: string): Model
   return {
     providerID,
     modelID,
-    key: `${providerID}/${modelID}`,
+    key: formatModelKey({ providerID, modelID }),
     displayName: modelID,
     providerName: providerID,
     searchText: createSearchText(modelID, providerID),
   }
-}
-
-function getSelectionKey(selection: { providerID: string, modelID: string }) {
-  return `${selection.providerID}/${selection.modelID}`
 }
 
 function VirtualizedList<T>({
@@ -185,6 +183,7 @@ export function ModelQuickSelect({
   opcodeUrl,
   directory,
   disabled,
+  onModelChange,
   children,
 }: ModelQuickSelectProps) {
   const [isOpen, setIsOpen] = useState(false)
@@ -206,11 +205,11 @@ export function ModelQuickSelect({
   const providers = providersData?.providers ?? EMPTY_PROVIDERS
 
   const favoriteKeySet = useMemo(() => {
-    return new Set(favoriteModels.map(getSelectionKey))
+    return new Set(favoriteModels.map(formatModelKey))
   }, [favoriteModels])
 
   const recentKeySet = useMemo(() => {
-    return new Set(recentModels.map(getSelectionKey))
+    return new Set(recentModels.map(formatModelKey))
   }, [recentModels])
 
   const { providerById, providerItems } = useMemo(() => {
@@ -306,7 +305,7 @@ export function ModelQuickSelect({
 
   const favoriteModelsWithNames = useMemo(() => {
     return favoriteModels
-      .filter(favorite => `${favorite.providerID}/${favorite.modelID}` !== modelString)
+      .filter(favorite => formatModelKey(favorite) !== modelString)
       .slice(0, 5)
       .map(toModelListItem)
   }, [favoriteModels, modelString, toModelListItem])
@@ -314,7 +313,7 @@ export function ModelQuickSelect({
   const recentModelsWithNames = useMemo(() => {
     return recentModels
       .filter(recent => {
-        const key = getSelectionKey(recent)
+        const key = formatModelKey(recent)
         return key !== modelString && !favoriteKeySet.has(key)
       })
       .slice(0, 5)
@@ -414,6 +413,7 @@ export function ModelQuickSelect({
 
   const handleModelSelect = (providerID: string, modelID: string) => {
     setModel({ providerID, modelID })
+    onModelChange?.()
     setShowAllModels(false)
     setSearchQuery('')
     setSelectedProviderId(null)
