@@ -35,9 +35,7 @@ function parseNullableInt(value: string | null): number | null {
 }
 
 export function useScheduleUrlState(): UseScheduleUrlStateReturn {
-  const { search, updateParams } = useUrlParams()
-
-  const searchParams = useMemo(() => new URLSearchParams(search), [search])
+  const { searchParams, updateParams } = useUrlParams()
 
   const scheduleTab = useMemo<ScheduleTab>(() => {
     const tabParam = searchParams.get('scheduleTab')
@@ -67,15 +65,30 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   const runId = useMemo<number | null>(() => parseNullableInt(searchParams.get('runId')), [searchParams])
   const templateId = useMemo<number | null>(() => parseNullableInt(searchParams.get('templateId')), [searchParams])
 
+  type ScheduleDialogParam = 'scheduleDialog' | 'promptDialog'
+  type ScheduleEntityParam = 'jobId' | 'templateId'
+
   const replaceUrlParams = useCallback(
     (updater: (params: URLSearchParams) => void) => updateParams(updater, 'replace'),
     [updateParams],
   )
 
-  const pushUrlParams = useCallback(
-    (updater: (params: URLSearchParams) => void) => updateParams(updater, 'push'),
-    [updateParams],
-  )
+  const openEntityDialog = useCallback((
+    dialogParam: ScheduleDialogParam,
+    dialogValue: Exclude<ScheduleDialog, null> | Exclude<PromptDialog, null>,
+    entityParam: ScheduleEntityParam,
+    entityId: number | null,
+  ) => {
+    const otherEntityParam = entityParam === 'jobId' ? 'templateId' : 'jobId'
+    updateParams((p) => {
+      p.set(dialogParam, dialogValue)
+      p.delete(entityParam)
+      p.delete(otherEntityParam)
+      if (entityId !== null) {
+        p.set(entityParam, String(entityId))
+      }
+    }, 'push')
+  }, [updateParams])
 
   const setScheduleTab = useCallback((tab: ScheduleTab) => {
     replaceUrlParams((p) => {
@@ -88,60 +101,32 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   }, [replaceUrlParams])
 
   const openNewJob = useCallback(() => {
-    pushUrlParams((p) => {
-      p.set('scheduleDialog', 'new')
-      p.delete('jobId')
-      p.delete('templateId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('scheduleDialog', 'new', 'jobId', null)
+  }, [openEntityDialog])
 
   const openEditJob = useCallback((id: number) => {
-    pushUrlParams((p) => {
-      p.set('scheduleDialog', 'edit')
-      p.set('jobId', String(id))
-      p.delete('templateId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('scheduleDialog', 'edit', 'jobId', id)
+  }, [openEntityDialog])
 
   const openDeleteJob = useCallback((id: number) => {
-    pushUrlParams((p) => {
-      p.set('scheduleDialog', 'delete')
-      p.set('jobId', String(id))
-      p.delete('templateId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('scheduleDialog', 'delete', 'jobId', id)
+  }, [openEntityDialog])
 
   const openNewTemplate = useCallback(() => {
-    pushUrlParams((p) => {
-      p.set('promptDialog', 'new')
-      p.delete('templateId')
-      p.delete('jobId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('promptDialog', 'new', 'templateId', null)
+  }, [openEntityDialog])
 
   const openEditTemplate = useCallback((id: number) => {
-    pushUrlParams((p) => {
-      p.set('promptDialog', 'edit')
-      p.set('templateId', String(id))
-      p.delete('jobId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('promptDialog', 'edit', 'templateId', id)
+  }, [openEntityDialog])
 
   const openDeleteTemplate = useCallback((id: number) => {
-    pushUrlParams((p) => {
-      p.set('promptDialog', 'delete')
-      p.set('templateId', String(id))
-      p.delete('jobId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('promptDialog', 'delete', 'templateId', id)
+  }, [openEntityDialog])
 
   const openImportTemplate = useCallback(() => {
-    pushUrlParams((p) => {
-      p.set('promptDialog', 'import')
-      p.delete('templateId')
-      p.delete('jobId')
-    })
-  }, [pushUrlParams])
+    openEntityDialog('promptDialog', 'import', 'templateId', null)
+  }, [openEntityDialog])
 
   const closeDialog = useCallback(() => {
     replaceUrlParams((p) => {

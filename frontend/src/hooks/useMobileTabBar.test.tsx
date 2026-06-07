@@ -2,16 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { renderHook, act, render, screen } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
-import { useMobileTabBar, type MobileSheetKey } from './useMobileTabBar'
-
-function renderHookWithRouter<T>(renderFn: () => T) {
-  const wrapper = ({ children }: { children: React.ReactNode }) => (
-    <MemoryRouter initialEntries={['/']}>
-      {children}
-    </MemoryRouter>
-  )
-  return renderHook(renderFn, { wrapper })
-}
+import { useMobileTabBar } from './useMobileTabBar'
+import { renderHookWithRouter, createRouterWrapper } from '@/test/test-utils'
 
 describe('useMobileTabBar', () => {
   it('returns null for openSheet when no mobileTab param is present', () => {
@@ -21,11 +13,7 @@ describe('useMobileTabBar', () => {
 
   it('returns the correct openSheet when mobileTab param is set', () => {
     const { result } = renderHook(() => useMobileTabBar(), {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={['/?mobileTab=repos']}>
-          {children}
-        </MemoryRouter>
-      ),
+      wrapper: createRouterWrapper(['/?mobileTab=repos']),
     })
     expect(result.current.openSheet).toBe('repos')
   })
@@ -40,11 +28,7 @@ describe('useMobileTabBar', () => {
 
   it('close removes the mobileTab param', () => {
     const { result } = renderHook(() => useMobileTabBar(), {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={['/?mobileTab=notifications']}>
-          {children}
-        </MemoryRouter>
-      ),
+      wrapper: createRouterWrapper(['/?mobileTab=notifications']),
     })
     expect(result.current.openSheet).toBe('notifications')
     act(() => {
@@ -55,24 +39,16 @@ describe('useMobileTabBar', () => {
 
   it('resolves invalid values to null', () => {
     const { result } = renderHook(() => useMobileTabBar(), {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={['/?mobileTab=invalid']}>
-          {children}
-        </MemoryRouter>
-      ),
+      wrapper: createRouterWrapper(['/?mobileTab=invalid']),
     })
     expect(result.current.openSheet).toBeNull()
   })
 
   it('handles all valid MobileSheetKey values', () => {
-    const validKeys: MobileSheetKey[] = ['repos', 'files', 'notifications', 'more']
+    const validKeys = ['repos', 'files', 'notifications', 'more'] as const
     validKeys.forEach((key) => {
       const { result } = renderHook(() => useMobileTabBar(), {
-        wrapper: ({ children }) => (
-          <MemoryRouter initialEntries={[`/?mobileTab=${key}`]}>
-            {children}
-          </MemoryRouter>
-        ),
+        wrapper: createRouterWrapper([`/?mobileTab=${key}`]),
       })
       expect(result.current.openSheet).toBe(key)
     })
@@ -80,11 +56,7 @@ describe('useMobileTabBar', () => {
 
   it('returns stable openSheet identity across rerenders when search is unchanged', () => {
     const { result, rerender } = renderHook(() => useMobileTabBar(), {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={['/?mobileTab=repos']}>
-          {children}
-        </MemoryRouter>
-      ),
+      wrapper: createRouterWrapper(['/?mobileTab=repos']),
     })
     const firstOpenSheet = result.current.openSheet
     rerender()
@@ -102,11 +74,7 @@ describe('useMobileTabBar', () => {
 
   it('open callback identity is stable across location.search changes', () => {
     const { result, rerender } = renderHook(() => useMobileTabBar(), {
-      wrapper: ({ children }) => (
-        <MemoryRouter initialEntries={['/?foo=1']}>
-          {children}
-        </MemoryRouter>
-      ),
+      wrapper: createRouterWrapper(['/?foo=1']),
     })
     const firstOpen = result.current.open
     rerender()

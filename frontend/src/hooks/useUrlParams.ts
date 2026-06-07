@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
-export type UrlHistoryMode = 'push' | 'replace'
+type UrlHistoryMode = 'push' | 'replace'
 
-export interface UseUrlParamsReturn {
+interface UseUrlParamsReturn {
   search: string
+  searchParams: URLSearchParams
   updateParams: (updater: (params: URLSearchParams) => void, mode?: UrlHistoryMode) => void
 }
 
@@ -17,6 +18,8 @@ export function useUrlParams(): UseUrlParamsReturn {
     searchRef.current = location.search
   }, [location.search])
 
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
+
   const updateParams = useCallback(
     (updater: (params: URLSearchParams) => void, mode: UrlHistoryMode = 'replace') => {
       const params = new URLSearchParams(searchRef.current)
@@ -26,5 +29,5 @@ export function useUrlParams(): UseUrlParamsReturn {
     [navigate],
   )
 
-  return { search: location.search, updateParams }
+  return { search: location.search, searchParams, updateParams }
 }

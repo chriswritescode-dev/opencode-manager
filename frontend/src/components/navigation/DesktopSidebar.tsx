@@ -5,6 +5,7 @@ import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useAuth } from '@/hooks/useAuth'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
+import { getPathWithReturnTo } from '@/lib/navigation'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
 import {
   Sidebar,
@@ -48,7 +49,10 @@ export function DesktopSidebar() {
 
   const handleItemClick = (item: MoreDrawerItem) => {
     if (item.to) {
-      navigate(item.to)
+      const to = item.key === 'schedules'
+        ? getPathWithReturnTo(item.to, `${location.pathname}${location.search}`)
+        : item.to
+      navigate(to)
     } else if (item.dialog) {
       updateParams((p) => {
         p.set('dialog', item.dialog!)

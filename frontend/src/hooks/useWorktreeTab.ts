@@ -3,15 +3,15 @@ import { useUrlParams } from './useUrlParams'
 
 export type WorktreeTabValue = 'repo' | 'workspaces'
 
-export interface UseWorktreeTabReturn {
+interface UseWorktreeTabReturn {
   activeTab: WorktreeTabValue
   setActiveTab: (tab: WorktreeTabValue) => void
 }
 
 export function useWorktreeTab(): UseWorktreeTabReturn {
-  const { search, updateParams } = useUrlParams()
+  const { searchParams, updateParams } = useUrlParams()
 
-  const activeTab: WorktreeTabValue = new URLSearchParams(search).get('repoTab') === 'workspaces' ? 'workspaces' : 'repo'
+  const activeTab: WorktreeTabValue = searchParams.get('repoTab') === 'workspaces' ? 'workspaces' : 'repo'
 
   const setActiveTab = useCallback((tab: WorktreeTabValue) => {
     updateParams((p) => {

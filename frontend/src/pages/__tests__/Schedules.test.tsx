@@ -109,9 +109,9 @@ const createWrapper = () => {
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }
 
-const renderSchedules = (repoId: string) => {
+const renderSchedules = (repoId: string, initialEntry = `/repos/${repoId}/schedules`) => {
   return render(
-    <MemoryRouter initialEntries={[`/repos/${repoId}/schedules`]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/repos/:id/schedules" element={<Schedules />} />
       </Routes>
@@ -308,6 +308,33 @@ describe('Schedules', () => {
       expect(backButton).toBeInTheDocument()
       fireEvent.click(backButton)
       expect(mockNavigate).toHaveBeenCalledWith('/repos/5')
+    })
+
+    it('uses returnTo param for back button when present', () => {
+      mockNavigate.mockClear()
+
+      mocks.useScheduleTarget.mockReturnValue({
+        scheduleTarget: {
+          repoId: 5,
+          kind: 'repo',
+          name: 'my-repo',
+          subtitle: 'repos/my-repo',
+          fullPath: '/abs/repos/my-repo',
+          backHref: '/repos/5',
+        },
+        isLoading: false,
+        isError: false,
+      })
+      mocks.useRepoSchedules.mockReturnValue({ data: [], isLoading: false })
+      mocks.useRepoSchedule.mockReturnValue({ data: undefined, isFetching: false })
+      mocks.useRepoScheduleRuns.mockReturnValue({ data: [], isLoading: false })
+      mocks.useRepoScheduleRun.mockReturnValue({ data: undefined, isLoading: false })
+
+      renderSchedules('5', '/repos/5/schedules?returnTo=%2Frepos%2F5%2Fsessions%2Fabc%3Fassistant%3D1')
+
+      fireEvent.click(screen.getAllByRole('button')[0])
+
+      expect(mockNavigate).toHaveBeenCalledWith('/repos/5/sessions/abc?assistant=1')
     })
 
     it('normalizes prompts tab to jobs when jobs exist', () => {

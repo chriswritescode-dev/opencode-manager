@@ -13,11 +13,10 @@ interface UseSettingsDialogReturn {
 }
 
 export function useSettingsDialog(): UseSettingsDialogReturn {
-  const { search, updateParams } = useUrlParams()
+  const { searchParams, updateParams } = useUrlParams()
 
-  const params = new URLSearchParams(search)
-  const isOpen = params.get('settings') === 'open'
-  const activeTab = (params.get('settingsTab') as Tab) || 'account'
+  const isOpen = searchParams.get('settings') === 'open'
+  const activeTab = (searchParams.get('settingsTab') as Tab) || 'account'
 
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
@@ -38,13 +37,13 @@ export function useSettingsDialog(): UseSettingsDialogReturn {
   }, [updateParams])
 
   const toggle = useCallback(() => {
-    const isCurrentlyOpen = new URLSearchParams(search).get('settings') === 'open'
+    const isCurrentlyOpen = searchParams.get('settings') === 'open'
     if (isCurrentlyOpen) {
       close()
     } else {
       open()
     }
-  }, [search, open, close])
+  }, [searchParams, open, close])
 
   const setActiveTab = useCallback((tab: Tab) => {
     updateParams((p) => {

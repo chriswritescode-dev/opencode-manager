@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
 import {
   useCancelRepoScheduleRun,
@@ -21,10 +21,12 @@ import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { getReturnToPath } from '@/lib/navigation'
 import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
   const repoId = id ? Number(id) : undefined
 
   const {
@@ -134,6 +136,7 @@ export function Schedules() {
     )
   }
   const hasJobs = (jobs?.length ?? 0) > 0
+  const backHref = getReturnToPath(location.search, scheduleTarget.backHref)
 
   const handleCreate = (data: CreateScheduleJobRequest) => {
     createMutation.mutate({ repoId: repoId!, data }, {
@@ -219,7 +222,7 @@ export function Schedules() {
   return (
     <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
-        <Header.BackButton to={scheduleTarget.backHref} />
+        <Header.BackButton to={backHref} />
         <div className="min-w-0 flex-1 px-3">
           <Header.Title className="truncate">{scheduleTarget.name}</Header.Title>
           <p className="text-xs text-muted-foreground truncate">{scheduleTarget.subtitle}</p>

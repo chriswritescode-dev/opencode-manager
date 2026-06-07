@@ -228,4 +228,26 @@ describe('DesktopSidebar', () => {
 
     expect(screen.getByTestId('location').textContent).toBe('/?dialog=files&settings=open&settingsTab=account')
   })
+
+  it('preserves session route as return target when opening schedules', () => {
+    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
+    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
+    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      logout: vi.fn(),
+    } as any)
+
+    render(
+      <>
+        <DesktopSidebar />
+        <LocationDisplay />
+      </>,
+      { wrapper: createWrapper(['/repos/5/sessions/abc?assistant=1']) }
+    )
+
+    fireEvent.click(screen.getByText('Schedules'))
+
+    expect(screen.getByTestId('location').textContent).toBe('/repos/5/schedules?returnTo=%2Frepos%2F5%2Fsessions%2Fabc%3Fassistant%3D1')
+  })
 })

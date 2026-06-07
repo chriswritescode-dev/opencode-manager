@@ -1,17 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { renderHook, act, render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
 import { useWorktreeTab } from './useWorktreeTab'
-
-function renderHookWithRouter<T>(renderFn: () => T, initialEntries = ['/']) {
-  const wrapper = ({ children }: { children: React.ReactNode }) => (
-    <MemoryRouter initialEntries={initialEntries}>
-      {children}
-    </MemoryRouter>
-  )
-  return renderHook(renderFn, { wrapper })
-}
+import { renderHookWithRouter } from '@/test/test-utils'
 
 describe('useWorktreeTab', () => {
   it('defaults activeTab to repo when no repoTab param', () => {

@@ -1,58 +1,35 @@
 import { useEffect, useRef, useState } from 'react'
-import { renderHook, act, render, screen } from '@testing-library/react'
-import { MemoryRouter, useNavigate, useLocation } from 'react-router-dom'
+import { act, render, screen } from '@testing-library/react'
+import { MemoryRouter, useNavigate } from 'react-router-dom'
 import { describe, it, expect } from 'vitest'
-import { useUrlParams, UrlHistoryMode } from './useUrlParams'
-import type { UseUrlParamsReturn } from './useUrlParams'
-
-function LocationCatcher({ capturedSearch }: { capturedSearch: { current: string } }) {
-  const location = useLocation()
-  useEffect(() => {
-    capturedSearch.current = location.search
-  })
-  return null
-}
-
-function createWrapper(initialEntries: string[], capturedSearch: { current: string }) {
-  return function Wrapper({ children }: { children: React.ReactNode }) {
-    return (
-      <MemoryRouter initialEntries={initialEntries}>
-        <LocationCatcher capturedSearch={capturedSearch} />
-        {children}
-      </MemoryRouter>
-    )
-  }
-}
-
-function renderUseUrlParams(initialEntries = ['/']) {
-  const capturedSearch: { current: string } = { current: '' }
-  const wrapper = createWrapper(initialEntries, capturedSearch)
-  const rendered = renderHook(() => useUrlParams(), { wrapper })
-  return { ...rendered, capturedSearch }
-}
+import { useUrlParams } from './useUrlParams'
+import { renderHookWithRouterAndLocation } from '@/test/test-utils'
 
 describe('useUrlParams', () => {
   it('exports the expected API surface', () => {
     expect(typeof useUrlParams).toBe('function')
-    const { result } = renderUseUrlParams()
-    const value: UseUrlParamsReturn = result.current
-    expect(typeof value.search).toBe('string')
-    expect(typeof value.updateParams).toBe('function')
+    const { result } = renderHookWithRouterAndLocation(() => useUrlParams())
+    expect(typeof result.current.search).toBe('string')
+    expect(typeof result.current.searchParams).toBe('object')
+    expect(result.current.searchParams instanceof URLSearchParams).toBe(true)
+    expect(typeof result.current.updateParams).toBe('function')
   })
 
-  it('returns initial search string from location', () => {
-    const { result } = renderUseUrlParams(['/?foo=1&bar=2'])
+  it('returns initial search string and searchParams from location', () => {
+    const { result } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?foo=1&bar=2'])
     expect(result.current.search).toBe('?foo=1&bar=2')
+    expect(result.current.searchParams.get('foo')).toBe('1')
+    expect(result.current.searchParams.get('bar')).toBe('2')
   })
 
   it('returns empty search when no params', () => {
-    const { result } = renderUseUrlParams(['/'])
+    const { result } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/'])
     expect(result.current.search).toBe('')
   })
 
   describe('updateParams', () => {
     it('sets a param and preserves unrelated params', () => {
-      const { result, capturedSearch } = renderUseUrlParams(['/?keep=1'])
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?keep=1'])
       act(() => {
         result.current.updateParams((p) => p.set('dialog', 'mcp'))
       })
@@ -63,7 +40,7 @@ describe('useUrlParams', () => {
     })
 
     it('deletes a param without affecting others', () => {
-      const { result, capturedSearch } = renderUseUrlParams(['/?foo=1&bar=2'])
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?foo=1&bar=2'])
       act(() => {
         result.current.updateParams((p) => p.delete('foo'))
       })
@@ -74,7 +51,7 @@ describe('useUrlParams', () => {
     })
 
     it('sets and deletes multiple params atomically', () => {
-      const { result, capturedSearch } = renderUseUrlParams(['/?a=1&b=2&c=3'])
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?a=1&b=2&c=3'])
       act(() => {
         result.current.updateParams((p) => {
           p.set('x', '10')
@@ -93,7 +70,7 @@ describe('useUrlParams', () => {
     })
 
     it('preserves all params when updater makes no changes', () => {
-      const { result, capturedSearch } = renderUseUrlParams(['/?foo=1&bar=2'])
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?foo=1&bar=2'])
       act(() => {
         result.current.updateParams((_p) => {})
       })
@@ -104,7 +81,7 @@ describe('useUrlParams', () => {
     })
 
     it('handles special characters in param values', () => {
-      const { result } = renderUseUrlParams()
+      const { result } = renderHookWithRouterAndLocation(() => useUrlParams())
       act(() => {
         result.current.updateParams((p) => p.set('q', 'hello world & more'))
       })
@@ -114,7 +91,7 @@ describe('useUrlParams', () => {
 
   describe('mode: replace (default)', () => {
     it('defaults to replace mode when no mode arg passed', () => {
-      const { result, capturedSearch } = renderUseUrlParams(['/?initial=1'])
+      const { result, capturedSearch } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?initial=1'])
       act(() => {
         result.current.updateParams((p) => p.set('added', 'yes'))
       })
@@ -123,7 +100,7 @@ describe('useUrlParams', () => {
     })
 
     it('explicit replace does not push a new history entry', () => {
-      const { result } = renderUseUrlParams(['/?x=1'])
+      const { result } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?x=1'])
       act(() => {
         result.current.updateParams((p) => p.set('x', '2'), 'replace')
       })
@@ -185,7 +162,7 @@ describe('useUrlParams', () => {
 
   describe('stable identity', () => {
     it('updateParams reference is stable across location.search changes', () => {
-      const { result, rerender } = renderUseUrlParams(['/?a=1'])
+      const { result, rerender } = renderHookWithRouterAndLocation(() => useUrlParams(), ['/?a=1'])
       const firstUpdateParams = result.current.updateParams
 
       act(() => {
@@ -198,7 +175,7 @@ describe('useUrlParams', () => {
     })
 
     it('updateParams reference is stable across multiple updates', () => {
-      const { result } = renderUseUrlParams()
+      const { result } = renderHookWithRouterAndLocation(() => useUrlParams())
       const firstUpdateParams = result.current.updateParams
 
       act(() => {
@@ -213,7 +190,7 @@ describe('useUrlParams', () => {
     })
 
     it('updateParams reference remains stable when no navigation occurs', () => {
-      const { result, rerender } = renderUseUrlParams()
+      const { result, rerender } = renderHookWithRouterAndLocation(() => useUrlParams())
       const firstUpdateParams = result.current.updateParams
 
       rerender()
@@ -222,12 +199,5 @@ describe('useUrlParams', () => {
     })
   })
 
-  describe('type exports', () => {
-    it('UrlHistoryMode accepts push and replace', () => {
-      const push: UrlHistoryMode = 'push'
-      const replace: UrlHistoryMode = 'replace'
-      expect(push).toBe('push')
-      expect(replace).toBe('replace')
-    })
-  })
+
 })
