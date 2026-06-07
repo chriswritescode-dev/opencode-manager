@@ -1,4 +1,4 @@
-import { memo, useMemo, useCallback, useRef, useEffect, Children, isValidElement } from 'react'
+import { memo, useMemo, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -31,11 +31,7 @@ function parseTaskItems(content: string): TaskItem[] {
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className = '', onContentChange }: MarkdownRendererProps) {
   const taskItems = useMemo(() => parseTaskItems(content), [content])
-  const renderIndexRef = useRef(0)
-
-  useEffect(() => {
-    renderIndexRef.current = 0
-  }, [content])
+  let taskInputIndex = 0
 
   const handleToggle = useCallback((taskItem: TaskItem) => {
     if (!onContentChange) return
@@ -53,34 +49,25 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
 
   const components: Components = {
     ...markdownComponents,
-    li(props) {
-      const { children, ...rest } = props
-      const maybeChecked = (rest as Record<string, unknown>).checked as boolean | null | undefined
+    input(props) {
+      const { type, ...rest } = props
 
-      if (maybeChecked !== null && maybeChecked !== undefined) {
-        const currentIndex = renderIndexRef.current++
-        const taskItem = taskItems[currentIndex]
+      if (type === 'checkbox') {
+        const taskItem = taskItems[taskInputIndex++]
 
         if (taskItem) {
-          const filteredChildren = Children.toArray(children).filter(
-            child => !(isValidElement(child) && child.type === 'input'),
-          )
-
           return (
-            <li className="task-list-item flex items-start gap-1.5 my-0.5 md:my-1 list-none">
-              <input
-                type="checkbox"
-                checked={taskItem.checked}
-                onChange={() => handleToggle(taskItem)}
-                className="mt-[3px] cursor-pointer accent-primary shrink-0"
-              />
-              <span className="flex-1 min-w-0">{filteredChildren}</span>
-            </li>
+            <input
+              type="checkbox"
+              checked={taskItem.checked}
+              onChange={() => handleToggle(taskItem)}
+              className="cursor-pointer accent-primary"
+            />
           )
         }
       }
 
-      return <li className="text-foreground my-0.5 md:my-1" {...rest}>{children}</li>
+      return <input type={type} {...rest} />
     },
   }
 

@@ -115,6 +115,22 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
   }
 
+  const saveFileContent = useCallback(async (content: string) => {
+    const response = await fetch(getFileApiUrl(file.path), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'file', content }),
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Save failed: ${response.statusText}`)
+    }
+
+    const event = new CustomEvent('fileSaved', { detail: { path: file.path, content } })
+    window.dispatchEvent(event)
+    onFileSaved?.()
+  }, [file.path, onFileSaved])
+
   const handleEdit = () => {
     if (shouldVirtualize) {
       setViewMode('edit')
@@ -138,22 +154,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const handleSave = async () => {
     setIsSaving(true)
     try {
-      const response = await fetch(getFileApiUrl(file.path), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'file', content: editContent }),
-      })
-      
-      if (!response.ok) {
-        throw new Error(`Save failed: ${response.statusText}`)
-      }
-      
+      await saveFileContent(editContent)
       setViewMode('preview')
       const editEvent = new CustomEvent('editModeChange', { detail: { isEditing: false } })
       window.dispatchEvent(editEvent)
-      const event = new CustomEvent('fileSaved', { detail: { path: file.path, content: editContent } })
-      window.dispatchEvent(event)
-      onFileSaved?.()
     } catch (err) {
       console.error('Failed to save file:', err)
     } finally {
@@ -181,6 +185,26 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     window.dispatchEvent(event)
     onFileSaved?.()
   }, [file.path, onFileSaved])
+
+  const persistMarkdownContent = useCallback(async (content: string, setContent: (content: string) => void) => {
+    setContent(content)
+    setIsSaving(true)
+    try {
+      await saveFileContent(content)
+    } catch (err) {
+      console.error('Failed to save markdown checkbox change:', err)
+    } finally {
+      setIsSaving(false)
+    }
+  }, [saveFileContent])
+
+  const handleFullMarkdownContentChange = useCallback((content: string) => {
+    void persistMarkdownContent(content, setFullContent)
+  }, [persistMarkdownContent])
+
+  const handleLocalMarkdownContentChange = useCallback((content: string) => {
+    void persistMarkdownContent(content, setLocalMdContent)
+  }, [persistMarkdownContent])
 
   const isTextFile = file.mimeType?.startsWith('text/') || 
     ['application/json', 'application/xml', 'text/javascript', 'text/typescript'].includes(file.mimeType || '')
@@ -231,7 +255,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                   <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : fullContent ? (
-                <MarkdownRenderer content={fullContent} onContentChange={setFullContent} />
+                <MarkdownRenderer content={fullContent} onContentChange={handleFullMarkdownContentChange} />
               ) : null}
             </>
           )}
@@ -270,7 +294,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
         
         if (isMarkdownFile && markdownPreview) {
           const mdContent = localMdContent ?? textContent
-          return <MarkdownRenderer content={mdContent} onContentChange={setLocalMdContent} />
+          return <MarkdownRenderer content={mdContent} onContentChange={handleLocalMarkdownContentChange} />
         }
         
         const lines = textContent.split('\n')
