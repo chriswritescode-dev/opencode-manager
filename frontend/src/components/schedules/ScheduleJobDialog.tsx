@@ -260,9 +260,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         overlayClassName="bg-black/80"
-        className="flex h-dvh max-h-dvh w-full max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh] sm:w-[calc(100vw-1rem)]"
+        mobileFullscreen
+        className="flex h-dvh max-h-dvh w-full max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh] sm:max-w-[90vw] sm:w-[calc(100vw-1rem)]"
       >
-        <DialogHeader className="shrink-0 space-y-1 px-3 sm:px-6 pt-6 pb-3 pr-14">
+        <DialogHeader className="shrink-0 space-y-1 border-b border-border px-3 sm:px-6 py-4">
           <DialogTitle>{job ? 'Edit schedule' : 'New schedule'}</DialogTitle>
           <DialogDescription className="mt-0">
             Create a reusable repo job with a visual schedule builder, manual runs, and optional advanced metadata.

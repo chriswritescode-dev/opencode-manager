@@ -16,13 +16,11 @@ import { useRepoActivity } from '@/hooks/useRepoActivity'
 import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
 import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
-import { toUpdateScheduleRequest, getJobStatusTone } from '@/components/schedules/schedule-utils'
+import { toUpdateScheduleRequest } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { cn } from '@/lib/utils'
 import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
@@ -135,7 +133,6 @@ export function Schedules() {
       </div>
     )
   }
-  const enabledCount = jobs?.filter((job) => job.enabled).length ?? 0
   const hasJobs = (jobs?.length ?? 0) > 0
 
   const handleCreate = (data: CreateScheduleJobRequest) => {
@@ -228,8 +225,6 @@ export function Schedules() {
           <p className="text-xs text-muted-foreground truncate">{scheduleTarget.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="h-6 rounded-full px-2 text-xs">{jobs?.length ?? 0} jobs</Badge>
-          <Badge variant="outline" className={cn('h-6 rounded-full px-2 text-xs', getJobStatusTone({ enabled: true } as ScheduleJob))}>{enabledCount} enabled</Badge>
           <Header.Actions>
             <Button onClick={openNewJob} size="sm" className="hidden sm:flex">
               <Plus className="w-4 h-4 mr-2" />

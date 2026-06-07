@@ -4,11 +4,10 @@ import { useAllSchedules, useAllScheduleRuns, useCancelRepoScheduleRun } from '@
 import { useDeleteRepoSchedule, useRunRepoSchedule, useUpdateRepoSchedule, useCreateRepoSchedule } from '@/hooks/useSchedules'
 import { ScheduleJobDialog, RunHistoryCards, PromptsTab } from '@/components/schedules'
 import type { CreateScheduleJobRequest } from '@opencode-manager/shared/types'
-import { toUpdateScheduleRequest, formatScheduleShortLabel, getJobStatusTone, formatTimestamp } from '@/components/schedules/schedule-utils'
+import { toUpdateScheduleRequest, formatScheduleShortLabel, formatTimestamp } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -158,17 +157,6 @@ export function GlobalSchedules() {
 
     return filtered
   }, [jobs, statusFilter, scheduleModeFilter, repoFilter, sortOption])
-
-  const stats = useMemo(() => {
-    const total = jobs.length
-    const enabled = jobs.filter((j) => j.enabled).length
-    const disabled = total - enabled
-    const now = Date.now()
-    const last24h = now - 24 * 60 * 60 * 1000
-    const recentRuns = jobs.filter((j) => j.lastRunAt && j.lastRunAt > last24h)
-
-    return { total, enabled, disabled, recentRuns: recentRuns.length }
-  }, [jobs])
 
   const repoOptions = useMemo(() => [
     { value: 'all', label: 'All Repos', description: `${jobs.length} total jobs` },
@@ -324,12 +312,6 @@ export function GlobalSchedules() {
         <Header.BackButton to="/" />
         <Header.Title>Schedules</Header.Title>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="hidden sm:inline-flex h-6 rounded-full px-2 text-xs">
-            {stats.total} total
-          </Badge>
-          <Badge variant="outline" className="h-6 rounded-full px-2 text-xs bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
-            {stats.enabled} enabled
-          </Badge>
           <Header.Actions>
             <Button
               onClick={() => { openNewJob(); setSelectedRepoId(undefined) }}
@@ -571,26 +553,21 @@ export function GlobalSchedules() {
                     onClick={() => navigate(`/repos/${job.repoId}/schedules`)}
                   >
                     <CardContent className="p-4 space-y-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleNavigateToRepo(job.repoPath)
-                            }}
-                            className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate block mb-1"
-                          >
-                            {job.repoName}
-                          </button>
-                          <h3 className="font-medium truncate">{job.name}</h3>
-                          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                            {job.description || 'No description'}
-                          </p>
-                        </div>
-                        <Badge className={getJobStatusTone(job)}>
-                          {job.enabled ? 'Enabled' : 'Paused'}
-                        </Badge>
+                      <div className="min-w-0">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleNavigateToRepo(job.repoPath)
+                          }}
+                          className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate block mb-1"
+                        >
+                          {job.repoName}
+                        </button>
+                        <h3 className="font-medium truncate">{job.name}</h3>
+                        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                          {job.description || 'No description'}
+                        </p>
                       </div>
 
                       <div className="space-y-2 text-xs text-muted-foreground">
