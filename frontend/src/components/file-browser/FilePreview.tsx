@@ -188,6 +188,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
 
   const persistMarkdownContent = useCallback(async (content: string, setContent: (content: string) => void) => {
     setContent(content)
+    setEditContent(content)
     setIsSaving(true)
     try {
       await saveFileContent(content)

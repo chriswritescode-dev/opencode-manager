@@ -42,6 +42,15 @@ interface UploadProgress {
   cancelled: boolean
 }
 
+const encodeBase64 = (content: string) => {
+  const bytes = new TextEncoder().encode(content)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
 async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
   return new Promise((resolve, reject) => {
     entry.file(resolve, reject)
@@ -440,15 +449,27 @@ useEffect(() => {
   }, [basePath, loadFiles])
 
   useEffect(() => {
-    const handleFileSaved = (event: CustomEvent<{ path: string; content: string }>) => {
+    const handleFileSaved = (event: CustomEvent<{ path: string; content?: string }>) => {
       if (selectedFile && selectedFile.path === event.detail.path) {
+        if (event.detail.content !== undefined) {
+          const nextFile = {
+            ...selectedFile,
+            content: encodeBase64(event.detail.content),
+            size: new Blob([event.detail.content]).size,
+            lastModified: new Date(),
+          }
+          setSelectedFile(nextFile)
+          onFileSelect?.(nextFile)
+          return
+        }
+
         handleFileSelect(selectedFile)
       }
     }
 
     window.addEventListener('fileSaved', handleFileSaved as EventListener)
     return () => window.removeEventListener('fileSaved', handleFileSaved as EventListener)
-  }, [selectedFile, handleFileSelect])
+  }, [selectedFile, handleFileSelect, onFileSelect])
 
   useEffect(() => {
     if (!isPreviewModalOpen) return
