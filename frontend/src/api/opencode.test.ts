@@ -125,7 +125,7 @@ describe('OpenCodeClient', () => {
       })
     })
 
-    it('sends cursor-only params without directory for cursor-based requests', async () => {
+    it('preserves directory for cursor-based requests', async () => {
       fetchMock.mockResolvedValue(
         new Response(
           JSON.stringify({
@@ -138,7 +138,7 @@ describe('OpenCodeClient', () => {
       await new OpenCodeClient('/api/opencode', '/repo').listSessionsPage({ cursor: 'cursor_123' })
 
       expect(fetchMock).toHaveBeenCalledWith(
-        'http://localhost/api/opencode/api/session?cursor=cursor_123',
+        'http://localhost/api/opencode/api/session?cursor=cursor_123&directory=%2Frepo',
         expect.any(Object),
       )
     })

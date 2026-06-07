@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRepo } from "@/api/repos"
-import { useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
+import { setCachedAssistantSessionId, useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
 import { useSSE } from "@/hooks/useSSE"
@@ -17,7 +17,7 @@ import { SourceControlPanel } from "@/components/source-control"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
 import { invalidateConfigCaches } from "@/lib/queryInvalidation"
-import { getSessionListPath, getAssistantPath } from "@/lib/navigation"
+import { getSessionListPath, getAssistantPath, getAssistantSessionListPath } from "@/lib/navigation"
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Loader2, Plus } from "lucide-react"
 
@@ -43,18 +43,26 @@ export function AssistantRedirect() {
   })
 
   const handleNavigate = useCallback((sessionId: string) => {
+    if (repo?.fullPath) {
+      setCachedAssistantSessionId(repoId, repo.fullPath, sessionId)
+    }
     setStatus("opening")
     if (!showSessionList) {
       window.history.replaceState(window.history.state, "", getSessionListPath(repoId, true))
     }
     navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)
-  }, [navigate, repoId, showSessionList])
+  }, [navigate, repo?.fullPath, repoId, showSessionList])
+
+  const handleMissingCachedSession = useCallback(() => {
+    navigate(getAssistantSessionListPath(), { replace: true })
+  }, [navigate])
 
   const { openAssistant } = useAssistantSessionLauncher({
     repoId,
     opcodeUrl,
     directory: repo?.fullPath,
     onNavigate: handleNavigate,
+    onMissingCachedSession: handleMissingCachedSession,
   })
 
   const assistantDirectory = repo?.fullPath
@@ -63,8 +71,18 @@ export function AssistantRedirect() {
   useSSE(opcodeUrl, assistantDirectory)
 
   const createSessionMutation = useCreateSession(opcodeUrl, assistantDirectory, (session) => {
+    if (assistantDirectory) {
+      setCachedAssistantSessionId(repoId, assistantDirectory, session.id)
+    }
     navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`)
   })
+
+  const handleSelectSession = useCallback((sessionId: string) => {
+    if (assistantDirectory) {
+      setCachedAssistantSessionId(repoId, assistantDirectory, sessionId)
+    }
+    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)
+  }, [assistantDirectory, navigate, repoId])
 
   const handleCreateSession = async () => {
     await createSessionMutation.mutateAsync({ agent: undefined })
@@ -124,7 +142,7 @@ export function AssistantRedirect() {
             <SessionList
               opcodeUrl={opcodeUrl}
               directory={assistantDirectory}
-              onSelectSession={(sessionId) => navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)}
+              onSelectSession={handleSelectSession}
             />
           )}
         </div>

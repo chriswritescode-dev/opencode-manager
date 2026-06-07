@@ -7,6 +7,7 @@ interface UseAssistantSessionLauncherOptions {
   opcodeUrl: string
   directory?: string
   onNavigate: (sessionId: string) => void
+  onMissingCachedSession?: () => void
 }
 
 type OpenCodeSession = components['schemas']['Session']
@@ -19,7 +20,7 @@ function getLastAssistantSessionKey(repoId: number, directory: string): string {
   return `${LAST_ASSISTANT_SESSION_KEY_PREFIX}:${repoId}:${directory}`
 }
 
-function setCachedAssistantSessionId(repoId: number, directory: string, sessionId: string): void {
+export function setCachedAssistantSessionId(repoId: number, directory: string, sessionId: string): void {
   try {
     localStorage.setItem(getLastAssistantSessionKey(repoId, directory), sessionId)
   } catch {
@@ -94,6 +95,7 @@ export function useAssistantSessionLauncher({
   opcodeUrl,
   directory,
   onNavigate,
+  onMissingCachedSession,
 }: UseAssistantSessionLauncherOptions) {
   const openAssistant = useCallback(async () => {
     if (!directory) {
@@ -103,6 +105,11 @@ export function useAssistantSessionLauncher({
     const cachedSessionId = getCachedAssistantSessionId(repoId, directory)
     if (cachedSessionId) {
       onNavigate(cachedSessionId)
+      return
+    }
+
+    if (onMissingCachedSession) {
+      onMissingCachedSession()
       return
     }
 
@@ -119,7 +126,7 @@ export function useAssistantSessionLauncher({
       onNavigate(session.id)
       void sendAssistantWelcomePrompt(client, session.id)
     }
-  }, [repoId, opcodeUrl, directory, onNavigate])
+  }, [repoId, opcodeUrl, directory, onNavigate, onMissingCachedSession])
 
   return { openAssistant }
 }

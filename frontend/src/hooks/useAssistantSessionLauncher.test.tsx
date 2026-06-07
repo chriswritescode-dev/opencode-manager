@@ -111,6 +111,28 @@ describe('useAssistantSessionLauncher', () => {
     expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
   })
 
+  it('uses the cache-miss callback without querying OpenCode', async () => {
+    const onNavigate = vi.fn()
+    const onMissingCachedSession = vi.fn()
+    const { result } = renderHook(() => useAssistantSessionLauncher({
+      repoId: 123,
+      opcodeUrl: 'http://localhost:5551',
+      directory: '/assistant',
+      onNavigate,
+      onMissingCachedSession,
+    }))
+
+    await act(async () => {
+      await result.current.openAssistant()
+    })
+
+    expect(onMissingCachedSession).toHaveBeenCalled()
+    expect(onNavigate).not.toHaveBeenCalled()
+    expect(OpenCodeClient).not.toHaveBeenCalled()
+    expect(mocks.listSessionsPage).not.toHaveBeenCalled()
+    expect(mocks.createSession).not.toHaveBeenCalled()
+  })
+
   it('creates a session when the assistant directory has no root sessions', async () => {
     mocks.listSessionsPage.mockResolvedValue({
       items: [

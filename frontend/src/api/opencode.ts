@@ -120,7 +120,7 @@ export class OpenCodeClient {
   async listSessionsPage(params?: SessionPageParams): Promise<SessionPage> {
     const isCursorRequest = params?.cursor !== undefined
     const queryParams = isCursorRequest
-      ? { cursor: params.cursor }
+      ? this.getParams({ cursor: params.cursor })
       : this.getParams({
           ...(params?.limit !== undefined && { limit: params.limit }),
           ...(params?.order !== undefined && { order: params.order }),

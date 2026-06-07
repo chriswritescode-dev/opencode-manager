@@ -52,6 +52,7 @@ import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
+import { setCachedAssistantSessionId } from "@/hooks/useAssistantSessionLauncher";
 
 const compareMessageIds = (id1: string, id2: string): number => {
   const num1 = parseInt(id1, 10)
@@ -120,6 +121,12 @@ export function SessionDetail() {
   
   const repoDirectory = repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
+
+  useEffect(() => {
+    if (isAssistantSession && repoDirectory && sessionId) {
+      setCachedAssistantSessionId(repoId, repoDirectory, sessionId);
+    }
+  }, [isAssistantSession, repoDirectory, repoId, sessionId]);
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
 
@@ -234,12 +241,15 @@ export function SessionDetail() {
     try {
       const newSession = await createSession.mutateAsync({ agent: undefined });
       if (newSession?.id) {
+        if (isAssistantSession && repoDirectory) {
+          setCachedAssistantSessionId(repoId, repoDirectory, newSession.id);
+        }
         navigate(`/repos/${repoId}/sessions/${newSession.id}${sessionRouteSuffix}`);
       }
     } catch {
       showToast.error('Failed to create new session');
     }
-  }, [createSession, navigate, repoId, sessionRouteSuffix]);
+  }, [createSession, isAssistantSession, navigate, repoDirectory, repoId, sessionRouteSuffix]);
 
   useSidebarAction('new-session', () => {
     handleNewSession();
