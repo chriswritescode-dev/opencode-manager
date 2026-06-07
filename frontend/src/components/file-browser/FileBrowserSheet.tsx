@@ -156,7 +156,7 @@ export const FileBrowserSheet = memo(function FileBrowserSheet({ isOpen, onClose
               <PathDisplay path={displayPath} maxSegments={4} className="truncate" />
             </div>
             <div className="flex items-center gap-2">
-              {repoId && !isEditing && (
+              {repoId != null && !isEditing && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
