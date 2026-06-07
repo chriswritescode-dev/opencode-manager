@@ -36,8 +36,8 @@ const isMessageStreaming = (msg: Message): boolean => {
   return !('completed' in msg.time && msg.time.completed)
 }
 
-function isSessionInRetry(sessionStatus: { type?: string }): boolean {
-  return sessionStatus?.type === 'retry'
+function isSessionStatusActive(sessionStatus: { type?: string }): boolean {
+  return sessionStatus?.type !== undefined && sessionStatus.type !== 'idle'
 }
 
 const compareMessageIds = (id1: string, id2: string): number => {
@@ -363,7 +363,7 @@ export const MessageThread = memo(function MessageThread({
     return map
   }, [messages])
 
-  const isSessionBusy = !!pendingAssistantId || isSessionInRetry(sessionStatus)
+  const isSessionBusy = !!pendingAssistantId || isSessionStatusActive(sessionStatus)
   const setSessionTodos = useSessionTodos((state) => state.setTodos)
 
   useEffect(() => {
