@@ -32,6 +32,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [isLoadingAllContent, setIsLoadingAllContent] = useState(false)
   const [fullContentLoaded, setFullContentLoaded] = useState(false)
   const [fullContent, setFullContent] = useState<string | null>(null)
+  const [localMdContent, setLocalMdContent] = useState<string | null>(null)
   const virtualizedRef = useRef<VirtualizedTextViewHandle>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   
@@ -42,6 +43,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     setFullContentLoaded(false)
     setMarkdownPreview(isMarkdownFile)
     setFullContent(null)
+    setLocalMdContent(null)
   }, [file.path, isMarkdownFile])
   
   useEffect(() => {
@@ -122,7 +124,8 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
     
     try {
-      const content = file.content ? decodeBase64(file.content) : ''
+      const textContent = file.content ? decodeBase64(file.content) : ''
+      const content = localMdContent ?? textContent
       setEditContent(content)
       setViewMode('edit')
       const event = new CustomEvent('editModeChange', { detail: { isEditing: true } })
@@ -228,7 +231,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                   <div className="w-6 h-6 border-2 border-muted-foreground border-t-transparent rounded-full animate-spin" />
                 </div>
               ) : fullContent ? (
-                <MarkdownRenderer content={fullContent} />
+                <MarkdownRenderer content={fullContent} onContentChange={setFullContent} />
               ) : null}
             </>
           )}
@@ -266,7 +269,8 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
         }
         
         if (isMarkdownFile && markdownPreview) {
-          return <MarkdownRenderer content={textContent} />
+          const mdContent = localMdContent ?? textContent
+          return <MarkdownRenderer content={mdContent} onContentChange={setLocalMdContent} />
         }
         
         const lines = textContent.split('\n')
