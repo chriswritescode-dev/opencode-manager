@@ -183,6 +183,8 @@ export interface SSESessionStatusEvent {
     } | {
       type: 'busy'
     } | {
+      type: 'compact'
+    } | {
       type: 'retry'
       attempt: number
       message: string

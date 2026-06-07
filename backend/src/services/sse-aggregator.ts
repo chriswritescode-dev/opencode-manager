@@ -37,6 +37,9 @@ interface PendingQuestion {
   [key: string]: unknown
 }
 
+type SessionStatusValue = { type: string } & Record<string, unknown>
+type SessionStatusMap = Record<string, SessionStatusValue>
+
 const OPENCODE_PORT = ENV.OPENCODE.PORT
 const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS } = DEFAULTS.SSE
 
@@ -202,6 +205,61 @@ class SSEAggregator {
     await Promise.allSettled(tasks)
   }
 
+  private async replaySessionStatusesForAllClients(): Promise<void> {
+    const fetcher = this.pendingActionsFetcher
+    if (!fetcher) return
+
+    const directories = new Set<string>()
+    this.clients.forEach((client) => {
+      client.directories.forEach(dir => directories.add(dir))
+    })
+
+    if (directories.size === 0) return
+    logger.info(`replay: replaying session statuses for ${directories.size} directory(ies) after upstream reconnect`)
+    await Promise.allSettled(Array.from(directories).map(directory =>
+      this.replaySessionStatusesForDirectory(directory, fetcher)
+    ))
+  }
+
+  private async replaySessionStatusesForDirectory(
+    directory: string,
+    fetcher: PendingActionsFetcher,
+  ): Promise<void> {
+    let statuses: SessionStatusMap
+    try {
+      statuses = await fetcher.getJson<SessionStatusMap>('/session/status', { directory })
+    } catch (error) {
+      logger.warn(`replay: failed to fetch session statuses for ${directory}: ${String(error)}`)
+      return
+    }
+
+    if (!statuses) return
+
+    const previouslyActive = new Set(this.activeSessions.get(directory) ?? [])
+    const nowActive = new Set<string>()
+
+    let replayed = 0
+    for (const [sessionID, status] of Object.entries(statuses)) {
+      if (!sessionID || !status || status.type === 'idle') continue
+      nowActive.add(sessionID)
+      const data = JSON.stringify({ directory, payload: { type: 'session.status', properties: { sessionID, status } } })
+      this.handleUpstreamMessage(data)
+      replayed++
+    }
+
+    let cleared = 0
+    for (const sessionID of previouslyActive) {
+      if (nowActive.has(sessionID)) continue
+      const data = JSON.stringify({ directory, payload: { type: 'session.status', properties: { sessionID, status: { type: 'idle' } } } })
+      this.handleUpstreamMessage(data)
+      cleared++
+    }
+
+    if (replayed > 0 || cleared > 0) {
+      logger.info(`replay: re-emitted ${replayed} active and ${cleared} idle session status(es) for ${directory}`)
+    }
+  }
+
   private async replayPendingActionsForDirectory(
     clientId: string,
     directory: string,
@@ -289,6 +347,7 @@ class SSEAggregator {
       this.everConnected = true
       if (wasConnectedBefore) {
         void this.replayPendingActionsForAllClients()
+        void this.replaySessionStatusesForAllClients()
       }
     }
 

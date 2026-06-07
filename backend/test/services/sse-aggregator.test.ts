@@ -34,13 +34,16 @@ function createCapturingClient() {
   return { callback, writeFrame, events, frames }
 }
 
-function makeFetcher(map: Record<string, { permissions?: unknown[]; questions?: unknown[] }>): PendingActionsFetcher {
+function makeFetcher(
+  map: Record<string, { permissions?: unknown[]; questions?: unknown[]; statuses?: Record<string, { type: string }> }>,
+): PendingActionsFetcher {
   return {
     async getJson<T>(path: string, opts?: { directory?: string }): Promise<T> {
       const directory = opts?.directory ?? ''
       const entry = map[directory] ?? {}
       if (path === '/permission') return (entry.permissions ?? []) as T
       if (path === '/question') return (entry.questions ?? []) as T
+      if (path === '/session/status') return (entry.statuses ?? {}) as T
       throw new Error(`unexpected path: ${path}`)
     },
   }
@@ -194,6 +197,66 @@ describe('SSEAggregator pending replay on connect', () => {
     await flushReplay()
 
     expect(events).toHaveLength(0)
+  })
+})
+
+describe('SSEAggregator session status replay on upstream reconnect', () => {
+  beforeEach(() => {
+    sseAggregator.shutdown()
+    sseAggregator.setPendingActionsFetcher(null)
+  })
+
+  it('re-emits active session statuses to subscribed clients', async () => {
+    const fetcher = makeFetcher({
+      '/repo/a': { statuses: { 'sess-1': { type: 'busy' }, 'sess-2': { type: 'idle' } } },
+    })
+    sseAggregator.setPendingActionsFetcher(fetcher)
+
+    const clientA = createCapturingClient()
+    sseAggregator.addClient('status-1', clientA.callback, clientA.writeFrame, ['/repo/a'])
+
+    await (sseAggregator as any).replaySessionStatusesForAllClients()
+    await flushReplay()
+
+    const parsed = clientA.frames.map(f => JSON.parse(f.replace(/^event: message\ndata: /, '').trim()) as {
+      directory: string
+      payload: { type: string; properties: { sessionID: string; status: { type: string } } }
+    })
+
+    const statusEvents = parsed.filter(p => p.payload.type === 'session.status')
+    expect(statusEvents).toHaveLength(1)
+    expect(statusEvents[0]?.payload.properties.sessionID).toBe('sess-1')
+    expect(statusEvents[0]?.payload.properties.status.type).toBe('busy')
+  })
+
+  it('emits idle for sessions that finished during the disconnect', async () => {
+    const clientA = createCapturingClient()
+    sseAggregator.addClient('status-2', clientA.callback, clientA.writeFrame, ['/repo/a'])
+
+    const busy = JSON.stringify({ directory: '/repo/a', payload: { type: 'session.status', properties: { sessionID: 'sess-9', status: { type: 'busy' } } } })
+    ;(sseAggregator as any).handleUpstreamMessage(busy)
+
+    sseAggregator.setPendingActionsFetcher(makeFetcher({ '/repo/a': { statuses: {} } }))
+
+    await (sseAggregator as any).replaySessionStatusesForAllClients()
+    await flushReplay()
+
+    const parsed = clientA.frames.map(f => JSON.parse(f.replace(/^event: message\ndata: /, '').trim()) as {
+      payload: { type: string; properties: { sessionID: string; status: { type: string } } }
+    })
+    const idleEvents = parsed.filter(p => p.payload.type === 'session.status' && p.payload.properties.status.type === 'idle')
+    expect(idleEvents).toHaveLength(1)
+    expect(idleEvents[0]?.payload.properties.sessionID).toBe('sess-9')
+  })
+
+  it('does nothing when no fetcher is configured', async () => {
+    const clientA = createCapturingClient()
+    sseAggregator.addClient('status-3', clientA.callback, clientA.writeFrame, ['/repo/a'])
+
+    await (sseAggregator as any).replaySessionStatusesForAllClients()
+    await flushReplay()
+
+    expect(clientA.frames).toHaveLength(0)
   })
 })
 
