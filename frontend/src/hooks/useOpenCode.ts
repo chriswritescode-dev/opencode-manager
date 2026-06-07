@@ -128,7 +128,7 @@ export const useSession = (opcodeUrl: string | null | undefined, sessionID: stri
   return useQuery({
     queryKey: ["opencode", "session", opcodeUrl, sessionID, directory],
     queryFn: () => client!.getSession(sessionID!),
-    enabled: !!client && !!sessionID,
+    enabled: !!client && !!sessionID && !!directory,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     staleTime: 15000,
@@ -144,7 +144,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
       const response = await client!.listMessages(sessionID!)
       return response as MessageWithParts[]
     },
-    enabled: !!client && !!sessionID,
+    enabled: !!client && !!sessionID && !!directory,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
