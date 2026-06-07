@@ -31,7 +31,6 @@ function parseTaskItems(content: string): TaskItem[] {
 
 export const MarkdownRenderer = memo(function MarkdownRenderer({ content, className = '', onContentChange }: MarkdownRendererProps) {
   const taskItems = useMemo(() => parseTaskItems(content), [content])
-  let taskInputIndex = 0
 
   const handleToggle = useCallback((taskItem: TaskItem) => {
     if (!onContentChange) return
@@ -47,27 +46,33 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({ content, classN
     }
   }, [content, onContentChange])
 
+  const handleInputToggle = useCallback((input: HTMLInputElement) => {
+    const inputs = Array.from(input.closest('.prose')?.querySelectorAll('input[type="checkbox"]') ?? [])
+    const taskItem = taskItems[inputs.indexOf(input)]
+    if (taskItem) {
+      handleToggle(taskItem)
+    }
+  }, [handleToggle, taskItems])
+
   const components: Components = {
     ...markdownComponents,
     input(props) {
-      const { type, ...rest } = props
+      const { type, checked, disabled, ...rest } = props
+      delete (rest as Record<string, unknown>).node
 
       if (type === 'checkbox') {
-        const taskItem = taskItems[taskInputIndex++]
-
-        if (taskItem) {
-          return (
-            <input
-              type="checkbox"
-              checked={taskItem.checked}
-              onChange={() => handleToggle(taskItem)}
-              className="cursor-pointer accent-primary"
-            />
-          )
-        }
+        return (
+          <input
+            type="checkbox"
+            checked={Boolean(checked)}
+            onChange={(event) => handleInputToggle(event.currentTarget)}
+            className="cursor-pointer accent-primary"
+            {...rest}
+          />
+        )
       }
 
-      return <input type={type} {...rest} />
+      return <input type={type} checked={checked} disabled={disabled} {...rest} />
     },
   }
 

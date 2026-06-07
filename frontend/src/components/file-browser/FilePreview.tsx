@@ -155,6 +155,9 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     setIsSaving(true)
     try {
       await saveFileContent(editContent)
+      if (isMarkdownFile) {
+        setLocalMdContent(editContent)
+      }
       setViewMode('preview')
       const editEvent = new CustomEvent('editModeChange', { detail: { isEditing: false } })
       window.dispatchEvent(editEvent)
@@ -285,7 +288,8 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       
       try {
         const textContent = decodeBase64(file.content)
-        if (!textContent) {
+        const displayContent = isMarkdownFile ? localMdContent ?? textContent : textContent
+        if (!displayContent) {
           return (
             <div className="text-center text-muted-foreground py-8">
               Empty file - click Edit to add content
@@ -294,11 +298,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
         }
         
         if (isMarkdownFile && markdownPreview) {
-          const mdContent = localMdContent ?? textContent
-          return <MarkdownRenderer content={mdContent} onContentChange={handleLocalMarkdownContentChange} />
+          return <MarkdownRenderer content={displayContent} onContentChange={handleLocalMarkdownContentChange} />
         }
         
-        const lines = textContent.split('\n')
+        const lines = displayContent.split('\n')
         return (
           <div className={`pb-[200px] text-sm bg-muted text-foreground rounded font-mono ${
             lineWrap ? 'overflow-x-hidden' : 'overflow-x-auto'
