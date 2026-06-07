@@ -4,11 +4,12 @@ import { useAllSchedules, useAllScheduleRuns, useCancelRepoScheduleRun } from '@
 import { useDeleteRepoSchedule, useRunRepoSchedule, useUpdateRepoSchedule, useCreateRepoSchedule } from '@/hooks/useSchedules'
 import { ScheduleJobDialog, RunHistoryCards, PromptsTab } from '@/components/schedules'
 import type { CreateScheduleJobRequest } from '@opencode-manager/shared/types'
-import { toUpdateScheduleRequest, formatScheduleShortLabel, formatTimestamp } from '@/components/schedules/schedule-utils'
+import { toUpdateScheduleRequest, formatScheduleShortLabel, formatTimestamp, getJobStatusTone } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuCheckboxItem, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuLabel, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { Card, CardContent } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CalendarClock, Loader2, Plus, ArrowLeft, Play, Pencil, Trash2, Pause, PlayCircle, Clock3, History, SlidersHorizontal } from 'lucide-react'
@@ -553,21 +554,24 @@ export function GlobalSchedules() {
                     onClick={() => navigate(`/repos/${job.repoId}/schedules`)}
                   >
                     <CardContent className="p-4 space-y-3">
-                      <div className="min-w-0">
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            handleNavigateToRepo(job.repoPath)
-                          }}
-                          className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate block mb-1"
-                        >
-                          {job.repoName}
-                        </button>
-                        <h3 className="font-medium truncate">{job.name}</h3>
-                        <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                          {job.description || 'No description'}
-                        </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleNavigateToRepo(job.repoPath)
+                            }}
+                            className="text-xs text-muted-foreground hover:text-foreground hover:underline truncate block mb-1"
+                          >
+                            {job.repoName}
+                          </button>
+                          <h3 className="font-medium truncate">{job.name}</h3>
+                          <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
+                            {job.description || 'No description'}
+                          </p>
+                        </div>
+                        <Badge className={getJobStatusTone(job)}>{job.enabled ? 'Enabled' : 'Paused'}</Badge>
                       </div>
 
                       <div className="space-y-2 text-xs text-muted-foreground">

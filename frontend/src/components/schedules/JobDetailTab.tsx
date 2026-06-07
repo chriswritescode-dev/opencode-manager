@@ -1,9 +1,11 @@
 import type { ScheduleJob } from '@opencode-manager/shared/types'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import {
   formatScheduleSummary,
   formatTimestamp,
+  getJobStatusTone,
   hasSkillMetadata,
 } from '@/components/schedules/schedule-utils'
 import { Bot, CalendarClock, Clock3, History, Loader2, Pencil, Play, Sparkles, Trash2 } from 'lucide-react'
@@ -49,7 +51,10 @@ export function JobDetailTab({
         <div className="border-b border-border/60 bg-card px-3 py-4 sm:px-6 sm:py-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-2">
-              <h3 className="text-xl font-semibold tracking-tight">{selectedJob.name}</h3>
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-xl font-semibold tracking-tight">{selectedJob.name}</h3>
+                <Badge className={getJobStatusTone(selectedJob)}>{selectedJob.enabled ? 'Enabled' : 'Paused'}</Badge>
+              </div>
               <p className="text-sm text-muted-foreground">{selectedJob.description || 'No description provided.'}</p>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 <span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" /> {formatTimestamp(selectedJob.nextRunAt)}</span>
