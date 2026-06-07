@@ -42,7 +42,7 @@ export function useServerHealth(enabled = true) {
     },
     onSuccess: () => {
       invalidateConfigCaches(queryClient)
-      toast.success('Server configuration reloaded successfully')
+      toast.success('Server configuration reloaded successfully', { id: 'reload-config' })
     },
     onError: (error: unknown) => {
       const errorMessage = error && typeof error === 'object' && 'response' in error
@@ -50,7 +50,7 @@ export function useServerHealth(enabled = true) {
            || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
            || 'Failed to reload configuration')
         : 'Failed to reload configuration'
-      toast.error(errorMessage)
+      toast.error(errorMessage, { id: 'reload-config' })
     },
   })
 
@@ -60,10 +60,10 @@ export function useServerHealth(enabled = true) {
     },
     onSuccess: (data) => {
       invalidateSettingsCaches(queryClient)
-      toast.success(data.message)
+      toast.success(data.message, { id: 'rollback-config' })
     },
     onError: () => {
-      toast.error('Failed to rollback to previous config')
+      toast.error('Failed to rollback to previous config', { id: 'rollback-config' })
     },
   })
 
@@ -91,12 +91,14 @@ export function useServerHealth(enabled = true) {
       hasAutoOpenedSettingsRef.current = true
       setActiveTab('opencode')
       toast.error(health.error || 'OpenCode server requires a password', {
+        id: 'server-health-password',
         duration: Infinity,
         description: 'Set a password under Settings → OpenCode to start the server.',
       })
     } else if (prevHealth && currentStatus !== prevHealth) {
       if (isUnhealthy && previousStatus === 'healthy') {
         toast.error(health.error || 'OpenCode server is currently unhealthy', {
+          id: 'server-health-unhealthy',
           duration: Infinity,
           action: {
             label: 'Reload',
@@ -104,7 +106,7 @@ export function useServerHealth(enabled = true) {
           },
         })
       } else if (!isUnhealthy && previousStatus === 'unhealthy') {
-        toast.success('Server is back online')
+        toast.success('Server is back online', { id: 'server-health-online' })
         hasAutoOpenedSettingsRef.current = false
       }
     }
