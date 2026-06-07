@@ -116,8 +116,14 @@ vi.mock('@/contexts/EventContext', async (importOriginal) => {
 })
 
 vi.mock('@/api/repos', () => ({
-  getRepo: vi.fn(() => Promise.resolve(null)),
-  getAssistantModeStatus: vi.fn(() => Promise.resolve({ directory: '/abs/assistant', warnings: [] })),
+  getRepo: vi.fn((repoId: number) => Promise.resolve(repoId === 0 ? {
+    id: 0,
+    localPath: 'assistant',
+    fullPath: '/abs/assistant',
+    defaultBranch: 'main',
+    cloneStatus: 'ready',
+    clonedAt: 1,
+  } : null)),
 }))
 
 vi.mock('@/components/model/ModelSelectDialog', () => ({
@@ -236,7 +242,7 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     })
   })
 
-  it('passes directory from assistantMode to RepoSkillsDialog once loaded', async () => {
+  it('passes directory from assistant repo to RepoSkillsDialog once loaded', async () => {
     renderAssistantSession('sess-asst-1')
 
     await waitFor(() => {

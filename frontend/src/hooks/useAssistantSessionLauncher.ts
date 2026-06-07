@@ -1,12 +1,11 @@
 import { useCallback } from 'react'
-import { getAssistantModeStatus } from '@/api/repos'
 import { OpenCodeClient } from '@/api/opencode'
-import type { AssistantModeStatus } from '@opencode-manager/shared/types'
 import type { components } from '@/api/opencode-types'
 
 interface UseAssistantSessionLauncherOptions {
   repoId: number
   opcodeUrl: string
+  directory?: string
   onNavigate: (sessionId: string) => void
 }
 
@@ -25,6 +24,14 @@ function setCachedAssistantSessionId(repoId: number, directory: string, sessionI
     localStorage.setItem(getLastAssistantSessionKey(repoId, directory), sessionId)
   } catch {
     return
+  }
+}
+
+function getCachedAssistantSessionId(repoId: number, directory: string): string | undefined {
+  try {
+    return localStorage.getItem(getLastAssistantSessionKey(repoId, directory)) ?? undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -71,79 +78,48 @@ AGENTS.md explains the assistant workspace directory and points to the files Ope
 
 Take your time exploring and customizing these settings. Let me know when you're ready to start coding, or if you have any questions about getting set up!`
 
-function buildAssistantModeWarningsPrompt(assistant: AssistantModeStatus): string | undefined {
-  if (!assistant.warnings?.length) return undefined
-
-  return [
-    'Assistant Mode was updated, but some generated instruction changes were not applied.',
-    '',
-    ...assistant.warnings.map((warning) => `- ${warning.message}`),
-  ].join('\n')
-}
-
-function buildAssistantWelcomePrompt(assistant: AssistantModeStatus): string {
-  const warningsPrompt = buildAssistantModeWarningsPrompt(assistant)
-  return warningsPrompt
-    ? `${ASSISTANT_WELCOME_PROMPT}\n\n${warningsPrompt}`
-    : ASSISTANT_WELCOME_PROMPT
-}
-
-async function sendAssistantWelcomePrompt(client: OpenCodeClient, sessionId: string, assistant: AssistantModeStatus): Promise<void> {
+async function sendAssistantWelcomePrompt(client: OpenCodeClient, sessionId: string): Promise<void> {
   await client.sendPromptAsync(sessionId, {
     parts: [
       {
         type: 'text',
-        text: buildAssistantWelcomePrompt(assistant),
+        text: ASSISTANT_WELCOME_PROMPT,
       },
     ],
   }).catch(() => undefined)
-}
-
-async function sendAssistantModeWarningsPrompt(client: OpenCodeClient, sessionId: string, assistant: AssistantModeStatus): Promise<void> {
-  const warningsPrompt = buildAssistantModeWarningsPrompt(assistant)
-  if (!warningsPrompt) return
-
-  await client.sendPromptAsync(sessionId, {
-    parts: [
-      {
-        type: 'text',
-        text: warningsPrompt,
-      },
-    ],
-  }).catch(() => undefined)
-}
-
-function assertAssistantReady(assistant: AssistantModeStatus): void {
-  if (!assistant.files.agentsMd.exists || !assistant.files.opencodeJson.exists || !assistant.defaultAgent?.exists) {
-    throw new Error('Assistant workspace is not ready. Restart the server to run Assistant setup.')
-  }
 }
 
 export function useAssistantSessionLauncher({
   repoId,
   opcodeUrl,
+  directory,
   onNavigate,
 }: UseAssistantSessionLauncherOptions) {
   const openAssistant = useCallback(async () => {
-    const assistant = await getAssistantModeStatus(repoId)
-    assertAssistantReady(assistant)
+    if (!directory) {
+      throw new Error('Assistant workspace directory is unavailable')
+    }
 
-    const client = new OpenCodeClient(opcodeUrl, assistant.directory)
-    const assistantDirectory = assistant.directory
+    const cachedSessionId = getCachedAssistantSessionId(repoId, directory)
+    if (cachedSessionId) {
+      onNavigate(cachedSessionId)
+      return
+    }
 
-    const newest = await getLatestAssistantSession(client, assistantDirectory)
+    const client = new OpenCodeClient(opcodeUrl, directory)
+
+    const newest = await getLatestAssistantSession(client, directory)
 
     if (newest) {
-      setCachedAssistantSessionId(repoId, assistantDirectory, newest.id)
+      setCachedAssistantSessionId(repoId, directory, newest.id)
       onNavigate(newest.id)
-      void sendAssistantModeWarningsPrompt(client, newest.id, assistant)
     } else {
       const session = await client.createSession({ title: 'Assistant' })
-      setCachedAssistantSessionId(repoId, assistantDirectory, session.id)
+      setCachedAssistantSessionId(repoId, directory, session.id)
       onNavigate(session.id)
-      void sendAssistantWelcomePrompt(client, session.id, assistant)
+      void sendAssistantWelcomePrompt(client, session.id)
     }
-  }, [repoId, opcodeUrl, onNavigate])
+  }, [repoId, opcodeUrl, directory, onNavigate])
 
   return { openAssistant }
 }

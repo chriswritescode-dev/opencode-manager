@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { getRepo, getAssistantModeStatus } from "@/api/repos";
+import { getRepo } from "@/api/repos";
 import { MessageThread } from "@/components/message/MessageThread";
 import { PromptInput, type PromptInputHandle } from "@/components/message/PromptInput";
 import { FloatingTTSButton } from '@/components/message/FloatingTTSButton'
@@ -111,20 +111,14 @@ export function SessionDetail() {
   const { data: repo, isLoading: repoLoading } = useQuery({
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
-    enabled: !!repoId,
-  });
-
-  const { data: assistantMode, isLoading: assistantModeLoading } = useQuery({
-    queryKey: ["repo", repoId, "assistant-mode"],
-    queryFn: () => getAssistantModeStatus(repoId),
-    enabled: isAssistantSession,
+    enabled: id !== undefined,
   });
 
   useRepoActivity(repoId, Boolean(repo));
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = isAssistantSession ? (assistantMode?.directory || repo?.fullPath) : repo?.fullPath;
+  const repoDirectory = repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
@@ -175,7 +169,7 @@ export function SessionDetail() {
   const latestPlayableAssistant = useMemo(() => getLatestPlayableAssistantMessage(messages), [messages]);
   const hasIncompleteMessages = lastAssistantMessage ? !('completed' in lastAssistantMessage.info.time && lastAssistantMessage.info.time.completed) : false;
   const isStreamingResponse = hasIncompleteMessages && isSessionActive;
-  const assistantFileBasePath = assistantMode?.directory.split('/').filter(Boolean).at(-1);
+  const assistantFileBasePath = repo?.fullPath.split('/').filter(Boolean).at(-1);
   const workspaceBasePath = (isAssistantSession ? assistantFileBasePath : repo?.localPath) ?? repo?.localPath;
 
   useEffect(() => {
@@ -486,7 +480,7 @@ export function SessionDetail() {
 
       <div className="relative flex-1 overflow-hidden flex flex-col">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
-          {repoLoading || assistantModeLoading || sessionLoading || messagesLoading ? (
+          {repoLoading || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
             <MessageThread 

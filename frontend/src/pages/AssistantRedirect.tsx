@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
-import { useParams, useNavigate, useLocation } from "react-router-dom"
+import { useNavigate, useLocation } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { getRepo, getAssistantModeStatus } from "@/api/repos"
+import { getRepo } from "@/api/repos"
 import { useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
@@ -22,11 +22,10 @@ import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Loader2, Plus } from "lucide-react"
 
 export function AssistantRedirect() {
-  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
-  const repoId = Number(id) || 0
+  const repoId = 0
   const showSessionList = new URLSearchParams(location.search).get('view') === 'sessions'
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files')
   const [mcpDialogOpen, setMcpDialogOpen] = useDialogParam('mcp')
@@ -38,10 +37,9 @@ export function AssistantRedirect() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const opcodeUrl = OPENCODE_API_ENDPOINT
-  const { data: repo } = useQuery({
+  const { data: repo, isLoading: repoLoading, error: repoError } = useQuery({
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
-    enabled: showSessionList && repoId !== undefined,
   })
 
   const handleNavigate = useCallback((sessionId: string) => {
@@ -55,16 +53,11 @@ export function AssistantRedirect() {
   const { openAssistant } = useAssistantSessionLauncher({
     repoId,
     opcodeUrl,
+    directory: repo?.fullPath,
     onNavigate: handleNavigate,
   })
 
-  const { data: assistantMode, isLoading: assistantModeLoading, error: assistantModeError } = useQuery({
-    queryKey: ["repo", repoId, "assistant-mode"],
-    queryFn: () => getAssistantModeStatus(repoId),
-    enabled: showSessionList && repoId !== undefined,
-  })
-
-  const assistantDirectory = assistantMode?.directory
+  const assistantDirectory = repo?.fullPath
   const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
 
   useSSE(opcodeUrl, assistantDirectory)
@@ -84,14 +77,8 @@ export function AssistantRedirect() {
       try {
         if (showSessionList) return
         setStatus("preparing")
-        if (repoId <= 0) {
-          if (cancelled) return
-          setStatus("creating")
-          await openAssistant()
-          return
-        }
-
-        await getRepo(repoId)
+        if (repoLoading) return
+        if (repoError || !repo?.fullPath) throw new Error("Failed to load Assistant workspace")
         if (cancelled) return
         setStatus("creating")
         await openAssistant()
@@ -107,7 +94,7 @@ export function AssistantRedirect() {
     return () => {
       cancelled = true
     }
-  }, [repoId, openAssistant, navigate, showSessionList, id])
+  }, [repo?.fullPath, repoError, repoLoading, openAssistant, showSessionList])
 
   if (showSessionList) {
     return (
@@ -129,9 +116,9 @@ export function AssistantRedirect() {
           </Header.Actions>
         </Header>
         <div className="flex-1 flex flex-col min-h-0">
-          {assistantModeError ? (
+          {repoError ? (
             <div className="p-4 text-sm text-muted-foreground">Failed to load Assistant sessions</div>
-          ) : assistantModeLoading || !assistantMode ? (
+          ) : repoLoading || !repo?.fullPath ? (
             <div className="p-4 text-sm text-muted-foreground">Loading Assistant sessions...</div>
           ) : (
             <SessionList
