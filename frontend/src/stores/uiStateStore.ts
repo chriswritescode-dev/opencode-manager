@@ -8,14 +8,12 @@ interface UIStateStore {
   activePromptFileBasePath: string | null
   pendingPromptCommand: { id: number; command: CommandType } | null
   pendingPromptFile: { id: number; path: string } | null
-  isMoreDrawerOpen: boolean
   setIsEditingMessage: (isEditing: boolean) => void
   setActivePromptFileBasePath: (basePath: string | null) => void
   selectPromptCommand: (command: CommandType) => void
   clearPendingPromptCommand: () => void
   selectPromptFile: (path: string) => void
   clearPendingPromptFile: () => void
-  setMoreDrawerOpen: (open: boolean) => void
 }
 
 export const useUIState = create<UIStateStore>((set) => ({
@@ -23,12 +21,10 @@ export const useUIState = create<UIStateStore>((set) => ({
   activePromptFileBasePath: null,
   pendingPromptCommand: null,
   pendingPromptFile: null,
-  isMoreDrawerOpen: false,
   setIsEditingMessage: (isEditing: boolean) => set({ isEditingMessage: isEditing }),
   setActivePromptFileBasePath: (basePath: string | null) => set({ activePromptFileBasePath: basePath }),
   selectPromptCommand: (command: CommandType) => set({ pendingPromptCommand: { id: Date.now(), command } }),
   clearPendingPromptCommand: () => set({ pendingPromptCommand: null }),
   selectPromptFile: (path: string) => set({ pendingPromptFile: { id: Date.now(), path } }),
   clearPendingPromptFile: () => set({ pendingPromptFile: null }),
-  setMoreDrawerOpen: (open: boolean) => set({ isMoreDrawerOpen: open }),
 }))

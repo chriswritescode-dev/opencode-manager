@@ -1,37 +1,27 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useCallback } from 'react'
+import { useUrlParams } from './useUrlParams'
 
 export type WorktreeTabValue = 'repo' | 'workspaces'
 
-export interface UseWorktreeTabReturn {
+interface UseWorktreeTabReturn {
   activeTab: WorktreeTabValue
   setActiveTab: (tab: WorktreeTabValue) => void
 }
 
 export function useWorktreeTab(): UseWorktreeTabReturn {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const searchRef = useRef(location.search)
+  const { searchParams, updateParams } = useUrlParams()
 
-  useEffect(() => {
-    searchRef.current = location.search
-  }, [location.search])
-
-  const activeTab = useMemo<WorktreeTabValue>(() => {
-    const searchParams = new URLSearchParams(location.search)
-    const tabParam = searchParams.get('tab')
-    return tabParam === 'workspaces' ? 'workspaces' : 'repo'
-  }, [location.search])
+  const activeTab: WorktreeTabValue = searchParams.get('repoTab') === 'workspaces' ? 'workspaces' : 'repo'
 
   const setActiveTab = useCallback((tab: WorktreeTabValue) => {
-    const newParams = new URLSearchParams(searchRef.current)
-    if (tab === 'repo') {
-      newParams.delete('tab')
-    } else {
-      newParams.set('tab', tab)
-    }
-    navigate({ search: newParams.toString() }, { replace: true })
-  }, [navigate])
+    updateParams((p) => {
+      if (tab === 'repo') {
+        p.delete('repoTab')
+      } else {
+        p.set('repoTab', tab)
+      }
+    }, 'replace')
+  }, [updateParams])
 
   return {
     activeTab,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DesktopSidebar } from './DesktopSidebar'
 import * as useDesktopModule from '@/hooks/useDesktop'
@@ -13,8 +13,14 @@ vi.mock('@/hooks/useAuth')
 
 function LocationDisplay() {
   const location = useLocation()
+  const navigate = useNavigate()
 
-  return <div data-testid="location">{location.pathname}{location.search}</div>
+  return (
+    <div>
+      <div data-testid="location">{location.pathname}{location.search}</div>
+      <button onClick={() => navigate(-1)} data-testid="back-button">Back</button>
+    </div>
+  )
 }
 
 function createWrapper(initialEntries?: string[]) {
@@ -175,7 +181,7 @@ describe('DesktopSidebar', () => {
     )
   })
 
-  it('opens dialog items by updating the dialog query param', () => {
+  it('opens dialog items by updating the dialog query param (push) and closes on back', () => {
     vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
     vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
     vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
@@ -195,6 +201,10 @@ describe('DesktopSidebar', () => {
     fireEvent.click(screen.getByText('Files'))
 
     expect(screen.getByTestId('location').textContent).toBe('/repos/5/sessions/abc?assistant=1&dialog=files')
+
+    fireEvent.click(screen.getByTestId('back-button'))
+
+    expect(screen.getByTestId('location').textContent).toBe('/repos/5/sessions/abc?assistant=1')
   })
 
   it('opens settings by updating settings query params', () => {
@@ -216,6 +226,28 @@ describe('DesktopSidebar', () => {
 
     fireEvent.click(screen.getByText('Settings'))
 
-    expect(screen.getByTestId('location').textContent).toBe('/?dialog=files&settings=open&tab=account')
+    expect(screen.getByTestId('location').textContent).toBe('/?dialog=files&settings=open&settingsTab=account')
+  })
+
+  it('preserves session route as return target when opening schedules', () => {
+    vi.spyOn(useDesktopModule, 'useDesktop').mockReturnValue(true)
+    vi.spyOn(useSidebarCollapsedModule, 'useSidebarCollapsed').mockReturnValue([false, vi.fn()])
+    vi.spyOn(useAuthModule, 'useAuth').mockReturnValue({
+      isAuthenticated: true,
+      isLoading: false,
+      logout: vi.fn(),
+    } as any)
+
+    render(
+      <>
+        <DesktopSidebar />
+        <LocationDisplay />
+      </>,
+      { wrapper: createWrapper(['/repos/5/sessions/abc?assistant=1']) }
+    )
+
+    fireEvent.click(screen.getByText('Schedules'))
+
+    expect(screen.getByTestId('location').textContent).toBe('/repos/5/schedules?returnTo=%2Frepos%2F5%2Fsessions%2Fabc%3Fassistant%3D1')
   })
 })

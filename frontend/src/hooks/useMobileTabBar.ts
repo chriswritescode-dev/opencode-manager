@@ -1,46 +1,29 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useCallback, useMemo } from 'react'
+import { useUrlParams } from './useUrlParams'
 
-export type MobileSheetKey = 'repos' | 'files' | 'notifications' | 'more'
+type MobileSheetKey = 'repos' | 'files' | 'notifications' | 'more'
 
-export interface UseMobileTabBarReturn {
+interface UseMobileTabBarReturn {
   openSheet: MobileSheetKey | null
   open: (key: MobileSheetKey) => void
   close: () => void
 }
 
 export function useMobileTabBar(): UseMobileTabBarReturn {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const searchRef = useRef(location.search)
-
-  useEffect(() => {
-    searchRef.current = location.search
-  }, [location.search])
+  const { searchParams, updateParams } = useUrlParams()
 
   const openSheet = useMemo<MobileSheetKey | null>(() => {
-    const searchParams = new URLSearchParams(location.search)
-    const mobileTabParam = searchParams.get('mobileTab')
-    return (mobileTabParam === 'repos' || mobileTabParam === 'files' || mobileTabParam === 'notifications' || mobileTabParam === 'more')
-      ? mobileTabParam
-      : null
-  }, [location.search])
+    const v = searchParams.get('mobileTab')
+    return (v === 'repos' || v === 'files' || v === 'notifications' || v === 'more') ? v : null
+  }, [searchParams])
 
   const open = useCallback((key: MobileSheetKey) => {
-    const newParams = new URLSearchParams(searchRef.current)
-    newParams.set('mobileTab', key)
-    navigate({ search: newParams.toString() }, { replace: true })
-  }, [navigate])
+    updateParams((p) => p.set('mobileTab', key), 'push')
+  }, [updateParams])
 
   const close = useCallback(() => {
-    const newParams = new URLSearchParams(searchRef.current)
-    newParams.delete('mobileTab')
-    navigate({ search: newParams.toString() }, { replace: true })
-  }, [navigate])
+    updateParams((p) => p.delete('mobileTab'), 'replace')
+  }, [updateParams])
 
-  return {
-    openSheet,
-    open,
-    close,
-  }
+  return { openSheet, open, close }
 }

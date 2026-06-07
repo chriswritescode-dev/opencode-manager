@@ -1,27 +1,24 @@
-import { useCallback, useEffect, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useCallback } from 'react'
+import { useUrlParams } from './useUrlParams'
 
 export function useDialogParam(name: string): [boolean, (open: boolean) => void] {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const searchRef = useRef(location.search)
+  const { searchParams, updateParams } = useUrlParams()
 
-  useEffect(() => {
-    searchRef.current = location.search
-  }, [location.search])
+  const isOpen = searchParams.get('dialog') === name
 
-  const isOpen = new URLSearchParams(location.search).get('dialog') === name
-
-  const setOpen = useCallback((open: boolean) => {
-    const p = new URLSearchParams(searchRef.current)
-    if (open) {
-      p.set('dialog', name)
-      p.delete('mobileTab')
-    } else if (p.get('dialog') === name) {
-      p.delete('dialog')
-    }
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate, name])
+  const setOpen = useCallback(
+    (open: boolean) => {
+      updateParams((p) => {
+        if (open) {
+          p.set('dialog', name)
+          p.delete('mobileTab')
+        } else if (p.get('dialog') === name) {
+          p.delete('dialog')
+        }
+      }, open ? 'push' : 'replace')
+    },
+    [updateParams, name],
+  )
 
   return [isOpen, setOpen]
 }

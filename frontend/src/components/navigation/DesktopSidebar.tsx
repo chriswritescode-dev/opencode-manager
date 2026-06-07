@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
 import { useAuth } from '@/hooks/useAuth'
+import { useUrlParams } from '@/hooks/useUrlParams'
 import { buildNavModel, type MoreDrawerItem, type NavPrimaryCta } from '@/components/navigation/moreDrawerItems'
+import { getPathWithReturnTo } from '@/lib/navigation'
 import { RepoQuickSwitchSheet } from '@/components/navigation/RepoQuickSwitchSheet'
 import {
   Sidebar,
@@ -16,6 +18,7 @@ import { FolderGit2 } from 'lucide-react'
 export function DesktopSidebar() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { updateParams } = useUrlParams()
   const [collapsed, toggle] = useSidebarCollapsed()
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
@@ -46,19 +49,23 @@ export function DesktopSidebar() {
 
   const handleItemClick = (item: MoreDrawerItem) => {
     if (item.to) {
-      navigate(item.to)
+      const to = item.key === 'schedules'
+        ? getPathWithReturnTo(item.to, `${location.pathname}${location.search}`)
+        : item.to
+      navigate(to)
     } else if (item.dialog) {
-      const params = new URLSearchParams(location.search)
-      params.set('dialog', item.dialog)
-      params.delete('mobileTab')
-      navigate({ search: params.toString() }, { replace: true })
+      updateParams((p) => {
+        p.set('dialog', item.dialog!)
+        p.delete('mobileTab')
+      }, 'push')
     } else if (item.key === 'logout') {
       logout()
     } else if (item.key === 'settings') {
-      const params = new URLSearchParams(location.search)
-      params.set('settings', 'open')
-      params.set('tab', 'account')
-      navigate({ search: params.toString() }, { replace: true })
+      updateParams((p) => {
+        p.set('settings', 'open')
+        p.set('settingsTab', 'account')
+        p.delete('mobileTab')
+      }, 'push')
     } else if (item.key === 'repos') {
       setRepoSwitcherOpen(true)
     }

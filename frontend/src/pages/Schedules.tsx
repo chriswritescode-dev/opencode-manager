@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { useParams } from 'react-router-dom'
+import { useLocation, useParams } from 'react-router-dom'
 import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
 import {
   useCancelRepoScheduleRun,
@@ -16,17 +16,17 @@ import { useRepoActivity } from '@/hooks/useRepoActivity'
 import { useScheduleTarget } from '@/hooks/useScheduleTarget'
 import { useScheduleUrlState } from '@/hooks/useScheduleUrlState'
 import { ScheduleJobDialog, JobsTab, JobDetailTab, RunHistoryTab, ScheduleTabMenu } from '@/components/schedules'
-import { toUpdateScheduleRequest, getJobStatusTone } from '@/components/schedules/schedule-utils'
+import { toUpdateScheduleRequest } from '@/components/schedules/schedule-utils'
 import { Header } from '@/components/ui/header'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
-import { cn } from '@/lib/utils'
+import { getReturnToPath } from '@/lib/navigation'
 import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
   const { id } = useParams<{ id: string }>()
+  const location = useLocation()
   const repoId = id ? Number(id) : undefined
 
   const {
@@ -135,8 +135,8 @@ export function Schedules() {
       </div>
     )
   }
-  const enabledCount = jobs?.filter((job) => job.enabled).length ?? 0
   const hasJobs = (jobs?.length ?? 0) > 0
+  const backHref = getReturnToPath(location.search, scheduleTarget.backHref)
 
   const handleCreate = (data: CreateScheduleJobRequest) => {
     createMutation.mutate({ repoId: repoId!, data }, {
@@ -222,14 +222,12 @@ export function Schedules() {
   return (
     <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
-        <Header.BackButton to={scheduleTarget.backHref} />
+        <Header.BackButton to={backHref} />
         <div className="min-w-0 flex-1 px-3">
           <Header.Title className="truncate">{scheduleTarget.name}</Header.Title>
           <p className="text-xs text-muted-foreground truncate">{scheduleTarget.subtitle}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="outline" className="h-6 rounded-full px-2 text-xs">{jobs?.length ?? 0} jobs</Badge>
-          <Badge variant="outline" className={cn('h-6 rounded-full px-2 text-xs', getJobStatusTone({ enabled: true } as ScheduleJob))}>{enabledCount} enabled</Badge>
           <Header.Actions>
             <Button onClick={openNewJob} size="sm" className="hidden sm:flex">
               <Plus className="w-4 h-4 mr-2" />

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useCallback, useMemo } from 'react'
+import { useUrlParams } from './useUrlParams'
 
 export type ScheduleTab = 'jobs' | 'detail' | 'runs' | 'prompts'
 export type ScheduleDialog = 'new' | 'edit' | 'delete' | null
@@ -35,15 +35,7 @@ function parseNullableInt(value: string | null): number | null {
 }
 
 export function useScheduleUrlState(): UseScheduleUrlStateReturn {
-  const navigate = useNavigate()
-  const location = useLocation()
-  const searchRef = useRef(location.search)
-
-  useEffect(() => {
-    searchRef.current = location.search
-  }, [location.search])
-
-  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search])
+  const { searchParams, updateParams } = useUrlParams()
 
   const scheduleTab = useMemo<ScheduleTab>(() => {
     const tabParam = searchParams.get('scheduleTab')
@@ -73,11 +65,30 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   const runId = useMemo<number | null>(() => parseNullableInt(searchParams.get('runId')), [searchParams])
   const templateId = useMemo<number | null>(() => parseNullableInt(searchParams.get('templateId')), [searchParams])
 
-  const replaceUrlParams = useCallback((updater: (params: URLSearchParams) => void) => {
-    const p = new URLSearchParams(searchRef.current)
-    updater(p)
-    navigate({ search: p.toString() }, { replace: true })
-  }, [navigate])
+  type ScheduleDialogParam = 'scheduleDialog' | 'promptDialog'
+  type ScheduleEntityParam = 'jobId' | 'templateId'
+
+  const replaceUrlParams = useCallback(
+    (updater: (params: URLSearchParams) => void) => updateParams(updater, 'replace'),
+    [updateParams],
+  )
+
+  const openEntityDialog = useCallback((
+    dialogParam: ScheduleDialogParam,
+    dialogValue: Exclude<ScheduleDialog, null> | Exclude<PromptDialog, null>,
+    entityParam: ScheduleEntityParam,
+    entityId: number | null,
+  ) => {
+    const otherEntityParam = entityParam === 'jobId' ? 'templateId' : 'jobId'
+    updateParams((p) => {
+      p.set(dialogParam, dialogValue)
+      p.delete(entityParam)
+      p.delete(otherEntityParam)
+      if (entityId !== null) {
+        p.set(entityParam, String(entityId))
+      }
+    }, 'push')
+  }, [updateParams])
 
   const setScheduleTab = useCallback((tab: ScheduleTab) => {
     replaceUrlParams((p) => {
@@ -90,60 +101,32 @@ export function useScheduleUrlState(): UseScheduleUrlStateReturn {
   }, [replaceUrlParams])
 
   const openNewJob = useCallback(() => {
-    replaceUrlParams((p) => {
-      p.set('scheduleDialog', 'new')
-      p.delete('jobId')
-      p.delete('templateId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('scheduleDialog', 'new', 'jobId', null)
+  }, [openEntityDialog])
 
   const openEditJob = useCallback((id: number) => {
-    replaceUrlParams((p) => {
-      p.set('scheduleDialog', 'edit')
-      p.set('jobId', String(id))
-      p.delete('templateId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('scheduleDialog', 'edit', 'jobId', id)
+  }, [openEntityDialog])
 
   const openDeleteJob = useCallback((id: number) => {
-    replaceUrlParams((p) => {
-      p.set('scheduleDialog', 'delete')
-      p.set('jobId', String(id))
-      p.delete('templateId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('scheduleDialog', 'delete', 'jobId', id)
+  }, [openEntityDialog])
 
   const openNewTemplate = useCallback(() => {
-    replaceUrlParams((p) => {
-      p.set('promptDialog', 'new')
-      p.delete('templateId')
-      p.delete('jobId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('promptDialog', 'new', 'templateId', null)
+  }, [openEntityDialog])
 
   const openEditTemplate = useCallback((id: number) => {
-    replaceUrlParams((p) => {
-      p.set('promptDialog', 'edit')
-      p.set('templateId', String(id))
-      p.delete('jobId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('promptDialog', 'edit', 'templateId', id)
+  }, [openEntityDialog])
 
   const openDeleteTemplate = useCallback((id: number) => {
-    replaceUrlParams((p) => {
-      p.set('promptDialog', 'delete')
-      p.set('templateId', String(id))
-      p.delete('jobId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('promptDialog', 'delete', 'templateId', id)
+  }, [openEntityDialog])
 
   const openImportTemplate = useCallback(() => {
-    replaceUrlParams((p) => {
-      p.set('promptDialog', 'import')
-      p.delete('templateId')
-      p.delete('jobId')
-    })
-  }, [replaceUrlParams])
+    openEntityDialog('promptDialog', 'import', 'templateId', null)
+  }, [openEntityDialog])
 
   const closeDialog = useCallback(() => {
     replaceUrlParams((p) => {

@@ -62,7 +62,7 @@ describe('SettingsDialog', () => {
 
       return (
         <>
-          <button onClick={() => navigate('?settings=open&tab=general')}>Open Settings</button>
+          <button onClick={() => navigate('?settings=open&settingsTab=general')}>Open Settings</button>
           <button onClick={() => navigate('/')}>Close Settings</button>
           {isOpen && <span data-testid="dialog-open">Dialog Open</span>}
           <SettingsDialog />

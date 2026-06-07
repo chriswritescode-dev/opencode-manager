@@ -108,7 +108,7 @@ export function RepoDetail() {
   const sessionUrl = useCallback(
     (sessionId: string) => {
       const base = `/repos/${repoId}/sessions/${sessionId}`;
-      return activeTab === 'workspaces' ? `${base}?tab=workspaces` : base;
+      return activeTab === 'workspaces' ? `${base}?repoTab=workspaces` : base;
     },
     [repoId, activeTab],
   );

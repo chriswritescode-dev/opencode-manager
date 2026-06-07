@@ -1,5 +1,5 @@
-import { useCallback } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useCallback, useRef } from 'react'
+import { useUrlParams } from './useUrlParams'
 
 type Tab = 'account' | 'general' | 'notifications' | 'voice' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'menu'
 
@@ -13,41 +13,44 @@ interface UseSettingsDialogReturn {
 }
 
 export function useSettingsDialog(): UseSettingsDialogReturn {
-  const navigate = useNavigate()
-  const location = useLocation()
+  const { searchParams, updateParams } = useUrlParams()
 
-  const searchParams = new URLSearchParams(location.search)
   const isOpen = searchParams.get('settings') === 'open'
-  const activeTab = (searchParams.get('tab') as Tab) || 'account'
+  const activeTab = (searchParams.get('settingsTab') as Tab) || 'account'
+
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
 
   const open = useCallback(() => {
-    const newParams = new URLSearchParams(location.search)
-    newParams.set('settings', 'open')
-    newParams.set('tab', activeTab)
-    navigate({ search: newParams.toString() }, { replace: true })
-  }, [activeTab, navigate, location.search])
+    updateParams((p) => {
+      p.set('settings', 'open')
+      p.set('settingsTab', activeTabRef.current)
+      p.delete('mobileTab')
+    }, 'push')
+  }, [updateParams])
 
   const close = useCallback(() => {
-    const newParams = new URLSearchParams(location.search)
-    newParams.delete('settings')
-    newParams.delete('tab')
-    navigate({ search: newParams.toString() }, { replace: true })
-  }, [navigate, location.search])
+    updateParams((p) => {
+      p.delete('settings')
+      p.delete('settingsTab')
+    }, 'replace')
+  }, [updateParams])
 
   const toggle = useCallback(() => {
-    if (isOpen) {
+    const isCurrentlyOpen = searchParams.get('settings') === 'open'
+    if (isCurrentlyOpen) {
       close()
     } else {
       open()
     }
-  }, [isOpen, open, close])
+  }, [searchParams, open, close])
 
   const setActiveTab = useCallback((tab: Tab) => {
-    const newParams = new URLSearchParams(location.search)
-    newParams.set('settings', 'open')
-    newParams.set('tab', tab)
-    navigate({ search: newParams.toString() }, { replace: true })
-  }, [navigate, location.search])
+    updateParams((p) => {
+      p.set('settings', 'open')
+      p.set('settingsTab', tab)
+    }, 'replace')
+  }, [updateParams])
 
   return {
     isOpen,

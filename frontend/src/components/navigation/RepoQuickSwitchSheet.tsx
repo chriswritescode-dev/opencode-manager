@@ -9,6 +9,7 @@ import { listRepos } from '@/api/repos'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Check, Plus, House } from 'lucide-react'
 import { isAssistantPath, getAssistantPath } from '@/lib/navigation'
+import { useUrlParams } from '@/hooks/useUrlParams'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -18,6 +19,7 @@ interface RepoQuickSwitchSheetProps {
 export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetProps) {
   const navigate = useNavigate()
   const location = useLocation()
+  const { searchParams } = useUrlParams()
   const [searchQuery, setSearchQuery] = useState('')
   const [addRepoOpen, setAddRepoOpen] = useState(false)
 
@@ -45,7 +47,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     )
   }, [repos, searchQuery])
 
-  const isUrlControlledSheet = new URLSearchParams(location.search).get('mobileTab') === 'repos'
+  const isUrlControlledSheet = searchParams.get('mobileTab') === 'repos'
 
   const navigateAndClose = (path: string, options?: { replace?: boolean }) => {
     navigate(path, options)
@@ -55,7 +57,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   }
 
   const handleClick = (id: number) => {
-    const pendingAction = new URLSearchParams(location.search).get('mobileTabAction')
+    const pendingAction = searchParams.get('mobileTabAction')
 
     if (isAssistantRoute) {
       navigateAndClose(`/repos/${id}`, { replace: true })
