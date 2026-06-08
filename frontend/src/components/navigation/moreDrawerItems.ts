@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { Plug, Sparkles, ShieldOff, CalendarClock, GitCommitHorizontal, Code2, Settings, LogOut, Plus, Bot, Folder, Clock, SquarePlus } from 'lucide-react'
-import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import { getAssistantSessionListPath, isAssistantPath } from '@/lib/navigation'
 
 export interface MoreDrawerItem {
   key: string
@@ -30,7 +30,7 @@ function getAssistantNavItem(_pathname: string, variant: NavPrimaryCta['variant'
     key: 'assistant',
     label: 'Assistant',
     icon: Bot,
-    to: getAssistantPath(),
+    to: getAssistantSessionListPath(),
     variant,
   }
 }

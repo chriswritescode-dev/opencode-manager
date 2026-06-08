@@ -6,7 +6,7 @@ import { useMobile } from '@/hooks/useMobile'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useScheduleUrlState, type ScheduleTab } from '@/hooks/useScheduleUrlState'
-import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
+import { getAssistantPath, getAssistantSessionListPath, isAssistantPath } from '@/lib/navigation'
 
 interface TabDef {
   key: string
@@ -74,7 +74,7 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
 
   const handleAssistantClick = () => {
     close()
-    navigate(getAssistantPath())
+    navigate(getAssistantSessionListPath())
   }
 
   return [

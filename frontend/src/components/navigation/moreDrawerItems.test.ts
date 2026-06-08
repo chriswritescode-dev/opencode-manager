@@ -90,7 +90,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].key).toBe('new-repo')
     expect(model.primary[0].onSelect).toBe('new-repo')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary[1].to).toBe('/assistant?view=sessions')
   })
 
   it('returns new-session and assistant primary CTAs for repo detail', () => {
@@ -99,7 +99,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].key).toBe('new-session')
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary[1].to).toBe('/assistant?view=sessions')
   })
 
   it('returns new-session and assistant primary CTAs for session detail', () => {
@@ -109,7 +109,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[0].variant).toBe('primary')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary[1].to).toBe('/assistant?view=sessions')
     expect(model.primary[1].variant).toBe('secondary')
   })
 
@@ -120,7 +120,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[0].variant).toBe('primary')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary[1].to).toBe('/assistant?view=sessions')
     expect(model.primary[1].variant).toBe('secondary')
   })
 
@@ -131,7 +131,7 @@ describe('buildNavModel', () => {
     expect(model.primary[0].onSelect).toBe('new-session')
     expect(model.primary[0].variant).toBe('primary')
     expect(model.primary[1].key).toBe('assistant')
-    expect(model.primary[1].to).toBe('/assistant')
+    expect(model.primary[1].to).toBe('/assistant?view=sessions')
     expect(model.primary[1].variant).toBe('secondary')
   })
 
@@ -141,21 +141,21 @@ describe('buildNavModel', () => {
     expect(model1.primary[0].key).toBe('new-schedule')
     expect(model1.primary[0].onSelect).toBe('new-schedule')
     expect(model1.primary[1].key).toBe('assistant')
-    expect(model1.primary[1].to).toBe('/assistant')
+    expect(model1.primary[1].to).toBe('/assistant?view=sessions')
 
     const model2 = buildNavModel('/repos/5/schedules')
     expect(model2.primary).toHaveLength(2)
     expect(model2.primary[0].key).toBe('new-schedule')
     expect(model2.primary[0].onSelect).toBe('new-schedule')
     expect(model2.primary[1].key).toBe('assistant')
-    expect(model2.primary[1].to).toBe('/assistant')
+    expect(model2.primary[1].to).toBe('/assistant?view=sessions')
   })
 
   it('returns assistant primary for unknown routes', () => {
     const model = buildNavModel('/unknown/path')
     expect(model.primary).toHaveLength(1)
     expect(model.primary[0].key).toBe('assistant')
-    expect(model.primary[0].to).toBe('/assistant')
+    expect(model.primary[0].to).toBe('/assistant?view=sessions')
   })
 
   it('preserves backwards compatibility with buildMoreItems', () => {

@@ -77,7 +77,7 @@ describe('MobileTabBar', () => {
     expect(screen.getByText('Schedules')).toBeInTheDocument()
   })
 
-  it('navigates to /assistant when assistant is clicked from repo context', async () => {
+  it('navigates to assistant session list when assistant is clicked from repo context', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -96,10 +96,10 @@ describe('MobileTabBar', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
+    expect(screen.getByTestId('location')).toHaveTextContent('/assistant?view=sessions')
   })
 
-  it('navigates to assistant route when assistant is clicked without repo id', async () => {
+  it('navigates to assistant session list when assistant is clicked without repo id', async () => {
     vi.mocked(useMobile).mockReturnValue(true)
     const queryClient = new QueryClient()
     const user = userEvent.setup()
@@ -118,7 +118,7 @@ describe('MobileTabBar', () => {
     )
 
     await user.click(screen.getByRole('button', { name: 'Assistant' }))
-    expect(screen.getByTestId('location')).toHaveTextContent('/assistant')
+    expect(screen.getByTestId('location')).toHaveTextContent('/assistant?view=sessions')
   })
 
   it('renders schedule tabs on /repos/:id/schedules path', () => {
