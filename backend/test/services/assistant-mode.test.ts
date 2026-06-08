@@ -9,6 +9,7 @@ import { ScheduleService } from '../../src/services/schedules'
 import { NotificationService } from '../../src/services/notification'
 import { SettingsService } from '../../src/services/settings'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
+import { getRepoById } from '../../src/db/queries'
 import { ENV } from '@opencode-manager/shared/config/env'
 
 describe('buildSchedulesSkill', () => {
@@ -634,6 +635,61 @@ describe('installAssistantWorkspace', () => {
     expect(result.files.opencodeJson?.exists).toBe(true)
     expect(result.files.agentsMd?.exists).toBe(true)
     expect(result.defaultAgent?.exists).toBe(true)
+    expect(result.repoId).toBe(0)
+
+    const assistantRepo = getRepoById(db, 0)
+    expect(assistantRepo?.id).toBe(0)
+    expect(assistantRepo?.localPath).toBe('assistant')
+    expect(assistantRepo?.fullPath).toBe(ws.assistantDir)
+    expect(assistantRepo?.cloneStatus).toBe('ready')
+    expect(assistantRepo?.defaultBranch).toBe('main')
+  })
+
+  it('repairs an assistant row created with a non-zero id', async () => {
+    db.prepare(`
+      INSERT INTO repos (
+        id,
+        repo_url,
+        local_path,
+        source_path,
+        branch,
+        default_branch,
+        clone_status,
+        cloned_at,
+        last_accessed_at,
+        is_worktree,
+        is_local
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(99, null, 'assistant', null, null, 'main', 'ready', Date.now(), Date.now(), 0, 0)
+    db.prepare(`
+      INSERT INTO schedule_jobs (
+        repo_id,
+        name,
+        description,
+        enabled,
+        interval_minutes,
+        schedule_mode,
+        cron_expression,
+        timezone,
+        agent_slug,
+        prompt,
+        model,
+        skill_metadata,
+        created_at,
+        updated_at,
+        last_run_at,
+        next_run_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(99, 'Assistant job', null, 1, 60, 'interval', null, null, null, 'hello', null, null, Date.now(), Date.now(), null, null)
+
+    await installAssistantWorkspace({ db, apiBaseUrl })
+
+    expect(getRepoById(db, 99)).toBeNull()
+    const assistantRepo = getRepoById(db, 0)
+    expect(assistantRepo?.localPath).toBe('assistant')
+
+    const migratedJob = db.prepare('SELECT repo_id FROM schedule_jobs WHERE name = ?').get('Assistant job') as { repo_id: number }
+    expect(migratedJob.repo_id).toBe(0)
   })
 
   it('is idempotent — second call does not recreate files and content is unchanged', async () => {

@@ -17,6 +17,7 @@ import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH } from '@opencode-manager/shared
 import { getReposPath, ENV } from '@opencode-manager/shared/config/env'
 import type { Database } from 'bun:sqlite'
 import { getOrCreateInternalToken } from './internal-token'
+import { ensureAssistantRepo } from '../db/queries'
 
 
 const ASSISTANT_MODE_DIR = ASSISTANT_REPO_PATH
@@ -1081,7 +1082,9 @@ export async function installAssistantWorkspace(deps: {
   db: Database
   apiBaseUrl: string
 }): Promise<AssistantModeStatus> {
-  return ensureAssistantMode(buildAssistantRepo(), {
+  const assistantRepo = ensureAssistantRepo(deps.db)
+
+  return ensureAssistantMode(assistantRepo, {
     db: deps.db,
     apiBaseUrl: deps.apiBaseUrl,
   })
