@@ -1080,6 +1080,8 @@ export class ScheduleService {
 
   private assertRepo(repoId: number) {
     if (repoId === ASSISTANT_REPO_ID) {
+      const repo = getRepoById(this.db, ASSISTANT_REPO_ID)
+      if (repo) return repo
       return { ...buildAssistantRepo(), lastAccessedAt: Date.now(), isLocal: true, currentBranch: undefined }
     }
     const repo = getRepoById(this.db, repoId)

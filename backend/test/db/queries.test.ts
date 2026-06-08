@@ -259,27 +259,25 @@ describe('Database Queries', () => {
 
   describe('deleteRepo', () => {
     it('should delete repo schedules before deleting repo by ID', () => {
-      const deleteRunsStmt = {
-        run: vi.fn().mockReturnValue({ changes: 2 })
-      }
-      const deleteJobsStmt = {
-        run: vi.fn().mockReturnValue({ changes: 1 })
-      }
-      const deleteRepoStmt = {
-        run: vi.fn().mockReturnValue({ changes: 1 })
-      }
+      const deleteRunsStmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
+      const deleteJobsStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
+      const deleteSettingsStmt = { run: vi.fn().mockReturnValue({ changes: 0 }) }
+      const deleteRepoStmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
       mockDb.prepare
         .mockReturnValueOnce(deleteRunsStmt)
         .mockReturnValueOnce(deleteJobsStmt)
+        .mockReturnValueOnce(deleteSettingsStmt)
         .mockReturnValueOnce(deleteRepoStmt)
 
       db.deleteRepo(mockDb, 1)
 
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_runs WHERE repo_id = ?')
-      expect(deleteRunsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(1, 'DELETE FROM schedule_jobs WHERE repo_id = ?')
       expect(deleteJobsStmt.run).toHaveBeenCalledWith(1)
-      expect(mockDb.prepare).toHaveBeenNthCalledWith(3,
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(2, 'DELETE FROM schedule_runs WHERE repo_id = ?')
+      expect(deleteRunsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(3, 'DELETE FROM repo_settings WHERE repo_id = ?')
+      expect(deleteSettingsStmt.run).toHaveBeenCalledWith(1)
+      expect(mockDb.prepare).toHaveBeenNthCalledWith(4,
         'DELETE FROM repos WHERE id = ?'
       )
       expect(deleteRepoStmt.run).toHaveBeenCalledWith(1)

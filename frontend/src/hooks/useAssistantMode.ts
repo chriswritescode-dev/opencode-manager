@@ -3,6 +3,7 @@ import {
   getAssistantModeStatus,
   initializeAssistantMode,
 } from '@/api/repos'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 import type { AssistantModeStatus, AssistantModeInitRequest } from '@opencode-manager/shared/types'
 
 export function useAssistantMode(repoId?: number) {
@@ -10,13 +11,13 @@ export function useAssistantMode(repoId?: number) {
 
   const statusQuery = useQuery<AssistantModeStatus>({
     queryKey: ['assistant-mode'],
-    queryFn: () => getAssistantModeStatus(0),
-    enabled: repoId === 0,
+    queryFn: () => getAssistantModeStatus(ASSISTANT_REPO_ID),
+    enabled: repoId === ASSISTANT_REPO_ID,
   })
 
   const initializeMutation = useMutation({
     mutationFn: (options?: AssistantModeInitRequest) =>
-      initializeAssistantMode(0, options),
+      initializeAssistantMode(ASSISTANT_REPO_ID, options),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ['assistant-mode'],

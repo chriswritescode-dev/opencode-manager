@@ -32,6 +32,10 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
   await opencodeServerManager.restart()
 }
 
+function resolveRepo(database: Database, id: number): Repo | null {
+  return getRepoById(database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null)
+}
+
 export function createRepoRoutes(
   database: Database,
   gitAuthService: GitAuthService,
@@ -158,14 +162,13 @@ app.get('/', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
 
-      const isAssistant = id === ASSISTANT_REPO_ID
-      const repo: Repo | null = getRepoById(database, id) ?? (isAssistant ? buildAssistantRepo() : null)
+      const repo: Repo | null = resolveRepo(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
       }
       
-      const currentBranch = isAssistant ? undefined : await repoService.getCurrentBranch(repo, gitAuthService.getGitEnvironment())
+      const currentBranch = id === ASSISTANT_REPO_ID ? undefined : await repoService.getCurrentBranch(repo, gitAuthService.getGitEnvironment())
       
       return c.json({ ...repo, currentBranch })
     } catch (error: unknown) {
@@ -268,6 +271,11 @@ app.get('/', async (c) => {
   app.delete('/:id', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
+
+      if (id === ASSISTANT_REPO_ID) {
+        return c.json({ error: 'Cannot delete the assistant repository' }, 403)
+      }
+
       const repo = getRepoById(database, id)
       
       if (!repo) {
@@ -481,7 +489,7 @@ app.get('/', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
 
-      const repo: Repo | null = getRepoById(database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null)
+      const repo: Repo | null = resolveRepo(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)
@@ -499,7 +507,7 @@ app.get('/', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))
 
-      const repo: Repo | null = getRepoById(database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null)
+      const repo: Repo | null = resolveRepo(database, id)
 
       if (!repo) {
         return c.json({ error: 'Repo not found' }, 404)

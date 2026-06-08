@@ -42,14 +42,10 @@ function rowToRepo(row: RepoRow): Repo {
   }
 }
 
-function tableExists(db: Database, tableName: string): boolean {
-  const row = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?")
-    .get(tableName)
-  return Boolean(row)
-}
+const TABLES_WITH_REPO_ID = ['schedule_jobs', 'schedule_runs', 'repo_settings'] as const
+type RepoIdTable = typeof TABLES_WITH_REPO_ID[number]
 
-function updateRepoIdReference(db: Database, tableName: string, fromRepoId: number, toRepoId: number): void {
-  if (!tableExists(db, tableName)) return
+function updateRepoIdReference(db: Database, tableName: RepoIdTable, fromRepoId: number, toRepoId: number): void {
   db.prepare(`UPDATE ${tableName} SET repo_id = ? WHERE repo_id = ?`).run(toRepoId, fromRepoId)
 }
 
@@ -68,10 +64,9 @@ export function ensureAssistantRepo(db: Database): Repo {
       .get(ASSISTANT_REPO_PATH, ASSISTANT_REPO_ID) as { id: number } | undefined
 
     if (existingAssistantPathRow) {
-      updateRepoIdReference(db, 'schedule_jobs', existingAssistantPathRow.id, ASSISTANT_REPO_ID)
-      updateRepoIdReference(db, 'schedule_runs', existingAssistantPathRow.id, ASSISTANT_REPO_ID)
-      updateRepoIdReference(db, 'repo_settings', existingAssistantPathRow.id, ASSISTANT_REPO_ID)
-      updateRepoIdReference(db, 'session_ports', existingAssistantPathRow.id, ASSISTANT_REPO_ID)
+      for (const table of TABLES_WITH_REPO_ID) {
+        updateRepoIdReference(db, table, existingAssistantPathRow.id, ASSISTANT_REPO_ID)
+      }
       db.prepare('DELETE FROM repos WHERE id = ?').run(existingAssistantPathRow.id)
     }
 
@@ -286,8 +281,9 @@ export function updateRepoBranch(db: Database, id: number, branch: string): void
 }
 
 export function deleteRepo(db: Database, id: number): void {
-  db.prepare('DELETE FROM schedule_runs WHERE repo_id = ?').run(id)
-  db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ?').run(id)
+  for (const table of TABLES_WITH_REPO_ID) {
+    db.prepare(`DELETE FROM ${table} WHERE repo_id = ?`).run(id)
+  }
   const stmt = db.prepare('DELETE FROM repos WHERE id = ?')
   stmt.run(id)
 }
