@@ -97,7 +97,7 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
       label: 'Assistant',
       icon: Bot,
       onClick: handleAssistantClick,
-      active: isAssistantPath(pathname) && !openSheet,
+      active: (pathname === getAssistantPath() || isAssistantPath(pathname)) && !openSheet,
     },
     {
       key: 'schedules',

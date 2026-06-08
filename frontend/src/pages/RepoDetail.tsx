@@ -108,7 +108,11 @@ export function RepoDetail() {
   const sessionUrl = useCallback(
     (sessionId: string) => {
       const base = `/repos/${repoId}/sessions/${sessionId}`;
-      return activeTab === 'workspaces' ? `${base}?repoTab=workspaces` : base;
+      const params = new URLSearchParams();
+      if (repoId === 0) params.set('assistant', '1');
+      if (activeTab === 'workspaces') params.set('repoTab', 'workspaces');
+      const search = params.toString();
+      return search ? `${base}?${search}` : base;
     },
     [repoId, activeTab],
   );
