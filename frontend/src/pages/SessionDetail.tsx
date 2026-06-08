@@ -132,7 +132,7 @@ export function SessionDetail() {
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
 
   const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
-  const { data: session, isLoading: sessionLoading } = useSession(
+  const { data: session } = useSession(
     opcodeUrl,
     sessionId,
     repoDirectory,
@@ -493,7 +493,7 @@ export function SessionDetail() {
 
       <div className="relative flex-1 overflow-hidden flex flex-col">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
-          {(!repoDirectory && repoLoading) || !repoDirectory || sessionLoading || messagesLoading ? (
+          {(!repoDirectory && repoLoading) || !repoDirectory || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
             <MessageThread 

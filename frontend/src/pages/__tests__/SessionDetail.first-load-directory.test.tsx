@@ -258,4 +258,19 @@ describe('SessionDetail first-load navigation directory', () => {
 
     expect(queryByText('Messages loading skeleton')).toBeNull()
   })
+
+  it('renders assistant messages while session metadata is still loading', async () => {
+    mocks.useSession.mockReturnValue({ data: undefined, isLoading: true })
+
+    const { queryByText, getByText } = renderSession({
+      pathname: '/repos/0/sessions/sess-assistant',
+      state: { directory: '/abs/assistant' },
+    })
+
+    await waitFor(() => {
+      expect(getByText('Messages rendered')).toBeTruthy()
+    })
+
+    expect(queryByText('Messages loading skeleton')).toBeNull()
+  })
 })

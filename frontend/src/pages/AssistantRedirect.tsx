@@ -64,16 +64,16 @@ export function AssistantRedirect() {
     navigate(getAssistantSessionListPath(), { replace: true })
   }, [navigate])
 
+  const assistantDirectory = repo?.fullPath ?? cachedAssistantDirectory
+  const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
+
   const { openAssistant } = useAssistantSessionLauncher({
     repoId,
     opcodeUrl,
-    directory: repo?.fullPath,
+    directory: assistantDirectory,
     onNavigate: handleNavigate,
     onMissingCachedSession: handleMissingCachedSession,
   })
-
-  const assistantDirectory = repo?.fullPath ?? cachedAssistantDirectory
-  const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
 
   useSSE(opcodeUrl, assistantDirectory)
 
