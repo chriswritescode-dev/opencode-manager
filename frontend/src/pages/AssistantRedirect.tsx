@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRepo } from "@/api/repos"
 import { OpenCodeClient } from "@/api/opencode"
 import { getCachedAssistantDirectory, setCachedAssistantSessionId, useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
-import { useCreateSession } from "@/hooks/useOpenCode"
+import { useCreateSession, useSessionsAcrossDirectories } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
 import { useSSE } from "@/hooks/useSSE"
 import { OPENCODE_API_ENDPOINT } from "@/config"
@@ -66,6 +66,16 @@ export function AssistantRedirect() {
 
   const assistantDirectory = repo?.fullPath ?? cachedAssistantDirectory
   const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
+  const assistantSessionDirectories = showSessionList && assistantDirectory ? [assistantDirectory] : []
+  const { data: assistantSessionsForWarmup } = useSessionsAcrossDirectories(opcodeUrl, assistantSessionDirectories, { limit: 25 })
+
+  const prefetchAssistantMessages = useCallback((sessionId: string, directory?: string) => {
+    if (!directory) return
+    void queryClient.prefetchQuery({
+      queryKey: messagesQueryKey(opcodeUrl, sessionId, directory),
+      queryFn: () => new OpenCodeClient(opcodeUrl, directory).listMessages(sessionId),
+    })
+  }, [opcodeUrl, queryClient])
 
   const { openAssistant } = useAssistantSessionLauncher({
     repoId,
@@ -81,6 +91,7 @@ export function AssistantRedirect() {
     if (assistantDirectory) {
       setCachedAssistantSessionId(repoId, assistantDirectory, session.id)
     }
+    prefetchAssistantMessages(session.id, assistantDirectory)
     navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`, { state: { directory: assistantDirectory } })
   })
 
@@ -89,8 +100,17 @@ export function AssistantRedirect() {
     if (selectedDirectory) {
       setCachedAssistantSessionId(repoId, selectedDirectory, sessionId)
     }
+    prefetchAssistantMessages(sessionId, selectedDirectory)
     navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`, { state: { directory: selectedDirectory } })
-  }, [assistantDirectory, navigate, repoId])
+  }, [assistantDirectory, navigate, prefetchAssistantMessages, repoId])
+
+  useEffect(() => {
+    if (!showSessionList || !assistantDirectory || assistantSessionsForWarmup.length === 0) return
+    const session = assistantSessionsForWarmup.find((item) => !item.parentID) ?? assistantSessionsForWarmup[0]
+    if (session?.id) {
+      prefetchAssistantMessages(session.id, session.directory ?? assistantDirectory)
+    }
+  }, [assistantDirectory, assistantSessionsForWarmup, prefetchAssistantMessages, showSessionList])
 
   const handleCreateSession = async () => {
     await createSessionMutation.mutateAsync({ agent: undefined })

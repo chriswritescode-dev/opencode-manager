@@ -7,13 +7,14 @@ import type { ScheduleRun } from '@opencode-manager/shared/types'
 
 interface RunDetailPanelProps {
   repoId: number
+  directory?: string
   activeRun: ScheduleRun | null
   selectedRunLoading: boolean
   onCancelRun: () => void
   cancelRunPending: boolean
 }
 
-export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancelRun, cancelRunPending }: RunDetailPanelProps) {
+export function RunDetailPanel({ repoId, directory, activeRun, selectedRunLoading, onCancelRun, cancelRunPending }: RunDetailPanelProps) {
   const navigate = useNavigate()
 
   if (selectedRunLoading && !activeRun) {
@@ -41,7 +42,7 @@ export function RunDetailPanel({ repoId, activeRun, selectedRunLoading, onCancel
         <div className="flex items-center justify-between gap-2 px-3 py-2">
           <div className="flex items-center gap-2">
             {activeRun.sessionId && (
-              <Button variant="outline" size="sm" onClick={() => navigate(`/repos/${repoId}/sessions/${activeRun.sessionId}`)}>
+              <Button variant="outline" size="sm" onClick={() => navigate(`/repos/${repoId}/sessions/${activeRun.sessionId}${repoId === 0 ? '?assistant=1' : ''}`, { state: { directory } })}>
                 Open session
               </Button>
             )}

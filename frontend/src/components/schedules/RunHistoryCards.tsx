@@ -9,6 +9,7 @@ import { useRepoScheduleRun } from '@/hooks/useSchedules'
 interface RunHistoryCardsProps {
   runs: ScheduleRun[] | undefined
   runsLoading: boolean
+  directory?: string
   onSelectRun: (id: number) => void
   onCancelRun: () => void
   cancelRunPending: boolean
@@ -17,6 +18,7 @@ interface RunHistoryCardsProps {
 export function RunHistoryCards({
   runs,
   runsLoading,
+  directory,
   onSelectRun,
   onCancelRun,
   cancelRunPending,
@@ -113,6 +115,7 @@ export function RunHistoryCards({
                   <div className="flex flex-col min-h-0 flex-1 overflow-hidden">
                     <RunDetailPanel
                       repoId={run.repoId}
+                      directory={directory}
                       activeRun={displayRun}
                       selectedRunLoading={isExpanded && isLoading}
                       onCancelRun={onCancelRun}

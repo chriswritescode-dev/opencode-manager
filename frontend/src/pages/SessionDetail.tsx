@@ -52,7 +52,7 @@ import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
-import { setCachedAssistantSessionId } from "@/hooks/useAssistantSessionLauncher";
+import { getCachedAssistantDirectory, setCachedAssistantSessionId } from "@/hooks/useAssistantSessionLauncher";
 
 const compareMessageIds = (id1: string, id2: string): number => {
   const num1 = parseInt(id1, 10)
@@ -120,7 +120,8 @@ export function SessionDetail() {
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = navigationDirectory ?? repo?.fullPath;
+  const cachedAssistantDirectory = isAssistantSession ? getCachedAssistantDirectory(repoId) : undefined;
+  const repoDirectory = navigationDirectory ?? repo?.fullPath ?? cachedAssistantDirectory;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   useEffect(() => {
@@ -129,13 +130,13 @@ export function SessionDetail() {
     }
   }, [isAssistantSession, repoDirectory, repoId, sessionId]);
 
-  const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
-
   const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
+  const initialMessagesDirectory = repoDirectory && !messagesLoading ? repoDirectory : undefined;
+  const { isConnected, isReconnecting } = useSSE(opcodeUrl, initialMessagesDirectory, sessionId);
   const { data: session } = useSession(
     opcodeUrl,
     sessionId,
-    repoDirectory,
+    initialMessagesDirectory,
   );
 
   const messages = useMemo(() => {
@@ -161,7 +162,7 @@ export function SessionDetail() {
   const abortSession = useAbortSession(opcodeUrl, repoDirectory, sessionId);
   const updateSession = useUpdateSession(opcodeUrl, repoDirectory);
   const createSession = useCreateSession(opcodeUrl, repoDirectory);
-  const { model, modelString } = useModelSelection(opcodeUrl, repoDirectory);
+  const { model, modelString } = useModelSelection(opcodeUrl, initialMessagesDirectory);
   const isEditingMessage = useUIState((state) => state.isEditingMessage);
   const setActivePromptFileBasePath = useUIState((state) => state.setActivePromptFileBasePath);
   const { isEnabled: ttsEnabled } = useTTS();
@@ -217,20 +218,20 @@ export function SessionDetail() {
   }, [sessionId, minimizedQuestion])
 
   const syncPendingActionsForSession = useCallback(async () => {
-    if (!repoDirectory || !sessionId) return
+    if (!initialMessagesDirectory || !sessionId) return
     await Promise.all([
-      syncPermissionsForSession(repoDirectory, sessionId),
-      syncQuestionsForSession(repoDirectory, sessionId),
+      syncPermissionsForSession(initialMessagesDirectory, sessionId),
+      syncQuestionsForSession(initialMessagesDirectory, sessionId),
     ])
-  }, [repoDirectory, sessionId, syncPermissionsForSession, syncQuestionsForSession])
+  }, [initialMessagesDirectory, sessionId, syncPermissionsForSession, syncQuestionsForSession])
 
   useQuery({
-    queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, repoDirectory],
+    queryKey: ['opencode', 'pending-actions', opcodeUrl, sessionId, initialMessagesDirectory],
     queryFn: async () => {
       await syncPendingActionsForSession()
       return null
     },
-    enabled: !!repoDirectory && !!sessionId,
+    enabled: !!initialMessagesDirectory && !!sessionId,
     refetchOnMount: 'always',
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
@@ -475,13 +476,15 @@ export function SessionDetail() {
             <div className="flex items-center gap-1">
               <PendingActionsGroup />
             </div>
-            <ContextUsageIndicator
-              opcodeUrl={opcodeUrl}
-              sessionID={sessionId}
-              directory={repoDirectory}
-              isConnected={isConnected}
-              isReconnecting={isReconnecting}
-            />
+            {initialMessagesDirectory && (
+              <ContextUsageIndicator
+                opcodeUrl={opcodeUrl}
+                sessionID={sessionId}
+                directory={initialMessagesDirectory}
+                isConnected={isConnected}
+                isReconnecting={isReconnecting}
+              />
+            )}
             <SessionMoreButton />
           </Header.Actions>
         </Header>
@@ -508,7 +511,7 @@ export function SessionDetail() {
             />
           ) : null}
         </div>
-        {opcodeUrl && repoDirectory && !isEditingMessage && (
+        {opcodeUrl && initialMessagesDirectory && !isEditingMessage && (
           <div
             ref={promptOverlayRef}
             className="absolute left-0 right-0 flex justify-center"
@@ -563,7 +566,7 @@ export function SessionDetail() {
               <PromptInput
                 ref={promptInputRef}
                 opcodeUrl={opcodeUrl}
-                directory={repoDirectory}
+                directory={initialMessagesDirectory}
                 sessionID={sessionId}
                 disabled={!isConnected}
                 showScrollButton={showScrollButton && !hasPromptContent}

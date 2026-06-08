@@ -284,6 +284,7 @@ export function Schedules() {
             {repoScheduleTab === 'runs' && (
               <RunHistoryTab
                 repoId={repoId}
+                directory={scheduleTarget?.fullPath}
                 selectedJob={selectedJob}
                 runs={runs}
                 runsLoading={runsLoading}

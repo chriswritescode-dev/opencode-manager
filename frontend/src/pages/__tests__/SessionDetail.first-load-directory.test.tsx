@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { setCachedAssistantSessionId } from '../../hooks/useAssistantSessionLauncher'
 import { SessionDetail } from '../SessionDetail'
 
 const mocks = vi.hoisted(() => ({
@@ -171,6 +172,7 @@ vi.mock('@/components/notifications/PendingActionsGroup', () => ({
 describe('SessionDetail first-load navigation directory', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    localStorage.clear()
 
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
     mocks.useMessages.mockReturnValue({ data: [], isLoading: false })
@@ -244,6 +246,20 @@ describe('SessionDetail first-load navigation directory', () => {
 
     const sessionCall = mocks.useSession.mock.calls[mocks.useSession.mock.calls.length - 1]
     expect(sessionCall?.[2]).toBeUndefined()
+  })
+
+  it('uses the cached assistant directory on direct assistant session load while the repo is loading', async () => {
+    setCachedAssistantSessionId(0, '/abs/assistant', 'sess-assistant')
+
+    renderSession('/repos/0/sessions/sess-assistant?assistant=1')
+
+    await waitFor(() => {
+      const call = mocks.useMessages.mock.calls[mocks.useMessages.mock.calls.length - 1]
+      expect(call?.[2]).toBe('/abs/assistant')
+    })
+
+    const sessionCall = mocks.useSession.mock.calls[mocks.useSession.mock.calls.length - 1]
+    expect(sessionCall?.[2]).toBe('/abs/assistant')
   })
 
   it('renders messages instead of the skeleton when assistant navigation provides directory while the repo is loading', async () => {

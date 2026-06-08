@@ -5,6 +5,7 @@ import { RunHistoryCards, RunDetailPanel } from '@/components/schedules'
 
 interface RunHistoryTabProps {
   repoId: number
+  directory?: string
   selectedJob: ScheduleJob | undefined
   runs: ScheduleRun[] | undefined
   runsLoading: boolean
@@ -17,6 +18,7 @@ interface RunHistoryTabProps {
 
 export function RunHistoryTab({
   repoId,
+  directory,
   selectedJob,
   runs,
   runsLoading,
@@ -53,6 +55,7 @@ export function RunHistoryTab({
         <RunHistoryCards
           runs={runs}
           runsLoading={runsLoading}
+          directory={directory}
           onSelectRun={onSelectRun}
           onCancelRun={onCancelRun}
           cancelRunPending={cancelRunPending}
@@ -61,6 +64,7 @@ export function RunHistoryTab({
         <div className="hidden xl:flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/60 bg-background/60 p-4">
           <RunDetailPanel
             repoId={repoId}
+            directory={directory}
             activeRun={activeRun}
             selectedRunLoading={selectedRunLoading}
             onCancelRun={onCancelRun}

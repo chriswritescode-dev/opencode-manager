@@ -269,6 +269,16 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return repo?.id ?? null
   }, [repos, findSessionDirectory])
 
+  const navigateToSession = useCallback((sessionID: string) => {
+    const repoId = getRepoIdForSession(sessionID)
+    if (!repoId && repoId !== 0) return
+    const directory = findSessionDirectory(sessionID) ?? undefined
+    const targetPath = `/repos/${repoId}/sessions/${sessionID}${repoId === 0 ? '?assistant=1' : ''}`
+    if (`${window.location.pathname}${window.location.search}` !== targetPath) {
+      navigate(targetPath, { state: { directory } })
+    }
+  }, [findSessionDirectory, getRepoIdForSession, navigate])
+
   const getClient = useCallback((sessionID: string): OpenCodeClient | null => {
     const result = findSessionInCache(sessionID)
     if (!result) return null
@@ -397,25 +407,13 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
 
   const navigateToCurrentQuestion = useCallback(() => {
     if (!currentQuestion) return
-    const repoId = getRepoIdForSession(currentQuestion.sessionID)
-    if (repoId) {
-      const targetPath = `/repos/${repoId}/sessions/${currentQuestion.sessionID}`
-      if (window.location.pathname !== targetPath) {
-        navigate(targetPath)
-      }
-    }
-  }, [currentQuestion, getRepoIdForSession, navigate])
+    navigateToSession(currentQuestion.sessionID)
+  }, [currentQuestion, navigateToSession])
 
   const navigateToCurrentPermission = useCallback(() => {
     if (!currentPermission) return
-    const repoId = getRepoIdForSession(currentPermission.sessionID)
-    if (repoId) {
-      const targetPath = `/repos/${repoId}/sessions/${currentPermission.sessionID}`
-      if (window.location.pathname !== targetPath) {
-        navigate(targetPath)
-      }
-    }
-  }, [currentPermission, getRepoIdForSession, navigate])
+    navigateToSession(currentPermission.sessionID)
+  }, [currentPermission, navigateToSession])
 
   const fetchInitialPendingData = useCallback(async () => {
     const reposToUse = reposRef.current

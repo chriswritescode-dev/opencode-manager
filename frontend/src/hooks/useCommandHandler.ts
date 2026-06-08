@@ -82,8 +82,9 @@ export function useCommandHandler({
               const repoMatch = currentPath.match(/\/repos\/(\d+)\/sessions\//)
               if (repoMatch) {
                 const repoId = repoMatch[1]
-                const newPath = `/repos/${repoId}/sessions/${newSession.id}`
-                navigate(newPath)
+                const assistantSuffix = new URLSearchParams(window.location.search).get('assistant') === '1' ? '?assistant=1' : ''
+                const newPath = `/repos/${repoId}/sessions/${newSession.id}${assistantSuffix}`
+                navigate(newPath, { state: { directory } })
               } else {
                 navigate(`/session/${newSession.id}`)
               }
