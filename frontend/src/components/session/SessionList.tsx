@@ -15,7 +15,7 @@ interface SessionListProps {
   createDirectory?: string;
   directoryLabels?: Record<string, string>;
   activeSessionID?: string;
-  onSelectSession: (sessionID: string) => void;
+  onSelectSession: (sessionID: string, directory?: string) => void;
 }
 
 export const SessionList = ({
@@ -41,7 +41,7 @@ export const SessionList = ({
   const { data: sessions, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } = useSessionsAcrossDirectories(opcodeUrl, directoriesList, { search: searchQuery, limit: 25 });
   const deleteSession = useDeleteSession(opcodeUrl, directoriesList);
   const createSession = useCreateSession(opcodeUrl, sessionCreateDirectory, (newSession) => {
-    onSelectSession(newSession.id);
+    onSelectSession(newSession.id, primaryDirectory);
   });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
@@ -273,7 +273,7 @@ export const SessionList = ({
                       isActive={activeSessionID === session.id}
                       manageMode={manageMode}
                       workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
-                      onSelect={onSelectSession}
+                      onSelect={(sessionID) => onSelectSession(sessionID, session.directory ?? primaryDirectory)}
                       onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
                       onDelete={(e) => handleDelete(session, e)}
                     />
@@ -292,7 +292,7 @@ export const SessionList = ({
                   isActive={activeSessionID === session.id}
                   manageMode={manageMode}
                   workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
-                  onSelect={onSelectSession}
+                  onSelect={(sessionID) => onSelectSession(sessionID, session.directory ?? primaryDirectory)}
                   onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
                   onDelete={(e) => handleDelete(session, e)}
                 />

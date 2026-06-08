@@ -68,6 +68,7 @@ export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+  const navigationDirectory = (location.state as { directory?: string } | null)?.directory;
   const repoId = Number(id) || 0;
   const isAssistantSession = new URLSearchParams(location.search).get('assistant') === '1';
   const { preferences, updateSettings } = useSettings();
@@ -119,7 +120,7 @@ export function SessionDetail() {
 
   const opcodeUrl = OPENCODE_API_ENDPOINT;
   
-  const repoDirectory = repo?.fullPath;
+  const repoDirectory = navigationDirectory ?? repo?.fullPath;
   const sessionRouteSuffix = isAssistantSession ? '?assistant=1' : '';
 
   useEffect(() => {
@@ -244,7 +245,7 @@ export function SessionDetail() {
         if (isAssistantSession && repoDirectory) {
           setCachedAssistantSessionId(repoId, repoDirectory, newSession.id);
         }
-        navigate(`/repos/${repoId}/sessions/${newSession.id}${sessionRouteSuffix}`);
+        navigate(`/repos/${repoId}/sessions/${newSession.id}${sessionRouteSuffix}`, { state: { directory: repoDirectory } });
       }
     } catch {
       showToast.error('Failed to create new session');
@@ -298,7 +299,7 @@ export function SessionDetail() {
       const client = createOpenCodeClient(opcodeUrl, repoDirectory);
       const forkedSession = await client.forkSession(sessionId);
       if (forkedSession?.id) {
-        navigate(`/repos/${repoId}/sessions/${forkedSession.id}${sessionRouteSuffix}`);
+        navigate(`/repos/${repoId}/sessions/${forkedSession.id}${sessionRouteSuffix}`, { state: { directory: repoDirectory } });
         showToast.success('Session forked');
       }
     } catch (error) {
@@ -375,14 +376,14 @@ export function SessionDetail() {
   }, [setFileBrowserOpen]);
 
   const handleChildSessionClick = useCallback((childSessionId: string) => {
-    navigate(`/repos/${repoId}/sessions/${childSessionId}${sessionRouteSuffix}`)
-  }, [navigate, repoId, sessionRouteSuffix]);
+    navigate(`/repos/${repoId}/sessions/${childSessionId}${sessionRouteSuffix}`, { state: { directory: repoDirectory } })
+  }, [navigate, repoDirectory, repoId, sessionRouteSuffix]);
 
   const handleParentSessionClick = useCallback(() => {
     if (session?.parentID) {
-      navigate(`/repos/${repoId}/sessions/${session.parentID}${sessionRouteSuffix}`)
+      navigate(`/repos/${repoId}/sessions/${session.parentID}${sessionRouteSuffix}`, { state: { directory: repoDirectory } })
     }
-  }, [navigate, repoId, session?.parentID, sessionRouteSuffix]);
+  }, [navigate, repoDirectory, repoId, session?.parentID, sessionRouteSuffix]);
 
   const handleToggleDetails = useCallback(() => {
     const newValue = !preferences?.expandToolCalls
@@ -590,8 +591,8 @@ export function SessionDetail() {
                 opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 activeSessionID={sessionId || undefined}
-                onSelectSession={(sessionID) => {
-                  navigate(`/repos/${repoId}/sessions/${sessionID}${sessionRouteSuffix}`)
+                onSelectSession={(sessionID, directory) => {
+                  navigate(`/repos/${repoId}/sessions/${sessionID}${sessionRouteSuffix}`, { state: { directory: directory ?? repoDirectory } })
                   setSessionsDialogOpen(false)
                 }}
               />

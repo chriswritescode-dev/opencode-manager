@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRepo } from "@/api/repos"
+import { OpenCodeClient } from "@/api/opencode"
 import { setCachedAssistantSessionId, useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
@@ -16,7 +17,7 @@ import { RepoSkillsDialog } from "@/components/repo/RepoSkillsDialog"
 import { SourceControlPanel } from "@/components/source-control"
 import { ResetPermissionsDialog } from "@/components/repo/ResetPermissionsDialog"
 import { PendingActionsGroup } from "@/components/notifications/PendingActionsGroup"
-import { invalidateConfigCaches } from "@/lib/queryInvalidation"
+import { invalidateConfigCaches, messagesQueryKey } from "@/lib/queryInvalidation"
 import { getSessionListPath, getAssistantPath, getAssistantSessionListPath } from "@/lib/navigation"
 import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Loader2, Plus } from "lucide-react"
@@ -45,13 +46,17 @@ export function AssistantRedirect() {
   const handleNavigate = useCallback((sessionId: string) => {
     if (repo?.fullPath) {
       setCachedAssistantSessionId(repoId, repo.fullPath, sessionId)
+      void queryClient.prefetchQuery({
+        queryKey: messagesQueryKey(opcodeUrl, sessionId, repo.fullPath),
+        queryFn: () => new OpenCodeClient(opcodeUrl, repo.fullPath).listMessages(sessionId),
+      })
     }
     setStatus("opening")
     if (!showSessionList) {
       window.history.replaceState(window.history.state, "", getSessionListPath(repoId, true))
     }
-    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)
-  }, [navigate, repo?.fullPath, repoId, showSessionList])
+    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`, { state: { directory: repo?.fullPath } })
+  }, [navigate, opcodeUrl, queryClient, repo?.fullPath, repoId, showSessionList])
 
   const handleMissingCachedSession = useCallback(() => {
     navigate(getAssistantSessionListPath(), { replace: true })
@@ -74,14 +79,15 @@ export function AssistantRedirect() {
     if (assistantDirectory) {
       setCachedAssistantSessionId(repoId, assistantDirectory, session.id)
     }
-    navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`)
+    navigate(`/repos/${repoId}/sessions/${session.id}?assistant=1`, { state: { directory: assistantDirectory } })
   })
 
-  const handleSelectSession = useCallback((sessionId: string) => {
-    if (assistantDirectory) {
-      setCachedAssistantSessionId(repoId, assistantDirectory, sessionId)
+  const handleSelectSession = useCallback((sessionId: string, directory?: string) => {
+    const selectedDirectory = directory ?? assistantDirectory
+    if (selectedDirectory) {
+      setCachedAssistantSessionId(repoId, selectedDirectory, sessionId)
     }
-    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`)
+    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`, { state: { directory: selectedDirectory } })
   }, [assistantDirectory, navigate, repoId])
 
   const handleCreateSession = async () => {

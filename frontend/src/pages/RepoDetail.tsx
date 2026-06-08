@@ -114,7 +114,7 @@ export function RepoDetail() {
   );
 
   const createSessionMutation = useCreateSession(opcodeUrl, composerDirectory, (session) => {
-    navigate(sessionUrl(session.id));
+    navigate(sessionUrl(session.id), { state: { directory: composerDirectory } });
   });
 
   const handleCreateSession = async (options?: {
@@ -149,8 +149,8 @@ export function RepoDetail() {
     setWorkspaceSelectorOpen(true);
   };
 
-  const handleSelectSession = (sessionId: string) => {
-    navigate(sessionUrl(sessionId));
+  const handleSelectSession = (sessionId: string, directory?: string) => {
+    navigate(sessionUrl(sessionId), { state: { directory: directory ?? composerDirectory } });
   };
 
   useSidebarAction('new-session', () => {
