@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { useAssistantSessionLauncher } from './useAssistantSessionLauncher'
+import { getCachedAssistantDirectory, setCachedAssistantSessionId, useAssistantSessionLauncher } from './useAssistantSessionLauncher'
 import { OpenCodeClient } from '@/api/opencode'
 
 const mocks = vi.hoisted(() => ({
@@ -109,6 +109,12 @@ describe('useAssistantSessionLauncher', () => {
     expect(mocks.listSessionsPage).not.toHaveBeenCalled()
     expect(mocks.createSession).not.toHaveBeenCalled()
     expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
+  })
+
+  it('reads the cached assistant directory from the cached session key', () => {
+    setCachedAssistantSessionId(123, '/assistant', 'cached')
+
+    expect(getCachedAssistantDirectory(123)).toBe('/assistant')
   })
 
   it('uses the cache-miss callback without querying OpenCode', async () => {

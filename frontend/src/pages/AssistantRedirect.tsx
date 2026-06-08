@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { getRepo } from "@/api/repos"
 import { OpenCodeClient } from "@/api/opencode"
-import { setCachedAssistantSessionId, useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
+import { getCachedAssistantDirectory, setCachedAssistantSessionId, useAssistantSessionLauncher } from "@/hooks/useAssistantSessionLauncher"
 import { useCreateSession } from "@/hooks/useOpenCode"
 import { useDialogParam } from "@/hooks/useDialogParam"
 import { useSSE } from "@/hooks/useSSE"
@@ -36,6 +36,7 @@ export function AssistantRedirect() {
   const [switchConfigOpen, setSwitchConfigOpen] = useState(false)
   const [status, setStatus] = useState<"preparing" | "opening" | "creating" | "error">("preparing")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const cachedAssistantDirectory = getCachedAssistantDirectory(repoId)
 
   const opcodeUrl = OPENCODE_API_ENDPOINT
   const { data: repo, isLoading: repoLoading, error: repoError } = useQuery({
@@ -44,19 +45,20 @@ export function AssistantRedirect() {
   })
 
   const handleNavigate = useCallback((sessionId: string) => {
-    if (repo?.fullPath) {
-      setCachedAssistantSessionId(repoId, repo.fullPath, sessionId)
+    const directory = repo?.fullPath ?? cachedAssistantDirectory
+    if (directory) {
+      setCachedAssistantSessionId(repoId, directory, sessionId)
       void queryClient.prefetchQuery({
-        queryKey: messagesQueryKey(opcodeUrl, sessionId, repo.fullPath),
-        queryFn: () => new OpenCodeClient(opcodeUrl, repo.fullPath).listMessages(sessionId),
+        queryKey: messagesQueryKey(opcodeUrl, sessionId, directory),
+        queryFn: () => new OpenCodeClient(opcodeUrl, directory).listMessages(sessionId),
       })
     }
     setStatus("opening")
     if (!showSessionList) {
       window.history.replaceState(window.history.state, "", getSessionListPath(repoId, true))
     }
-    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`, { state: { directory: repo?.fullPath } })
-  }, [navigate, opcodeUrl, queryClient, repo?.fullPath, repoId, showSessionList])
+    navigate(`/repos/${repoId}/sessions/${sessionId}?assistant=1`, { state: { directory } })
+  }, [cachedAssistantDirectory, navigate, opcodeUrl, queryClient, repo?.fullPath, repoId, showSessionList])
 
   const handleMissingCachedSession = useCallback(() => {
     navigate(getAssistantSessionListPath(), { replace: true })
@@ -70,7 +72,7 @@ export function AssistantRedirect() {
     onMissingCachedSession: handleMissingCachedSession,
   })
 
-  const assistantDirectory = repo?.fullPath
+  const assistantDirectory = repo?.fullPath ?? cachedAssistantDirectory
   const assistantFileBasePath = assistantDirectory?.split('/').filter(Boolean).at(-1)
 
   useSSE(opcodeUrl, assistantDirectory)
@@ -101,8 +103,8 @@ export function AssistantRedirect() {
       try {
         if (showSessionList) return
         setStatus("preparing")
-        if (repoLoading) return
-        if (repoError || !repo?.fullPath) throw new Error("Failed to load Assistant workspace")
+        if (repoLoading && !assistantDirectory) return
+        if ((repoError && !assistantDirectory) || !assistantDirectory) throw new Error("Failed to load Assistant workspace")
         if (cancelled) return
         setStatus("creating")
         await openAssistant()
@@ -118,7 +120,7 @@ export function AssistantRedirect() {
     return () => {
       cancelled = true
     }
-  }, [repo?.fullPath, repoError, repoLoading, openAssistant, showSessionList])
+  }, [assistantDirectory, repoError, repoLoading, openAssistant, showSessionList])
 
   if (showSessionList) {
     return (
@@ -140,9 +142,9 @@ export function AssistantRedirect() {
           </Header.Actions>
         </Header>
         <div className="flex-1 flex flex-col min-h-0">
-          {repoError ? (
+          {repoError && !assistantDirectory ? (
             <div className="p-4 text-sm text-muted-foreground">Failed to load Assistant sessions</div>
-          ) : repoLoading || !repo?.fullPath ? (
+          ) : repoLoading && !assistantDirectory ? (
             <div className="p-4 text-sm text-muted-foreground">Loading Assistant sessions...</div>
           ) : (
             <SessionList

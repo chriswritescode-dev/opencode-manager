@@ -128,6 +128,14 @@ vi.mock('@/components/file-browser/FileBrowserSheet', () => ({
   FileBrowserSheet: vi.fn(() => null),
 }))
 
+vi.mock('@/components/message/MessageSkeleton', () => ({
+  MessageSkeleton: vi.fn(() => <div>Messages loading skeleton</div>),
+}))
+
+vi.mock('@/components/message/MessageThread', () => ({
+  MessageThread: vi.fn(() => <div>Messages rendered</div>),
+}))
+
 vi.mock('@/components/repo/RepoMcpDialog', () => ({
   RepoMcpDialog: vi.fn(() => null),
 }))
@@ -236,5 +244,18 @@ describe('SessionDetail first-load navigation directory', () => {
 
     const sessionCall = mocks.useSession.mock.calls[mocks.useSession.mock.calls.length - 1]
     expect(sessionCall?.[2]).toBeUndefined()
+  })
+
+  it('renders messages instead of the skeleton when assistant navigation provides directory while the repo is loading', async () => {
+    const { queryByText, getByText } = renderSession({
+      pathname: '/repos/0/sessions/sess-assistant',
+      state: { directory: '/abs/assistant' },
+    })
+
+    await waitFor(() => {
+      expect(getByText('Messages rendered')).toBeTruthy()
+    })
+
+    expect(queryByText('Messages loading skeleton')).toBeNull()
   })
 })

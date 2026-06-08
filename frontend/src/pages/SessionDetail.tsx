@@ -419,7 +419,7 @@ export function SessionDetail() {
     return <Navigate to="/" replace />;
   }
 
-  if (!repo && !isAssistantSession) {
+  if (!repo && !isAssistantSession && !repoDirectory) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
@@ -493,7 +493,7 @@ export function SessionDetail() {
 
       <div className="relative flex-1 overflow-hidden flex flex-col">
         <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
-          {repoLoading || !repoDirectory || sessionLoading || messagesLoading ? (
+          {(!repoDirectory && repoLoading) || !repoDirectory || sessionLoading || messagesLoading ? (
             <MessageSkeleton />
           ) : opcodeUrl && repoDirectory ? (
             <MessageThread 

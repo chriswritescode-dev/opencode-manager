@@ -15,6 +15,7 @@ type OpenCodeSession = components['schemas']['Session']
 const ASSISTANT_SESSION_LOOKUP_PAGE_SIZE = 25
 
 const LAST_ASSISTANT_SESSION_KEY_PREFIX = 'ocm:assistant:last-session'
+const LAST_ASSISTANT_DIRECTORY_KEY_PREFIX = 'ocm:assistant:last-directory'
 
 function getLastAssistantSessionKey(repoId: number, directory: string): string {
   return `${LAST_ASSISTANT_SESSION_KEY_PREFIX}:${repoId}:${directory}`
@@ -23,6 +24,7 @@ function getLastAssistantSessionKey(repoId: number, directory: string): string {
 export function setCachedAssistantSessionId(repoId: number, directory: string, sessionId: string): void {
   try {
     localStorage.setItem(getLastAssistantSessionKey(repoId, directory), sessionId)
+    localStorage.setItem(`${LAST_ASSISTANT_DIRECTORY_KEY_PREFIX}:${repoId}`, directory)
   } catch {
     return
   }
@@ -31,6 +33,25 @@ export function setCachedAssistantSessionId(repoId: number, directory: string, s
 function getCachedAssistantSessionId(repoId: number, directory: string): string | undefined {
   try {
     return localStorage.getItem(getLastAssistantSessionKey(repoId, directory)) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function getCachedAssistantDirectory(repoId: number): string | undefined {
+  try {
+    const cachedDirectory = localStorage.getItem(`${LAST_ASSISTANT_DIRECTORY_KEY_PREFIX}:${repoId}`)
+    if (cachedDirectory) return cachedDirectory
+
+    const prefix = `${LAST_ASSISTANT_SESSION_KEY_PREFIX}:${repoId}:`
+    const storageKeys = [
+      ...Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)),
+      ...Object.keys(localStorage),
+    ]
+    for (const key of storageKeys) {
+      if (key?.startsWith(prefix)) return key.slice(prefix.length)
+    }
+    return undefined
   } catch {
     return undefined
   }
