@@ -12,6 +12,8 @@ import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
+import { beginOptimisticBusy, rollbackOptimisticBusy } from "../stores/sessionStatusStore";
+import type { SessionStatusType } from "../stores/sessionStatusStore";
 import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
@@ -21,6 +23,8 @@ type SendPromptRequest = NonNullable<
 >["content"]["application/json"];
 
 type SendCommandResponse = paths["/session/{sessionID}/command"]["post"]["responses"]["200"]["content"]["application/json"];
+
+type OptimisticBusyContext = { previousBusyStatus: SessionStatusType };
 
 const parseModelString = (model: string) => {
   const [providerID, ...rest] = model.split("/");
@@ -477,8 +481,13 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
 
       return { optimisticUserID, response, queued: false };
     },
-    onError: (error, variables) => {
+    onMutate: ({ sessionID }): OptimisticBusyContext => ({
+      previousBusyStatus: beginOptimisticBusy(sessionID),
+    }),
+    onError: (error, variables, context: OptimisticBusyContext | undefined) => {
       const { sessionID } = variables;
+      rollbackOptimisticBusy(sessionID, context?.previousBusyStatus ?? { type: 'idle' });
+
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       queryClient.setQueryData<MessageWithParts[]>(
@@ -726,8 +735,12 @@ export const useSendShell = (opcodeUrl: string | null | undefined, directory?: s
 
       return { optimisticUserID, response };
     },
-    onError: (_, variables) => {
+    onMutate: ({ sessionID }): OptimisticBusyContext => ({
+      previousBusyStatus: beginOptimisticBusy(sessionID),
+    }),
+    onError: (_error, variables, context: OptimisticBusyContext | undefined) => {
       const { sessionID } = variables;
+      rollbackOptimisticBusy(sessionID, context?.previousBusyStatus ?? { type: 'idle' });
       queryClient.setQueryData<MessageWithParts[]>(
         messagesQueryKey(opcodeUrl, sessionID, directory),
         (old) => {
@@ -788,7 +801,8 @@ export const useLoadSkill = (
   return useMutation<
     { optimisticUserID: string; response: SendCommandResponse },
     Error,
-    { skillName: string }
+    { skillName: string },
+    OptimisticBusyContext | undefined
   >({
     mutationFn: async ({ skillName }: { skillName: string }) => {
       if (!client) throw new Error("No OpenCode client available");
@@ -817,7 +831,14 @@ export const useLoadSkill = (
       const response = await client.sendCommand(sessionID, { command: skillName, arguments: "" });
       return { optimisticUserID, response };
     },
-    onError: (error) => {
+    onMutate: () => {
+      if (!sessionID) return undefined;
+      return { previousBusyStatus: beginOptimisticBusy(sessionID) };
+    },
+    onError: (error, _variables, context: OptimisticBusyContext | undefined) => {
+      if (sessionID && context?.previousBusyStatus) {
+        rollbackOptimisticBusy(sessionID, context.previousBusyStatus);
+      }
       if (sessionID) {
         const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
         queryClient.setQueryData<MessageWithParts[]>(

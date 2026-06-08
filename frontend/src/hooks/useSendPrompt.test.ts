@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { useSendPrompt } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
+import { useSessionStatus } from '../stores/sessionStatusStore'
 
 const mockSendPrompt = vi.fn()
 const mockSendPromptAsync = vi.fn()
@@ -18,10 +19,6 @@ vi.mock('../api/opencode', async () => {
     })),
   }
 })
-
-vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn(() => vi.fn()),
-}))
 
 vi.mock('../lib/toast', () => ({
   showToast: { error: vi.fn() },
@@ -62,6 +59,7 @@ describe('useSendPrompt', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    useSessionStatus.getState().replaceStatuses({})
     queryClient = createTestQueryClient()
     mockSendPrompt.mockResolvedValue({
       info: { id: 'test-response' },
@@ -193,5 +191,26 @@ describe('useSendPrompt', () => {
     ).resolves.toBeDefined()
 
     expect(mockClearError).toHaveBeenCalledWith('session-2')
+  })
+
+  it('sets session status to busy immediately on send', async () => {
+    mockSendPrompt.mockReturnValue(new Promise(() => {}))
+
+    const { result } = renderHookWithProviders()
+    result.current.mutate({ sessionID: 'busy-session', prompt: 'Hi' })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('busy-session').type).toBe('busy')
+    })
+  })
+
+  it('rolls back to idle when send fails', async () => {
+    mockSendPrompt.mockRejectedValue(new Error('boom'))
+
+    const { result } = renderHookWithProviders()
+    result.current.mutate({ sessionID: 'busy-session', prompt: 'Hi' })
+
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(useSessionStatus.getState().getStatus('busy-session').type).toBe('idle')
   })
 })

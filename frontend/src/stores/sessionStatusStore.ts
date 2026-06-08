@@ -104,3 +104,17 @@ export const useSessionStatusForSession = (sessionID: string | undefined): Sessi
     sessionID ? (state.statuses.get(sessionID) ?? DEFAULT_STATUS) : DEFAULT_STATUS
   )
 }
+
+export function beginOptimisticBusy(sessionID: string): SessionStatusType {
+  const { getStatus, setStatus } = useSessionStatus.getState()
+  const previous = getStatus(sessionID)
+  setStatus(sessionID, { type: 'busy' })
+  return previous
+}
+
+export function rollbackOptimisticBusy(
+  sessionID: string,
+  previous: SessionStatusType,
+): void {
+  useSessionStatus.getState().setStatus(sessionID, previous)
+}

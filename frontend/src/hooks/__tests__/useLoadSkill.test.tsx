@@ -5,6 +5,7 @@ import { useLoadSkill } from '../useOpenCode'
 import type { MessageWithParts } from '../../api/types'
 
 import { showToast } from '../../lib/toast'
+import { useSessionStatus } from '../../stores/sessionStatusStore'
 
 const mocks = vi.hoisted(() => ({
   sendCommand: vi.fn(),
@@ -38,6 +39,7 @@ const createWrapper = () => {
 describe('useLoadSkill', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useSessionStatus.getState().replaceStatuses({})
   })
 
   it('calls sendCommand with correct parameters when mutate is called', async () => {
@@ -161,13 +163,29 @@ describe('useLoadSkill', () => {
     })
   })
 
-  it('sets session status to busy on mutate and idle on error', async () => {
+  it('sets session status to busy on mutate', async () => {
+    mocks.sendCommand.mockReturnValue(new Promise(() => {}))
+
+    const { result } = renderHook(
+      () => useLoadSkill('http://localhost:5551', 'test-session-id', '/test/dir'),
+      { wrapper: createWrapper() },
+    )
+
+    result.current.mutate({ skillName: 'my-skill' })
+
+    await waitFor(() => {
+      expect(useSessionStatus.getState().getStatus('test-session-id').type).toBe('busy')
+    })
+  })
+
+  it('rolls back to idle on mutation error', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
         mutations: { retry: false },
       },
     })
+
     const testError = new Error('Command failed')
     mocks.sendCommand.mockRejectedValue(testError)
 
@@ -182,6 +200,33 @@ describe('useLoadSkill', () => {
       expect(result.current.isError).toBe(true)
     })
 
+    expect(useSessionStatus.getState().getStatus('test-session-id').type).toBe('idle')
+  })
+
+  it('does not set session status when sessionID is undefined', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    })
+
+    mocks.sendCommand.mockReturnValue(new Promise(() => {}))
+
+    const { result } = renderHook(
+      () => useLoadSkill('http://localhost:5551', undefined, '/test/dir'),
+      { wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider> },
+    )
+
+    result.current.mutate({ skillName: 'my-skill' })
+
+    await waitFor(() => {
+      expect(result.current.isError).toBe(true)
+    })
+
+    expect(result.current.error).toBeInstanceOf(Error)
+    expect((result.current.error as Error).message).toBe('No active session')
+    expect(useSessionStatus.getState().getStatus('test-session-id').type).toBe('idle')
   })
 
   it('removes optimistic message from cache on error', async () => {
