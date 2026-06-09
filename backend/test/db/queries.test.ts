@@ -282,6 +282,12 @@ describe('Database Queries', () => {
       )
       expect(deleteRepoStmt.run).toHaveBeenCalledWith(1)
     })
+
+    it('should not delete the assistant repo', () => {
+      db.deleteRepo(mockDb, 0)
+
+      expect(mockDb.prepare).not.toHaveBeenCalled()
+    })
   })
 
   describe('Database Schema', () => {

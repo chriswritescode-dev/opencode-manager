@@ -281,6 +281,10 @@ export function updateRepoBranch(db: Database, id: number, branch: string): void
 }
 
 export function deleteRepo(db: Database, id: number): void {
+  if (id === ASSISTANT_REPO_ID) {
+    return
+  }
+
   for (const table of TABLES_WITH_REPO_ID) {
     db.prepare(`DELETE FROM ${table} WHERE repo_id = ?`).run(id)
   }
