@@ -3,7 +3,6 @@ import { OpenCodeClient } from '@/api/opencode'
 import type { components } from '@/api/opencode-types'
 
 interface UseAssistantSessionLauncherOptions {
-  repoId: number
   opcodeUrl: string
   directory?: string
   onNavigate: (sessionId: string) => void
@@ -12,28 +11,6 @@ interface UseAssistantSessionLauncherOptions {
 type OpenCodeSession = components['schemas']['Session']
 
 const ASSISTANT_SESSION_LOOKUP_PAGE_SIZE = 25
-
-const LAST_ASSISTANT_SESSION_KEY_PREFIX = 'ocm:assistant:last-session'
-
-function getLastAssistantSessionKey(repoId: number, directory: string): string {
-  return `${LAST_ASSISTANT_SESSION_KEY_PREFIX}:${repoId}:${directory}`
-}
-
-function setCachedAssistantSessionId(repoId: number, directory: string, sessionId: string): void {
-  try {
-    localStorage.setItem(getLastAssistantSessionKey(repoId, directory), sessionId)
-  } catch {
-    return
-  }
-}
-
-function getCachedAssistantSessionId(repoId: number, directory: string): string | undefined {
-  try {
-    return localStorage.getItem(getLastAssistantSessionKey(repoId, directory)) ?? undefined
-  } catch {
-    return undefined
-  }
-}
 
 function isAssistantRootSession(session: OpenCodeSession, assistantDirectory: string): boolean {
   return !session.parentID && session.directory === assistantDirectory
@@ -90,7 +67,6 @@ async function sendAssistantWelcomePrompt(client: OpenCodeClient, sessionId: str
 }
 
 export function useAssistantSessionLauncher({
-  repoId,
   opcodeUrl,
   directory,
   onNavigate,
@@ -100,26 +76,18 @@ export function useAssistantSessionLauncher({
       throw new Error('Assistant workspace directory is unavailable')
     }
 
-    const cachedSessionId = getCachedAssistantSessionId(repoId, directory)
-    if (cachedSessionId) {
-      onNavigate(cachedSessionId)
-      return
-    }
-
     const client = new OpenCodeClient(opcodeUrl, directory)
 
     const newest = await getLatestAssistantSession(client, directory)
 
     if (newest) {
-      setCachedAssistantSessionId(repoId, directory, newest.id)
       onNavigate(newest.id)
     } else {
       const session = await client.createSession({ title: 'Assistant' })
-      setCachedAssistantSessionId(repoId, directory, session.id)
       onNavigate(session.id)
       void sendAssistantWelcomePrompt(client, session.id)
     }
-  }, [repoId, opcodeUrl, directory, onNavigate])
+  }, [opcodeUrl, directory, onNavigate])
 
   return { openAssistant }
 }

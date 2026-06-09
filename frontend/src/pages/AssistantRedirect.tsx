@@ -51,7 +51,6 @@ export function AssistantRedirect() {
   }, [navigate, repoId, showSessionList])
 
   const { openAssistant } = useAssistantSessionLauncher({
-    repoId,
     opcodeUrl,
     directory: repo?.fullPath,
     onNavigate: handleNavigate,

@@ -40,7 +40,6 @@ describe('useAssistantSessionLauncher', () => {
     })
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
       opcodeUrl: 'http://localhost:5551',
       directory: '/assistant',
       onNavigate,
@@ -54,7 +53,6 @@ describe('useAssistantSessionLauncher', () => {
     expect(mocks.listSessionsPage).toHaveBeenCalledWith({ limit: 25, order: 'desc' })
     expect(mocks.listSessions).not.toHaveBeenCalled()
     expect(onNavigate).toHaveBeenCalledWith('newest')
-    expect(localStorage.getItem('ocm:assistant:last-session:123:/assistant')).toBe('newest')
     expect(mocks.createSession).not.toHaveBeenCalled()
     expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
   })
@@ -74,7 +72,6 @@ describe('useAssistantSessionLauncher', () => {
       })
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
       opcodeUrl: 'http://localhost:5551',
       directory: '/assistant',
       onNavigate,
@@ -90,27 +87,6 @@ describe('useAssistantSessionLauncher', () => {
     expect(onNavigate).toHaveBeenCalledWith('newest')
   })
 
-  it('navigates directly to the cached assistant session without querying OpenCode', async () => {
-    localStorage.setItem('ocm:assistant:last-session:123:/assistant', 'cached')
-    const onNavigate = vi.fn()
-    const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
-      opcodeUrl: 'http://localhost:5551',
-      directory: '/assistant',
-      onNavigate,
-    }))
-
-    await act(async () => {
-      await result.current.openAssistant()
-    })
-
-    expect(onNavigate).toHaveBeenCalledWith('cached')
-    expect(OpenCodeClient).not.toHaveBeenCalled()
-    expect(mocks.listSessionsPage).not.toHaveBeenCalled()
-    expect(mocks.createSession).not.toHaveBeenCalled()
-    expect(mocks.sendPromptAsync).not.toHaveBeenCalled()
-  })
-
   it('creates a session when the assistant directory has no root sessions', async () => {
     mocks.listSessionsPage.mockResolvedValue({
       items: [
@@ -120,7 +96,6 @@ describe('useAssistantSessionLauncher', () => {
     mocks.createSession.mockResolvedValue({ id: 'created' })
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
       opcodeUrl: 'http://localhost:5551',
       directory: '/assistant',
       onNavigate,
@@ -140,7 +115,6 @@ describe('useAssistantSessionLauncher', () => {
       ],
     })
     expect(onNavigate).toHaveBeenCalledWith('created')
-    expect(localStorage.getItem('ocm:assistant:last-session:123:/assistant')).toBe('created')
 
     const promptCall = mocks.sendPromptAsync.mock.calls[0]
     const promptText = promptCall[1].parts[0].text as string
@@ -164,7 +138,6 @@ describe('useAssistantSessionLauncher', () => {
     mocks.sendPromptAsync.mockImplementation(() => promptPromise)
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
       opcodeUrl: 'http://localhost:5551',
       directory: '/assistant',
       onNavigate,
@@ -192,7 +165,6 @@ describe('useAssistantSessionLauncher', () => {
     mocks.sendPromptAsync.mockRejectedValueOnce(new Error('provider unavailable'))
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
       opcodeUrl: 'http://localhost:5551',
       directory: '/assistant',
       onNavigate,
@@ -209,7 +181,6 @@ describe('useAssistantSessionLauncher', () => {
   it('rejects when the assistant directory is unavailable', async () => {
     const onNavigate = vi.fn()
     const { result } = renderHook(() => useAssistantSessionLauncher({
-      repoId: 123,
       opcodeUrl: 'http://localhost:5551',
       onNavigate,
     }))
