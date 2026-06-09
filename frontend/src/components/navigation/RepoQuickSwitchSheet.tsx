@@ -9,6 +9,7 @@ import { listRepos } from '@/api/repos'
 import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Check, Plus, House } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -33,15 +34,20 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     enabled: isOpen,
   })
 
+  const regularRepos = useMemo(
+    () => repos?.filter((r) => r.id !== ASSISTANT_REPO_ID) ?? null,
+    [repos],
+  )
+
   const filteredRepos = useMemo(() => {
-    if (!repos) return []
-    const sorted = [...repos].sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))
+    if (!regularRepos) return []
+    const sorted = [...regularRepos].sort((a, b) => (b.lastAccessedAt ?? 0) - (a.lastAccessedAt ?? 0))
     if (!searchQuery.trim()) return sorted
     const query = searchQuery.toLowerCase()
     return sorted.filter((repo) =>
       getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath).toLowerCase().includes(query)
     )
-  }, [repos, searchQuery])
+  }, [regularRepos, searchQuery])
 
   const isUrlControlledSheet = searchParams.get('mobileTab') === 'repos'
 
