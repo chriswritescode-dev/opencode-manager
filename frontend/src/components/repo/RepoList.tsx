@@ -24,6 +24,7 @@ import {
   type RepoSortMode,
 } from "./repo-list-state"
 import { RepoListControls } from "./RepoListControls"
+import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils"
 
 function formatActivityLabel(timestamp: number): string {
   const now = Date.now()
@@ -175,6 +176,11 @@ export function RepoList() {
     queryFn: listRepos,
   })
 
+  const regularRepos = useMemo(
+    () => repos?.filter((r) => r.id !== ASSISTANT_REPO_ID) ?? null,
+    [repos],
+  )
+
   const repoForDelete = useMemo(() => {
     return repoToDelete ? repos?.find(r => r.id === repoToDelete) : null
   }, [repoToDelete, repos])
@@ -188,7 +194,7 @@ export function RepoList() {
     }
   }, [selectedRepos, repos])
 
-  const repoIds = repos?.map((repo) => repo.id) || []
+  const repoIds = regularRepos?.map((repo) => repo.id) || []
 
   const { data: gitStatuses } = useQuery({
     queryKey: ["reposGitStatus", repoIds],
@@ -199,9 +205,9 @@ export function RepoList() {
   })
 
   const viewModels = useMemo(() => {
-    if (!repos) return []
-    return buildRepoViewModels(repos, gitStatuses)
-  }, [repos, gitStatuses])
+    if (!regularRepos) return []
+    return buildRepoViewModels(regularRepos, gitStatuses)
+  }, [regularRepos, gitStatuses])
 
   const filteredViewModels = useMemo(() => {
     const searched = filterReposBySearch(viewModels, searchQuery)
