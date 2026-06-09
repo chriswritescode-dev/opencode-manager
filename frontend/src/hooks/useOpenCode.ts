@@ -12,6 +12,7 @@ import type { paths, components } from "../api/opencode-types";
 import { parseNetworkError } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
+import { useSessionStatus } from "../stores/sessionStatusStore";
 import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
@@ -411,6 +412,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         queryKey,
         (old) => [...(old || []), optimisticMessageWithParts],
       );
+      useSessionStatus.getState().setOptimisticActive(sessionID);
 
       const requestData: SendPromptRequest = {
         parts: parts?.map((part) =>
@@ -492,6 +494,8 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       if (isNetworkError) {
         return;
       }
+
+      useSessionStatus.getState().clearStatus(sessionID);
 
       const parsed = parseNetworkError(error);
       useSendErrorStore.getState().setError({

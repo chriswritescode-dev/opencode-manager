@@ -12,6 +12,8 @@ import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
 import { createPartsBatcher } from '@/lib/partsBatcher'
 
+const STATUS_POLL_INTERVAL_MS = 5000
+
 const getEventDirectory = (event: SSEEvent): string | undefined => {
   const directory = (event as { directory?: unknown }).directory
   return typeof directory === 'string' ? directory : undefined
@@ -354,6 +356,16 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
       }
     }
   }, [client, primaryDirectory, replaceSessionStatuses])
+
+  useEffect(() => {
+    if (!client || !primaryDirectory) return
+
+    const interval = setInterval(() => {
+      void fetchInitialData()
+    }, STATUS_POLL_INTERVAL_MS)
+
+    return () => clearInterval(interval)
+  }, [client, primaryDirectory, fetchInitialData])
 
   const syncCurrentSession = useCallback(() => {
     const sessionId = sessionIdRef.current

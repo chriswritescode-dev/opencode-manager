@@ -5,7 +5,7 @@ export function useRepoActivity(repoId: number, isReady: boolean): void {
   const hasLoggedRef = useRef(false)
 
   useEffect(() => {
-    if (!isReady || hasLoggedRef.current || !repoId) {
+    if (!isReady || hasLoggedRef.current || repoId == null) {
       return
     }
 

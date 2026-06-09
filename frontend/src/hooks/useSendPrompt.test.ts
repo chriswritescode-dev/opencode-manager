@@ -7,6 +7,8 @@ import { FetchError } from '../api/fetchWrapper'
 
 const mockSendPrompt = vi.fn()
 const mockSendPromptAsync = vi.fn()
+const mockSetOptimisticActive = vi.fn()
+const mockClearStatus = vi.fn()
 
 vi.mock('../api/opencode', async () => {
   const actual = await vi.importActual('../api/opencode')
@@ -20,7 +22,12 @@ vi.mock('../api/opencode', async () => {
 })
 
 vi.mock('@/stores/sessionStatusStore', () => ({
-  useSessionStatus: vi.fn(() => vi.fn()),
+  useSessionStatus: Object.assign(vi.fn(() => vi.fn()), {
+    getState: () => ({
+      setOptimisticActive: mockSetOptimisticActive,
+      clearStatus: mockClearStatus,
+    }),
+  }),
 }))
 
 vi.mock('../lib/toast', () => ({
