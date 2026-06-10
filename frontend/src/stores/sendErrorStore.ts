@@ -42,12 +42,13 @@ export const useSendErrorStore = create<SendErrorStore>((set, get) => ({
   failQueuedPrompt: (err: Omit<SendError, 'failedPrompt'>) => {
     set((state) => {
       const failedPrompt = state.queuedPrompts[err.sessionID]
+      if (!failedPrompt) return state
       const queuedPrompts = { ...state.queuedPrompts }
       delete queuedPrompts[err.sessionID]
       return {
         errors: {
           ...state.errors,
-          [err.sessionID]: failedPrompt ? { ...err, failedPrompt } : err,
+          [err.sessionID]: { ...err, failedPrompt },
         },
         queuedPrompts,
       }

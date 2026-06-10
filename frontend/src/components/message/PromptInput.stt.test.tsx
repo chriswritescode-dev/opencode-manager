@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   useSessionAgent: vi.fn(),
   useAgents: vi.fn(),
   useSendPromptMutate: vi.fn(),
+  sendPromptPending: vi.fn(() => false),
   useUserBash: vi.fn(),
   useSessionAgentStore: vi.fn(),
   useSendErrorStore: vi.fn(),
@@ -40,9 +41,9 @@ vi.mock('@/hooks/useMobile', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({ mutate: mocks.useSendPromptMutate }),
+  useSendPrompt: () => ({ mutate: mocks.useSendPromptMutate, isPending: mocks.sendPromptPending() }),
   useAbortSession: () => ({ mutate: vi.fn() }),
-  useSendShell: () => ({ mutate: vi.fn() }),
+  useSendShell: () => ({ mutate: vi.fn(), isPending: false }),
   useOpenCodeClient: () => ({}),
   useAgents: () => ({ data: [] }),
 }))
@@ -162,6 +163,7 @@ describe('PromptInput STT Gesture Tests', () => {
     mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
       options?.onSuccess?.()
     })
+    mocks.sendPromptPending.mockReturnValue(false)
 
     mocks.useMobile.mockReturnValue(true)
     mocks.useSTT.mockReturnValue({
@@ -272,6 +274,54 @@ describe('PromptInput STT Gesture Tests', () => {
       await waitFor(() => {
         expect(input).toHaveValue('')
       })
+    })
+
+    it('clears submitted text once the server confirms it is processing', async () => {
+      mocks.useSendPromptMutate.mockImplementation(() => undefined)
+      const queryClient = createTestQueryClient()
+      const { rerender } = render(
+        <QueryClientProvider client={queryClient}>
+          <PromptInput {...defaultProps} />
+        </QueryClientProvider>,
+      )
+
+      const input = screen.getByPlaceholderText('Send a message...')
+      fireEvent.change(input, { target: { value: 'do the thing' } })
+      fireEvent.click(screen.getByTitle('Send'))
+
+      expect(input).toHaveValue('do the thing')
+
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <PromptInput {...defaultProps} isStreamingResponse />
+        </QueryClientProvider>,
+      )
+
+      await waitFor(() => {
+        expect(input).toHaveValue('')
+      })
+    })
+
+    it('allows queuing a follow-up while a non-queued send is pending', async () => {
+      mocks.sendPromptPending.mockReturnValue(true)
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <PromptInput {...defaultProps} isStreamingResponse />
+        </QueryClientProvider>,
+      )
+
+      const input = screen.getByPlaceholderText('Send a message...')
+      fireEvent.change(input, { target: { value: 'follow-up' } })
+
+      const queueButton = screen.getByTitle('Queue message')
+      expect(queueButton).not.toBeDisabled()
+
+      fireEvent.click(queueButton)
+
+      expect(mocks.useSendPromptMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: 'follow-up', queued: true }),
+        expect.any(Object),
+      )
     })
 
     it('restores a failed queued prompt when the input is empty', async () => {

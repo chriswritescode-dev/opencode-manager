@@ -373,7 +373,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
     if (!client || !primaryDirectory) return
 
     const interval = setInterval(() => {
-      void fetchInitialData()
+      void fetchInitialData().catch(() => undefined)
     }, STATUS_POLL_INTERVAL_MS)
 
     return () => clearInterval(interval)
@@ -417,7 +417,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
       
       if (connected) {
         setError(null)
-        fetchInitialData()
+        void fetchInitialData().catch(() => undefined)
         syncCurrentSession()
         eventStreamSubscriptionRef.current?.reportVisibility(document.visibilityState === 'visible', sessionIdRef.current)
       } else {

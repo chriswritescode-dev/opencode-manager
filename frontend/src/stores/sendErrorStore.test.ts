@@ -41,4 +41,14 @@ describe('useSendErrorStore', () => {
     })
     expect(useSendErrorStore.getState().queuedPrompts['session-1']).toBeUndefined()
   })
+
+  it('does not store an error when no queued prompt was tracked', () => {
+    useSendErrorStore.getState().failQueuedPrompt({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Failed',
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+  })
 })

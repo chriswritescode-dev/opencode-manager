@@ -401,7 +401,7 @@ describe('useSSE', () => {
     unmount()
   })
 
-  it('clears queued prompt text when the queued user message is observed', async () => {
+  it('does not create a send error banner once the queued prompt has been cleared', async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false },
@@ -453,11 +453,7 @@ describe('useSSE', () => {
       })
     })
 
-    expect(useSendErrorStore.getState().getError('session-1')).toEqual({
-      sessionID: 'session-1',
-      title: 'Error',
-      message: 'Unrelated failure',
-    })
+    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
 
     unmount()
   })

@@ -174,7 +174,21 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setSelectedAgent(null)
     clearSTT()
   }, [clearSTT])
-  
+
+  const pendingConfirmClearRef = useRef<{
+    prompt: string
+    files: Map<string, FileAttachmentInfo>
+    images: ImageAttachment[]
+  } | null>(null)
+
+  useEffect(() => {
+    if (!isStreamingResponse) return
+    const pending = pendingConfirmClearRef.current
+    if (!pending) return
+    pendingConfirmClearRef.current = null
+    clearSubmittedPrompt(pending.prompt, pending.files, pending.images)
+  }, [isStreamingResponse, clearSubmittedPrompt])
+
   useImperativeHandle(ref, () => ({
     setPromptValue: (value: string) => {
       setPrompt(value)
@@ -262,7 +276,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const handleSubmit = () => {
     if (disabled) return
-    if (isPromptSubmitPending) return
     if (!prompt.trim() && imageAttachments.length === 0) return
 
     pendingVoiceAutoSubmitRef.current = false
@@ -295,6 +308,8 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       }
       return
     }
+
+    if (isPromptSubmitPending) return
 
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
@@ -340,6 +355,12 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     const submittedAttachedFiles = attachedFiles
     const submittedImageAttachments = imageAttachments
 
+    pendingConfirmClearRef.current = {
+      prompt: submittedPrompt,
+      files: submittedAttachedFiles,
+      images: submittedImageAttachments
+    }
+
     sendPrompt.mutate(
       {
         sessionID,
@@ -350,7 +371,13 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
         variant: currentVariant
       },
       {
-        onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+        onSuccess: () => {
+          pendingConfirmClearRef.current = null
+          clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+        },
+        onError: () => {
+          pendingConfirmClearRef.current = null
+        }
       }
     )
 
@@ -1367,7 +1394,7 @@ return (
             <button
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled || isPromptSubmitPending)}
+              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled || (isPromptSubmitPending && !isStreamingResponse))}
               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
                 hasPendingPermissionForSession
                   ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
