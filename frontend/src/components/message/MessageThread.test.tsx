@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MessageThread } from './MessageThread'
+import { useUIState } from '@/stores/uiStateStore'
 
 const mocks = vi.hoisted(() => ({
   useSessionStatus: vi.fn(),
@@ -8,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   useSettings: vi.fn(),
   usePermissions: vi.fn(),
   useQuestions: vi.fn(),
+  useRefreshMessage: vi.fn(),
+  useSessionAgent: vi.fn(),
 }))
 
 vi.mock('@/stores/sessionStatusStore', () => ({
@@ -25,6 +28,14 @@ vi.mock('@/hooks/useSettings', () => ({
 vi.mock('@/contexts/EventContext', () => ({
   usePermissions: () => mocks.usePermissions(),
   useQuestions: () => mocks.useQuestions(),
+}))
+
+vi.mock('@/hooks/useRemoveMessage', () => ({
+  useRefreshMessage: () => mocks.useRefreshMessage(),
+}))
+
+vi.mock('@/hooks/useSessionAgent', () => ({
+  useSessionAgent: () => mocks.useSessionAgent(),
 }))
 
 interface MockSettingsReturn {
@@ -147,6 +158,12 @@ describe('MessageThread', () => {
     mocks.useQuestions.mockReturnValue({
       getForCallID: vi.fn(() => null),
     })
+    mocks.useRefreshMessage.mockReturnValue({
+      isPending: false,
+      mutate: vi.fn(),
+    })
+    mocks.useSessionAgent.mockReturnValue({ agent: 'test-agent' })
+    useUIState.getState().setIsEditingMessage(false)
   })
 
   it('renders assistant message with only subtask part as standalone row without header', () => {
@@ -396,5 +413,75 @@ describe('MessageThread', () => {
 
     expect(screen.getByText('Hello')).toBeInTheDocument()
     expect(screen.getByText('You')).toBeInTheDocument()
+  })
+
+  it('keeps global editing state active when edit textarea blurs', () => {
+    setupSettings({
+      simpleChatMode: false,
+      showReasoning: false,
+    })
+
+    const messages = [
+      createUserMessage('1', 'Hello'),
+      createAssistantMessage('2', [createTextPart('This is a response', '2')]),
+    ]
+
+    const { unmount } = render(
+      <MessageThread
+        opcodeUrl="http://localhost:5551"
+        sessionID="test-session"
+        messages={messages as any}
+      />
+    )
+
+    fireEvent.click(screen.getByTitle('Edit message'))
+    const textarea = screen.getByPlaceholderText('Edit your message...')
+    fireEvent.focus(textarea)
+    expect(useUIState.getState().isEditingMessage).toBe(true)
+
+    fireEvent.blur(textarea)
+    expect(useUIState.getState().isEditingMessage).toBe(true)
+
+    unmount()
+    expect(useUIState.getState().isEditingMessage).toBe(false)
+  })
+
+  it('resends an edited prompt after the edit textarea blurs', () => {
+    setupSettings({
+      simpleChatMode: false,
+      showReasoning: false,
+    })
+    const mutate = vi.fn()
+    mocks.useRefreshMessage.mockReturnValue({
+      isPending: false,
+      mutate,
+    })
+
+    const messages = [
+      createUserMessage('1', 'Hello'),
+      createAssistantMessage('2', [createTextPart('This is a response', '2')]),
+    ]
+
+    render(
+      <MessageThread
+        opcodeUrl="http://localhost:5551"
+        sessionID="test-session"
+        messages={messages as any}
+      />
+    )
+
+    fireEvent.click(screen.getByTitle('Edit message'))
+    const textarea = screen.getByPlaceholderText('Edit your message...')
+    fireEvent.change(textarea, { target: { value: 'Updated prompt' } })
+    fireEvent.blur(textarea)
+    fireEvent.click(screen.getByRole('button', { name: /resend/i }))
+
+    expect(mutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantMessageID: '2',
+        userMessageContent: 'Updated prompt',
+      }),
+      expect.any(Object),
+    )
   })
 })
