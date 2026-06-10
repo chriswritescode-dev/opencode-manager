@@ -13,6 +13,7 @@ import { useUserBash } from '@/stores/userBashStore'
 import { useModelStore } from '@/stores/modelStore'
 import { useSessionAgentStore } from '@/stores/sessionAgentStore'
 import { useUIState } from '@/stores/uiStateStore'
+import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { useMobile } from '@/hooks/useMobile'
 
 import { usePermissions } from '@/contexts/EventContext'
@@ -222,6 +223,16 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   )
   
   const { data: agents = [] } = useAgents(opcodeUrl, directory)
+  const failedPrompt = useSendErrorStore((state) => state.errors[sessionID]?.failedPrompt)
+  const restoredFailedPromptRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!failedPrompt || restoredFailedPromptRef.current === failedPrompt) return
+    restoredFailedPromptRef.current = failedPrompt
+    if (promptRef.current) return
+    setPrompt(failedPrompt)
+    textareaRef.current?.focus()
+  }, [failedPrompt])
   
   const mentionItems = useMemo((): MentionItem[] => {
     const filteredAgents = filterAgentsByQuery(
@@ -267,6 +278,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       sendPrompt.mutate(
         {
           sessionID,
+          prompt: submittedPrompt,
           parts,
           model: currentModel,
           agent: agentUsed,
@@ -331,6 +343,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     sendPrompt.mutate(
       {
         sessionID,
+        prompt: submittedPrompt,
         parts,
         model: currentModel,
         agent: agentUsed,

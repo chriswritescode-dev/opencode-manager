@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   useSendPromptMutate: vi.fn(),
   useUserBash: vi.fn(),
   useSessionAgentStore: vi.fn(),
+  useSendErrorStore: vi.fn(),
   useSettings: vi.fn(),
   EventContext: vi.fn(),
 }))
@@ -76,6 +77,10 @@ vi.mock('@/stores/userBashStore', () => ({
 
 vi.mock('@/stores/sessionAgentStore', () => ({
   useSessionAgentStore: mocks.useSessionAgentStore,
+}))
+
+vi.mock('@/stores/sendErrorStore', () => ({
+  useSendErrorStore: mocks.useSendErrorStore,
 }))
 
 vi.mock('@/contexts/EventContext', () => ({
@@ -195,6 +200,7 @@ describe('PromptInput STT Gesture Tests', () => {
     mocks.useAgents.mockReturnValue({ data: [] })
     mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
     mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: mockSetAgent }))
+    mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
   })
@@ -265,6 +271,49 @@ describe('PromptInput STT Gesture Tests', () => {
 
       await waitFor(() => {
         expect(input).toHaveValue('')
+      })
+    })
+
+    it('restores a failed queued prompt when the input is empty', async () => {
+      const queryClient = createTestQueryClient()
+      const { rerender } = render(
+        <QueryClientProvider client={queryClient}>
+          <PromptInput {...defaultProps} isStreamingResponse />
+        </QueryClientProvider>,
+      )
+
+      const input = screen.getByPlaceholderText('Send a message...')
+      fireEvent.change(input, { target: { value: 'queued message' } })
+      fireEvent.click(screen.getByTitle('Queue message'))
+
+      expect(mocks.useSendPromptMutate).toHaveBeenCalledWith(
+        expect.objectContaining({ prompt: 'queued message', queued: true }),
+        expect.any(Object),
+      )
+
+      await waitFor(() => {
+        expect(input).toHaveValue('')
+      })
+
+      mocks.useSendErrorStore.mockImplementation((selector) => selector({
+        errors: {
+          'test-session': {
+            sessionID: 'test-session',
+            title: 'Error',
+            message: 'Queued send failed',
+            failedPrompt: 'queued message',
+          },
+        },
+      }))
+
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <PromptInput {...defaultProps} />
+        </QueryClientProvider>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('queued message')
       })
     })
 

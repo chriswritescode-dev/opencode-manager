@@ -7,6 +7,7 @@ import { showToast } from '@/lib/toast'
 import { settingsApi } from '@/api/settings'
 import { useSessionStatus } from '@/stores/sessionStatusStore'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
+import { useSendErrorStore } from '@/stores/sendErrorStore'
 import { openCodeEventStream } from '@/lib/opencode-event-stream'
 import type { EventStreamSubscription } from '@/lib/opencode-event-stream'
 import { parseOpenCodeError } from '@/lib/opencode-errors'
@@ -155,6 +156,9 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         
         const { info } = event.properties
         const sessionID = info.sessionID
+        if (info.role === 'user') {
+          useSendErrorStore.getState().clearQueuedPrompt(sessionID)
+        }
 
         const queryKey = messagesQueryKey(opcodeUrl, sessionID, cacheDirectory)
         const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
@@ -311,12 +315,20 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
 
       case 'session.error': {
         if (!('error' in event.properties)) break
-        if ('sessionID' in event.properties && event.properties.sessionID === currentSessionId) break
+        const sessionID = 'sessionID' in event.properties ? event.properties.sessionID : undefined
+        const parsed = parseOpenCodeError(event.properties.error)
+        if (sessionID && parsed) {
+          useSendErrorStore.getState().failQueuedPrompt({
+            sessionID,
+            title: parsed.title,
+            message: parsed.message,
+          })
+        }
+        if (sessionID === currentSessionId) break
         
         const error = event.properties.error
         if (error?.name === 'MessageAbortedError') break
         
-        const parsed = parseOpenCodeError(error)
         if (parsed) {
           showToast.error(parsed.title, {
             description: parsed.message,

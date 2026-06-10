@@ -3,7 +3,7 @@ import { useSendErrorStore } from './sendErrorStore'
 
 describe('useSendErrorStore', () => {
   beforeEach(() => {
-    useSendErrorStore.setState({ errors: {} })
+    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
   })
 
   it('stores error keyed by sessionID', () => {
@@ -22,5 +22,23 @@ describe('useSendErrorStore', () => {
 
   it('returns null when no error exists for sessionID', () => {
     expect(useSendErrorStore.getState().getError('nonexistent')).toBeNull()
+  })
+
+  it('moves queued prompt text into failed error and clears the queued draft', () => {
+    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
+
+    useSendErrorStore.getState().failQueuedPrompt({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Failed',
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).toEqual({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Failed',
+      failedPrompt: 'queued message',
+    })
+    expect(useSendErrorStore.getState().queuedPrompts['session-1']).toBeUndefined()
   })
 })

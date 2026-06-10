@@ -27,13 +27,6 @@ const clearOptimisticActiveTimer = (sessionID: string): void => {
   optimisticActiveTimers.delete(sessionID)
 }
 
-const clearAllOptimisticActiveTimers = (): void => {
-  for (const timer of optimisticActiveTimers.values()) {
-    clearTimeout(timer)
-  }
-  optimisticActiveTimers.clear()
-}
-
 const getStatusHash = (status: SessionStatusType): string => {
   if (status.type === 'retry') {
     return `${status.type}:${status.attempt}:${status.message}:${status.next}`
@@ -101,12 +94,22 @@ export const useSessionStatus = create<SessionStatusStore>((set, get) => ({
   },
 
   replaceStatuses: (statuses: Record<string, SessionStatusType>) => {
-    clearAllOptimisticActiveTimers()
+    for (const sessionID of Object.keys(statuses)) {
+      clearOptimisticActiveTimer(sessionID)
+    }
+
     const newMap = new Map<string, SessionStatusType>()
     const newCache = new Map<string, string>()
+    const currentStatuses = get().statuses
 
     for (const [sessionID, status] of Object.entries(statuses)) {
       if (status.type === 'idle') continue
+      newMap.set(sessionID, status)
+      newCache.set(sessionID, getStatusHash(status))
+    }
+
+    for (const [sessionID, status] of currentStatuses.entries()) {
+      if (!optimisticActiveTimers.has(sessionID) || sessionID in statuses) continue
       newMap.set(sessionID, status)
       newCache.set(sessionID, getStatusHash(status))
     }

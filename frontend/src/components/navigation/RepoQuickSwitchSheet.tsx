@@ -10,6 +10,7 @@ import { AddRepoDialog } from '@/components/repo/AddRepoDialog'
 import { FolderGit2, Check, Plus, House } from 'lucide-react'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
+import { getAssistantPath, isAssistantPath } from '@/lib/navigation'
 
 interface RepoQuickSwitchSheetProps {
   isOpen: boolean
@@ -24,6 +25,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   const [addRepoOpen, setAddRepoOpen] = useState(false)
 
   const activeRepoId = useMemo(() => {
+    if (isAssistantPath(location.pathname)) return null
     const match = location.pathname.match(/^\/repos\/(\d+)/)
     return match ? Number(match[1]) : null
   }, [location.pathname])
@@ -59,6 +61,11 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
   }
 
   const handleClick = (id: number) => {
+    if (searchParams.get('mobileTabAction') === 'assistant') {
+      navigateAndClose(getAssistantPath(), { replace: true })
+      return
+    }
+
     if (id === activeRepoId) {
       onClose()
       return

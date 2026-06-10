@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useSSE } from './useSSE'
 import { useSessionStatus } from '../stores/sessionStatusStore'
+import { useSendErrorStore } from '../stores/sendErrorStore'
 import type { MessageWithParts } from '@/api/types'
 import { createTextPart } from '@/lib/partsBatcher'
 
@@ -71,12 +72,14 @@ describe('useSSE', () => {
     MockEventSource.instances = []
     mocks.getSessionStatuses.mockResolvedValue({})
     useSessionStatus.getState().replaceStatuses({})
+    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
     globalThis.EventSource = MockEventSource as unknown as typeof EventSource
     globalThis.fetch = vi.fn(() => Promise.resolve({ ok: true } as Response))
   })
 
   afterEach(() => {
     useSessionStatus.getState().replaceStatuses({})
+    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
     globalThis.EventSource = originalEventSource
     globalThis.fetch = originalFetch
   })
@@ -162,6 +165,20 @@ describe('useSSE', () => {
     })
 
     unmount()
+  })
+
+  it('preserves optimistic active status when a poll snapshot omits the session', () => {
+    useSessionStatus.getState().setOptimisticActive('session-1', 10_000)
+
+    useSessionStatus.getState().replaceStatuses({})
+
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'busy' })
+
+    useSessionStatus.getState().replaceStatuses({
+      'session-1': { type: 'idle' },
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
   })
 
   it('ignores stale status snapshots after the directory changes', async () => {
@@ -318,6 +335,129 @@ describe('useSSE', () => {
     })
 
     expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
+
+    unmount()
+  })
+
+  it('stores queued prompt text for restoration when the queued session errors', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'assistant-current',
+            role: 'assistant',
+            sessionID: 'session-1',
+            time: { created: 1 },
+          },
+        },
+      })
+    })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.error',
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'UnknownError',
+            data: { message: 'Queued send failed' },
+          },
+        },
+      })
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).toEqual({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Queued send failed',
+      failedPrompt: 'queued message',
+    })
+
+    unmount()
+  })
+
+  it('clears queued prompt text when the queued user message is observed', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'queued-user',
+            role: 'user',
+            sessionID: 'session-1',
+            time: { created: 1 },
+          },
+        },
+      })
+    })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.error',
+        properties: {
+          sessionID: 'session-1',
+          error: {
+            name: 'UnknownError',
+            data: { message: 'Unrelated failure' },
+          },
+        },
+      })
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).toEqual({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Unrelated failure',
+    })
 
     unmount()
   })

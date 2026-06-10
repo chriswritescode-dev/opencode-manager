@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RepoQuickSwitchSheet } from './RepoQuickSwitchSheet'
 import { listRepos } from '@/api/repos'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
+import { ASSISTANT_REPO_ID } from '@opencode-manager/shared/utils'
 
 vi.mock('@/api/repos')
 
@@ -107,6 +108,42 @@ describe('RepoQuickSwitchSheet', () => {
       expect(screen.getByText('repo1')).toBeInTheDocument()
       expect(screen.queryByText('repo2')).not.toBeInTheDocument()
     })
+  })
+
+  it('does not show assistant as a repo option', async () => {
+    vi.mocked(listRepos).mockResolvedValue([
+      {
+        id: ASSISTANT_REPO_ID,
+        repoUrl: 'Assistant',
+        localPath: '/assistant',
+        sourcePath: null,
+        currentBranch: null,
+        isLocal: true,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      {
+        id: 1,
+        repoUrl: 'https://github.com/test/repo1.git',
+        localPath: '/path/to/repo1',
+        sourcePath: null,
+        currentBranch: 'main',
+        isLocal: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ])
+    const handleClose = vi.fn()
+    render(
+      <RepoQuickSwitchSheet isOpen onClose={handleClose} />,
+      { wrapper: createWrapper() },
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('repo1')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('Assistant')).not.toBeInTheDocument()
   })
 
   it('navigates on repo click and closes sheet', async () => {

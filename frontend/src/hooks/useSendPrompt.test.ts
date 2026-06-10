@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook } from '@testing-library/react'
+import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { useSendPrompt } from './useOpenCode'
@@ -44,12 +44,18 @@ vi.mock('../lib/opencode-errors', () => ({
 
 const mockClearError = vi.fn()
 const mockSetError = vi.fn()
+const mockSetQueuedPrompt = vi.fn()
+const mockClearQueuedPrompt = vi.fn()
+const mockFailQueuedPrompt = vi.fn()
 
 vi.mock('../stores/sendErrorStore', () => ({
   useSendErrorStore: {
     getState: () => ({
       clearError: mockClearError,
       setError: mockSetError,
+      setQueuedPrompt: mockSetQueuedPrompt,
+      clearQueuedPrompt: mockClearQueuedPrompt,
+      failQueuedPrompt: mockFailQueuedPrompt,
       getError: vi.fn(),
     }),
   },
@@ -185,6 +191,63 @@ describe('useSendPrompt', () => {
     ).resolves.toEqual(expect.objectContaining({ queued: true }))
 
     expect(mockClearError).toHaveBeenCalledWith('session-1')
+    expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-1', 'Hello')
+  })
+
+  it('stores the raw prompt for queued restoration when parts omit file mentions', async () => {
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-raw',
+        prompt: 'please inspect @App.tsx',
+        parts: [
+          { type: 'text', content: 'please inspect ' },
+          { type: 'file', path: '/repo/src/App.tsx', name: 'App.tsx' },
+        ],
+        queued: true,
+      })
+    ).resolves.toEqual(expect.objectContaining({ queued: true }))
+
+    expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-raw', 'please inspect @App.tsx')
+  })
+
+  it('stores queued prompt before the async queue request resolves', async () => {
+    let resolveQueued: () => void = () => {}
+    mockSendPromptAsync.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveQueued = resolve
+    }))
+
+    const { result } = renderHookWithProviders()
+
+    const queued = result.current.mutateAsync({
+      sessionID: 'session-pending',
+      prompt: 'pending queued prompt',
+      queued: true,
+    })
+
+    await waitFor(() => {
+      expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-pending', 'pending queued prompt')
+    })
+
+    resolveQueued()
+    await expect(queued).resolves.toEqual(expect.objectContaining({ queued: true }))
+  })
+
+  it('clears queued prompt when the async queue request fails', async () => {
+    mockSendPromptAsync.mockRejectedValueOnce(new Error('Queue failed'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-failed',
+        prompt: 'failed queued prompt',
+        queued: true,
+      })
+    ).rejects.toThrow('Queue failed')
+
+    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-failed')
   })
 
   it('clears stored send error on successful non-queued response', async () => {
