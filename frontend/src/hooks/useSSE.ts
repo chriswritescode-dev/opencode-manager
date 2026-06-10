@@ -155,7 +155,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         
         const { info } = event.properties
         const sessionID = info.sessionID
-        
+
         const queryKey = messagesQueryKey(opcodeUrl, sessionID, cacheDirectory)
         const currentData = queryClient.getQueryData<MessageWithParts[]>(queryKey)
         if (!currentData) {

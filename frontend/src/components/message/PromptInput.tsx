@@ -117,6 +117,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const ignoreVoiceClickUntilRef = useRef(0)
   const voiceStartRequestRef = useRef(0)
   const handleSubmitRef = useRef<() => void>(() => {})
+  const promptRef = useRef(prompt)
+  const attachedFilesRef = useRef(attachedFiles)
+  const imageAttachmentsRef = useRef(imageAttachments)
   const pendingPromptCommand = useUIState((state) => state.pendingPromptCommand)
   const pendingPromptFile = useUIState((state) => state.pendingPromptFile)
   const clearPendingPromptCommand = useUIState((state) => state.clearPendingPromptCommand)
@@ -148,6 +151,29 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     setIsVoiceAutoSendPending(false)
     setIsVoiceAutoSendWaitingForTranscript(false)
   }, [])
+
+  useEffect(() => {
+    promptRef.current = prompt
+    attachedFilesRef.current = attachedFiles
+    imageAttachmentsRef.current = imageAttachments
+  }, [attachedFiles, imageAttachments, prompt])
+
+  const clearSubmittedPrompt = useCallback((submittedPrompt: string, submittedAttachedFiles: Map<string, FileAttachmentInfo>, submittedImageAttachments: ImageAttachment[]) => {
+    if (
+      promptRef.current !== submittedPrompt ||
+      attachedFilesRef.current !== submittedAttachedFiles ||
+      imageAttachmentsRef.current !== submittedImageAttachments
+    ) {
+      return
+    }
+
+    setPrompt('')
+    setAttachedFiles(new Map())
+    revokeBlobUrls(submittedImageAttachments)
+    setImageAttachments([])
+    setSelectedAgent(null)
+    clearSTT()
+  }, [clearSTT])
   
   useImperativeHandle(ref, () => ({
     setPromptValue: (value: string) => {
@@ -174,6 +200,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState])
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
+  const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending
   const abortSession = useAbortSession(opcodeUrl, directory, sessionID)
   const { filterCommands } = useCommands(opcodeUrl)
   const { executeCommand } = useCommandHandler({
@@ -225,6 +252,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
   const handleSubmit = () => {
     if (disabled) return
+    if (isPromptSubmitPending) return
     if (!prompt.trim() && imageAttachments.length === 0) return
 
     pendingVoiceAutoSubmitRef.current = false
@@ -234,39 +262,49 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       onScrollToBottom()
       const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
       const agentUsed = selectedAgent || currentMode
-      sendPrompt.mutate({
-        sessionID,
-        parts,
-        model: currentModel,
-        agent: agentUsed,
-        variant: currentVariant,
-        queued: true
-      })
+      const submittedPrompt = prompt
+      const submittedAttachedFiles = attachedFiles
+      const submittedImageAttachments = imageAttachments
+      sendPrompt.mutate(
+        {
+          sessionID,
+          parts,
+          model: currentModel,
+          agent: agentUsed,
+          variant: currentVariant,
+          queued: true
+        },
+        {
+          onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+        }
+      )
       setStoredAgent(sessionID, agentUsed)
       if (model) {
         setStoredModel({ providerID: model.providerID, modelID: model.modelID })
       }
-      setPrompt('')
-      setAttachedFiles(new Map())
-      revokeBlobUrls(imageAttachments)
-      setImageAttachments([])
-      setSelectedAgent(null)
-      clearSTT()
       return
     }
 
     if (isBashMode) {
       const command = prompt.startsWith('!') ? prompt.slice(1) : prompt
       addUserBashCommand(command)
-      sendShell.mutate({
-        sessionID,
-        command,
-        agent: currentMode
-      })
+      const submittedPrompt = prompt
+      sendShell.mutate(
+        {
+          sessionID,
+          command,
+          agent: currentMode
+        },
+        {
+          onSuccess: () => {
+            if (promptRef.current !== submittedPrompt) return
+            setPrompt('')
+            setIsBashMode(false)
+            clearSTT()
+          }
+        }
+      )
       setStoredAgent(sessionID, currentMode)
-      setPrompt('')
-      setIsBashMode(false)
-      clearSTT()
       return
     }
 
@@ -287,14 +325,22 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
 
     const parts = parsePromptToParts(prompt, attachedFiles, imageAttachments)
     const agentUsed = selectedAgent || currentMode
+    const submittedPrompt = prompt
+    const submittedAttachedFiles = attachedFiles
+    const submittedImageAttachments = imageAttachments
 
-    sendPrompt.mutate({
-      sessionID,
-      parts,
-      model: currentModel,
-      agent: agentUsed,
-      variant: currentVariant
-    })
+    sendPrompt.mutate(
+      {
+        sessionID,
+        parts,
+        model: currentModel,
+        agent: agentUsed,
+        variant: currentVariant
+      },
+      {
+        onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)
+      }
+    )
 
     onScrollToBottom()
 
@@ -302,12 +348,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     if (model) {
       setStoredModel({ providerID: model.providerID, modelID: model.modelID })
     }
-    setPrompt('')
-    setAttachedFiles(new Map())
-    revokeBlobUrls(imageAttachments)
-    setImageAttachments([])
-    setSelectedAgent(null)
-    clearSTT()
   }
 
   handleSubmitRef.current = handleSubmit
@@ -1317,7 +1357,7 @@ return (
             <button
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled)}
+              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled || isPromptSubmitPending)}
               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
                 hasPendingPermissionForSession
                   ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'

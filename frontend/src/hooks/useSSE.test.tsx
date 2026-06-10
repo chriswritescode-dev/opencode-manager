@@ -277,6 +277,51 @@ describe('useSSE', () => {
     unmount()
   })
 
+  it('clears optimistic active status when session status reports idle', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+      },
+    })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    queryClient.setQueryData(
+      ['opencode', 'messages', 'http://localhost:5551', 'session-1', '/repo'],
+      [],
+    )
+    useSessionStatus.getState().setOptimisticActive('session-1')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+    useSessionStatus.getState().setOptimisticActive('session-1')
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.status',
+        properties: {
+          sessionID: 'session-1',
+          status: { type: 'idle' },
+        },
+      })
+    })
+
+    expect(useSessionStatus.getState().getStatus('session-1')).toEqual({ type: 'idle' })
+
+    unmount()
+  })
+
   it('routes streamed part deltas to the event directory in multi-directory subscriptions', async () => {
     const origRAF = window.requestAnimationFrame
     window.requestAnimationFrame = ((cb: FrameRequestCallback) => {
@@ -450,4 +495,3 @@ function assistantMessage(sessionID: string, messageID: string): MessageWithPart
     parts: [],
   }
 }
-

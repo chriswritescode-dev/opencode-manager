@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   useVariants: vi.fn(),
   useSessionAgent: vi.fn(),
   useAgents: vi.fn(),
+  useSendPromptMutate: vi.fn(),
   useUserBash: vi.fn(),
   useSessionAgentStore: vi.fn(),
   useSettings: vi.fn(),
@@ -38,7 +39,7 @@ vi.mock('@/hooks/useMobile', () => ({
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
-  useSendPrompt: () => ({ mutate: vi.fn() }),
+  useSendPrompt: () => ({ mutate: mocks.useSendPromptMutate }),
   useAbortSession: () => ({ mutate: vi.fn() }),
   useSendShell: () => ({ mutate: vi.fn() }),
   useOpenCodeClient: () => ({}),
@@ -153,6 +154,9 @@ describe('PromptInput STT Gesture Tests', () => {
     mockReset.mockReturnValue(undefined)
     mockClear.mockReturnValue(undefined)
     mockSetAgent.mockClear()
+    mocks.useSendPromptMutate.mockImplementation((_variables, options) => {
+      options?.onSuccess?.()
+    })
 
     mocks.useMobile.mockReturnValue(true)
     mocks.useSTT.mockReturnValue({
@@ -189,8 +193,8 @@ describe('PromptInput STT Gesture Tests', () => {
     })
     mocks.useSessionAgent.mockReturnValue({ agent: 'default' })
     mocks.useAgents.mockReturnValue({ data: [] })
-    mocks.useUserBash.mockReturnValue({ addUserBashCommand: vi.fn() })
-    mocks.useSessionAgentStore.mockReturnValue({ setAgent: mockSetAgent })
+    mocks.useUserBash.mockImplementation((selector) => selector({ addUserBashCommand: vi.fn() }))
+    mocks.useSessionAgentStore.mockImplementation((selector) => selector({ setAgent: mockSetAgent }))
     useUIState.getState().clearPendingPromptCommand()
     useUIState.getState().clearPendingPromptFile()
   })
@@ -241,6 +245,29 @@ describe('PromptInput STT Gesture Tests', () => {
   }
 
   describe('quick tap behavior', () => {
+    it('keeps submitted text until send succeeds', async () => {
+      mocks.useSendPromptMutate.mockImplementation(() => undefined)
+      renderComponent()
+
+      const input = screen.getByPlaceholderText('Send a message...')
+      fireEvent.change(input, { target: { value: 'retry me' } })
+      fireEvent.click(screen.getByTitle('Send'))
+
+      expect(input).toHaveValue('retry me')
+    })
+
+    it('clears submitted text after send success', async () => {
+      renderComponent()
+
+      const input = screen.getByPlaceholderText('Send a message...')
+      fireEvent.change(input, { target: { value: 'sent message' } })
+      fireEvent.click(screen.getByTitle('Send'))
+
+      await waitFor(() => {
+        expect(input).toHaveValue('')
+      })
+    })
+
     it('inserts a command selected from the mobile drawer', async () => {
       renderComponent()
 
