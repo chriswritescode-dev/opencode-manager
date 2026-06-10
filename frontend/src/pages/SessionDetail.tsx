@@ -511,7 +511,7 @@ export function SessionDetail() {
                     content={latestPlayableAssistant.text}
                   />
                 )}
-                {hasPromptContent && (
+                {hasPromptContent && !isSessionActive && (
                   <button
                     onMouseDown={(e) => e.preventDefault()}
                     onTouchEnd={(e) => {

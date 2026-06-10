@@ -105,7 +105,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
   const [localMode, setLocalMode] = useState<string | null>(null)
-  const [isFocused, setIsFocused] = useState(false)
   const [isTogglingRecording, setIsTogglingRecording] = useState(false)
   const [isVoiceSwipeArmed, setIsVoiceSwipeArmed] = useState(false)
   const [isVoiceAutoSendPending, setIsVoiceAutoSendPending] = useState(false)
@@ -1203,7 +1202,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
 return (
     <div className={`relative backdrop-blur-md bg-background opacity-95 border border-border dark:border-white/30 rounded-xl p-2 md:p-3 mb-4 md:mb-1 w-full transition-all ${hasPendingPermissionForSession ? 'border-orange-500/50 ring-1 ring-orange-500/30' : ''}`}>
-      {showStopButton && !(isFocused && prompt.trim().length > 0) && (
+      {showStopButton && (
         <button
           onClick={handleStop}
           disabled={disabled}
@@ -1229,8 +1228,6 @@ return (
             : "Send a message..."
         }
         disabled={disabled}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
         className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
             ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10'

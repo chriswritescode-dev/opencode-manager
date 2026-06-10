@@ -268,6 +268,19 @@ describe('PromptInput STT Gesture Tests', () => {
       })
     })
 
+    it('keeps stop available while active with prompt content', async () => {
+      render(
+        <QueryClientProvider client={createTestQueryClient()}>
+          <PromptInput {...defaultProps} isSessionActive />
+        </QueryClientProvider>
+      )
+
+      const input = screen.getByPlaceholderText('Send a message...')
+      fireEvent.change(input, { target: { value: 'draft while active' } })
+
+      expect(screen.getAllByTitle('Stop').length).toBeGreaterThan(0)
+    })
+
     it('inserts a command selected from the mobile drawer', async () => {
       renderComponent()
 

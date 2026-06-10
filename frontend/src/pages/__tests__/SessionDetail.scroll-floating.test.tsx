@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   useAutoScroll: vi.fn(),
   useDialogParam: vi.fn(),
   useSidebarAction: vi.fn(),
+  useSessionStatusForSession: vi.fn(),
   PromptInput: vi.fn(),
 }))
 
@@ -110,7 +111,7 @@ vi.mock('@/stores/uiStateStore', () => ({
 
 vi.mock('@/stores/sessionStatusStore', () => ({
   useSessionStatus: vi.fn(() => ({ setStatus: vi.fn() })),
-  useSessionStatusForSession: vi.fn(() => ({ type: 'idle' })),
+  useSessionStatusForSession: mocks.useSessionStatusForSession,
 }))
 
 vi.mock('@/hooks/useSSE', () => ({
@@ -226,6 +227,7 @@ describe('SessionDetail scroll floating button', () => {
     mocks.useKeyboardShortcuts.mockReturnValue({ leaderActive: false })
     mocks.useDialogParam.mockReturnValue([false, vi.fn()])
     mocks.useSidebarAction.mockReturnValue(undefined)
+    mocks.useSessionStatusForSession.mockReturnValue({ type: 'idle' })
     mocks.PromptInput.mockImplementation(() => <div>MockedPromptInput</div>)
   })
 
@@ -239,6 +241,7 @@ describe('SessionDetail scroll floating button', () => {
     sessionActive?: boolean
   }) => {
     mocks.useMobile.mockReturnValue(opts.mobile)
+    mocks.useSessionStatusForSession.mockReturnValue({ type: opts.sessionActive ? 'busy' : 'idle' })
     mocks.useAutoScroll.mockImplementation(
       ({ onScrollStateChange }: { onScrollStateChange?: (v: boolean) => void }) => {
         if (opts.showScrollButton) {
@@ -314,6 +317,19 @@ describe('SessionDetail scroll floating button', () => {
 
     await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
     expect(screen.queryByLabelText('Scroll to bottom')).not.toBeInTheDocument()
+  })
+
+  it('shows clear button for prompt content only when session is idle', async () => {
+    renderWith({ mobile: true, showScrollButton: false, promptContent: true })
+
+    await waitFor(() => expect(screen.getByLabelText('Clear')).toBeInTheDocument())
+  })
+
+  it('does not show clear button for prompt content while session is active', async () => {
+    renderWith({ mobile: true, showScrollButton: false, promptContent: true, sessionActive: true })
+
+    await waitFor(() => expect(screen.getByText('MockedPromptInput')).toBeInTheDocument())
+    expect(screen.queryByLabelText('Clear')).not.toBeInTheDocument()
   })
 
   it('clicking PromptInput scroll button calls scrollToBottom from useAutoScroll', async () => {
