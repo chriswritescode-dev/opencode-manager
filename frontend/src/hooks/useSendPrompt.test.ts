@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { useSendPrompt } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
+import { messagesQueryKey } from '../lib/queryInvalidation'
 
 const mockSendPrompt = vi.fn()
 const mockSendPromptAsync = vi.fn()
@@ -263,5 +264,48 @@ describe('useSendPrompt', () => {
     ).resolves.toBeDefined()
 
     expect(mockClearError).toHaveBeenCalledWith('session-2')
+  })
+
+  it('rolls back optimistic prompt and stores failed prompt on network failure', async () => {
+    const queryKey = messagesQueryKey('http://localhost:5551', 'session-lost', '/test')
+    queryClient.setQueryData(queryKey, [])
+    mockSendPrompt.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-lost',
+        prompt: 'keep this prompt',
+      })
+    ).rejects.toThrow('Failed to fetch')
+
+    expect(mockClearStatus).toHaveBeenCalledWith('session-lost')
+    expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-lost',
+      failedPrompt: 'keep this prompt',
+    }))
+    expect(queryClient.getQueryData(queryKey)).toEqual([])
+  })
+
+  it('stores failed prompt when queued async request fails before reaching OpenCode', async () => {
+    mockSendPromptAsync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-queued-lost',
+        prompt: 'queued while disconnected',
+        queued: true,
+      })
+    ).rejects.toThrow('Failed to fetch')
+
+    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-queued-lost')
+    expect(mockClearStatus).toHaveBeenCalledWith('session-queued-lost')
+    expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-queued-lost',
+      failedPrompt: 'queued while disconnected',
+    }))
   })
 })

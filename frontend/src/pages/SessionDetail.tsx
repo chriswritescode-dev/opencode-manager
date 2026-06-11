@@ -554,7 +554,6 @@ export function SessionDetail() {
                 opcodeUrl={opcodeUrl}
                 directory={repoDirectory}
                 sessionID={sessionId}
-                disabled={!isConnected}
                 showScrollButton={showScrollButton && !hasPromptContent}
                 isSessionActive={isSessionActive}
                 isStreamingResponse={isStreamingResponse}

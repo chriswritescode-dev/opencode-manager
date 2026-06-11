@@ -498,7 +498,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       return { optimisticUserID, response, queued: false };
     },
     onError: (error, variables) => {
-      const { sessionID, queued } = variables;
+      const { sessionID, queued, prompt, parts } = variables;
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       if (queued) {
@@ -509,22 +509,17 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         queryKey,
         (old) => old?.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_")),
       );
-      
-      const isNetworkError = error instanceof TypeError ||
-        (error instanceof FetchError && (error.code === 'TIMEOUT' || error.statusCode === 524));
-
-      if (isNetworkError) {
-        return;
-      }
 
       useSessionStatus.getState().clearStatus(sessionID);
 
       const parsed = parseNetworkError(error);
+      const failedPrompt = getPromptText(prompt, parts);
       useSendErrorStore.getState().setError({
         sessionID,
         title: parsed.title,
         message: parsed.message,
         detail: error instanceof FetchError ? error.detail : undefined,
+        failedPrompt: failedPrompt || undefined,
       });
     },
     onSuccess: async (data, variables) => {
