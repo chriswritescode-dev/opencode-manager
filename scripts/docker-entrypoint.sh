@@ -5,24 +5,35 @@ export HOME=/home/node
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:/usr/local/bin:$PATH"
 
-echo "🔍 Checking Bun installation..."
+install_opencode() {
+  echo "Installing OpenCode latest..."
+  curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" \
+    -o /tmp/opencode.tar.gz
+  tar -xzf /tmp/opencode.tar.gz -C /tmp
+  mkdir -p "$HOME/.opencode/bin"
+  mv /tmp/opencode "$HOME/.opencode/bin/opencode"
+  chmod 755 "$HOME/.opencode/bin/opencode"
+  rm -f /tmp/opencode.tar.gz
+}
+
+echo "Checking Bun installation..."
 
 if ! command -v bun >/dev/null 2>&1; then
-  echo "❌ Bun not found. Installing..."
+  echo "Bun not found. Installing..."
   curl -fsSL https://bun.sh/install | bash
-  
+
   if ! command -v bun >/dev/null 2>&1; then
-    echo "❌ Failed to install Bun. Exiting."
+    echo "Failed to install Bun. Exiting."
     exit 1
   fi
-  
-  echo "✅ Bun installed successfully"
+
+  echo "Bun installed successfully"
 else
   BUN_VERSION=$(bun --version 2>&1 || echo "unknown")
-  echo "✅ Bun is installed (version: $BUN_VERSION)"
+  echo "Bun is installed (version: $BUN_VERSION)"
 fi
 
-echo "🔍 Checking OpenCode installation..."
+echo "Checking OpenCode installation..."
 
 MIN_OPENCODE_VERSION="1.0.137"
 
@@ -31,36 +42,36 @@ version_gte() {
 }
 
 if ! command -v opencode >/dev/null 2>&1; then
-  echo "⚠️  OpenCode not found. Installing..."
-  curl -fsSL https://opencode.ai/install | bash
-  
+  echo "OpenCode not found. Installing..."
+  install_opencode
+
   if ! command -v opencode >/dev/null 2>&1; then
-    echo "❌ Failed to install OpenCode. Exiting."
+    echo "Failed to install OpenCode. Exiting."
     exit 1
   fi
-  echo "✅ OpenCode installed successfully"
+  echo "OpenCode installed successfully"
 fi
 
 OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
-echo "✅ OpenCode is installed (version: $OPENCODE_VERSION)"
+echo "OpenCode is installed (version: $OPENCODE_VERSION)"
 
 if [ "$OPENCODE_VERSION" != "unknown" ]; then
   if version_gte "$OPENCODE_VERSION" "$MIN_OPENCODE_VERSION"; then
-    echo "✅ OpenCode version meets minimum requirement (>=$MIN_OPENCODE_VERSION)"
+    echo "OpenCode version meets minimum requirement (>=$MIN_OPENCODE_VERSION)"
   else
-    echo "⚠️  OpenCode version $OPENCODE_VERSION is below minimum required version $MIN_OPENCODE_VERSION"
-    echo "🔄 Upgrading OpenCode..."
-    opencode upgrade || curl -fsSL https://opencode.ai/install | bash
-    
+    echo "OpenCode version $OPENCODE_VERSION is below minimum required version $MIN_OPENCODE_VERSION"
+    echo "Upgrading OpenCode..."
+    opencode upgrade || install_opencode
+
     OPENCODE_VERSION=$(opencode --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
-    echo "✅ OpenCode upgraded to version: $OPENCODE_VERSION"
+    echo "OpenCode upgraded to version: $OPENCODE_VERSION"
   fi
 fi
 
-echo "🚀 Starting OpenCode Manager Backend..."
+echo "Starting OpenCode Manager Backend..."
 
 if [ -z "$AUTH_SECRET" ]; then
-  echo "❌ AUTH_SECRET is required but not set"
+  echo "AUTH_SECRET is required but not set"
   echo ""
   echo "Please set AUTH_SECRET environment variable with a secure random string."
   echo "Generate one with: openssl rand -base64 32"
@@ -79,4 +90,3 @@ mkdir -p /app/data /workspace /home/node/.cache /home/node/.opencode
 chown -R node:node /app/data /workspace /home/node
 
 exec runuser -u node -- "$@"
-
