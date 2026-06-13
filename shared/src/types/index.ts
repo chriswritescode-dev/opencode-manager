@@ -127,6 +127,11 @@ export type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SkillFileInfo,
+  SkillInstallSource,
+  InstallSkillFromGithubRequest,
+  InstallSkillUploadRequest,
+  InstallSkillUploadManifestEntry,
+  InstallSkillResponse,
 } from '../schemas/skills'
 export {
   SKILL_NAME_REGEX,
@@ -135,4 +140,8 @@ export {
   SkillFrontmatterSchema,
   CreateSkillRequestSchema,
   UpdateSkillRequestSchema,
+  SkillInstallSourceSchema,
+  InstallSkillFromGithubRequestSchema,
+  InstallSkillUploadRequestSchema,
+  InstallSkillUploadManifestEntrySchema,
 } from '../schemas/skills'
