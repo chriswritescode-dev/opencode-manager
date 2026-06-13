@@ -68,14 +68,23 @@ RUN echo "Installing uv=${UV_VERSION} opencode=${OPENCODE_VERSION} (cachebust=${
     mv /root/.local/bin/uv /usr/local/bin/uv && \
     mv /root/.local/bin/uvx /usr/local/bin/uvx && \
     chmod +x /usr/local/bin/uv /usr/local/bin/uvx && \
+    echo "Downloading opencode ${OPENCODE_VERSION}..." && \
+    OC_ARCH=$(uname -m) && \
+    if [ "$OC_ARCH" = "aarch64" ]; then OC_ARCH="arm64"; fi && \
+    if [ "$OC_ARCH" = "x86_64" ]; then OC_ARCH="x64"; fi && \
     if [ "${OPENCODE_VERSION}" = "latest" ]; then \
-        curl -fsSL https://opencode.ai/install | bash -s -- --no-modify-path; \
+        OC_DOWNLOAD_URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OC_ARCH}.tar.gz"; \
     else \
-        curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION} --no-modify-path; \
+        OC_DOWNLOAD_URL="https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz"; \
     fi && \
-    mv /root/.opencode /opt/opencode && \
-    chmod -R 755 /opt/opencode && \
-    ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode
+    curl -fsSL "$OC_DOWNLOAD_URL" -o /tmp/opencode.tar.gz && \
+    tar -xzf /tmp/opencode.tar.gz -C /tmp && \
+    mkdir -p /opt/opencode/bin && \
+    mv /tmp/opencode /opt/opencode/bin/opencode && \
+    chmod 755 /opt/opencode/bin/opencode && \
+    rm -f /tmp/opencode.tar.gz && \
+    ln -s /opt/opencode/bin/opencode /usr/local/bin/opencode && \
+    echo "opencode ${OPENCODE_VERSION} installed successfully"
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
