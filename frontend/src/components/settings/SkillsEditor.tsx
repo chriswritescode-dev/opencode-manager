@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, Save, X } from 'lucide-react'
+import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, Save, X, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { SkillDialog } from './SkillDialog'
+import { SkillInstallDialog } from './SkillInstallDialog'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { settingsApi } from '@/api/settings'
 import type { OpenCodeConfigInput, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope } from '@opencode-manager/shared'
@@ -80,6 +81,7 @@ function SkillPathEditor({ items, onChange, onAddItem, onRemoveItem, label, plac
 
 export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEditorProps) {
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [installDialogOpen, setInstallDialogOpen] = useState(false)
   const [editingSkill, setEditingSkill] = useState<SkillFileInfo | null>(null)
   const [collapsiblesOpen, setCollapsiblesOpen] = useState({
     managed: true,
@@ -225,10 +227,16 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
             <Badge variant="secondary" className="ml-2">{managedSkills.length}</Badge>
           )}
         </Button>
-        <Button type="button" onClick={handleCreate} size="sm">
-          <Plus className="h-4 w-4 mr-1" />
-          Create Skill
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" onClick={() => setInstallDialogOpen(true)} size="sm">
+            <Download className="h-4 w-4 mr-1" />
+            Install Skill
+          </Button>
+          <Button type="button" onClick={handleCreate} size="sm">
+            <Plus className="h-4 w-4 mr-1" />
+            Create Skill
+          </Button>
+        </div>
       </div>
 
       {collapsiblesOpen.managed && (
@@ -240,7 +248,7 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
                   <p className="text-sm font-medium">No skills created</p>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  Create your first skill to get started.
+                  Create or install your first skill to get started.
                 </p>
               </CardContent>
             </Card>
@@ -369,6 +377,12 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
         )}
       </div>
 
+      <SkillInstallDialog
+        open={installDialogOpen}
+        onOpenChange={setInstallDialogOpen}
+        onInstalled={() => queryClient.invalidateQueries({ queryKey: ['managed-skills'] })}
+      />
+
       <SkillDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -382,7 +396,7 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
         onConfirm={confirmDelete}
         onCancel={() => setDeleteSkill(null)}
         title="Delete Skill"
-        description="Are you sure you want to delete this skill? This action cannot be undone."
+        description="Delete this managed skill directory and bundled files? This action cannot be undone."
         itemName={deleteSkill?.name}
         isDeleting={deleteMutation.isPending}
       />

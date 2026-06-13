@@ -11,6 +11,8 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SkillScope,
+  InstallSkillFromGithubRequest,
+  InstallSkillResponse,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
@@ -266,6 +268,43 @@ export const settingsApi = {
     if (repoId) params.set('repoId', String(repoId))
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills/${name}?${params}`, {
       method: 'DELETE',
+    })
+  },
+
+  installSkillFromGithub: async (data: InstallSkillFromGithubRequest): Promise<InstallSkillResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  installSkillFromUpload: async (data: {
+    files: File[]
+    scope: SkillScope
+    repoId?: number
+    overwrite?: boolean
+  }): Promise<InstallSkillResponse> => {
+    const formData = new FormData()
+    formData.append('sourceType', 'upload')
+    formData.append('scope', data.scope)
+    if (data.repoId !== undefined) formData.append('repoId', String(data.repoId))
+    if (data.overwrite !== undefined) formData.append('overwrite', String(data.overwrite))
+
+    const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
+
+    data.files.forEach((file, index) => {
+      const fieldName = `file${index}`
+      const relativePath = file.webkitRelativePath || file.name
+      fileManifest.push({ fieldName, relativePath })
+      formData.append(fieldName, file)
+    })
+
+    formData.append('fileManifest', JSON.stringify(fileManifest))
+
+    return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
+      method: 'POST',
+      body: formData,
     })
   },
 }
