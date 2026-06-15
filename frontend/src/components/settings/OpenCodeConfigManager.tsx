@@ -723,18 +723,16 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Delete</TooltipContent>
                   </Tooltip>
+                  <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
+                    <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                    <span className="text-xs sm:text-sm">New Config</span>
+                  </Button>
                 </div>
               </TooltipProvider>
-              <div className="flex items-center gap-2 sm:ml-auto">
-                <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
-                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  <span className="text-xs sm:text-sm">New Config</span>
-                </Button>
-              </div>
             </div>
 
             {activeConfig && (
-              <div className="text-sm text-muted-foreground break-words mt-2">
+              <div className="text-sm text-muted-foreground break-words">
                 <p className="truncate">Updated: {new Date(activeConfig.updatedAt).toLocaleString()}</p>
                 <p className="truncate">Created: {new Date(activeConfig.createdAt).toLocaleString()}</p>
               </div>
