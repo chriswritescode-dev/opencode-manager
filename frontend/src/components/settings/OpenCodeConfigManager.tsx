@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { CreateConfigDialog } from './CreateConfigDialog'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
@@ -647,7 +648,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                   {configs.map((config) => (
                     <SelectItem key={config.id} value={config.name}>
                       {config.name}
-                      {config.isDefault && ' (Current)'}
+                      {config.isDefault && ' (Active)'}
                       {!config.isValid && ' (Invalid)'}
                     </SelectItem>
                   ))}
@@ -656,54 +657,78 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
 
               <div className="flex items-center gap-2">
                 {activeConfig?.isDefault && (
-                  <Badge variant="default" className="text-green-500 bg-green-500/10">
-                    Current
-                  </Badge>
+                  <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                    Active
+                  </span>
                 )}
                 {activeConfig && !activeConfig.isValid && (
                   <Badge variant="destructive">Invalid Config</Badge>
                 )}
               </div>
 
-              <div className="flex items-center gap-2 sm:ml-auto">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!activeConfig}
-                  onClick={() => activeConfig && downloadConfig(activeConfig)}
-                >
-                  <Download className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!activeConfig}
-                  onClick={() => activeConfig && startEdit(activeConfig)}
-                >
-                  <Edit className="h-4 w-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant={activeConfig?.isDefault ? 'outline' : 'default'}
-                  disabled={!activeConfig || activeConfig.isDefault || isUpdating}
-                  onClick={() => activeConfig && setDefaultConfig(activeConfig)}
-                >
-                  {activeConfig?.isDefault ? 'Applied' : 'Apply'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!activeConfig}
-                  className="text-red-500 hover:text-red-600"
-                  onClick={() => activeConfig && setDeleteConfirmConfig(activeConfig)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-                <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
-                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  <span className="text-xs sm:text-sm">New Config</span>
-                </Button>
-              </div>
+              <TooltipProvider delayDuration={200}>
+                <div className="flex items-center gap-1 sm:gap-1.5 sm:ml-auto flex-wrap">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!activeConfig}
+                        onClick={() => activeConfig && downloadConfig(activeConfig)}
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Download</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!activeConfig}
+                        onClick={() => activeConfig && startEdit(activeConfig)}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Edit</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="sm"
+                        variant={activeConfig?.isDefault ? 'outline' : 'default'}
+                        disabled={!activeConfig || activeConfig.isDefault || isUpdating}
+                        onClick={() => activeConfig && setDefaultConfig(activeConfig)}
+                      >
+                        {activeConfig?.isDefault ? 'Applied' : 'Apply'}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">
+                      {activeConfig?.isDefault ? 'Applied' : 'Apply as default'}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={!activeConfig}
+                        className="text-red-500 hover:text-red-600"
+                        onClick={() => activeConfig && setDeleteConfirmConfig(activeConfig)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Delete</TooltipContent>
+                  </Tooltip>
+                  <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
+                    <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                    <span className="text-xs sm:text-sm">New Config</span>
+                  </Button>
+                </div>
+              </TooltipProvider>
             </div>
 
             {activeConfig && (
