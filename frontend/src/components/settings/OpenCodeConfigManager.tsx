@@ -635,11 +635,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              {activeConfig?.isDefault && (
-                <span className="text-xs font-medium text-green-600 dark:text-green-400 sm:hidden">
-                  Active
-                </span>
-              )}
               <Select
                 value={activeConfigName}
                 onValueChange={(value) => {
@@ -647,13 +642,25 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                 }}
               >
                 <SelectTrigger className="w-full sm:max-w-xs">
-                  <SelectValue placeholder="Select a configuration..." />
+                  <SelectValue placeholder="Select a configuration...">
+                    {activeConfig && (
+                      <>
+                        {activeConfig.name}
+                        {activeConfig.isDefault && (
+                          <span className="text-orange-500 dark:text-orange-400"> (Active)</span>
+                        )}
+                        {!activeConfig.isValid && ' (Invalid)'}
+                      </>
+                    )}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {configs.map((config) => (
                     <SelectItem key={config.id} value={config.name}>
                       {config.name}
-                      {config.isDefault && ' (Active)'}
+                      {config.isDefault && (
+                        <span className="text-orange-500 dark:text-orange-400"> (Active)</span>
+                      )}
                       {!config.isValid && ' (Invalid)'}
                     </SelectItem>
                   ))}
