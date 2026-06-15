@@ -635,6 +635,11 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {activeConfig?.isDefault && (
+                <span className="text-xs font-medium text-green-600 dark:text-green-400 sm:hidden">
+                  Active
+                </span>
+              )}
               <Select
                 value={activeConfigName}
                 onValueChange={(value) => {
@@ -656,18 +661,13 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
               </Select>
 
               <div className="flex items-center gap-2">
-                {activeConfig?.isDefault && (
-                  <span className="text-xs font-medium text-green-600 dark:text-green-400">
-                    Active
-                  </span>
-                )}
                 {activeConfig && !activeConfig.isValid && (
                   <Badge variant="destructive">Invalid Config</Badge>
                 )}
               </div>
 
               <TooltipProvider delayDuration={200}>
-                <div className="flex items-center gap-1 sm:gap-1.5 sm:ml-auto flex-wrap">
+                <div className="flex items-center gap-1 sm:gap-1.5 sm:ml-auto">
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -694,21 +694,21 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Edit</TooltipContent>
                   </Tooltip>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant={activeConfig?.isDefault ? 'outline' : 'default'}
-                        disabled={!activeConfig || activeConfig.isDefault || isUpdating}
-                        onClick={() => activeConfig && setDefaultConfig(activeConfig)}
-                      >
-                        {activeConfig?.isDefault ? 'Applied' : 'Apply'}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom">
-                      {activeConfig?.isDefault ? 'Applied' : 'Apply as default'}
-                    </TooltipContent>
-                  </Tooltip>
+                  {!activeConfig?.isDefault && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          size="sm"
+                          variant="default"
+                          disabled={!activeConfig || isUpdating}
+                          onClick={() => activeConfig && setDefaultConfig(activeConfig)}
+                        >
+                          Apply
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">Apply as default</TooltipContent>
+                    </Tooltip>
+                  )}
                   <Tooltip>
                     <TooltipTrigger asChild>
                       <Button
@@ -723,16 +723,18 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Delete</TooltipContent>
                   </Tooltip>
-                  <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
-                    <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                    <span className="text-xs sm:text-sm">New Config</span>
-                  </Button>
                 </div>
               </TooltipProvider>
+              <div className="flex items-center gap-2 sm:ml-auto">
+                <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
+                  <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                  <span className="text-xs sm:text-sm">New Config</span>
+                </Button>
+              </div>
             </div>
 
             {activeConfig && (
-              <div className="text-sm text-muted-foreground break-words">
+              <div className="text-sm text-muted-foreground break-words mt-2">
                 <p className="truncate">Updated: {new Date(activeConfig.updatedAt).toLocaleString()}</p>
                 <p className="truncate">Created: {new Date(activeConfig.createdAt).toLocaleString()}</p>
               </div>
@@ -802,7 +804,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
             <div className="space-y-6">
               <div className='px-1'>
                 <Label className="text-sm sm:text-base font-medium">Select Configuration to Edit</Label>
-                <Select 
+                <Select
                   onValueChange={(value) => {
                     const config = configs.find(c => c.name === value)
                     setSelectedConfig(config || null)
