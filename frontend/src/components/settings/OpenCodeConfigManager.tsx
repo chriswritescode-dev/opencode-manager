@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Loader2, Plus, Trash2, Edit, StarOff, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -638,10 +638,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                 value={activeConfigName}
                 onValueChange={(value) => {
                   setActiveConfigName(value)
-                  const next = configs.find((c) => c.name === value)
-                  if (next && !next.isDefault) {
-                    void setDefaultConfig(next)
-                  }
                 }}
               >
                 <SelectTrigger className="w-full sm:max-w-xs">
@@ -687,12 +683,12 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                   <Edit className="h-4 w-4" />
                 </Button>
                 <Button
-                  variant="ghost"
                   size="sm"
+                  variant={activeConfig?.isDefault ? 'outline' : 'default'}
                   disabled={!activeConfig || activeConfig.isDefault || isUpdating}
                   onClick={() => activeConfig && setDefaultConfig(activeConfig)}
                 >
-                  <StarOff className="h-4 w-4" />
+                  {activeConfig?.isDefault ? 'Applied' : 'Apply'}
                 </Button>
                 <Button
                   variant="ghost"
