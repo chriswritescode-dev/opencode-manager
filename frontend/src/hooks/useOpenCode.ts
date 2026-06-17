@@ -401,27 +401,9 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     }) => {
       if (!client) throw new Error("No client available");
 
-      const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
-
-      const contentParts = parts || [{ type: "text" as const, content: prompt || "", name: "" }];
-      const userMessageParts = createOptimisticUserMessageParts(
-        sessionID,
-        contentParts,
-        optimisticUserID,
-      );
-      const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID, model, agent, variant);
-
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
       await queryClient.cancelQueries({ queryKey });
 
-      const optimisticMessageWithParts: MessageWithParts = {
-        info: userMessageInfo,
-        parts: userMessageParts,
-      }
-      queryClient.setQueryData<MessageWithParts[]>(
-        queryKey,
-        (old) => [...(old || []), optimisticMessageWithParts],
-      );
       useSessionStatus.getState().setOptimisticActive(sessionID);
 
       const requestData: SendPromptRequest = {
@@ -490,12 +472,12 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
           throw error;
         }
 
-        return { optimisticUserID, queued: true };
+        return { queued: true };
       }
 
       const response = await client.sendPrompt(sessionID, requestData);
 
-      return { optimisticUserID, response, queued: false };
+      return { response, queued: false };
     },
     onError: (error, variables) => {
       const { sessionID, queued, prompt, parts } = variables;
