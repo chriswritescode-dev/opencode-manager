@@ -4,19 +4,23 @@ type UpdateCallback = () => void;
 
 let updateCallback: UpdateCallback | null = null;
 let updatePending = false;
+let updateNotified = false;
 
 function notifyUpdate() {
+  if (updateNotified) return;
   if (!updateCallback) {
     updatePending = true;
     return;
   }
+  updateNotified = true;
   updatePending = false;
   updateCallback();
 }
 
 export function onServiceWorkerUpdate(callback: UpdateCallback): void {
   updateCallback = callback;
-  if (updatePending) {
+  if (updatePending && !updateNotified) {
+    updateNotified = true;
     updatePending = false;
     callback();
   }

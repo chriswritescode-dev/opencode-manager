@@ -17,6 +17,7 @@ import { VersionNotifier } from './components/VersionNotifier'
 import { PwaUpdatePrompt } from '@/components/PwaUpdatePrompt'
 import { MobileTabBar } from '@/components/navigation/MobileTabBar'
 import { MobileSheetHost } from '@/components/navigation/MobileSheetHost'
+import { RouteErrorBoundary } from '@/components/ui/route-error-boundary'
 import { DesktopSidebar } from '@/components/navigation/DesktopSidebar'
 import { useTheme } from './hooks/useTheme'
 import { useRightEdgeSwipe, useSwipeBack } from './hooks/useMobile'
@@ -185,6 +186,7 @@ function AppShell() {
 const router = createBrowserRouter([
   {
     element: <AppShell />,
+    errorElement: <RouteErrorBoundary />,
     children: [
       {
         path: '/login',

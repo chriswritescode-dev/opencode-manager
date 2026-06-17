@@ -1,23 +1,90 @@
 /// <reference lib="webworker" />
 
-declare const self: ServiceWorkerGlobalScope & typeof globalThis;
+const worker = self as unknown as ServiceWorkerGlobalScope & typeof globalThis;
 
-self.addEventListener("install", () => {
-  self.skipWaiting();
+interface SwBuildGlobals {
+  __SW_BUILD_HASH__?: string;
+  __SW_PRECACHE__?: string[];
+}
+
+const buildGlobals = worker as unknown as SwBuildGlobals;
+
+const BUILD_HASH = buildGlobals.__SW_BUILD_HASH__ ?? "dev";
+const PRECACHE_URLS = buildGlobals.__SW_PRECACHE__ ?? [];
+
+const APP_SHELL_CACHE = `app-shell-${BUILD_HASH}`;
+const RUNTIME_CACHE = `runtime-${BUILD_HASH}`;
+const APP_SHELL_URL = "/index.html";
+const MANAGED_CACHE_PREFIXES = ["app-shell-", "runtime-", "offline-assets-"];
+
+worker.addEventListener("install", (event) => {
+  event.waitUntil(caches.open(APP_SHELL_CACHE).then((cache) => cache.addAll(PRECACHE_URLS)));
+  worker.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+worker.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((names) =>
-      Promise.all(names.map((name) => caches.delete(name)))
-    ).then(() => self.clients.claim())
-    .then(() => self.clients.matchAll({ type: "window" }))
-    .then((clients) => {
+    caches.keys().then(async (names) => {
+      const stale = names.filter(
+        (name) =>
+          MANAGED_CACHE_PREFIXES.some((prefix) => name.startsWith(prefix)) &&
+          name !== APP_SHELL_CACHE &&
+          name !== RUNTIME_CACHE
+      );
+      const isUpdate = stale.length > 0;
+
+      await Promise.all(stale.map((name) => caches.delete(name)));
+      await worker.clients.claim();
+
+      if (!isUpdate) return;
+
+      const clients = await worker.clients.matchAll({ type: "window" });
       for (const client of clients) {
         client.postMessage({ type: "SW_UPDATED" });
       }
     })
   );
+});
+
+async function networkFirstShell(request: Request): Promise<Response> {
+  const cache = await caches.open(APP_SHELL_CACHE);
+  try {
+    const response = await fetch(request);
+    if (response.ok) cache.put(APP_SHELL_URL, response.clone());
+    return response;
+  } catch (error) {
+    const cached = await cache.match(APP_SHELL_URL);
+    if (cached) return cached;
+    throw error;
+  }
+}
+
+async function cacheFirstAsset(request: Request): Promise<Response> {
+  const cached = await caches.match(request);
+  if (cached) return cached;
+
+  const response = await fetch(request);
+  if (response.ok && response.status === 200) {
+    const cache = await caches.open(RUNTIME_CACHE);
+    cache.put(request, response.clone());
+  }
+  return response;
+}
+
+worker.addEventListener("fetch", (event) => {
+  const { request } = event;
+  if (request.method !== "GET") return;
+
+  const url = new URL(request.url);
+  if (url.origin !== worker.location.origin) return;
+  if (url.pathname.startsWith("/api/") || url.pathname === "/sw.js") return;
+
+  if (request.mode === "navigate") {
+    event.respondWith(networkFirstShell(request));
+    return;
+  }
+
+  event.respondWith(cacheFirstAsset(request));
 });
 
 interface PushNotificationData {
@@ -37,7 +104,7 @@ interface PushNotificationData {
   };
 }
 
-self.addEventListener("push", (event) => {
+worker.addEventListener("push", (event) => {
   if (!event.data) return;
 
   let payload: PushNotificationData;
@@ -60,27 +127,27 @@ self.addEventListener("push", (event) => {
     requireInteraction: isHighPriority(payload.data?.eventType, payload.data?.priority),
   };
 
-  event.waitUntil(self.registration.showNotification(payload.title, options));
+  event.waitUntil(worker.registration.showNotification(payload.title, options));
 });
 
-self.addEventListener("notificationclick", (event) => {
+worker.addEventListener("notificationclick", (event) => {
   event.notification.close();
 
   const url = (event.notification.data?.url as string) ?? "/";
 
   event.waitUntil(
-    self.clients
+    worker.clients
       .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
         for (const client of clientList) {
-          if (new URL(client.url).origin === self.location.origin) {
+          if (new URL(client.url).origin === worker.location.origin) {
             const channel = new BroadcastChannel("notification-click");
             channel.postMessage({ url });
             channel.close();
             return (client as WindowClient).focus();
           }
         }
-        return self.clients.openWindow(url);
+        return worker.clients.openWindow(url);
       })
   );
 });
