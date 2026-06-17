@@ -44,6 +44,20 @@ describe('OpenCodeEventStream', () => {
     expect(healthStates.at(-1)).toMatchObject({ isConnected: true, isHealthy: true, isStalled: false })
   })
 
+  it('recovers when a connection never opens', async () => {
+    const transport = new TestEventStreamTransport()
+    const stream = new OpenCodeEventStream({ transport })
+
+    stream.subscribeGlobalMonitor({ directories: [], onEvent: vi.fn() })
+    expect(transport.openedUrls).toHaveLength(1)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(transport.closeCount).toBeGreaterThan(0)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(transport.openedUrls.length).toBeGreaterThan(1)
+  })
+
   it('reconnects when the watchdog detects a stall', async () => {
     const transport = new TestEventStreamTransport()
     const stream = new OpenCodeEventStream({ transport })
