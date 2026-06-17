@@ -9,7 +9,7 @@ import type {
   MessageWithParts,
 } from "../api/types";
 import type { paths, components } from "../api/opencode-types";
-import { parseNetworkError } from "../lib/opencode-errors";
+import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus } from "../stores/sessionStatusStore";
@@ -401,27 +401,9 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
     }) => {
       if (!client) throw new Error("No client available");
 
-      const optimisticUserID = `optimistic_user_${Date.now()}_${Math.random()}`;
-
-      const contentParts = parts || [{ type: "text" as const, content: prompt || "", name: "" }];
-      const userMessageParts = createOptimisticUserMessageParts(
-        sessionID,
-        contentParts,
-        optimisticUserID,
-      );
-      const userMessageInfo = createOptimisticUserMessageInfo(sessionID, optimisticUserID, model, agent, variant);
-
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
       await queryClient.cancelQueries({ queryKey });
 
-      const optimisticMessageWithParts: MessageWithParts = {
-        info: userMessageInfo,
-        parts: userMessageParts,
-      }
-      queryClient.setQueryData<MessageWithParts[]>(
-        queryKey,
-        (old) => [...(old || []), optimisticMessageWithParts],
-      );
       useSessionStatus.getState().setOptimisticActive(sessionID);
 
       const requestData: SendPromptRequest = {
@@ -490,15 +472,15 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
           throw error;
         }
 
-        return { optimisticUserID, queued: true };
+        return { queued: true };
       }
 
       const response = await client.sendPrompt(sessionID, requestData);
 
-      return { optimisticUserID, response, queued: false };
+      return { response, queued: false };
     },
     onError: (error, variables) => {
-      const { sessionID, queued } = variables;
+      const { sessionID, queued, prompt, parts } = variables;
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       if (queued) {
@@ -509,22 +491,21 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         queryKey,
         (old) => old?.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_")),
       );
-      
-      const isNetworkError = error instanceof TypeError ||
-        (error instanceof FetchError && (error.code === 'TIMEOUT' || error.statusCode === 524));
 
-      if (isNetworkError) {
+      if (isGatewayTimeout(error)) {
         return;
       }
 
       useSessionStatus.getState().clearStatus(sessionID);
 
       const parsed = parseNetworkError(error);
+      const failedPrompt = getPromptText(prompt, parts);
       useSendErrorStore.getState().setError({
         sessionID,
         title: parsed.title,
         message: parsed.message,
         detail: error instanceof FetchError ? error.detail : undefined,
+        failedPrompt: failedPrompt || undefined,
       });
     },
     onSuccess: async (data, variables) => {

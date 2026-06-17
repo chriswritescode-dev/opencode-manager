@@ -1,3 +1,4 @@
+import { FetchError } from '@opencode-manager/shared'
 import type { components } from '@/api/opencode-types'
 
 export type OpenCodeError =
@@ -61,9 +62,33 @@ export function parseOpenCodeError(error: OpenCodeError | undefined | null): Par
   }
 }
 
+export function isGatewayTimeout(error: unknown): boolean {
+  return error instanceof FetchError && error.statusCode === 524
+}
+
 export function parseNetworkError(error: unknown): ParsedError {
   if (error instanceof Error) {
-    if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+    if (error instanceof FetchError) {
+      if (error.statusCode === 502) {
+        return {
+          title: 'Server Unavailable',
+          message: 'The OpenCode server is not responding. It may need to be restarted.',
+          isRetryable: true,
+        }
+      }
+
+      if (error.statusCode === 524) {
+        return {
+          title: 'Request Timeout',
+          message: 'The request took too long to complete. Please try again.',
+          isRetryable: true,
+        }
+      }
+    }
+
+    const message = error.message.toLowerCase()
+
+    if (message.includes('timeout') || message.includes('etimedout')) {
       return {
         title: 'Request Timeout',
         message: 'The request took too long to complete. Please try again.',
@@ -71,7 +96,14 @@ export function parseNetworkError(error: unknown): ParsedError {
       }
     }
 
-    if (error.message.includes('Network Error') || error.message.includes('ECONNREFUSED')) {
+    if (
+      message.includes('failed to fetch') ||
+      message.includes('network error') ||
+      message.includes('networkerror') ||
+      message.includes('fetch failed') ||
+      message.includes('econnrefused') ||
+      message.includes('econnreset')
+    ) {
       return {
         title: 'Connection Failed',
         message: 'Could not connect to the server. Please check your connection.',
@@ -79,7 +111,7 @@ export function parseNetworkError(error: unknown): ParsedError {
       }
     }
 
-    if (error.message.includes('502') || error.message.includes('Bad Gateway')) {
+    if (message.includes('502') || message.includes('bad gateway')) {
       return {
         title: 'Server Unavailable',
         message: 'The OpenCode server is not responding. It may need to be restarted.',

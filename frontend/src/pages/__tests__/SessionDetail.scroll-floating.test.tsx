@@ -342,4 +342,16 @@ describe('SessionDetail scroll floating button', () => {
     fireEvent.click(screen.getByLabelText('Scroll to bottom'))
     expect(mockScrollToBottom).toHaveBeenCalledTimes(1)
   })
+
+  it('does NOT disable PromptInput when SSE is disconnected', async () => {
+    mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: true })
+    renderWith({ mobile: true, showScrollButton: false })
+
+    await waitFor(() => {
+      expect(mocks.PromptInput).toHaveBeenCalled()
+    })
+
+    const props = mocks.PromptInput.mock.calls.at(-1)?.[0] as { disabled?: boolean }
+    expect(props.disabled).not.toBe(true)
+  })
 })

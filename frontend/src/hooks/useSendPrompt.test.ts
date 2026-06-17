@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { createElement } from 'react'
 import { useSendPrompt } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
+import { messagesQueryKey } from '../lib/queryInvalidation'
 
 const mockSendPrompt = vi.fn()
 const mockSendPromptAsync = vi.fn()
@@ -40,6 +41,7 @@ vi.mock('../lib/opencode-errors', () => ({
     message: err.message,
     isRetryable: false,
   })),
+  isGatewayTimeout: vi.fn((err) => err?.statusCode === 524),
 }))
 
 const mockClearError = vi.fn()
@@ -263,5 +265,69 @@ describe('useSendPrompt', () => {
     ).resolves.toBeDefined()
 
     expect(mockClearError).toHaveBeenCalledWith('session-2')
+  })
+
+  it('rolls back optimistic prompt and stores failed prompt on network failure', async () => {
+    const queryKey = messagesQueryKey('http://localhost:5551', 'session-lost', '/test')
+    queryClient.setQueryData(queryKey, [])
+    mockSendPrompt.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-lost',
+        prompt: 'keep this prompt',
+      })
+    ).rejects.toThrow('Failed to fetch')
+
+    expect(mockClearStatus).toHaveBeenCalledWith('session-lost')
+    expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-lost',
+      failedPrompt: 'keep this prompt',
+    }))
+    expect(queryClient.getQueryData(queryKey)).toEqual([])
+  })
+
+  it('stores failed prompt when queued async request fails before reaching OpenCode', async () => {
+    mockSendPromptAsync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-queued-lost',
+        prompt: 'queued while disconnected',
+        queued: true,
+      })
+    ).rejects.toThrow('Failed to fetch')
+
+    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-queued-lost')
+    expect(mockClearStatus).toHaveBeenCalledWith('session-queued-lost')
+    expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
+      sessionID: 'session-queued-lost',
+      failedPrompt: 'queued while disconnected',
+    }))
+  })
+
+  it('rolls back optimistic message but keeps status and surfaces no error on gateway timeout', async () => {
+    const queryKey = messagesQueryKey('http://localhost:5551', 'session-524', '/test')
+    queryClient.setQueryData(queryKey, [
+      { info: { id: 'optimistic_user_1' }, parts: [] },
+    ])
+    mockSendPrompt.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-524',
+        prompt: 'long running prompt',
+      })
+    ).rejects.toThrow('Gateway timeout')
+
+    expect(queryClient.getQueryData(queryKey)).toEqual([])
+    expect(mockClearStatus).not.toHaveBeenCalled()
+    expect(mockSetError).not.toHaveBeenCalled()
   })
 })

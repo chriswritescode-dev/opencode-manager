@@ -21,7 +21,7 @@ interface OpenCodeEventStreamOptions {
   transport?: EventStreamTransport
 }
 
-const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, STALL_THRESHOLD_MS, WATCHDOG_TICK_MS } = DEFAULTS.SSE
+const { RECONNECT_DELAY_MS, MAX_RECONNECT_DELAY_MS, CONNECT_TIMEOUT_MS, STALL_THRESHOLD_MS, WATCHDOG_TICK_MS } = DEFAULTS.SSE
 
 export class OpenCodeEventStream {
   private connection: { close(): void } | null = null
@@ -30,6 +30,7 @@ export class OpenCodeEventStream {
   private directoryRefCounts = new Map<string, number>()
   private pendingDirectories = new Set<string>()
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
+  private connectTimeout: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay: number = RECONNECT_DELAY_MS
   private connected = false
   private subscriberIdCounter = 0
@@ -194,9 +195,26 @@ export class OpenCodeEventStream {
       onConnected: (data) => this.handleConnected(data),
       onHeartbeat: () => this.markActivity(),
     })
+    this.startConnectTimeout()
+  }
+
+  private startConnectTimeout(): void {
+    this.clearConnectTimeout()
+    this.connectTimeout = setTimeout(() => {
+      this.connectTimeout = null
+      this.handleError()
+    }, CONNECT_TIMEOUT_MS)
+  }
+
+  private clearConnectTimeout(): void {
+    if (this.connectTimeout) {
+      clearTimeout(this.connectTimeout)
+      this.connectTimeout = null
+    }
   }
 
   private handleOpen(): void {
+    this.clearConnectTimeout()
     this.connected = true
     this.reconnectDelay = RECONNECT_DELAY_MS
     this.startWatchdog()
@@ -205,6 +223,7 @@ export class OpenCodeEventStream {
   }
 
   private handleError(): void {
+    this.clearConnectTimeout()
     this.connected = false
     this.clientId = null
     this.upstreamConnectedCount = null
@@ -250,6 +269,7 @@ export class OpenCodeEventStream {
       this.clientId = null
     }
 
+    this.clearConnectTimeout()
     this.connected = true
     this.startWatchdog()
     this.markActivity()
@@ -263,6 +283,7 @@ export class OpenCodeEventStream {
       this.reconnectTimeout = null
     }
 
+    this.clearConnectTimeout()
     this.stopWatchdog()
     this.connection?.close()
     this.connection = null
@@ -289,6 +310,7 @@ export class OpenCodeEventStream {
       this.reconnectTimeout = null
     }
 
+    this.clearConnectTimeout()
     this.stopWatchdog()
     this.connection?.close()
     this.connection = null
