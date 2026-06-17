@@ -51,6 +51,7 @@ COPY shared ./shared
 COPY backend ./backend
 COPY frontend/src ./frontend/src
 COPY frontend/public ./frontend/public
+COPY frontend/plugins ./frontend/plugins
 COPY frontend/index.html frontend/vite.config.ts frontend/tsconfig*.json frontend/components.json frontend/eslint.config.js ./frontend/
 
 RUN pnpm --filter frontend build
