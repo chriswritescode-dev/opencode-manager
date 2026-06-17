@@ -141,7 +141,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
                   <Input
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
-                    placeholder="https://github.com/mattpocock/skills/tree/main/skills/productivity/teach"
+                    placeholder="Paste a GitHub skill URL"
                   />
                 </div>
               </TabsContent>

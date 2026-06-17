@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, Pencil, ChevronDown, ChevronRight, Save, X, Download } from 'lucide-react'
+import { Plus, Trash2, ChevronDown, ChevronRight, Save, X, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { SkillDialog } from './SkillDialog'
 import { SkillInstallDialog } from './SkillInstallDialog'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { SkillLibraryList } from '@/components/skills/SkillLibraryList'
 import { settingsApi } from '@/api/settings'
 import type { OpenCodeConfigInput, SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope } from '@opencode-manager/shared'
 import { toast } from 'sonner'
@@ -200,17 +200,6 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
     setHasUnsavedChanges(false)
   }
 
-  const getScopeBadge = (skill: SkillFileInfo) => {
-    if (skill.scope === 'global') {
-      return <Badge variant="secondary">Global</Badge>
-    }
-    return (
-      <Badge variant="outline">
-        Project{skill.repoName ? `: ${skill.repoName}` : ''}
-      </Badge>
-    )
-  }
-
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -240,65 +229,15 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
       </div>
 
       {collapsiblesOpen.managed && (
-        <>
-          {managedSkills.length === 0 ? (
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center gap-2 mb-2">
-                  <p className="text-sm font-medium">No skills created</p>
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  Create or install your first skill to get started.
-                </p>
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="max-h-[400px] overflow-y-auto">
-              <div className="grid gap-3">
-                {managedSkills.map((skill) => (
-                  <Card key={`${skill.scope}-${skill.name}`}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm">{skill.name}</CardTitle>
-                        <div className="flex items-center gap-1">
-                          {getScopeBadge(skill)}
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleEdit(skill)}
-                            className="h-8 w-8"
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDelete(skill)}
-                            className="h-8 w-8"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="space-y-2">
-                      {skill.description && (
-                        <p className="text-sm text-muted-foreground">{skill.description}</p>
-                      )}
-                      {skill.body && (
-                        <div className="text-xs font-mono bg-muted rounded p-2 line-clamp-3 max-h-[60px] overflow-hidden whitespace-pre-wrap">
-                          {skill.body}
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
+        <SkillLibraryList
+          isLoading={false}
+          data={managedSkills}
+          error={null}
+          primaryAction={{ label: 'Edit', onClick: handleEdit }}
+          rowActions={[{ label: 'Delete', onClick: handleDelete, destructive: true }]}
+          emptyTitle="No skills created"
+          emptyHint="Create or install your first skill to get started."
+        />
       )}
 
       <div className="space-y-3">
@@ -403,4 +342,3 @@ export function SkillsEditor({ skills, managedSkills = [], onChange }: SkillsEdi
     </div>
   )
 }
-

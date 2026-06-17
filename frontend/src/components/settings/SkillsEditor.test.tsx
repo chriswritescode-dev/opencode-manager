@@ -81,9 +81,7 @@ describe('SkillsEditor', () => {
 
     await user.click(screen.getByText('Install Skill'))
 
-    const urlInput = screen.getByPlaceholderText(
-      'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach'
-    )
+    const urlInput = screen.getByPlaceholderText('Paste a GitHub skill URL')
     await user.type(urlInput, 'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach')
 
     await user.click(screen.getByText('Install'))
@@ -144,9 +142,7 @@ describe('SkillsEditor', () => {
 
     await user.click(screen.getByText('Install Skill'))
 
-    const urlInput = screen.getByPlaceholderText(
-      'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach'
-    )
+    const urlInput = screen.getByPlaceholderText('Paste a GitHub skill URL')
     await user.type(urlInput, 'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach')
 
     await user.click(screen.getByText('Install'))
@@ -178,11 +174,8 @@ describe('SkillsEditor', () => {
       wrapper: createWrapper(),
     })
 
-    const skillHeading = screen.getByText('test-skill')
-    const card = skillHeading.closest('[class*="card"]') || skillHeading.closest('[class*="border"]') || skillHeading.parentElement!.parentElement!
-    const deleteButtons = card.querySelectorAll('button')
-    const deleteButton = deleteButtons[deleteButtons.length - 1]
-    await user.click(deleteButton)
+    await user.click(screen.getByLabelText('Actions for test-skill'))
+    await user.click(screen.getByText('Delete'))
 
     await waitFor(() => {
       expect(screen.getByText(/bundled files/)).toBeInTheDocument()
