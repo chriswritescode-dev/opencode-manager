@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/settings', () => ({
   settingsApi: {
     listManagedSkills: mocks.listManagedSkills,
+    deleteSkill: vi.fn(),
   },
 }))
 
@@ -93,7 +94,7 @@ describe('RepoSkillsDialog', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByText('Test skill')).toBeInTheDocument()
+        expect(screen.getByText('test-skill')).toBeInTheDocument()
       })
     })
 
@@ -116,7 +117,7 @@ describe('RepoSkillsDialog', () => {
       const globalTab = screen.getByText('Global')
       await userEvent.click(globalTab)
 
-      expect(screen.getByText('Global skill')).toBeInTheDocument()
+      expect(screen.getByText('global-skill')).toBeInTheDocument()
     })
 
     it('shows empty state for project tab when no project skills', async () => {
@@ -143,7 +144,7 @@ describe('RepoSkillsDialog', () => {
       await userEvent.click(projectTab)
 
       await waitFor(() => {
-        expect(screen.getByText('No local skills found')).toBeInTheDocument()
+        expect(screen.getByText('No skills found')).toBeInTheDocument()
       })
     })
   })
@@ -170,10 +171,10 @@ describe('RepoSkillsDialog', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByText('Test skill')).toBeInTheDocument()
+        expect(screen.getByText('test-skill')).toBeInTheDocument()
       })
 
-      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')
+      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')
       expect(card).toBeTruthy()
     })
 
@@ -190,10 +191,10 @@ describe('RepoSkillsDialog', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByText('Test skill')).toBeInTheDocument()
+        expect(screen.getByText('test-skill')).toBeInTheDocument()
       })
 
-      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')
+      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')
       expect(card).toBeNull()
     })
 
@@ -219,10 +220,10 @@ describe('RepoSkillsDialog', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByText('Test skill')).toBeInTheDocument()
+        expect(screen.getByText('test-skill')).toBeInTheDocument()
       })
 
-      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')!
+      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')!
       await user.click(card)
 
       expect(onOpenChange).toHaveBeenCalledWith(false)
@@ -254,10 +255,10 @@ describe('RepoSkillsDialog', () => {
       )
 
       await waitFor(() => {
-        expect(screen.getByText('Test skill')).toBeInTheDocument()
+        expect(screen.getByText('test-skill')).toBeInTheDocument()
       })
 
-      const card = screen.getByText('Test skill').closest('[class*="cursor-pointer"]')!
+      const card = screen.getByText('test-skill').closest('[class*="cursor-pointer"]')!
       await user.click(card)
 
       await waitFor(() => {
