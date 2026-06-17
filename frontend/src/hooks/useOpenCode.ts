@@ -9,7 +9,7 @@ import type {
   MessageWithParts,
 } from "../api/types";
 import type { paths, components } from "../api/opencode-types";
-import { parseNetworkError } from "../lib/opencode-errors";
+import { parseNetworkError, isGatewayTimeout } from "../lib/opencode-errors";
 import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus } from "../stores/sessionStatusStore";
@@ -509,6 +509,10 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         queryKey,
         (old) => old?.filter((msgWithParts) => !msgWithParts.info.id.startsWith("optimistic_")),
       );
+
+      if (isGatewayTimeout(error)) {
+        return;
+      }
 
       useSessionStatus.getState().clearStatus(sessionID);
 

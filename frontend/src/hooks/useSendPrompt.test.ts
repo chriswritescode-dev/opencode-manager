@@ -41,6 +41,7 @@ vi.mock('../lib/opencode-errors', () => ({
     message: err.message,
     isRetryable: false,
   })),
+  isGatewayTimeout: vi.fn((err) => err?.statusCode === 524),
 }))
 
 const mockClearError = vi.fn()
@@ -307,5 +308,26 @@ describe('useSendPrompt', () => {
       sessionID: 'session-queued-lost',
       failedPrompt: 'queued while disconnected',
     }))
+  })
+
+  it('rolls back optimistic message but keeps status and surfaces no error on gateway timeout', async () => {
+    const queryKey = messagesQueryKey('http://localhost:5551', 'session-524', '/test')
+    queryClient.setQueryData(queryKey, [
+      { info: { id: 'optimistic_user_1' }, parts: [] },
+    ])
+    mockSendPrompt.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID: 'session-524',
+        prompt: 'long running prompt',
+      })
+    ).rejects.toThrow('Gateway timeout')
+
+    expect(queryClient.getQueryData(queryKey)).toEqual([])
+    expect(mockClearStatus).not.toHaveBeenCalled()
+    expect(mockSetError).not.toHaveBeenCalled()
   })
 })

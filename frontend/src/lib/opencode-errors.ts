@@ -62,6 +62,10 @@ export function parseOpenCodeError(error: OpenCodeError | undefined | null): Par
   }
 }
 
+export function isGatewayTimeout(error: unknown): boolean {
+  return error instanceof FetchError && error.statusCode === 524
+}
+
 export function parseNetworkError(error: unknown): ParsedError {
   if (error instanceof Error) {
     if (error instanceof FetchError) {
