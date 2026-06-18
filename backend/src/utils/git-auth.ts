@@ -1,4 +1,5 @@
 import type { GitCredential } from '@opencode-manager/shared'
+import { githubFetch } from './github'
 
 export function isGitHubHttpsUrl(repoUrl: string): boolean {
   const url = normalizeGitCredentialUrl(repoUrl)
@@ -202,20 +203,8 @@ export function createGitIdentityEnv(identity: GitIdentity): Record<string, stri
 export async function fetchGitHubUserInfo(token: string): Promise<GitHubUserInfo | null> {
   try {
     const [userResponse, emailsResponse] = await Promise.all([
-      fetch('https://api.github.com/user', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28'
-        }
-      }),
-      fetch('https://api.github.com/user/emails', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28'
-        }
-      })
+      githubFetch('https://api.github.com/user', { token, apiVersion: '2022-11-28' }),
+      githubFetch('https://api.github.com/user/emails', { token, apiVersion: '2022-11-28' }),
     ])
 
     if (!userResponse.ok) return null

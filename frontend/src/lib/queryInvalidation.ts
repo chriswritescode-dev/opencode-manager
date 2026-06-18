@@ -28,6 +28,12 @@ export function invalidateConfigCaches(queryClient: QueryClient) {
   invalidateProviderCaches(queryClient)
 }
 
+export function invalidateSkillCaches(queryClient: QueryClient) {
+  queryClient.invalidateQueries({ queryKey: ['settings', 'skills'] })
+  queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
+  queryClient.invalidateQueries({ queryKey: ['opencode-skills'] })
+}
+
 export function invalidateSettingsCaches(queryClient: QueryClient, userId = 'default') {
   queryClient.invalidateQueries({ queryKey: ['settings', userId] })
   invalidateConfigCaches(queryClient)

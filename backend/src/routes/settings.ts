@@ -18,6 +18,10 @@ import {
   CreateSkillRequestSchema,
   UpdateSkillRequestSchema,
   SkillScopeSchema,
+  InstallSkillFromGithubRequestSchema,
+  InstallSkillUploadRequestSchema,
+  InstallSkillUploadManifestEntrySchema,
+  type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
@@ -38,7 +42,11 @@ import {
   createSkill,
   updateSkill,
   deleteSkill,
+  installSkillFromGithubTree,
+  installSkillFromUploadedFiles,
 } from '../services/skills'
+import { getRepoById } from '../db/queries'
+import { githubFetch } from '../utils/github'
 
 function getOpenCodeInstallMethod(): string {
   const homePath = process.env.HOME || ''
@@ -92,6 +100,72 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
   await opencodeServerManager.restart()
 }
 
+async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
+  try {
+    await restartOpenCode(openCodeSupervisor)
+    logger.info(`Restarted OpenCode server after skill ${context}`)
+  } catch (restartError) {
+    logger.warn(`Failed to restart OpenCode server after skill ${context}:`, restartError)
+  }
+}
+
+async function dispatchSkillReload(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  repoId: number,
+): Promise<void> {
+  const repo = getRepoById(db, repoId)
+  if (!repo) {
+    logger.warn(`Cannot dispatch skill reload: repo ${repoId} not found`)
+    return
+  }
+
+  await restartOpenCodeSafe(openCodeSupervisor, 'install')
+
+  try {
+    await openCodeClient.forward({
+      method: 'GET',
+      path: '/skill',
+      directory: repo.fullPath,
+    })
+    logger.info(`Dispatched skill reload for project ${repo.fullPath}`)
+  } catch (dispatchError) {
+    logger.warn('Failed to dispatch skill reload:', dispatchError)
+  }
+}
+
+async function reloadAfterSkillInstall(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  scope: SkillScope,
+  repoId: number | undefined,
+): Promise<void> {
+  if (scope === 'project' && repoId !== undefined) {
+    await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
+  } else {
+    await restartOpenCodeSafe(openCodeSupervisor, 'install')
+  }
+}
+
+const SKILL_INSTALL_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 404 | 409]> = [
+  ['already exists', 409],
+  ['404', 404],
+  ['Invalid GitHub tree URL', 400],
+  ['Invalid skill name', 400],
+  ['Only one skill', 400],
+  ['Skill source must contain', 400],
+  ['Path must be relative', 400],
+  ['Path must not contain', 400],
+  ['escapes', 400],
+  ['no downloadable files', 400],
+  ['repoId is required', 400],
+  ['Missing upload file', 400],
+  ['Invalid repoId', 400],
+  ['not a valid file', 400],
+]
+
 function didConfigFieldChange(
   previous: Record<string, unknown> | undefined,
   next: Record<string, unknown> | undefined,
@@ -105,6 +179,19 @@ function needsOpenCodeRestart(
   next: Record<string, unknown> | undefined
 ): boolean {
   return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
+}
+
+function parseOptionalRepoId(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined
+  const parsed = parseInt(value, 10)
+  if (isNaN(parsed)) throw new Error('Invalid repoId')
+  return parsed
+}
+
+function parseBooleanFormValue(value: unknown): boolean | undefined {
+  if (value === true || value === 'true') return true
+  if (value === false || value === 'false') return false
+  return undefined
 }
 
 function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
@@ -855,11 +942,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Fetching available OpenCode versions from GitHub')
       
-      const response = await fetch('https://api.github.com/repos/sst/opencode/releases?per_page=20', {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'User-Agent': 'opencode-manager'
-        }
+      const response = await githubFetch('https://api.github.com/repos/sst/opencode/releases?per_page=20', {
+        accept: 'application/vnd.github.v3+json',
       })
       
       if (!response.ok) {
@@ -1122,11 +1206,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
   app.get('/skills', async (c) => {
     try {
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
       const directory = c.req.query('directory')
       
       const skills = await listManagedSkills(db, openCodeClient, repoId, directory)
@@ -1137,15 +1217,113 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
+  app.post('/skills/install', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+
+      if (contentType.includes('application/json')) {
+        const body = await c.req.json()
+        const validated = InstallSkillFromGithubRequestSchema.parse(body)
+
+        if (validated.scope === 'project' && validated.repoId === undefined) {
+          return c.json({ error: 'repoId is required for project scope' }, 400)
+        }
+
+        const result = await installSkillFromGithubTree(db, validated)
+
+        await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
+
+        return c.json(result)
+      }
+
+      if (contentType.includes('multipart/form-data')) {
+        const formData = await c.req.parseBody({ all: true })
+
+        const scope = formData['scope']
+        const repoIdValue = formData['repoId']
+        const overwriteValue = formData['overwrite']
+        const fileManifestRaw = formData['fileManifest']
+
+        if (typeof fileManifestRaw !== 'string') {
+          return c.json({ error: 'fileManifest is required as a JSON string' }, 400)
+        }
+
+        let manifestEntries: unknown
+        try {
+          manifestEntries = JSON.parse(fileManifestRaw)
+        } catch {
+          return c.json({ error: 'fileManifest must be valid JSON' }, 400)
+        }
+
+        const manifest = InstallSkillUploadManifestEntrySchema.array().parse(manifestEntries)
+
+        const repoId = parseOptionalRepoId(repoIdValue as string | undefined)
+        const overwrite = parseBooleanFormValue(overwriteValue)
+
+        const uploadRequest = InstallSkillUploadRequestSchema.parse({
+          sourceType: 'upload',
+          scope,
+          repoId,
+          overwrite,
+        })
+
+        if (scope === 'project' && repoId === undefined) {
+          return c.json({ error: 'repoId is required for project scope' }, 400)
+        }
+
+        if (manifest.length === 0) {
+          return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+        }
+
+        const missingFields = manifest.filter((entry) => !formData[entry.fieldName])
+        if (missingFields.length > 0) {
+          return c.json({
+            error: `Missing upload file(s): ${missingFields.map((e) => e.fieldName).join(', ')}`,
+          }, 400)
+        }
+
+        const files = await Promise.all(
+          manifest.map(async (entry) => {
+            const file = formData[entry.fieldName]
+            if (!file || !(file instanceof File)) {
+              throw new Error(`Field "${entry.fieldName}" is not a valid file`)
+            }
+            const content = Buffer.from(await file.arrayBuffer())
+            return { relativePath: entry.relativePath, content }
+          }),
+        )
+
+        const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
+
+        await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
+
+        return c.json(result)
+      }
+
+      return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
+    } catch (error) {
+      logger.error('Failed to install skill:', error)
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid skill install data', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const match = SKILL_INSTALL_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
+        if (match) {
+          return c.json({ error: error.message }, match[1])
+        }
+      }
+
+      return c.json({ error: 'Failed to install skill' }, 500)
+    }
+  })
+
   app.get('/skills/:name', async (c) => {
     try {
       const name = c.req.param('name')
       const scope = SkillScopeSchema.parse(c.req.query('scope'))
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
 
       if (scope === 'project' && !repoId) {
         return c.json({ error: 'repoId is required for project scope' }, 400)
@@ -1157,6 +1335,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.error('Failed to get skill:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid scope parameter. Must be "global" or "project"' }, 400)
+      }
+      if (error instanceof Error && error.message.includes('Invalid repoId')) {
+        return c.json({ error: error.message }, 400)
       }
       if (error instanceof Error && error.message.includes('not found')) {
         return c.json({ error: error.message }, 404)
@@ -1174,14 +1355,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const validated = CreateSkillRequestSchema.parse(body)
 
       const skill = await createSkill(db, validated)
-      
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.info('Restarted OpenCode server after skill creation')
-      } catch (restartError) {
-        logger.warn('Failed to restart OpenCode server after skill creation:', restartError)
-      }
-      
+
+      await restartOpenCodeSafe(openCodeSupervisor, 'creation')
+
       return c.json(skill)
     } catch (error) {
       logger.error('Failed to create skill:', error)
@@ -1199,11 +1375,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       const name = c.req.param('name')
       const scope = SkillScopeSchema.parse(c.req.query('scope'))
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
       const body = await c.req.json()
       const validated = UpdateSkillRequestSchema.parse(body)
 
@@ -1212,19 +1384,17 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
-      
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.info('Restarted OpenCode server after skill update')
-      } catch (restartError) {
-        logger.warn('Failed to restart OpenCode server after skill update:', restartError)
-      }
-      
+
+      await restartOpenCodeSafe(openCodeSupervisor, 'update')
+
       return c.json(skill)
     } catch (error) {
       logger.error('Failed to update skill:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid request data', details: error.issues }, 400)
+      }
+      if (error instanceof Error && error.message.includes('Invalid repoId')) {
+        return c.json({ error: error.message }, 400)
       }
       if (error instanceof Error && error.message.includes('not found')) {
         return c.json({ error: error.message }, 404)
@@ -1240,30 +1410,24 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       const name = c.req.param('name')
       const scope = SkillScopeSchema.parse(c.req.query('scope'))
-      const repoIdParam = c.req.query('repoId')
-      const repoId = repoIdParam ? parseInt(repoIdParam, 10) : undefined
-      if (repoId !== undefined && isNaN(repoId)) {
-        return c.json({ error: 'Invalid repoId' }, 400)
-      }
+      const repoId = parseOptionalRepoId(c.req.query('repoId'))
 
       if (scope === 'project' && !repoId) {
         return c.json({ error: 'repoId is required for project scope' }, 400)
       }
 
       await deleteSkill(db, name, scope, repoId)
-      
-      try {
-        await restartOpenCode(openCodeSupervisor)
-        logger.info('Restarted OpenCode server after skill deletion')
-      } catch (restartError) {
-        logger.warn('Failed to restart OpenCode server after skill deletion:', restartError)
-      }
-      
+
+      await restartOpenCodeSafe(openCodeSupervisor, 'deletion')
+
       return c.json({ success: true })
     } catch (error) {
       logger.error('Failed to delete skill:', error)
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid scope parameter. Must be "global" or "project"' }, 400)
+      }
+      if (error instanceof Error && error.message.includes('Invalid repoId')) {
+        return c.json({ error: error.message }, 400)
       }
       if (error instanceof Error && error.message.includes('not found')) {
         return c.json({ error: error.message }, 404)
