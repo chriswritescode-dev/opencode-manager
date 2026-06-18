@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Plus, Trash2, Edit } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
+import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { CommandDialog } from './CommandDialog'
 
 interface Command {
@@ -36,6 +37,7 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
         [name]: command
       }
       onChange(updatedCommands)
+      setIsCreateDialogOpen(false)
     }
   }
 
@@ -51,13 +53,12 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Commands</h3>
+      <div className="flex items-center justify-end">
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
-            <Button className='mr-1 h-6'>
-              <Plus className="h-4 w-4" />
-             
+            <Button size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              Add Command
             </Button>
           </DialogTrigger>
           <CommandDialog
@@ -68,58 +69,27 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
         </Dialog>
       </div>
 
-      {Object.keys(commands).length === 0 ? (
-        <Card>
-          <CardContent className="p-2 sm:p-8 text-center">
-            <p className="text-muted-foreground">No commands configured. Add your first command to get started.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {Object.entries(commands).map(([name, command]) => (
-            <Card key={name}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">/{name}</CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => startEdit(name, command)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => deleteCommand(name)}
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className='p-2'>
-                <div className="space-y-2">
-                  {command.description && (
-                    <p className="text-sm text-muted-foreground">{command.description}</p>
-                  )}
-<div className="text-xs text-muted-foreground space-y-1">
-                     {command.agent && <p>Agent: {command.agent}</p>}
-                     {command.model && <p>Model: {command.model}</p>}
-                     {command.topP !== undefined && <p>Top P: {command.topP}</p>}
-                     {command.subtask && <p>Subtask: Yes</p>}
-                   </div>
-                  <div className="mt-2 bg-muted rounded text-xs font-mono overflow-y-auto p-1 rounded-lg">
-                    {command.template}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <SettingsList
+        isEmpty={Object.keys(commands).length === 0}
+        emptyTitle="No commands configured"
+        emptyHint="Add your first command to get started."
+        maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
+      >
+        {Object.entries(commands).map(([name, command]) => (
+          <SettingsListRow
+            key={name}
+            title={`/${name}`}
+            description={command.description}
+            badges={
+              command.agent && <Badge variant="outline" className="shrink-0">{command.agent}</Badge>
+            }
+            onClick={() => startEdit(name, command)}
+            primaryAction={{ label: 'Edit', onClick: () => startEdit(name, command) }}
+            actions={[{ label: 'Delete', destructive: true, onClick: () => deleteCommand(name) }]}
+            actionsLabel={`Actions for /${name}`}
+          />
+        ))}
+      </SettingsList>
 
       <CommandDialog
         open={!!editingCommand}

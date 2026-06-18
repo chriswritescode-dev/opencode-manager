@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { OpenCodeModelsEditor } from './OpenCodeModelsEditor'
 import type { ConfigProvider, ConfigModel } from './OpenCodeModelsEditor'
 
@@ -24,17 +25,6 @@ const mockProviders: Record<string, ConfigProvider> = {
   },
 }
 
-const findTrashButton = (): HTMLButtonElement | null => {
-  const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-  for (const btn of buttons) {
-    const svg = btn.querySelector('svg')
-    if (svg && svg.getAttribute('class')?.includes('trash')) {
-      return btn
-    }
-  }
-  return null
-}
-
 describe('OpenCodeModelsEditor', () => {
   describe('rendering', () => {
     it('should render empty state when no providers configured', () => {
@@ -51,7 +41,7 @@ describe('OpenCodeModelsEditor', () => {
 
       expect(screen.getByText('OpenAI')).toBeInTheDocument()
       expect(screen.getByText('Anthropic')).toBeInTheDocument()
-      const modelCountSpans = screen.getAllByText(/\(1 model\)/)
+      const modelCountSpans = screen.getAllByText(/1 model/)
       expect(modelCountSpans.length).toBe(2)
     })
 
@@ -75,15 +65,13 @@ describe('OpenCodeModelsEditor', () => {
   })
 
   describe('delete model', () => {
-    it('should call onChange with updated providers when model is deleted', () => {
+    it('should call onChange with updated providers when model is deleted', async () => {
       const onChange = vi.fn()
+      const user = userEvent.setup()
       render(<OpenCodeModelsEditor providers={mockProviders} onChange={onChange} />)
 
-      const deleteButton = findTrashButton()
-      expect(deleteButton).not.toBeNull()
-      if (deleteButton) {
-        fireEvent.click(deleteButton)
-      }
+      await user.click(screen.getByLabelText('Actions for GPT-4o'))
+      await user.click(screen.getByText('Delete'))
 
       expect(onChange).toHaveBeenCalled()
       const updatedProviders = onChange.mock.calls[0][0]
@@ -93,7 +81,7 @@ describe('OpenCodeModelsEditor', () => {
   })
 
   describe('model content structure', () => {
-    it('should preserve provider structure when models change', () => {
+    it('should preserve provider structure when models change', async () => {
       const onChange = vi.fn()
       const providersWithExtras: Record<string, ConfigProvider> = {
         openai: {
@@ -108,12 +96,11 @@ describe('OpenCodeModelsEditor', () => {
         },
       }
 
+      const user = userEvent.setup()
       render(<OpenCodeModelsEditor providers={providersWithExtras} onChange={onChange} />)
 
-      const deleteButton = findTrashButton()
-      if (deleteButton) {
-        fireEvent.click(deleteButton)
-      }
+      await user.click(screen.getByLabelText('Actions for GPT-4o'))
+      await user.click(screen.getByText('Delete'))
 
       expect(onChange).toHaveBeenCalled()
       const updatedProviders = onChange.mock.calls[0][0]

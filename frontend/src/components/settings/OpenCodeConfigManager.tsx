@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
+import { RestartServerDialog } from './RestartServerDialog'
 import { CreateConfigDialog } from './CreateConfigDialog'
 import { OpenCodeConfigEditor } from './OpenCodeConfigEditor'
 import { CommandsEditor } from './CommandsEditor'
@@ -78,6 +79,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
+  const [isRestartPromptOpen, setIsRestartPromptOpen] = useState(false)
   
   const agentsMdRef = useRef<HTMLButtonElement>(null)
   const commandsRef = useRef<HTMLButtonElement>(null)
@@ -232,58 +234,44 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     }
   }
 
-  const updateConfigContent = async (configName: string, newContent: Record<string, unknown>, restartServer = false) => {
+  const updateConfigContent = async (configName: string, newContent: Record<string, unknown>) => {
+    const previousConfig = configs.find(c => c.name === configName)
+    const previousContent = previousConfig?.content
+    const previousSelectedConfig = selectedConfig
+    const shouldPromptRestart = Boolean(previousConfig?.isDefault)
+    const now = Date.now()
+
+    setConfigs(prev => prev.map(config =>
+      config.name === configName ? { ...config, content: newContent, updatedAt: now } : config
+    ))
+    if (selectedConfig && selectedConfig.name === configName) {
+      setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: now })
+    }
+    if (shouldPromptRestart) {
+      setIsRestartPromptOpen(true)
+    }
+
     try {
       setIsUpdating(true)
-      const previousConfig = configs.find(c => c.name === configName)
-      const previousContent = previousConfig?.content
-
       const result = await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
-
-      setConfigs(prev => prev.map(config =>
-        config.name === configName
-          ? { ...config, content: newContent, updatedAt: Date.now() }
-          : config
-      ))
-
-      if (selectedConfig && selectedConfig.name === configName) {
-        setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: Date.now() })
-      }
-
-      const agentsChanged = JSON.stringify(previousContent?.agent) !== JSON.stringify(newContent.agent)
-      const pluginsChanged = JSON.stringify(previousContent?.plugin) !== JSON.stringify(newContent.plugin)
-      const skillsChanged = JSON.stringify(previousContent?.skills) !== JSON.stringify(newContent.skills)
-      const providersChanged = JSON.stringify(previousContent?.provider) !== JSON.stringify(newContent.provider)
-      const defaultConfigChanged = Boolean(previousConfig?.isDefault && (agentsChanged || pluginsChanged || skillsChanged || providersChanged))
-      if (restartServer || defaultConfigChanged) {
-        showToast.loading(restartServer ? 'Restarting server...' : 'Applying server configuration...', { id: 'update-restart' })
-        try {
-          if (restartServer && !defaultConfigChanged) {
-            await restartServerMutation.mutateAsync()
-          }
-          if (result.removedFields && result.removedFields.length > 0) {
-            showToast.info(`Configuration updated after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'update-restart' })
-          } else if (pluginsChanged || restartServer) {
-            showToast.success('Configuration updated and server restarted', { id: 'update-restart' })
-          } else {
-            showToast.success('Configuration updated and server applied', { id: 'update-restart' })
-          }
-          invalidateConfigCaches(queryClient)
-        } catch (error) {
-          showToast.error(getRestartErrorMessage(error), { id: 'update-restart' })
-          throw error
-        }
+      if (result.removedFields && result.removedFields.length > 0) {
+        showToast.info(`Configuration updated after removing invalid fields: ${result.removedFields.join(', ')}`)
       } else {
-        if (result.removedFields && result.removedFields.length > 0) {
-          showToast.info(`Configuration applied after removing invalid fields: ${result.removedFields.join(', ')}`, { id: 'update-restart' })
-        } else {
-          showToast.success('Configuration updated')
-        }
-        invalidateConfigCaches(queryClient)
+        showToast.success('Configuration updated')
       }
+      invalidateConfigCaches(queryClient)
     } catch (error) {
+      setConfigs(prev => prev.map(config =>
+        config.name === configName ? { ...config, content: previousContent ?? {}, updatedAt: previousConfig?.updatedAt ?? now } : config
+      ))
+      if (previousSelectedConfig && previousSelectedConfig.name === configName) {
+        setSelectedConfig(previousSelectedConfig)
+      }
+      if (shouldPromptRestart) {
+        setIsRestartPromptOpen(false)
+      }
       console.error('Failed to update config:', error)
-      showToast.error(getApiErrorMessage(error, 'Failed to update config'), { id: 'update-restart' })
+      showToast.error(getApiErrorMessage(error, 'Failed to update config'))
     } finally {
       setIsUpdating(false)
     }
@@ -1052,6 +1040,24 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
         description="Any repositories using this configuration will continue to work but won't receive updates."
         itemName={deleteConfirmConfig?.name}
         isDeleting={isUpdating}
+      />
+
+      <RestartServerDialog
+        open={isRestartPromptOpen}
+        onOpenChange={setIsRestartPromptOpen}
+        isSaving={isUpdating && !restartServerMutation.isPending}
+        isRestarting={restartServerMutation.isPending}
+        onCancel={() => setIsRestartPromptOpen(false)}
+        onConfirm={async () => {
+          showToast.loading('Restarting OpenCode server...', { id: 'config-restart' })
+          try {
+            await restartServerMutation.mutateAsync()
+            showToast.success('Server restarted successfully', { id: 'config-restart' })
+            setIsRestartPromptOpen(false)
+          } catch (error) {
+            showToast.error(getRestartErrorMessage(error), { id: 'config-restart' })
+          }
+        }}
       />
     </div>
   )
