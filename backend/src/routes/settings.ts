@@ -18,6 +18,9 @@ import {
   CreateSkillRequestSchema,
   UpdateSkillRequestSchema,
   SkillScopeSchema,
+  InstallSkillFromGithubRequestSchema,
+  InstallSkillUploadRequestSchema,
+  InstallSkillUploadManifestEntrySchema,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
@@ -38,7 +41,10 @@ import {
   createSkill,
   updateSkill,
   deleteSkill,
+  installSkillFromGithubTree,
+  installSkillFromUploadedFiles,
 } from '../services/skills'
+import { getRepoById } from '../db/queries'
 
 function getOpenCodeInstallMethod(): string {
   const homePath = process.env.HOME || ''
@@ -92,6 +98,37 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
   await opencodeServerManager.restart()
 }
 
+async function dispatchSkillReload(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  repoId: number,
+): Promise<void> {
+  const repo = getRepoById(db, repoId)
+  if (!repo) {
+    logger.warn(`Cannot dispatch skill reload: repo ${repoId} not found`)
+    return
+  }
+
+  try {
+    await restartOpenCode(openCodeSupervisor)
+    logger.info('Restarted OpenCode server after skill install')
+  } catch (restartError) {
+    logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+  }
+
+  try {
+    await openCodeClient.forward({
+      method: 'GET',
+      path: '/skill',
+      directory: repo.fullPath,
+    })
+    logger.info(`Dispatched skill reload for project ${repo.fullPath}`)
+  } catch (dispatchError) {
+    logger.warn('Failed to dispatch skill reload:', dispatchError)
+  }
+}
+
 function didConfigFieldChange(
   previous: Record<string, unknown> | undefined,
   next: Record<string, unknown> | undefined,
@@ -105,6 +142,19 @@ function needsOpenCodeRestart(
   next: Record<string, unknown> | undefined
 ): boolean {
   return ['agent', 'plugin', 'skills', 'provider'].some((field) => didConfigFieldChange(previous, next, field))
+}
+
+function parseOptionalRepoId(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined
+  const parsed = parseInt(value, 10)
+  if (isNaN(parsed)) throw new Error('Invalid repoId')
+  return parsed
+}
+
+function parseBooleanFormValue(value: unknown): boolean | undefined {
+  if (value === true || value === 'true') return true
+  if (value === false || value === 'false') return false
+  return undefined
 }
 
 function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
@@ -1134,6 +1184,158 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     } catch (error) {
       logger.error('Failed to list skills:', error)
       return c.json({ error: 'Failed to list skills' }, 500)
+    }
+  })
+
+  app.post('/skills/install', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+
+      if (contentType.includes('application/json')) {
+        const body = await c.req.json()
+        const validated = InstallSkillFromGithubRequestSchema.parse(body)
+
+        if (validated.scope === 'project' && validated.repoId === undefined) {
+          return c.json({ error: 'repoId is required for project scope' }, 400)
+        }
+
+        const result = await installSkillFromGithubTree(db, validated)
+
+        if (validated.scope === 'project' && validated.repoId) {
+          await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, validated.repoId)
+        } else {
+          try {
+            await restartOpenCode(openCodeSupervisor)
+            logger.info('Restarted OpenCode server after skill install')
+          } catch (restartError) {
+            logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+          }
+        }
+
+        return c.json(result)
+      }
+
+      if (contentType.includes('multipart/form-data')) {
+        const formData = await c.req.parseBody({ all: true })
+
+        const scope = formData['scope']
+        const repoIdValue = formData['repoId']
+        const overwriteValue = formData['overwrite']
+        const fileManifestRaw = formData['fileManifest']
+
+        if (typeof fileManifestRaw !== 'string') {
+          return c.json({ error: 'fileManifest is required as a JSON string' }, 400)
+        }
+
+        let manifestEntries: unknown
+        try {
+          manifestEntries = JSON.parse(fileManifestRaw)
+        } catch {
+          return c.json({ error: 'fileManifest must be valid JSON' }, 400)
+        }
+
+        const manifest = InstallSkillUploadManifestEntrySchema.array().parse(manifestEntries)
+
+        const repoId = parseOptionalRepoId(repoIdValue as string | undefined)
+        const overwrite = parseBooleanFormValue(overwriteValue)
+
+        const uploadRequest = InstallSkillUploadRequestSchema.parse({
+          sourceType: 'upload',
+          scope,
+          repoId,
+          overwrite,
+        })
+
+        if (scope === 'project' && repoId === undefined) {
+          return c.json({ error: 'repoId is required for project scope' }, 400)
+        }
+
+        if (manifest.length === 0) {
+          return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+        }
+
+        const missingFields = manifest.filter((entry) => !formData[entry.fieldName])
+        if (missingFields.length > 0) {
+          return c.json({
+            error: `Missing upload file(s): ${missingFields.map((e) => e.fieldName).join(', ')}`,
+          }, 400)
+        }
+
+        const files = await Promise.all(
+          manifest.map(async (entry) => {
+            const file = formData[entry.fieldName]
+            if (!file || !(file instanceof File)) {
+              throw new Error(`Field "${entry.fieldName}" is not a valid file`)
+            }
+            const content = Buffer.from(await file.arrayBuffer())
+            return { relativePath: entry.relativePath, content }
+          }),
+        )
+
+        const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
+
+        if (uploadRequest.scope === 'project' && uploadRequest.repoId) {
+          await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, uploadRequest.repoId)
+        } else {
+          try {
+            await restartOpenCode(openCodeSupervisor)
+            logger.info('Restarted OpenCode server after skill install')
+          } catch (restartError) {
+            logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+          }
+        }
+
+        return c.json(result)
+      }
+
+      return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
+    } catch (error) {
+      logger.error('Failed to install skill:', error)
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid skill install data', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        if (error.message.includes('already exists')) {
+          return c.json({ error: error.message }, 409)
+        }
+        if (error.message.includes('Invalid GitHub tree URL')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('Invalid skill name')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('Only one skill')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('Skill source must contain')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('Path must be relative') || error.message.includes('Path must not contain') || error.message.includes('escapes')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('no downloadable files')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('404')) {
+          return c.json({ error: error.message }, 404)
+        }
+        if (error.message.includes('repoId is required')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('Missing upload file')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('Invalid repoId')) {
+          return c.json({ error: error.message }, 400)
+        }
+        if (error.message.includes('not a valid file')) {
+          return c.json({ error: error.message }, 400)
+        }
+      }
+
+      return c.json({ error: 'Failed to install skill' }, 500)
     }
   })
 
