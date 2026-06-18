@@ -1,14 +1,9 @@
 import { useMemo, useState } from 'react'
-import { AlertCircle, Loader2, MoreHorizontal, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import type { SkillFileInfo, SkillScope } from '@opencode-manager/shared'
 
 type SkillFilter = 'all' | SkillScope
@@ -100,77 +95,38 @@ export function SkillLibraryList({
         </div>
       </div>
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-          <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
-        </div>
-      ) : error ? (
-        <div className="text-center py-6 text-muted-foreground">
-          <AlertCircle className="w-10 h-10 mx-auto mb-3 opacity-50 text-red-500" />
-          <p className="text-sm">Failed to load skills</p>
-          <p className="text-xs mt-1">{error.message}</p>
-        </div>
-      ) : filteredSkills.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-muted-foreground">
-          <p className="text-sm font-medium text-foreground">{emptyTitle || 'No skills available'}</p>
-          <p className="text-xs mt-1">{emptyHint || 'Create or install a skill to get started.'}</p>
-        </div>
-      ) : (
-        <div className={`${maxHeightClassName} overflow-y-auto rounded-lg border border-border`}>
-          <div className="divide-y divide-border">
-            {filteredSkills.map((skill) => (
-              <div
-                key={getSkillKey(skill)}
-                onClick={primaryAction ? () => primaryAction.onClick(skill) : undefined}
-                className={`group flex flex-col gap-2 bg-card px-3 py-3 hover:bg-accent/50 sm:flex-row sm:items-center sm:gap-3 ${primaryAction ? 'cursor-pointer' : ''}`}
-              >
-                <div className="min-w-0 flex-1 self-stretch sm:self-auto">
-                  <div className="flex min-w-0 items-start gap-2">
-                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-orange-600 dark:text-orange-400">{skill.name}</p>
-                    <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="shrink-0 sm:hidden">
-                      {getCompactScopeLabel(skill)}
-                    </Badge>
-                    <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="hidden max-w-full truncate sm:inline-flex">
-                      {getScopeLabel(skill)}
-                    </Badge>
-                  </div>
-                  {skill.description && (
-                    <p className="mt-1 truncate text-xs text-muted-foreground">{skill.description}</p>
-                  )}
-                </div>
-                <div className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto sm:justify-start" onClick={(event) => event.stopPropagation()}>
-                  {primaryAction && (
-                    <Button type="button" size="sm" onClick={() => primaryAction.onClick(skill)} className="flex-1 sm:flex-none">
-                      {primaryAction.label}
-                    </Button>
-                  )}
-                  {rowActions.length > 0 && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" aria-label={`Actions for ${skill.name}`}>
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        {rowActions.map((action) => (
-                          <DropdownMenuItem
-                            key={action.label}
-                            onClick={() => action.onClick(skill)}
-                            className={action.destructive ? 'text-destructive focus:text-destructive' : undefined}
-                          >
-                            {action.label}
-                          </DropdownMenuItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <SettingsList
+        isLoading={isLoading}
+        error={error}
+        isEmpty={filteredSkills.length === 0}
+        emptyTitle={emptyTitle ?? 'No skills available'}
+        emptyHint={emptyHint ?? 'Create or install a skill to get started.'}
+        errorTitle="Failed to load skills"
+        maxHeightClassName={maxHeightClassName}
+      >
+        {filteredSkills.map((skill) => (
+          <SettingsListRow
+            key={getSkillKey(skill)}
+            title={skill.name}
+            titleClassName="text-orange-600 dark:text-orange-400"
+            description={skill.description}
+            onClick={primaryAction ? () => primaryAction.onClick(skill) : undefined}
+            primaryAction={primaryAction ? { label: primaryAction.label, onClick: () => primaryAction.onClick(skill) } : undefined}
+            actions={rowActions.map((a) => ({ label: a.label, destructive: a.destructive, onClick: () => a.onClick(skill) }))}
+            actionsLabel={`Actions for ${skill.name}`}
+            badges={
+              <>
+                <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="shrink-0 sm:hidden">
+                  {getCompactScopeLabel(skill)}
+                </Badge>
+                <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="hidden max-w-full truncate sm:inline-flex">
+                  {getScopeLabel(skill)}
+                </Badge>
+              </>
+            }
+          />
+        ))}
+      </SettingsList>
     </div>
   )
 }

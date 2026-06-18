@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
+import { SettingsList } from '@/components/ui/settings-list'
 import { Plus, Loader2, RefreshCw } from 'lucide-react'
 import { DeleteDialog } from '@/components/ui/delete-dialog'
 import { AddMcpServerDialog } from './AddMcpServerDialog'
@@ -198,69 +199,62 @@ export function McpManager({ config, onUpdate, onConfigUpdate }: McpManagerProps
           </div>
         </div>
       )}
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-semibold">MCP Servers</h3>
-          <p className="text-sm text-muted-foreground">
-            Manage Model Context Protocol servers for {config.name}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6"
-            onClick={() => refetchStatus()}
-            disabled={isLoadingStatus}
-          >
-            <RefreshCw className={`h-3 w-3 ${isLoadingStatus ? 'animate-spin' : ''}`} />
-          </Button>
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className='mr-1 h-6'>
-                <Plus className="h-4 w-4" />
-              </Button>
-            </DialogTrigger>
-            <AddMcpServerDialog 
-              open={isAddDialogOpen} 
-              onOpenChange={setIsAddDialogOpen}
-              onUpdate={onConfigUpdate}
-            />
-          </Dialog>
-        </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => refetchStatus()}
+          disabled={isLoadingStatus}
+        >
+          <RefreshCw className={`h-3 w-3 mr-1 ${isLoadingStatus ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
+        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <DialogTrigger asChild>
+            <Button size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              Add Server
+            </Button>
+          </DialogTrigger>
+          <AddMcpServerDialog 
+            open={isAddDialogOpen} 
+            onOpenChange={setIsAddDialogOpen}
+            onUpdate={onConfigUpdate}
+          />
+        </Dialog>
       </div>
 
-      {Object.keys(mcpServers).length === 0 ? (
-        <div className="rounded-lg border border-border p-6 sm:p-8 text-center">
-          <p className="text-muted-foreground">No MCP servers configured. Add your first server to get started.</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {Object.entries(mcpServers).map(([serverId, serverConfig]) => {
-            const status = mcpStatus?.[serverId]
-            const isConnected = status?.status === 'connected'
-            const errorMessage = getErrorMessage(serverId)
-            
-            return (
-              <McpServerCard
-                key={serverId}
-                serverId={serverId}
-                serverConfig={serverConfig}
-                status={status}
-                isConnected={isConnected}
-                errorMessage={errorMessage}
-                isAnyOperationPending={isAnyOperationPending}
-                togglingServerId={togglingServerId}
-                isRemovingAuth={isRemovingAuth}
-                onToggleServer={handleToggleServer}
-                onAuthenticate={handleAuthenticate}
-                onRemoveAuth={handleRemoveAuth}
-                onDeleteServer={(id, name) => setDeleteConfirmServer({ id, name })}
-              />
-            )
-          })}
-        </div>
-      )}
+      <SettingsList
+        isLoading={false}
+        error={null}
+        isEmpty={Object.keys(mcpServers).length === 0}
+        emptyTitle="No MCP servers configured"
+        emptyHint="Add your first server to get started."
+      >
+        {Object.entries(mcpServers).map(([serverId, serverConfig]) => {
+          const status = mcpStatus?.[serverId]
+          const isConnected = status?.status === 'connected'
+          const errorMessage = getErrorMessage(serverId)
+          
+          return (
+            <McpServerCard
+              key={serverId}
+              serverId={serverId}
+              serverConfig={serverConfig}
+              status={status}
+              isConnected={isConnected}
+              errorMessage={errorMessage}
+              isAnyOperationPending={isAnyOperationPending}
+              togglingServerId={togglingServerId}
+              isRemovingAuth={isRemovingAuth}
+              onToggleServer={handleToggleServer}
+              onAuthenticate={handleAuthenticate}
+              onRemoveAuth={handleRemoveAuth}
+              onDeleteServer={(id, name) => setDeleteConfirmServer({ id, name })}
+            />
+          )
+        })}
+      </SettingsList>
 
       <DeleteDialog
         open={!!deleteConfirmServer}

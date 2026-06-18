@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { Plus, Trash2, Edit, Box } from 'lucide-react'
+import { Plus, Box } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
+import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { OpenCodeModelDialog, type NewProviderConfig } from './OpenCodeModelDialog'
 import type { ModelConfig, ProviderConfig } from '@/api/types/settings'
 
@@ -142,12 +142,12 @@ export function OpenCodeModelsEditor({ providers, onChange }: OpenCodeModelsEdit
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Models</h3>
+      <div className="flex items-center justify-end">
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="mr-1 h-6" onClick={() => openCreateDialog()}>
-              <Plus className="h-4 w-4" />
+            <Button size="sm" onClick={() => openCreateDialog()}>
+              <Plus className="h-4 w-4 mr-1" />
+              Add Model
             </Button>
           </DialogTrigger>
           <OpenCodeModelDialog
@@ -162,73 +162,45 @@ export function OpenCodeModelsEditor({ providers, onChange }: OpenCodeModelsEdit
       </div>
 
       {totalModelCount === 0 ? (
-        <Card>
-          <CardContent className="p-2 sm:p-8 text-center">
-            <p className="text-muted-foreground">
-              No models configured. Add your first model to get started.
-            </p>
-          </CardContent>
-        </Card>
+        <SettingsList
+          isEmpty
+          emptyTitle="No models configured"
+          emptyHint="Add your first model to get started."
+        >
+          <div />
+        </SettingsList>
       ) : (
-        <div className="grid gap-4">
+        <div className="space-y-3">
           {providerEntries.map(({ providerId, providerName, models }) => {
             const modelEntries = Object.entries(models)
             if (modelEntries.length === 0) return null
 
             return (
-              <Card key={providerId}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      <Box className="h-4 w-4" />
-                      {providerName}
-                      <span className="text-xs text-muted-foreground font-normal">
-                        ({modelEntries.length} model{modelEntries.length !== 1 ? 's' : ''})
-                      </span>
-                    </CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-2 space-y-3">
+              <div key={providerId} className="space-y-2">
+                <div className="flex items-center gap-2 px-1 text-xs font-medium text-muted-foreground">
+                  <Box className="h-3.5 w-3.5" />
+                  <span>{providerName}</span>
+                  <span>{modelEntries.length} model{modelEntries.length !== 1 ? 's' : ''}</span>
+                </div>
+                <SettingsList isEmpty={false} maxHeightClassName="max-h-[420px]">
                   {modelEntries.map(([modelId, model]) => (
-                    <div
+                    <SettingsListRow
                       key={modelId}
-                      className="flex items-center justify-between p-2 bg-muted/50 rounded-lg"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-sm truncate">{model.name || modelId}</p>
-                        <p className="text-xs text-muted-foreground font-mono truncate">
-                          {modelId}
+                      title={model.name || modelId}
+                      description={<span className="font-mono">{modelId}</span>}
+                      belowDescription={(model.limit?.context || model.limit?.output) && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Limits: {model.limit?.context && `Context ${model.limit.context}`}{model.limit?.context && model.limit?.output && ' / '}{model.limit?.output && `Output ${model.limit.output}`}
                         </p>
-                        {(model.limit?.context || model.limit?.output) && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Limits:{' '}
-                            {model.limit.context && `Context ${model.limit.context}`}
-                            {model.limit.context && model.limit.output && ' / '}
-                            {model.limit.output && `Output ${model.limit.output}`}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-1 ml-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => startEdit(providerId, modelId, model)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => deleteModel(providerId, modelId)}
-                          className="text-red-500 hover:text-red-600"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
+                      )}
+                      onClick={() => startEdit(providerId, modelId, model)}
+                      primaryAction={{ label: 'Edit', onClick: () => startEdit(providerId, modelId, model) }}
+                      actions={[{ label: 'Delete', destructive: true, onClick: () => deleteModel(providerId, modelId) }]}
+                      actionsLabel={`Actions for ${model.name || modelId}`}
+                    />
                   ))}
-                </CardContent>
-              </Card>
+                </SettingsList>
+              </div>
             )
           })}
         </div>

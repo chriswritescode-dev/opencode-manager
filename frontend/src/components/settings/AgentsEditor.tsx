@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Plus, Trash2, Edit } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
+import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { AgentDialog } from './AgentDialog'
 
 interface Agent {
@@ -61,12 +62,12 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Agents</h3>
+      <div className="flex items-center justify-end">
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
-            <Button className='mr-1 h-6'>
-              <Plus className="h-4 w-4" />
+            <Button size="sm">
+              <Plus className="h-4 w-4 mr-1" />
+              Add Agent
             </Button>
           </DialogTrigger>
           <AgentDialog
@@ -77,61 +78,30 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
         </Dialog>
       </div>
 
-      {Object.keys(agents).length === 0 ? (
-        <Card>
-          <CardContent className="p-2 sm:p-8 text-center">
-            <p className="text-muted-foreground">No agents configured. Add your first agent to get started.</p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {Object.entries(agents).map(([name, agent]) => (
-            <Card key={name}>
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-base">{name}</CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => startEdit(name, agent)}
-                    >
-                      <Edit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => deleteAgent(name)}
-                      className="text-red-500 hover:text-red-600"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className='p-2'>
-                <div className="space-y-2">
-                  {agent.description && (
-                    <p className="text-sm text-muted-foreground">{agent.description}</p>
-                  )}
-                  <div className="text-xs text-muted-foreground space-y-1">
-                    <p>Mode: {agent.mode}</p>
-                    {agent.temperature !== undefined && <p>Temperature: {agent.temperature}</p>}
-                    {agent.topP !== undefined && <p>Top P: {agent.topP}</p>}
-                    {agent.model && <p>Model: {agent.model}</p>}
-                    {agent.disable && <p>Status: Disabled</p>}
-                  </div>
-                  {agent.prompt && (
-                    <div className="mt-2 bg-muted rounded text-xs font-mono overflow-y-auto p-1 rounded-lg">
-                      {agent.prompt}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+      <SettingsList
+        isEmpty={Object.keys(agents).length === 0}
+        emptyTitle="No agents configured"
+        emptyHint="Add your first agent to get started."
+        maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
+      >
+        {Object.entries(agents).map(([name, agent]) => (
+          <SettingsListRow
+            key={name}
+            title={name}
+            description={agent.description}
+            badges={
+              <>
+                {agent.mode && <Badge variant="outline" className="shrink-0">{agent.mode}</Badge>}
+                {agent.disable && <Badge variant="secondary" className="shrink-0">Disabled</Badge>}
+              </>
+            }
+            onClick={() => startEdit(name, agent)}
+            primaryAction={{ label: 'Edit', onClick: () => startEdit(name, agent) }}
+            actions={[{ label: 'Delete', destructive: true, onClick: () => deleteAgent(name) }]}
+            actionsLabel={`Actions for ${name}`}
+          />
+        ))}
+      </SettingsList>
 
       <AgentDialog
         open={!!editingAgent}
