@@ -10,6 +10,7 @@ import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
+import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
 
 interface BranchesTabProps {
   repoId: number
@@ -44,9 +45,7 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
     mutationFn: (branch: string) => switchBranch(repoId, branch),
     onSuccess: (updatedRepo) => {
       queryClient.setQueryData(['repo', repoId], updatedRepo)
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
-      queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
+      invalidateRepoGitCaches(queryClient, repoId)
       refetch()
       showToast.success(`Switched to branch: ${updatedRepo.currentBranch}`)
     },

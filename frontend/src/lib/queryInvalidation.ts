@@ -39,6 +39,26 @@ export function invalidateSettingsCaches(queryClient: QueryClient, userId = 'def
   invalidateConfigCaches(queryClient)
 }
 
+export function invalidateRepoGitCaches(queryClient: QueryClient, repoId?: number | null) {
+  queryClient.invalidateQueries({ queryKey: ['repos'] })
+  queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
+
+  if (!repoId) {
+    queryClient.invalidateQueries({ queryKey: ['repo'] })
+    queryClient.invalidateQueries({ queryKey: ['branches'] })
+    queryClient.invalidateQueries({ queryKey: ['gitStatus'] })
+    queryClient.invalidateQueries({ queryKey: ['gitLog'] })
+    queryClient.invalidateQueries({ queryKey: ['fileDiff'] })
+    return
+  }
+
+  queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
+  queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
+  queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
+  queryClient.invalidateQueries({ queryKey: ['gitLog', repoId] })
+  queryClient.invalidateQueries({ queryKey: ['fileDiff', repoId] })
+}
+
 export function invalidateSessionCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({
     predicate: (query) =>

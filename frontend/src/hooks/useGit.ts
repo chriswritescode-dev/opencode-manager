@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, gitDiscardFiles, fetchGitLog, fetchGitDiff, gitReset, getApiErrorMessage } from '@/api/git'
 import { createBranch, switchBranch } from '@/api/repos'
 import { showToast } from '@/lib/toast'
+import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
 
 export function useGit(repoId: number | undefined, onError?: (error: unknown) => void) {
   const queryClient = useQueryClient()
@@ -127,7 +128,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return createBranch(repoId, branchName)
     },
     onSuccess: () => {
-      invalidateCache(['branches'])
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Branch created')
     },
     onError: handleError,
@@ -139,7 +140,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return switchBranch(repoId, branchName)
     },
     onSuccess: () => {
-      invalidateCache(['branches'])
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Switched to branch')
     },
     onError: handleError,

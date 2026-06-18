@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FetchError } from '@opencode-manager/shared'
 import { useGitStatus, getApiErrorMessage } from '@/api/git'
+import { getRepo } from '@/api/repos'
 
 import { useGit } from '@/hooks/useGit'
 import { ChangesTab } from './ChangesTab'
@@ -26,6 +28,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
+import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
 
 interface SourceControlPanelProps {
   repoId: number
@@ -51,8 +54,21 @@ export function SourceControlPanel({
   const [selectedCommit, setSelectedCommit] = useState<string | undefined>()
   const [selectedCommitFile, setSelectedCommitFile] = useState<string | undefined>()
   const [gitError, setGitError] = useState<{ summary: string; detail?: string } | null>(null)
+  const queryClient = useQueryClient()
   const { data: status } = useGitStatus(repoId)
+  const { data: repo, refetch: refetchRepo } = useQuery({
+    queryKey: ['repo', repoId],
+    queryFn: () => getRepo(repoId),
+    enabled: isOpen,
+  })
   const isMobile = useMobile()
+  const displayBranch = repo?.currentBranch || repo?.branch || currentBranch
+
+  useEffect(() => {
+    if (!isOpen) return
+    invalidateRepoGitCaches(queryClient, repoId)
+    void refetchRepo()
+  }, [isOpen, queryClient, refetchRepo, repoId])
 
   const handleGitError = (error: unknown) => {
     if (error instanceof FetchError) {
@@ -100,7 +116,7 @@ export function SourceControlPanel({
         <div className="flex items-center gap-2">
           <div className="flex items-center gap-2">
             <GitBranch className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-medium">{currentBranch}</span>
+            <span className="text-sm font-medium">{displayBranch}</span>
           </div>
           {status && (status.ahead > 0 || status.behind > 0) && (
             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -220,7 +236,7 @@ export function SourceControlPanel({
             <CommitsTab repoId={repoId} onSelectCommit={handleSelectCommit} />
           )}
           {activeTab === 'branches' && currentView === 'default' && (
-            <BranchesTab repoId={repoId} currentBranch={currentBranch} />
+            <BranchesTab repoId={repoId} currentBranch={displayBranch} />
           )}
 
           {currentView === 'commit-detail' && selectedCommit && (
