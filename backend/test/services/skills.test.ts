@@ -545,8 +545,8 @@ Another section.`
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
         if (urlStr === contentsUrl) {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'skills/productivity/teach/SKILL.md', type: 'file', download_url: downloadUrl1, url: contentsUrl },
-            { name: 'GLOSSARY-FORMAT.md', path: 'skills/productivity/teach/GLOSSARY-FORMAT.md', type: 'file', download_url: downloadUrl2, url: contentsUrl.replace('teach', 'teach/GLOSSARY-FORMAT') },
+            { name: 'SKILL.md', path: 'skills/productivity/teach/SKILL.md', type: 'file', download_url: downloadUrl1 },
+            { name: 'GLOSSARY-FORMAT.md', path: 'skills/productivity/teach/GLOSSARY-FORMAT.md', type: 'file', download_url: downloadUrl2 },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === downloadUrl1) {
@@ -616,18 +616,18 @@ Another section.`
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
         if (urlStr === parentContentsUrl) {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'teach', path: 'skills/teach', type: 'dir', download_url: null, url: parentContentsUrl + '/teach' },
-            { name: 'review', path: 'skills/review', type: 'dir', download_url: null, url: parentContentsUrl + '/review' },
+            { name: 'teach', path: 'skills/teach', type: 'dir', download_url: null },
+            { name: 'review', path: 'skills/review', type: 'dir', download_url: null },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === 'https://api.github.com/repos/user/repo/contents/skills/teach?ref=main') {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'skills/teach/SKILL.md', type: 'file', download_url: 'https://raw.githubusercontent.com/user/repo/main/skills/teach/SKILL.md', url },
+            { name: 'SKILL.md', path: 'skills/teach/SKILL.md', type: 'file', download_url: 'https://raw.githubusercontent.com/user/repo/main/skills/teach/SKILL.md' },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === 'https://api.github.com/repos/user/repo/contents/skills/review?ref=main') {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'skills/review/SKILL.md', type: 'file', download_url: 'https://raw.githubusercontent.com/user/repo/main/skills/review/SKILL.md', url },
+            { name: 'SKILL.md', path: 'skills/review/SKILL.md', type: 'file', download_url: 'https://raw.githubusercontent.com/user/repo/main/skills/review/SKILL.md' },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === 'https://raw.githubusercontent.com/user/repo/main/skills/teach/SKILL.md') {
@@ -656,7 +656,7 @@ Another section.`
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
         if (urlStr === contentsUrl) {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'my-skill/SKILL.md', type: 'file', download_url: downloadUrl, url: contentsUrl },
+            { name: 'SKILL.md', path: 'my-skill/SKILL.md', type: 'file', download_url: downloadUrl },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === downloadUrl) {
@@ -702,7 +702,7 @@ Another section.`
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
         if (urlStr === contentsUrl) {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'huge-skill/SKILL.md', type: 'file', download_url: downloadUrl, url: contentsUrl },
+            { name: 'SKILL.md', path: 'huge-skill/SKILL.md', type: 'file', download_url: downloadUrl },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === downloadUrl) {
@@ -728,7 +728,7 @@ Another section.`
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
         if (urlStr === contentsUrl) {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'failing-skill/SKILL.md', type: 'file', download_url: downloadUrl, url: contentsUrl },
+            { name: 'SKILL.md', path: 'failing-skill/SKILL.md', type: 'file', download_url: downloadUrl },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === downloadUrl) {
@@ -755,8 +755,8 @@ Another section.`
         const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.href : url.url
         if (urlStr === contentsUrl) {
           return Promise.resolve(new Response(JSON.stringify([
-            { name: 'SKILL.md', path: 'skill-with-bundle/SKILL.md', type: 'file', download_url: skillUrl, url: contentsUrl },
-            { name: 'GLOSSARY-FORMAT.md', path: 'skill-with-bundle/GLOSSARY-FORMAT.md', type: 'file', download_url: bundleUrl, url: contentsUrl },
+            { name: 'SKILL.md', path: 'skill-with-bundle/SKILL.md', type: 'file', download_url: skillUrl },
+            { name: 'GLOSSARY-FORMAT.md', path: 'skill-with-bundle/GLOSSARY-FORMAT.md', type: 'file', download_url: bundleUrl },
           ]), { status: 200, headers: { 'Content-Type': 'application/json' } }))
         }
         if (urlStr === skillUrl) {

@@ -91,18 +91,12 @@ export function SkillLibraryList({
           />
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1">
-          <Button type="button" variant={filter === 'all' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('all')}>
-            <span>All</span>
-            <span>{counts.all}</span>
-          </Button>
-          <Button type="button" variant={filter === 'project' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('project')}>
-            <span>Project</span>
-            <span>{counts.project}</span>
-          </Button>
-          <Button type="button" variant={filter === 'global' ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter('global')}>
-            <span>Global</span>
-            <span>{counts.global}</span>
-          </Button>
+          {(['all', 'project', 'global'] as const).map((key) => (
+            <Button key={key} type="button" variant={filter === key ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter(key)}>
+              <span>{key.charAt(0).toUpperCase() + key.slice(1)}</span>
+              <span>{counts[key]}</span>
+            </Button>
+          ))}
         </div>
       </div>
 

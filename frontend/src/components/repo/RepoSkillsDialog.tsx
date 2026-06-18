@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -8,8 +8,9 @@ import { SkillLibraryList } from '@/components/skills/SkillLibraryList'
 import { SkillInstallDialog } from '@/components/settings/SkillInstallDialog'
 import { settingsApi } from '@/api/settings'
 import { useLoadSkill } from '@/hooks/useOpenCode'
+import { useDeleteSkill } from '@/hooks/useDeleteSkill'
+import { invalidateSkillCaches } from '@/lib/queryInvalidation'
 import type { SkillFileInfo } from '@opencode-manager/shared'
-import { toast } from 'sonner'
 
 type RepoSkillsDialogBaseProps = {
   open: boolean
@@ -33,7 +34,7 @@ export function RepoSkillsDialog({
 }: RepoSkillsDialogProps) {
   const queryClient = useQueryClient()
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
-  const [deleteSkill, setDeleteSkill] = useState<SkillFileInfo | null>(null)
+  const { deleteSkill, setDeleteSkill, confirmDelete, isDeleting } = useDeleteSkill()
   const skillsQueryKey = directory ? ['settings', 'skills', 'directory', directory] : ['settings', 'skills', repoId]
 
   const { isLoading, data, error } = useQuery({
@@ -46,39 +47,14 @@ export function RepoSkillsDialog({
   const canLoad = !!sessionId && !!opcodeUrl
   const loadSkill = useLoadSkill(opcodeUrl, sessionId, directory)
 
-  const deleteMutation = useMutation({
-    mutationFn: ({ name, scope, repoId }: { name: string; scope: SkillFileInfo['scope']; repoId?: number }) =>
-      settingsApi.deleteSkill(name, scope, repoId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings', 'skills'] })
-      queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
-      toast.success('Skill deleted successfully')
-    },
-    onError: (deleteError) => {
-      toast.error(deleteError instanceof Error ? deleteError.message : 'Failed to delete skill')
-    },
-  })
-
   const handleLoad = (skill: SkillFileInfo) => {
     loadSkill.mutate({ skillName: skill.name })
     onSkillLoaded?.(skill)
     onOpenChange(false)
   }
 
-  const confirmDelete = () => {
-    if (!deleteSkill) return
-    deleteMutation.mutate({
-      name: deleteSkill.name,
-      scope: deleteSkill.scope,
-      repoId: deleteSkill.scope === 'project' ? deleteSkill.repoId : undefined,
-    }, {
-      onSettled: () => setDeleteSkill(null),
-    })
-  }
-
   const handleInstalled = () => {
-    queryClient.invalidateQueries({ queryKey: ['settings', 'skills'] })
-    queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
+    invalidateSkillCaches(queryClient)
   }
 
   if (!repoId && !sessionId) {
@@ -132,7 +108,7 @@ export function RepoSkillsDialog({
         title="Delete Skill"
         description="Delete this managed skill directory and bundled files? This action cannot be undone."
         itemName={deleteSkill?.name}
-        isDeleting={deleteMutation.isPending}
+        isDeleting={isDeleting}
       />
     </>
   )

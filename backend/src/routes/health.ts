@@ -4,6 +4,7 @@ import { readFile } from 'fs/promises'
 import { opencodeServerManager } from '../services/opencode-single-server'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { compareVersions } from '../utils/version-utils'
+import { githubFetch } from '../utils/github'
 
 const GITHUB_REPO_OWNER = 'chriswritescode-dev'
 const GITHUB_REPO_NAME = 'opencode-manager'
@@ -24,14 +25,8 @@ async function fetchLatestRelease(): Promise<CachedRelease | null> {
   }
 
   try {
-    const response = await fetch(
+    const response = await githubFetch(
       `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases/latest`,
-      {
-        headers: {
-          'Accept': 'application/vnd.github+json',
-          'User-Agent': 'OpenCode-Manager'
-        }
-      }
     )
 
     if (!response.ok) {

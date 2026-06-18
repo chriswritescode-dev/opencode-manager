@@ -10,6 +10,7 @@ import type { Repo } from '@opencode-manager/shared/types'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory } from './file-operations'
 import type { OpenCodeClient } from './opencode/client'
 import { logger } from '../utils/logger'
+import { githubFetchJson, githubFetchBinary, type GithubFetchFn } from '../utils/github'
 
 interface OpenCodeSkillInfo {
   name: string
@@ -47,10 +48,7 @@ function getSkillTargetRoot(db: Database, scope: SkillScope, repoId?: number): s
 
 function normalizeInstallRelativePath(relativePath: string): string {
   const normalized = relativePath.replace(/\\/g, '/')
-  if (path.isAbsolute(normalized)) {
-    throw new Error(`Path must be relative, got absolute path: "${relativePath}"`)
-  }
-  if (/^[A-Za-z]:\//.test(normalized)) {
+  if (path.isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized)) {
     throw new Error(`Path must be relative, got absolute path: "${relativePath}"`)
   }
   if (normalized === '' || normalized === '.') {
@@ -203,8 +201,6 @@ export async function installSkillFromUploadedFiles(
   return installSkillFiles(db, input, files)
 }
 
-type GithubFetchFn = (url: string | URL | Request, init?: RequestInit) => Promise<Response>
-
 interface GithubTreeSource {
   owner: string
   repo: string
@@ -217,7 +213,6 @@ interface GithubContentEntry {
   path: string
   type: 'file' | 'dir'
   download_url?: string | null
-  url: string
 }
 
 function parseGithubTreeUrl(url: string): GithubTreeSource {
@@ -249,31 +244,6 @@ function parseGithubTreeUrl(url: string): GithubTreeSource {
   return { owner, repo, ref, path }
 }
 
-async function fetchGithubJson(fetchFn: GithubFetchFn, url: string): Promise<unknown> {
-  const response = await fetchFn(url, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'opencode-manager',
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`GitHub request failed with status ${response.status}`)
-  }
-  return response.json()
-}
-
-async function fetchGithubFile(fetchFn: GithubFetchFn, url: string): Promise<ArrayBuffer> {
-  const response = await fetchFn(url, {
-    headers: {
-      'User-Agent': 'opencode-manager',
-    },
-  })
-  if (!response.ok) {
-    throw new Error(`GitHub request failed with status ${response.status}`)
-  }
-  return response.arrayBuffer()
-}
-
 function githubContentsApiUrl(source: GithubTreeSource, path: string): string {
   const encodedPath = path.split('/').map(encodeURIComponent).join('/')
   return `https://api.github.com/repos/${source.owner}/${source.repo}/contents/${encodedPath}?ref=${encodeURIComponent(source.ref)}`
@@ -284,14 +254,14 @@ async function fetchGithubSkillFiles(
   fetchFn: GithubFetchFn = fetch,
 ): Promise<SkillInstallFile[]> {
   const apiUrl = githubContentsApiUrl(source, source.path)
-  const data = await fetchGithubJson(fetchFn, apiUrl)
+  const data = await githubFetchJson(apiUrl, {}, fetchFn)
 
   if (!Array.isArray(data)) {
     const entry = data as GithubContentEntry
     if (entry.name !== 'SKILL.md') {
       throw new Error('GitHub tree URL must point to a skill folder containing SKILL.md')
     }
-    const buffer = await fetchGithubFile(fetchFn, entry.download_url!)
+    const buffer = await githubFetchBinary(entry.download_url!, {}, fetchFn)
     const content = Buffer.from(buffer)
     if (content.length > FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES) {
       throw new Error('Skill files exceed maximum upload size')
@@ -299,44 +269,40 @@ async function fetchGithubSkillFiles(
     return [{ relativePath: 'SKILL.md', content }]
   }
 
-  const files: SkillInstallFile[] = []
-  let totalBytes = 0
   const MAX_FILES = 100
 
-  async function walk(entries: GithubContentEntry[]) {
-    for (const entry of entries) {
-      if (files.length >= MAX_FILES) {
-        throw new Error(`Skill contains too many files (max ${MAX_FILES})`)
-      }
+  async function collectFileEntries(entries: GithubContentEntry[]): Promise<GithubContentEntry[]> {
+    const fileEntries = entries.filter((entry) => entry.type === 'file' && entry.download_url)
+    const dirEntries = entries.filter((entry) => entry.type === 'dir')
+    const nested = await Promise.all(
+      dirEntries.map(async (dir) => {
+        const dirData = await githubFetchJson(githubContentsApiUrl(source, dir.path), {}, fetchFn)
+        return Array.isArray(dirData) ? collectFileEntries(dirData as GithubContentEntry[]) : []
+      }),
+    )
+    return [...fileEntries, ...nested.flat()]
+  }
 
-      if (entry.type === 'dir') {
-        const dirUrl = githubContentsApiUrl(source, entry.path)
-        const dirData = await fetchGithubJson(fetchFn, dirUrl)
-        if (Array.isArray(dirData)) {
-          await walk(dirData as GithubContentEntry[])
-        }
-        continue
-      }
+  const collected = await collectFileEntries(data as GithubContentEntry[])
 
-      if (!entry.download_url) continue
+  if (collected.length > MAX_FILES) {
+    throw new Error(`Skill contains too many files (max ${MAX_FILES})`)
+  }
 
+  const files = await Promise.all(
+    collected.map(async (entry) => {
       const relativePath = entry.path.startsWith(source.path + '/')
         ? entry.path.substring(source.path.length + 1)
         : entry.path
+      const arrayBuffer = await githubFetchBinary(entry.download_url!, {}, fetchFn)
+      return { relativePath, content: Buffer.from(arrayBuffer) }
+    }),
+  )
 
-      const arrayBuffer = await fetchGithubFile(fetchFn, entry.download_url)
-      const buffer = Buffer.from(arrayBuffer)
-      totalBytes += buffer.length
-
-      if (totalBytes > FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES) {
-        throw new Error('Skill files exceed maximum upload size')
-      }
-
-      files.push({ relativePath, content: buffer })
-    }
+  const totalBytes = files.reduce((sum, file) => sum + file.content.length, 0)
+  if (totalBytes > FILE_LIMITS.MAX_UPLOAD_SIZE_BYTES) {
+    throw new Error('Skill files exceed maximum upload size')
   }
-
-  await walk(data as GithubContentEntry[])
 
   if (files.length === 0) {
     throw new Error('GitHub tree URL contains no downloadable files')
@@ -505,31 +471,33 @@ async function scanSkillRoot(root: string, scope: SkillScope, repo?: Repo): Prom
     return []
   }
 
-  const skills: SkillFileInfo[] = []
-  for (const entry of entries) {
-    if (!entry.isDirectory) continue
+  const scanned = await Promise.all(
+    entries
+      .filter((entry) => entry.isDirectory)
+      .map(async (entry): Promise<SkillFileInfo | null> => {
+        const skillPath = path.join(entry.path, 'SKILL.md')
+        if (!await fileExists(skillPath)) return null
 
-    const skillPath = path.join(entry.path, 'SKILL.md')
-    if (!await fileExists(skillPath)) continue
+        try {
+          const content = await readFileContent(skillPath)
+          const parsed = parseSkillMarkdown(content)
+          return {
+            name: parsed.name,
+            description: parsed.description,
+            body: parsed.body,
+            scope,
+            location: skillPath,
+            repoId: scope === 'project' ? repo?.id : undefined,
+            repoName: scope === 'project' ? repo?.localPath : undefined,
+          }
+        } catch (error) {
+          logger.warn(`Failed to read skill at ${skillPath}:`, error)
+          return null
+        }
+      }),
+  )
 
-    try {
-      const content = await readFileContent(skillPath)
-      const parsed = parseSkillMarkdown(content)
-      skills.push({
-        name: parsed.name,
-        description: parsed.description,
-        body: parsed.body,
-        scope,
-        location: skillPath,
-        repoId: scope === 'project' ? repo?.id : undefined,
-        repoName: scope === 'project' ? repo?.localPath : undefined,
-      })
-    } catch (error) {
-      logger.warn(`Failed to read skill at ${skillPath}:`, error)
-    }
-  }
-
-  return skills
+  return scanned.filter((skill): skill is SkillFileInfo => skill !== null)
 }
 
 function addSkill(result: SkillFileInfo[], seenLocations: Set<string>, skill: SkillFileInfo): void {
@@ -560,10 +528,10 @@ export async function listManagedSkills(
     }
 
     const repo = allRepos.find(r => r.fullPath === directory)
-    const fallbackSkills = [
-      ...await scanSkillRoot(globalPrefix, 'global'),
-      ...await scanSkillRoot(path.join(directory, '.opencode', 'skills'), 'project', repo),
-    ]
+    const fallbackSkills = (await Promise.all([
+      scanSkillRoot(globalPrefix, 'global'),
+      scanSkillRoot(path.join(directory, '.opencode', 'skills'), 'project', repo),
+    ])).flat()
     for (const skill of fallbackSkills) {
       addSkill(result, seenLocations, skill)
     }
@@ -590,12 +558,11 @@ export async function listManagedSkills(
       }
     }
 
-    const fallbackSkills = [
-      ...await scanSkillRoot(globalPrefix, 'global'),
-      ...(await Promise.all(
-        targetRepos.map(repo => scanSkillRoot(getProjectSkillsPath(repo), 'project', repo)),
-      )).flat(),
-    ]
+    const [globalFallback, repoFallbacks] = await Promise.all([
+      scanSkillRoot(globalPrefix, 'global'),
+      Promise.all(targetRepos.map(repo => scanSkillRoot(getProjectSkillsPath(repo), 'project', repo))),
+    ])
+    const fallbackSkills = [...globalFallback, ...repoFallbacks.flat()]
     for (const skill of fallbackSkills) {
       addSkill(result, seenLocations, skill)
     }
