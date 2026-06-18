@@ -462,16 +462,16 @@ function classifySkillLocation(
   if (location.startsWith(globalPrefix + path.sep)) {
     return { scope: 'global' }
   }
-  if (customDirectory) {
-    const projectPrefix = path.join(customDirectory, '.opencode', 'skills')
-    if (location.startsWith(projectPrefix + path.sep)) {
-      return { scope: 'project' }
-    }
-  }
   for (const repo of repos) {
     const projectPrefix = getProjectSkillsPath(repo)
     if (location.startsWith(projectPrefix + path.sep)) {
       return { scope: 'project', repo }
+    }
+  }
+  if (customDirectory) {
+    const projectPrefix = path.join(customDirectory, '.opencode', 'skills')
+    if (location.startsWith(projectPrefix + path.sep)) {
+      return { scope: 'project' }
     }
   }
   return null
@@ -492,6 +492,52 @@ function toSkillFileInfo(
   }
 }
 
+async function scanSkillRoot(root: string, scope: SkillScope, repo?: Repo): Promise<SkillFileInfo[]> {
+  if (!await fileExists(root)) {
+    return []
+  }
+
+  let entries: Awaited<ReturnType<typeof listDirectory>>
+  try {
+    entries = await listDirectory(root)
+  } catch (error) {
+    logger.warn(`Failed to scan skills at ${root}:`, error)
+    return []
+  }
+
+  const skills: SkillFileInfo[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory) continue
+
+    const skillPath = path.join(entry.path, 'SKILL.md')
+    if (!await fileExists(skillPath)) continue
+
+    try {
+      const content = await readFileContent(skillPath)
+      const parsed = parseSkillMarkdown(content)
+      skills.push({
+        name: parsed.name,
+        description: parsed.description,
+        body: parsed.body,
+        scope,
+        location: skillPath,
+        repoId: scope === 'project' ? repo?.id : undefined,
+        repoName: scope === 'project' ? repo?.localPath : undefined,
+      })
+    } catch (error) {
+      logger.warn(`Failed to read skill at ${skillPath}:`, error)
+    }
+  }
+
+  return skills
+}
+
+function addSkill(result: SkillFileInfo[], seenLocations: Set<string>, skill: SkillFileInfo): void {
+  if (seenLocations.has(skill.location)) return
+  seenLocations.add(skill.location)
+  result.push(skill)
+}
+
 export async function listManagedSkills(
   db: Database,
   openCodeClient: OpenCodeClient,
@@ -510,8 +556,16 @@ export async function listManagedSkills(
       if (seenLocations.has(skill.location)) continue
       const classification = classifySkillLocation(skill.location, globalPrefix, allRepos, directory)
       if (!classification) continue
-      seenLocations.add(skill.location)
-      result.push(toSkillFileInfo(skill, classification))
+      addSkill(result, seenLocations, toSkillFileInfo(skill, classification))
+    }
+
+    const repo = allRepos.find(r => r.fullPath === directory)
+    const fallbackSkills = [
+      ...await scanSkillRoot(globalPrefix, 'global'),
+      ...await scanSkillRoot(path.join(directory, '.opencode', 'skills'), 'project', repo),
+    ]
+    for (const skill of fallbackSkills) {
+      addSkill(result, seenLocations, skill)
     }
   } else {
     const targetRepos = repoId
@@ -532,9 +586,18 @@ export async function listManagedSkills(
         if (seenLocations.has(skill.location)) continue
         const classification = classifySkillLocation(skill.location, globalPrefix, allRepos)
         if (!classification) continue
-        seenLocations.add(skill.location)
-        result.push(toSkillFileInfo(skill, classification))
+        addSkill(result, seenLocations, toSkillFileInfo(skill, classification))
       }
+    }
+
+    const fallbackSkills = [
+      ...await scanSkillRoot(globalPrefix, 'global'),
+      ...(await Promise.all(
+        targetRepos.map(repo => scanSkillRoot(getProjectSkillsPath(repo), 'project', repo)),
+      )).flat(),
+    ]
+    for (const skill of fallbackSkills) {
+      addSkill(result, seenLocations, skill)
     }
   }
 

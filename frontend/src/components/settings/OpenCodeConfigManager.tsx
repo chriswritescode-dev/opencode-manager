@@ -874,7 +874,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.commands ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-1 sm:p-4 max-h-[50vh] overflow-y-auto">
+                        <div className="p-2 sm:max-h-[50vh] sm:overflow-y-auto sm:p-4">
                           <CommandsEditor
                             commands={(selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}}
                             onChange={(commands) => {
@@ -911,7 +911,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.agents ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                        <div className="p-2 sm:max-h-[50vh] sm:overflow-y-auto sm:p-4">
                           <AgentsEditor
                             agents={(selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}}
                             onChange={(agents) => {
@@ -941,25 +941,15 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Skills</h4>
                           <span className="text-xs text-muted-foreground">
-                            {managedSkills.length + (((selectedConfig.content?.skills as { paths?: string[]; urls?: string[] } | undefined)?.paths?.length) ?? 0) + (((selectedConfig.content?.skills as { paths?: string[]; urls?: string[] } | undefined)?.urls?.length) ?? 0)} configured
+                            {managedSkills.length} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.skills ? 'rotate-90' : ''}`} />
                       </button>
                         <div className={`${expandedSections.skills ? 'block' : 'hidden'} border-t border-border`}>
-                          <div className="p-4 max-h-[50vh] overflow-y-auto">
+                          <div className="p-2 sm:max-h-[50vh] sm:overflow-y-auto sm:p-4">
                             <SkillsEditor
-                              skills={selectedConfig.content?.skills as { paths?: string[]; urls?: string[] } | undefined}
                               managedSkills={managedSkills}
-                              onChange={(skills) => {
-                                const paths = skills?.paths?.filter(Boolean)
-                                const urls = skills?.urls?.filter(Boolean)
-                                const updatedContent = {
-                                  ...selectedConfig.content,
-                                  skills: (paths?.length || urls?.length) ? { paths: paths?.length ? paths : undefined, urls: urls?.length ? urls : undefined } : undefined
-                                }
-                                updateConfigContent(selectedConfig.name, updatedContent)
-                              }}
                             />
                           </div>
                         </div>
@@ -987,7 +977,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.mcp ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.mcp ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                        <div className="p-2 sm:max-h-[50vh] sm:overflow-y-auto sm:p-4">
                           <McpManager
                             config={selectedConfig}
                             onUpdate={(content) => updateConfigContent(selectedConfig.name, content)}
@@ -1026,7 +1016,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.models ? 'rotate-90' : ''}`} />
                       </button>
                       <div className={`${expandedSections.models ? 'block' : 'hidden'} border-t border-border`}>
-                        <div className="p-4 max-h-[50vh] overflow-y-auto">
+                        <div className="p-2 sm:max-h-[50vh] sm:overflow-y-auto sm:p-4">
                           <OpenCodeModelsEditor
                             providers={(selectedConfig.content?.provider as Record<string, ConfigProvider> | undefined) ?? {}}
                             onChange={(providers) => {
