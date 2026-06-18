@@ -50,7 +50,7 @@ export function RepoSkillsDialog({
     mutationFn: ({ name, scope, repoId }: { name: string; scope: SkillFileInfo['scope']; repoId?: number }) =>
       settingsApi.deleteSkill(name, scope, repoId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: skillsQueryKey })
+      queryClient.invalidateQueries({ queryKey: ['settings', 'skills'] })
       queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
       toast.success('Skill deleted successfully')
     },
@@ -77,7 +77,7 @@ export function RepoSkillsDialog({
   }
 
   const handleInstalled = () => {
-    queryClient.invalidateQueries({ queryKey: skillsQueryKey })
+    queryClient.invalidateQueries({ queryKey: ['settings', 'skills'] })
     queryClient.invalidateQueries({ queryKey: ['managed-skills'] })
   }
 

@@ -1,8 +1,9 @@
 import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { mkdtemp, rm, readFile } from 'fs/promises'
+import { mkdir, mkdtemp, rm, readFile, writeFile } from 'fs/promises'
 import type { OpenCodeClient } from '../../src/services/opencode/client'
+import type { Repo } from '../../src/types/repo'
 
 vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@opencode-manager/shared/config/env')>()
@@ -296,6 +297,43 @@ describe('SkillService', () => {
     } finally {
       await deleteSkill(mockDb, name1, 'global').catch(() => {})
       await deleteSkill(mockDb, name2, 'global').catch(() => {})
+    }
+  })
+
+  test('lists project skills from repo .opencode directory when OpenCode returns none', async () => {
+    const { listManagedSkills } = await import('../../src/services/skills')
+    const dbQueries = await import('../../src/db/queries')
+    const projectPath = join(tempDir, 'project-zero')
+    const skillDir = join(projectPath, '.opencode', 'skills', 'project-helper')
+    const repo: Repo = {
+      id: 123,
+      localPath: 'Project Zero',
+      fullPath: projectPath,
+      sourcePath: projectPath,
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+      isLocal: true,
+    }
+
+    vi.mocked(dbQueries.listRepos).mockReturnValue([repo])
+    await mkdir(skillDir, { recursive: true })
+    await writeFile(
+      join(skillDir, 'SKILL.md'),
+      '---\nname: project-helper\ndescription: Helps project work\n---\nUse repo context.',
+    )
+
+    const repoSkills = await listManagedSkills(mockDb, createMockClient([]), repo.id)
+    const directorySkills = await listManagedSkills(mockDb, createMockClient([]), undefined, projectPath)
+
+    for (const skills of [repoSkills, directorySkills]) {
+      expect(skills).toContainEqual(expect.objectContaining({
+        name: 'project-helper',
+        description: 'Helps project work',
+        scope: 'project',
+        repoId: repo.id,
+        repoName: 'Project Zero',
+      }))
     }
   })
 

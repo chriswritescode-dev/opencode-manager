@@ -44,6 +44,7 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
+import { getRepoById } from '../db/queries'
 
 function getOpenCodeInstallMethod(): string {
   const homePath = process.env.HOME || ''
@@ -95,6 +96,37 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
 
   opencodeServerManager.clearStartupError()
   await opencodeServerManager.restart()
+}
+
+async function dispatchSkillReload(
+  db: Database,
+  openCodeClient: OpenCodeClient,
+  openCodeSupervisor: OpenCodeSupervisor | undefined,
+  repoId: number,
+): Promise<void> {
+  const repo = getRepoById(db, repoId)
+  if (!repo) {
+    logger.warn(`Cannot dispatch skill reload: repo ${repoId} not found`)
+    return
+  }
+
+  try {
+    await restartOpenCode(openCodeSupervisor)
+    logger.info('Restarted OpenCode server after skill install')
+  } catch (restartError) {
+    logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+  }
+
+  try {
+    await openCodeClient.forward({
+      method: 'GET',
+      path: '/skill',
+      directory: repo.fullPath,
+    })
+    logger.info(`Dispatched skill reload for project ${repo.fullPath}`)
+  } catch (dispatchError) {
+    logger.warn('Failed to dispatch skill reload:', dispatchError)
+  }
 }
 
 function didConfigFieldChange(
@@ -1169,11 +1201,15 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromGithubTree(db, validated)
 
-        try {
-          await restartOpenCode(openCodeSupervisor)
-          logger.info('Restarted OpenCode server after skill install')
-        } catch (restartError) {
-          logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+        if (validated.scope === 'project' && validated.repoId) {
+          await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, validated.repoId)
+        } else {
+          try {
+            await restartOpenCode(openCodeSupervisor)
+            logger.info('Restarted OpenCode server after skill install')
+          } catch (restartError) {
+            logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+          }
         }
 
         return c.json(result)
@@ -1238,11 +1274,15 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
 
-        try {
-          await restartOpenCode(openCodeSupervisor)
-          logger.info('Restarted OpenCode server after skill install')
-        } catch (restartError) {
-          logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+        if (uploadRequest.scope === 'project' && uploadRequest.repoId) {
+          await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, uploadRequest.repoId)
+        } else {
+          try {
+            await restartOpenCode(openCodeSupervisor)
+            logger.info('Restarted OpenCode server after skill install')
+          } catch (restartError) {
+            logger.warn('Failed to restart OpenCode server after skill install:', restartError)
+          }
         }
 
         return c.json(result)

@@ -40,6 +40,8 @@ const getScopeLabel = (skill: SkillFileInfo) => {
   return skill.repoName ? `Project: ${skill.repoName}` : 'Project'
 }
 
+const getCompactScopeLabel = (skill: SkillFileInfo) => skill.scope === 'global' ? 'Global' : 'Project'
+
 const matchesSkillSearch = (skill: SkillFileInfo, search: string) => {
   const query = search.trim().toLowerCase()
   if (!query) return true
@@ -127,12 +129,15 @@ export function SkillLibraryList({
               <div
                 key={getSkillKey(skill)}
                 onClick={primaryAction ? () => primaryAction.onClick(skill) : undefined}
-                className={`group flex items-center gap-3 bg-card px-3 py-3 hover:bg-accent/50 ${primaryAction ? 'cursor-pointer' : ''}`}
+                className={`group flex flex-col gap-2 bg-card px-3 py-3 hover:bg-accent/50 sm:flex-row sm:items-center sm:gap-3 ${primaryAction ? 'cursor-pointer' : ''}`}
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-medium text-orange-600 dark:text-orange-400">{skill.name}</p>
-                    <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="shrink-0">
+                <div className="min-w-0 flex-1 self-stretch sm:self-auto">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <p className="min-w-0 flex-1 truncate text-sm font-medium text-orange-600 dark:text-orange-400">{skill.name}</p>
+                    <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="shrink-0 sm:hidden">
+                      {getCompactScopeLabel(skill)}
+                    </Badge>
+                    <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="hidden max-w-full truncate sm:inline-flex">
                       {getScopeLabel(skill)}
                     </Badge>
                   </div>
@@ -140,9 +145,9 @@ export function SkillLibraryList({
                     <p className="mt-1 truncate text-xs text-muted-foreground">{skill.description}</p>
                   )}
                 </div>
-                <div className="flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                <div className="flex w-full shrink-0 items-center justify-end gap-1 sm:w-auto sm:justify-start" onClick={(event) => event.stopPropagation()}>
                   {primaryAction && (
-                    <Button type="button" size="sm" onClick={() => primaryAction.onClick(skill)}>
+                    <Button type="button" size="sm" onClick={() => primaryAction.onClick(skill)} className="flex-1 sm:flex-none">
                       {primaryAction.label}
                     </Button>
                   )}

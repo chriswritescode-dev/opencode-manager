@@ -335,6 +335,8 @@ export function OpenCodeModelDialog({
 
   const isEditing = !!editingModel
 
+  if (!open) return null
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange} key={editingModel ? `edit-${editingModel.modelId}` : 'create'}>
       <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
