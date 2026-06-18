@@ -307,6 +307,30 @@ export const settingsApi = {
       body: formData,
     })
   },
+
+  installOpenCodeDirectoryFiles: async (data: {
+    kind: 'agents' | 'commands'
+    files: File[]
+  }): Promise<{ kind: 'agents' | 'commands'; filesInstalled: string[] }> => {
+    const formData = new FormData()
+    formData.append('kind', data.kind)
+
+    const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
+
+    data.files.forEach((file, index) => {
+      const fieldName = `file${index}`
+      const relativePath = file.webkitRelativePath || file.name
+      fileManifest.push({ fieldName, relativePath })
+      formData.append(fieldName, file)
+    })
+
+    formData.append('fileManifest', JSON.stringify(fileManifest))
+
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/install`, {
+      method: 'POST',
+      body: formData,
+    })
+  },
 }
 
 export interface VersionInfo {

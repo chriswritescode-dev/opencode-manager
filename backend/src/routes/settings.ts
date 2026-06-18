@@ -45,6 +45,7 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
+import { installOpenCodeDirectoryFiles } from '../services/opencode-directory-files'
 import { getRepoById } from '../db/queries'
 import { githubFetch } from '../utils/github'
 
@@ -103,9 +104,9 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
 async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
   try {
     await restartOpenCode(openCodeSupervisor)
-    logger.info(`Restarted OpenCode server after skill ${context}`)
+    logger.info(`Restarted OpenCode server after ${context}`)
   } catch (restartError) {
-    logger.warn(`Failed to restart OpenCode server after skill ${context}:`, restartError)
+    logger.warn(`Failed to restart OpenCode server after ${context}:`, restartError)
   }
 }
 
@@ -121,7 +122,7 @@ async function dispatchSkillReload(
     return
   }
 
-  await restartOpenCodeSafe(openCodeSupervisor, 'install')
+  await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
 
   try {
     await openCodeClient.forward({
@@ -145,9 +146,18 @@ async function reloadAfterSkillInstall(
   if (scope === 'project' && repoId !== undefined) {
     await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
   } else {
-    await restartOpenCodeSafe(openCodeSupervisor, 'install')
+    await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
   }
 }
+
+const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
+  ['No markdown', 400],
+  ['Path must be relative', 400],
+  ['Path must not contain', 400],
+  ['escapes', 400],
+  ['Missing upload file', 400],
+  ['not a valid file', 400],
+]
 
 const SKILL_INSTALL_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 404 | 409]> = [
   ['already exists', 409],
@@ -1214,6 +1224,73 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     } catch (error) {
       logger.error('Failed to list skills:', error)
       return c.json({ error: 'Failed to list skills' }, 500)
+    }
+  })
+
+  app.post('/opencode-directory-files/install', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+      if (!contentType.includes('multipart/form-data')) {
+        return c.json({ error: 'Unsupported content type. Use multipart/form-data' }, 400)
+      }
+
+      const formData = await c.req.parseBody({ all: true })
+      const kind = z.enum(['agents', 'commands']).parse(formData['kind'])
+      const fileManifestRaw = formData['fileManifest']
+
+      if (typeof fileManifestRaw !== 'string') {
+        return c.json({ error: 'fileManifest is required as a JSON string' }, 400)
+      }
+
+      let manifestEntries: unknown
+      try {
+        manifestEntries = JSON.parse(fileManifestRaw)
+      } catch {
+        return c.json({ error: 'fileManifest must be valid JSON' }, 400)
+      }
+
+      const manifest = InstallSkillUploadManifestEntrySchema.array().parse(manifestEntries)
+      if (manifest.length === 0) {
+        return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+      }
+
+      const missingFields = manifest.filter((entry) => !formData[entry.fieldName])
+      if (missingFields.length > 0) {
+        return c.json({
+          error: `Missing upload file(s): ${missingFields.map((e) => e.fieldName).join(', ')}`,
+        }, 400)
+      }
+
+      const files = await Promise.all(
+        manifest.map(async (entry) => {
+          const file = formData[entry.fieldName]
+          if (!file || !(file instanceof File)) {
+            throw new Error(`Field "${entry.fieldName}" is not a valid file`)
+          }
+          const content = Buffer.from(await file.arrayBuffer())
+          return { relativePath: entry.relativePath, content }
+        }),
+      )
+
+      const result = await installOpenCodeDirectoryFiles(kind, files)
+      await restartOpenCodeSafe(openCodeSupervisor, `${kind} upload`)
+
+      return c.json(result)
+    } catch (error) {
+      logger.error('Failed to install OpenCode directory files:', error)
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid upload data', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const match = OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
+        if (match) {
+          return c.json({ error: error.message }, match[1])
+        }
+      }
+
+      return c.json({ error: 'Failed to install OpenCode directory files' }, 500)
     }
   })
 
