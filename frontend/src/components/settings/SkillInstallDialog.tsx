@@ -32,6 +32,14 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
     setOverwrite(false)
   }, [url, files, sourceType, scope, selectedRepoId])
 
+  const resetForm = () => {
+    setUrl('')
+    setScope('global')
+    setSelectedRepoId(undefined)
+    setFiles([])
+    setOverwrite(false)
+  }
+
   const { data: repos = [] } = useQuery<Repo[]>({
     queryKey: ['repos'],
     queryFn: listRepos,
@@ -59,11 +67,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
     },
     onSuccess: () => {
       toast.success('Skill installed successfully')
-      setUrl('')
-      setScope('global')
-      setSelectedRepoId(undefined)
-      setFiles([])
-      setOverwrite(false)
+      resetForm()
       onInstalled()
       onOpenChange(false)
     },
@@ -94,11 +98,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
 
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) {
-      setUrl('')
-      setScope('global')
-      setSelectedRepoId(undefined)
-      setFiles([])
-      setOverwrite(false)
+      resetForm()
     }
     onOpenChange(isOpen)
   }

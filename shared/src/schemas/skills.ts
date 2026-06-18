@@ -44,9 +44,6 @@ export interface SkillFileInfo {
   repoName?: string
 }
 
-export const SkillInstallSourceSchema = z.enum(['github', 'upload'])
-export type SkillInstallSource = z.infer<typeof SkillInstallSourceSchema>
-
 export const InstallSkillFromGithubRequestSchema = z.object({
   sourceType: z.literal('github'),
   url: z.string().url(),
