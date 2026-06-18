@@ -19,7 +19,7 @@ jobs:
         id: versions
         run: |
           UV_VERSION=$(git ls-remote --tags --sort=-v:refname https://github.com/astral-sh/uv.git 'refs/tags/[0-9]*' | head -1 | sed 's/.*refs\/tags\///')
-          OPENCODE_VERSION=$(curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+          OPENCODE_VERSION=$(curl -s https://api.github.com/repos/anomalyco/opencode/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
           echo "uv=${UV_VERSION}" >> $GITHUB_OUTPUT
           echo "opencode=${OPENCODE_VERSION}" >> $GITHUB_OUTPUT
           echo "Detected versions: uv=${UV_VERSION}, opencode=${OPENCODE_VERSION}"
