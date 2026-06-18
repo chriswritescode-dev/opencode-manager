@@ -43,36 +43,3 @@ export interface SkillFileInfo {
   repoId?: number
   repoName?: string
 }
-
-export const SkillInstallSourceSchema = z.enum(['github', 'upload'])
-export type SkillInstallSource = z.infer<typeof SkillInstallSourceSchema>
-
-export const InstallSkillFromGithubRequestSchema = z.object({
-  sourceType: z.literal('github'),
-  url: z.string().url(),
-  scope: SkillScopeSchema,
-  repoId: z.number().optional(),
-  overwrite: z.boolean().optional(),
-})
-export type InstallSkillFromGithubRequest = z.infer<typeof InstallSkillFromGithubRequestSchema>
-
-export const InstallSkillUploadManifestEntrySchema = z.object({
-  fieldName: z.string().min(1),
-  relativePath: z.string().min(1),
-})
-export type InstallSkillUploadManifestEntry = z.infer<typeof InstallSkillUploadManifestEntrySchema>
-
-export const InstallSkillUploadRequestSchema = z.object({
-  sourceType: z.literal('upload'),
-  scope: SkillScopeSchema,
-  repoId: z.number().optional(),
-  overwrite: z.boolean().optional(),
-})
-export type InstallSkillUploadRequest = z.infer<typeof InstallSkillUploadRequestSchema>
-
-export interface InstallSkillResponse {
-  skill: SkillFileInfo
-  overwritten: boolean
-  sourceType: 'github' | 'upload'
-  filesInstalled: string[]
-}

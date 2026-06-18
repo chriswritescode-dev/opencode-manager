@@ -179,7 +179,7 @@ export function SettingsDialog() {
         </div>
 
         <div className="sm:hidden flex flex-col h-full min-h-0">
-           <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-3 py-3 flex items-center justify-between">
+           <div className="flex-shrink-0 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-4 py-4 flex items-center justify-between">
              <div className="flex items-center gap-2 flex-1">
                 {mobileView !== 'menu' && (
                   <Button
@@ -205,7 +205,7 @@ export function SettingsDialog() {
              </Button>
            </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto p-3 pb-20">
+           <div className="flex-1 min-h-0 overflow-y-auto p-4 pb-32">
              {mobileView === 'menu' && (
                <div className="space-y-3">
                  {menuItems.map((item) => (
@@ -235,7 +235,7 @@ export function SettingsDialog() {
              {mobileView === 'git' && <div key="git"><GitSettings /></div>}
               {mobileView === 'shortcuts' && <div key="shortcuts"><KeyboardShortcuts /></div>}
                 {mobileView === 'opencode' && (
-                   <div key="opencode" className="space-y-4">
+                  <div key="opencode" className="space-y-6">
                     <ServerHealthStatus onOpenVersionDialog={() => setIsVersionDialogOpen(true)} />
                     <OpenCodeServerAuthSettings />
                     <ManagerTokenSettings />
