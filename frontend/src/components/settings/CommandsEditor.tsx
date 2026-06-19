@@ -1,13 +1,11 @@
 import { useState } from 'react'
-import { FolderUp, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { CommandDialog } from './CommandDialog'
-import { Input } from '@/components/ui/input'
-import { settingsApi } from '@/api/settings'
-import { toast } from 'sonner'
+import { UploadFolderButton } from './UploadFolderButton'
 
 interface Command {
   template: string
@@ -26,7 +24,6 @@ interface CommandsEditorProps {
 export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingCommand, setEditingCommand] = useState<{ name: string; command: Command } | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
 
   const handleCommandSubmit = (name: string, command: Command) => {
     if (editingCommand) {
@@ -55,40 +52,10 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
     setEditingCommand({ name, command })
   }
 
-  const importCommandDirectory = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
-    event.target.value = ''
-    if (files.length === 0) return
-
-    try {
-      setIsUploading(true)
-      const result = await settingsApi.installOpenCodeDirectoryFiles({ kind: 'commands', files })
-      toast.success(`Uploaded ${result.filesInstalled.length} command file${result.filesInstalled.length === 1 ? '' : 's'}`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to upload commands')
-    } finally {
-      setIsUploading(false)
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" disabled={isUploading} asChild>
-          <label className="cursor-pointer">
-            <FolderUp className="h-4 w-4 mr-1" />
-            {isUploading ? 'Uploading...' : 'Upload Folder'}
-            <Input
-              type="file"
-              accept=".md,text/markdown"
-              className="sr-only"
-              multiple
-              disabled={isUploading}
-              {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
-              onChange={importCommandDirectory}
-            />
-          </label>
-        </Button>
+        <UploadFolderButton kind="commands" />
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm">

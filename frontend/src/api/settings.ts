@@ -19,6 +19,19 @@ import { fetchWrapper, FetchError } from './fetchWrapper'
 
 const DEFAULT_USER_ID = 'default'
 
+function appendFilesWithManifest(formData: FormData, files: File[]): void {
+  const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
+
+  files.forEach((file, index) => {
+    const fieldName = `file${index}`
+    const relativePath = file.webkitRelativePath || file.name
+    fileManifest.push({ fieldName, relativePath })
+    formData.append(fieldName, file)
+  })
+
+  formData.append('fileManifest', JSON.stringify(fileManifest))
+}
+
 export const settingsApi = {
   getSettings: async (userId = DEFAULT_USER_ID): Promise<SettingsResponse> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings`, {
@@ -291,16 +304,7 @@ export const settingsApi = {
     if (data.repoId !== undefined) formData.append('repoId', String(data.repoId))
     if (data.overwrite !== undefined) formData.append('overwrite', String(data.overwrite))
 
-    const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
-
-    data.files.forEach((file, index) => {
-      const fieldName = `file${index}`
-      const relativePath = file.webkitRelativePath || file.name
-      fileManifest.push({ fieldName, relativePath })
-      formData.append(fieldName, file)
-    })
-
-    formData.append('fileManifest', JSON.stringify(fileManifest))
+    appendFilesWithManifest(formData, data.files)
 
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
       method: 'POST',
@@ -315,16 +319,7 @@ export const settingsApi = {
     const formData = new FormData()
     formData.append('kind', data.kind)
 
-    const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
-
-    data.files.forEach((file, index) => {
-      const fieldName = `file${index}`
-      const relativePath = file.webkitRelativePath || file.name
-      fileManifest.push({ fieldName, relativePath })
-      formData.append(fieldName, file)
-    })
-
-    formData.append('fileManifest', JSON.stringify(fileManifest))
+    appendFilesWithManifest(formData, data.files)
 
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/install`, {
       method: 'POST',

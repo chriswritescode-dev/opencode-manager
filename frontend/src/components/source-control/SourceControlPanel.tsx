@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FetchError } from '@opencode-manager/shared'
 import { useGitStatus, getApiErrorMessage } from '@/api/git'
@@ -29,6 +29,7 @@ import {
 import { cn } from '@/lib/utils'
 import { useMobile } from '@/hooks/useMobile'
 import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
+import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 
 interface SourceControlPanelProps {
   repoId: number
@@ -56,7 +57,7 @@ export function SourceControlPanel({
   const [gitError, setGitError] = useState<{ summary: string; detail?: string } | null>(null)
   const queryClient = useQueryClient()
   const { data: status } = useGitStatus(repoId)
-  const { data: repo, refetch: refetchRepo } = useQuery({
+  const { data: repo } = useQuery({
     queryKey: ['repo', repoId],
     queryFn: () => getRepo(repoId),
     enabled: isOpen,
@@ -64,11 +65,7 @@ export function SourceControlPanel({
   const isMobile = useMobile()
   const displayBranch = repo?.currentBranch || repo?.branch || currentBranch
 
-  useEffect(() => {
-    if (!isOpen) return
-    invalidateRepoGitCaches(queryClient, repoId)
-    void refetchRepo()
-  }, [isOpen, queryClient, refetchRepo, repoId])
+  useRefreshOnOpen(isOpen, () => { invalidateRepoGitCaches(queryClient, repoId) })
 
   const handleGitError = (error: unknown) => {
     if (error instanceof FetchError) {

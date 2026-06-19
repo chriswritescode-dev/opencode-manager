@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { createOpenCodeClient } from '@/api/opencode'
 import type { components } from '@/api/opencode-types'
 
@@ -164,35 +164,20 @@ const BUILTIN_COMMANDS: CommandType[] = [
 ]
 
 export function useCommands(opcodeUrl: string | null) {
-  const [commands, setCommands] = useState<CommandType[]>(sortCommandsByName(BUILTIN_COMMANDS))
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!opcodeUrl) return
-
-    const fetchCommands = async () => {
-      setLoading(true)
-      setError(null)
-      
-      try {
-        const client = createOpenCodeClient(opcodeUrl)
-        const commandList = await client.listCommands()
-        const allCommands = [...BUILTIN_COMMANDS, ...commandList]
-        const uniqueCommands = allCommands.filter((command, index, self) =>
-          index === self.findIndex((c) => c.name === command.name)
-        )
-        setCommands(sortCommandsByName(uniqueCommands))
-      } catch {
-        setError('Failed to load commands')
-        setCommands(sortCommandsByName(BUILTIN_COMMANDS))
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchCommands()
-  }, [opcodeUrl])
+  const { data: commands, isLoading: loading, error } = useQuery({
+    queryKey: ['opencode', 'commands', opcodeUrl],
+    queryFn: async () => {
+      const client = createOpenCodeClient(opcodeUrl!)
+      const commandList = await client.listCommands()
+      const allCommands = [...BUILTIN_COMMANDS, ...commandList]
+      const uniqueCommands = allCommands.filter((command, index, self) =>
+        index === self.findIndex((c) => c.name === command.name)
+      )
+      return sortCommandsByName(uniqueCommands)
+    },
+    enabled: !!opcodeUrl,
+    initialData: sortCommandsByName(BUILTIN_COMMANDS),
+  })
 
   const filterCommands = (query: string) => {
     if (!query.trim()) return commands
@@ -210,7 +195,7 @@ export function useCommands(opcodeUrl: string | null) {
   return {
     commands,
     loading,
-    error,
+    error: error ? 'Failed to load commands' : null,
     filterCommands
   }
 }

@@ -15,19 +15,13 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     }
   }
 
-  const invalidateCache = (additionalKeys: string[] = []) => {
-    if (!repoId) return
-    const keys = ['gitStatus', 'fileDiff', 'gitLog', ...additionalKeys]
-    keys.forEach(key => queryClient.invalidateQueries({ queryKey: [key, repoId] }))
-  }
-
   const fetch = useMutation({
     mutationFn: () => {
       if (!repoId) throw new Error('No repo ID')
       return gitFetch(repoId)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Fetch completed')
     },
     onError: handleError,
@@ -39,7 +33,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitPull(repoId)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Pull completed')
     },
     onError: handleError,
@@ -52,8 +46,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       queryClient.setQueryData(['gitStatus', repoId], data)
-      const keysToInvalidate = ['fileDiff', 'gitLog', 'repo', 'branches']
-      keysToInvalidate.forEach(key => queryClient.invalidateQueries({ queryKey: [key, repoId] }))
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Push completed')
     },
     onError: handleError,
@@ -65,7 +58,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitCommit(repoId, message, stagedPaths)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Commit created')
     },
     onError: handleError,
@@ -77,7 +70,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitStageFiles(repoId, paths)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Files staged')
     },
     onError: handleError,
@@ -89,7 +82,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitUnstageFiles(repoId, paths)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Files unstaged')
     },
     onError: handleError,
@@ -101,7 +94,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitDiscardFiles(repoId, paths, staged)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
     },
     onError: handleError,
   })
@@ -152,7 +145,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitReset(repoId, commitHash)
     },
     onSuccess: () => {
-      invalidateCache()
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Reset to commit')
     },
     onError: handleError,

@@ -20,7 +20,6 @@ import {
   SkillScopeSchema,
   InstallSkillFromGithubRequestSchema,
   InstallSkillUploadRequestSchema,
-  InstallSkillUploadManifestEntrySchema,
   type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
@@ -46,6 +45,7 @@ import {
   installSkillFromUploadedFiles,
 } from '../services/skills'
 import { installOpenCodeDirectoryFiles } from '../services/opencode-directory-files'
+import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
 import { getRepoById } from '../db/queries'
 import { githubFetch } from '../utils/github'
 
@@ -1236,41 +1236,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const formData = await c.req.parseBody({ all: true })
       const kind = z.enum(['agents', 'commands']).parse(formData['kind'])
-      const fileManifestRaw = formData['fileManifest']
 
-      if (typeof fileManifestRaw !== 'string') {
-        return c.json({ error: 'fileManifest is required as a JSON string' }, 400)
-      }
-
-      let manifestEntries: unknown
-      try {
-        manifestEntries = JSON.parse(fileManifestRaw)
-      } catch {
-        return c.json({ error: 'fileManifest must be valid JSON' }, 400)
-      }
-
-      const manifest = InstallSkillUploadManifestEntrySchema.array().parse(manifestEntries)
+      const manifest = parseUploadManifest(formData['fileManifest'])
       if (manifest.length === 0) {
         return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
       }
 
-      const missingFields = manifest.filter((entry) => !formData[entry.fieldName])
-      if (missingFields.length > 0) {
-        return c.json({
-          error: `Missing upload file(s): ${missingFields.map((e) => e.fieldName).join(', ')}`,
-        }, 400)
-      }
-
-      const files = await Promise.all(
-        manifest.map(async (entry) => {
-          const file = formData[entry.fieldName]
-          if (!file || !(file instanceof File)) {
-            throw new Error(`Field "${entry.fieldName}" is not a valid file`)
-          }
-          const content = Buffer.from(await file.arrayBuffer())
-          return { relativePath: entry.relativePath, content }
-        }),
-      )
+      const files = await readUploadedManifestFiles(formData, manifest)
 
       const result = await installOpenCodeDirectoryFiles(kind, files)
       await restartOpenCodeSafe(openCodeSupervisor, `${kind} upload`)
@@ -1278,6 +1250,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       return c.json(result)
     } catch (error) {
       logger.error('Failed to install OpenCode directory files:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
 
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid upload data', details: error.issues }, 400)
@@ -1319,20 +1295,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         const scope = formData['scope']
         const repoIdValue = formData['repoId']
         const overwriteValue = formData['overwrite']
-        const fileManifestRaw = formData['fileManifest']
 
-        if (typeof fileManifestRaw !== 'string') {
-          return c.json({ error: 'fileManifest is required as a JSON string' }, 400)
-        }
-
-        let manifestEntries: unknown
-        try {
-          manifestEntries = JSON.parse(fileManifestRaw)
-        } catch {
-          return c.json({ error: 'fileManifest must be valid JSON' }, 400)
-        }
-
-        const manifest = InstallSkillUploadManifestEntrySchema.array().parse(manifestEntries)
+        const manifest = parseUploadManifest(formData['fileManifest'])
 
         const repoId = parseOptionalRepoId(repoIdValue as string | undefined)
         const overwrite = parseBooleanFormValue(overwriteValue)
@@ -1352,23 +1316,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
         }
 
-        const missingFields = manifest.filter((entry) => !formData[entry.fieldName])
-        if (missingFields.length > 0) {
-          return c.json({
-            error: `Missing upload file(s): ${missingFields.map((e) => e.fieldName).join(', ')}`,
-          }, 400)
-        }
-
-        const files = await Promise.all(
-          manifest.map(async (entry) => {
-            const file = formData[entry.fieldName]
-            if (!file || !(file instanceof File)) {
-              throw new Error(`Field "${entry.fieldName}" is not a valid file`)
-            }
-            const content = Buffer.from(await file.arrayBuffer())
-            return { relativePath: entry.relativePath, content }
-          }),
-        )
+        const files = await readUploadedManifestFiles(formData, manifest)
 
         const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
 
@@ -1380,6 +1328,10 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
     } catch (error) {
       logger.error('Failed to install skill:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
 
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid skill install data', details: error.issues }, 400)
@@ -1433,7 +1385,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await createSkill(db, validated)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'creation')
+      await restartOpenCodeSafe(openCodeSupervisor, 'skill creation')
 
       return c.json(skill)
     } catch (error) {
@@ -1462,7 +1414,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'update')
+      await restartOpenCodeSafe(openCodeSupervisor, 'skill update')
 
       return c.json(skill)
     } catch (error) {
@@ -1495,7 +1447,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       await deleteSkill(db, name, scope, repoId)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'deletion')
+      await restartOpenCodeSafe(openCodeSupervisor, 'skill deletion')
 
       return c.json({ success: true })
     } catch (error) {

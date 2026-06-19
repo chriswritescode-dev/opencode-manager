@@ -6,8 +6,9 @@ import { useServerHealth } from '@/hooks/useServerHealth'
 import { useCommands } from '@/hooks/useCommands'
 import { useUrlParams } from '@/hooks/useUrlParams'
 import { useUIState } from '@/stores/uiStateStore'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
+import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
@@ -35,7 +36,6 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const { bind } = useSwipeBack(onClose, { enabled: isOpen, suspendsRouteSwipe: true })
   const { searchParams, updateParams } = useUrlParams()
   const { logout } = useAuth()
-  const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const isSessionDetail = /^\/repos\/\d+\/sessions\/[^/]+$/.test(location.pathname)
   const isAssistantRoute = isAssistantPath(location.pathname)
@@ -58,11 +58,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     enabled: !!repoId,
   })
 
-  useEffect(() => {
-    if (!isOpen || !repoId) return
-    queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
-    void refetchRepo()
-  }, [isOpen, queryClient, refetchRepo, repoId])
+  useRefreshOnOpen(isOpen && repoId != null, () => { void refetchRepo() })
 
   const currentBranch = repo?.currentBranch || repo?.branch
   const repoDisplayName = isAssistantRoute || isAssistantSession

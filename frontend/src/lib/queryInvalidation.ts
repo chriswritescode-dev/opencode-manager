@@ -20,6 +20,7 @@ export function invalidateProviderCaches(queryClient: QueryClient) {
 export function invalidateConfigCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['opencode', 'config'] })
   queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
+  queryClient.invalidateQueries({ queryKey: ['opencode', 'commands'] })
   queryClient.invalidateQueries({ queryKey: ['opencode-config'] })
   queryClient.invalidateQueries({ queryKey: ['health'] })
   queryClient.invalidateQueries({ queryKey: ['mcp-status'] })
@@ -39,11 +40,14 @@ export function invalidateSettingsCaches(queryClient: QueryClient, userId = 'def
   invalidateConfigCaches(queryClient)
 }
 
-export function invalidateRepoGitCaches(queryClient: QueryClient, repoId?: number | null) {
+export function invalidateRepoListCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['repos'] })
   queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
+}
 
+export function invalidateRepoGitCaches(queryClient: QueryClient, repoId?: number | null) {
   if (!repoId) {
+    invalidateRepoListCaches(queryClient)
     queryClient.invalidateQueries({ queryKey: ['repo'] })
     queryClient.invalidateQueries({ queryKey: ['branches'] })
     queryClient.invalidateQueries({ queryKey: ['gitStatus'] })
@@ -52,11 +56,31 @@ export function invalidateRepoGitCaches(queryClient: QueryClient, repoId?: numbe
     return
   }
 
+  queryClient.invalidateQueries({ queryKey: ['repos'] })
   queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
   queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
   queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
   queryClient.invalidateQueries({ queryKey: ['gitLog', repoId] })
   queryClient.invalidateQueries({ queryKey: ['fileDiff', repoId] })
+}
+
+const repoGitInvalidationTimers = new WeakMap<QueryClient, Map<number, ReturnType<typeof setTimeout>>>()
+
+export function invalidateRepoGitCachesDebounced(queryClient: QueryClient, repoId: number, delayMs = 200) {
+  const existingTimers = repoGitInvalidationTimers.get(queryClient)
+  const timers = existingTimers ?? new Map<number, ReturnType<typeof setTimeout>>()
+  if (!existingTimers) {
+    repoGitInvalidationTimers.set(queryClient, timers)
+  }
+  const existing = timers.get(repoId)
+  if (existing) clearTimeout(existing)
+  timers.set(
+    repoId,
+    setTimeout(() => {
+      timers.delete(repoId)
+      invalidateRepoGitCaches(queryClient, repoId)
+    }, delayMs),
+  )
 }
 
 export function invalidateSessionCaches(queryClient: QueryClient) {

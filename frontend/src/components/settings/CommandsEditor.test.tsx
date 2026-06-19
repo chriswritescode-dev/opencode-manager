@@ -1,12 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { CommandsEditor } from './CommandsEditor'
 
 vi.mock('./CommandDialog', () => ({
   CommandDialog: ({ open, editingCommand }: { open: boolean; editingCommand?: { name: string } | null }) =>
     open ? <div data-testid="command-dialog">{editingCommand ? 'Edit Command' : 'Create Command'}</div> : null,
 }))
+
+const createWrapper = () => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+}
 
 const mockCommands = {
   'review': {
@@ -27,7 +35,7 @@ describe('CommandsEditor', () => {
 
   it('renders empty state when no commands configured', () => {
     const onChange = vi.fn()
-    render(<CommandsEditor commands={{}} onChange={onChange} />)
+    render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('No commands configured')).toBeInTheDocument()
     expect(screen.getByText('Add your first command to get started.')).toBeInTheDocument()
@@ -35,7 +43,7 @@ describe('CommandsEditor', () => {
 
   it('renders command names with leading slash', () => {
     const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />)
+    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('/review')).toBeInTheDocument()
     expect(screen.getByText('/build')).toBeInTheDocument()
@@ -44,7 +52,7 @@ describe('CommandsEditor', () => {
   it('opens CommandDialog when clicking Edit on a row', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />)
+    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
     const editButtons = screen.getAllByText('Edit')
     await user.click(editButtons[0])
@@ -56,7 +64,7 @@ describe('CommandsEditor', () => {
   it('opens CommandDialog when clicking row body', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />)
+    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByText('/review'))
 
@@ -66,7 +74,7 @@ describe('CommandsEditor', () => {
   it('opens CommandDialog and displays Create Command text when clicking Add Command button', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<CommandsEditor commands={{}} onChange={onChange} />)
+    render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByText('Add Command'))
 
@@ -77,7 +85,7 @@ describe('CommandsEditor', () => {
   it('calls onChange with command removed when Delete is clicked from overflow menu', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />)
+    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
     await user.click(screen.getByLabelText('Actions for /review'))
     await user.click(screen.getByText('Delete'))
@@ -88,7 +96,7 @@ describe('CommandsEditor', () => {
 
   it('renders agent badge when command has agent', () => {
     const onChange = vi.fn()
-    render(<CommandsEditor commands={mockCommands} onChange={onChange} />)
+    render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('code-reviewer')).toBeInTheDocument()
   })

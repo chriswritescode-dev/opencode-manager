@@ -24,6 +24,7 @@ import {
   type RepoSortMode,
 } from "./repo-list-state"
 import { RepoListControls } from "./RepoListControls"
+import { invalidateRepoListCaches } from "@/lib/queryInvalidation"
 import { ASSISTANT_REPO_ID } from "@opencode-manager/shared/utils"
 
 function formatActivityLabel(timestamp: number): string {
@@ -229,8 +230,7 @@ export function RepoList() {
   const deleteMutation = useMutation({
     mutationFn: deleteRepo,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] })
-      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
+      invalidateRepoListCaches(queryClient)
       setDeleteDialogOpen(false)
       setRepoToDelete(null)
     },
@@ -241,8 +241,7 @@ export function RepoList() {
       await Promise.all(repoIds.map((id) => deleteRepo(id)))
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] })
-      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
+      invalidateRepoListCaches(queryClient)
       setDeleteDialogOpen(false)
       setSelectedRepos(new Set())
       setSelectionMode(false)
@@ -270,8 +269,7 @@ export function RepoList() {
       queryClient.setQueryData(["repos"], context?.previousRepos)
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["repos"] })
-      queryClient.invalidateQueries({ queryKey: ["reposGitStatus"] })
+      invalidateRepoListCaches(queryClient)
     },
   })
 

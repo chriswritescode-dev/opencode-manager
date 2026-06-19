@@ -1,6 +1,7 @@
-import { useEffect, useState, useMemo } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
@@ -20,7 +21,6 @@ interface RepoQuickSwitchSheetProps {
 export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetProps) {
   const navigate = useNavigate()
   const location = useLocation()
-  const queryClient = useQueryClient()
   const { searchParams } = useUrlParams()
   const [searchQuery, setSearchQuery] = useState('')
   const [addRepoOpen, setAddRepoOpen] = useState(false)
@@ -37,11 +37,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     enabled: isOpen,
   })
 
-  useEffect(() => {
-    if (!isOpen) return
-    queryClient.invalidateQueries({ queryKey: ['repos'] })
-    void refetch()
-  }, [isOpen, queryClient, refetch])
+  useRefreshOnOpen(isOpen, () => { void refetch() })
 
   const regularRepos = useMemo(
     () => repos?.filter((r) => r.id !== ASSISTANT_REPO_ID) ?? null,

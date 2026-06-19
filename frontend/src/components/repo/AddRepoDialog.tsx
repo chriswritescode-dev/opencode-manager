@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Loader2 } from 'lucide-react'
 import { showToast } from '@/lib/toast'
+import { invalidateRepoListCaches } from '@/lib/queryInvalidation'
 import { getRepoBaseDirectoryName, getRepoDirectoryNameError, getRepoNameFromUrl, normalizeRepoUrlForCompare, sanitizeRepoDirectoryName } from '@opencode-manager/shared/utils'
 import type { DiscoverReposResponse } from '@opencode-manager/shared/types'
 import type { Repo } from '@/api/types'
@@ -82,8 +83,7 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
       return { mode: 'single', repo }
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
+      invalidateRepoListCaches(queryClient)
       setRepoUrl('')
       setLocalPath('')
       setFolderPath('')

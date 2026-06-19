@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AlertCircle, GitBranch, Loader2 } from 'lucide-react'
 import { createRepo, listBranches } from '@/api/repos'
 import { showToast } from '@/lib/toast'
+import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
 
 interface CreateWorktreeDialogProps {
   open: boolean
@@ -66,8 +67,7 @@ export function CreateWorktreeDialog({
         baseBranch: payload.base,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
+      invalidateRepoGitCaches(queryClient, repoId)
       showToast.success('Worktree created')
       onCreated?.()
       onOpenChange(false)

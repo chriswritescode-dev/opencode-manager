@@ -1,13 +1,11 @@
 import { useState } from 'react'
-import { FolderUp, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { AgentDialog } from './AgentDialog'
-import { Input } from '@/components/ui/input'
-import { settingsApi } from '@/api/settings'
-import { toast } from 'sonner'
+import { UploadFolderButton } from './UploadFolderButton'
 
 interface Agent {
   prompt?: string
@@ -35,7 +33,6 @@ interface AgentsEditorProps {
 export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<{ name: string; agent: Agent } | null>(null)
-  const [isUploading, setIsUploading] = useState(false)
 
   const handleAgentSubmit = (name: string, agent: Agent) => {
     if (editingAgent) {
@@ -64,40 +61,10 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
     setEditingAgent({ name, agent })
   }
 
-  const importAgentDirectory = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
-    event.target.value = ''
-    if (files.length === 0) return
-
-    try {
-      setIsUploading(true)
-      const result = await settingsApi.installOpenCodeDirectoryFiles({ kind: 'agents', files })
-      toast.success(`Uploaded ${result.filesInstalled.length} agent file${result.filesInstalled.length === 1 ? '' : 's'}`)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to upload agents')
-    } finally {
-      setIsUploading(false)
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-end gap-2">
-        <Button size="sm" variant="outline" disabled={isUploading} asChild>
-          <label className="cursor-pointer">
-            <FolderUp className="h-4 w-4 mr-1" />
-            {isUploading ? 'Uploading...' : 'Upload Folder'}
-            <Input
-              type="file"
-              accept=".md,text/markdown"
-              className="sr-only"
-              multiple
-              disabled={isUploading}
-              {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
-              onChange={importAgentDirectory}
-            />
-          </label>
-        </Button>
+        <UploadFolderButton kind="agents" />
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm">

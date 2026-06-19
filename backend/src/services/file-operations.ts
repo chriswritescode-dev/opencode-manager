@@ -89,6 +89,35 @@ export async function getFileStats(filePath: string): Promise<{ size: number; la
   }
 }
 
+export function normalizeUploadRelativePath(
+  relativePath: string,
+  options?: { collapseEmptySegments?: boolean },
+): string {
+  const normalized = relativePath.replace(/\\/g, '/')
+  if (path.isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized)) {
+    throw new Error(`Path must be relative, got absolute path: "${relativePath}"`)
+  }
+  if (normalized === '' || normalized === '.') {
+    throw new Error('Path must not be empty')
+  }
+  const rawParts = normalized.split('/')
+  const parts = options?.collapseEmptySegments ? rawParts.filter(Boolean) : rawParts
+  for (const part of parts) {
+    if (part === '..') {
+      throw new Error(`Path must not contain "..": "${relativePath}"`)
+    }
+  }
+  return options?.collapseEmptySegments ? parts.join('/') : normalized
+}
+
+export function resolveWithinDirectory(rootDir: string, relativePath: string, escapeLabel: string): string {
+  const resolved = path.resolve(rootDir, relativePath)
+  if (!resolved.startsWith(rootDir + path.sep)) {
+    throw new Error(`File "${relativePath}" escapes the ${escapeLabel}`)
+  }
+  return resolved
+}
+
 export async function listDirectory(dirPath: string): Promise<Array<{
   name: string
   path: string

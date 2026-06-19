@@ -9,7 +9,7 @@ import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
-import { invalidateRepoGitCaches } from '@/lib/queryInvalidation'
+import { invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
@@ -278,7 +278,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     if (!repos) return null
     const directory = findSessionDirectory(sessionID)
     if (!directory) return null
-    const repo = repos.find(r => r.fullPath === directory)
+    const repo = repos.find(r => repoMatchesDirectory(r, directory))
     return repo?.id ?? null
   }, [repos, findSessionDirectory])
 
@@ -518,9 +518,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
           break
         case 'vcs.branch.updated': {
           const repo = reposRef.current?.find((candidate) => repoMatchesDirectory(candidate, event.directory))
-          const branch = event.properties.branch
+          if (!repo) break
 
-          if (repo && branch) {
+          const branch = event.properties.branch
+          if (branch) {
             const updatedRepo = { ...repo, currentBranch: branch, branch }
             queryClient.setQueryData(['repo', repo.id], updatedRepo)
             queryClient.setQueryData<Repo[]>(['repos'], (current) =>
@@ -528,7 +529,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             )
           }
 
-          invalidateRepoGitCaches(queryClient, repo?.id)
+          invalidateRepoGitCachesDebounced(queryClient, repo.id)
           break
         }
       }
