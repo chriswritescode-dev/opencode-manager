@@ -6,6 +6,7 @@ import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { AgentDialog } from './AgentDialog'
 import { UploadFolderButton } from './UploadFolderButton'
+import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 
 interface Agent {
   prompt?: string
@@ -27,12 +28,14 @@ interface Agent {
 
 interface AgentsEditorProps {
   agents: Record<string, Agent>
+  directoryAgents?: OpenCodeDirectoryFileInfo[]
   onChange: (agents: Record<string, Agent>) => void
 }
 
-export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
+export function AgentsEditor({ agents, directoryAgents = [], onChange }: AgentsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<{ name: string; agent: Agent } | null>(null)
+  const hasAgents = Object.keys(agents).length > 0 || directoryAgents.length > 0
 
   const handleAgentSubmit = (name: string, agent: Agent) => {
     if (editingAgent) {
@@ -81,7 +84,7 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
       </div>
 
       <SettingsList
-        isEmpty={Object.keys(agents).length === 0}
+        isEmpty={!hasAgents}
         emptyTitle="No agents configured"
         emptyHint="Add your first agent to get started."
         maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
@@ -101,6 +104,14 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
             primaryAction={{ label: 'Edit', onClick: () => startEdit(name, agent) }}
             actions={[{ label: 'Delete', destructive: true, onClick: () => deleteAgent(name) }]}
             actionsLabel={`Actions for ${name}`}
+          />
+        ))}
+        {directoryAgents.map((agent) => (
+          <SettingsListRow
+            key={`file:${agent.relativePath}`}
+            title={agent.name}
+            description={`Uploaded file: ${agent.relativePath}`}
+            badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
           />
         ))}
       </SettingsList>

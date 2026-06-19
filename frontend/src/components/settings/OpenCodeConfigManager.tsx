@@ -102,6 +102,18 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     staleTime: 30 * 1000,
   })
 
+  const { data: directoryCommands = [] } = useQuery({
+    queryKey: ['opencode-directory-files', 'commands'],
+    queryFn: () => settingsApi.listOpenCodeDirectoryFiles('commands'),
+    staleTime: 30 * 1000,
+  })
+
+  const { data: directoryAgents = [] } = useQuery({
+    queryKey: ['opencode-directory-files', 'agents'],
+    queryFn: () => settingsApi.listOpenCodeDirectoryFiles('agents'),
+    staleTime: 30 * 1000,
+  })
+
   const scrollToSection = (ref: React.RefObject<HTMLButtonElement | null>) => {
     if (ref.current) {
       ref.current.scrollIntoView({ 
@@ -858,7 +870,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Commands</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length} configured
+                            {Object.keys((selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}).length + directoryCommands.length} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.commands ? 'rotate-90' : ''}`} />
@@ -867,6 +879,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <div className={EXPANDED_SECTION_CONTENT_CLASS}>
                           <CommandsEditor
                             commands={(selectedConfig.content?.command as Record<string, Command> | undefined) ?? {}}
+                            directoryCommands={directoryCommands}
                             onChange={(commands) => {
                               const updatedContent = {
                                 ...selectedConfig.content,
@@ -895,7 +908,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <div className="flex items-center gap-3 min-w-0">
                           <h4 className="text-sm font-medium truncate">Agents</h4>
                           <span className="text-xs text-muted-foreground">
-                            {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length} configured
+                            {Object.keys((selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}).length + directoryAgents.length} configured
                           </span>
                         </div>
                         <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agents ? 'rotate-90' : ''}`} />
@@ -904,6 +917,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <div className={EXPANDED_SECTION_CONTENT_CLASS}>
                           <AgentsEditor
                             agents={(selectedConfig.content?.agent as Record<string, Agent> | undefined) ?? {}}
+                            directoryAgents={directoryAgents}
                             onChange={(agents) => {
                               const updatedContent = {
                                 ...selectedConfig.content,

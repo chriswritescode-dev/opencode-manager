@@ -137,3 +137,9 @@ export interface SyncOpenCodeImportResponse extends OpenCodeImportStatus {
     errors: Array<{ path: string; error: string }>
   }
 }
+
+export interface OpenCodeDirectoryFileInfo {
+  kind: 'agents' | 'commands'
+  name: string
+  relativePath: string
+}

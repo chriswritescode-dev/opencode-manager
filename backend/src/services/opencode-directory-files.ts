@@ -15,8 +15,38 @@ export interface InstallOpenCodeDirectoryFilesResult {
   filesInstalled: string[]
 }
 
+export interface OpenCodeDirectoryFileInfo {
+  kind: OpenCodeDirectoryFileKind
+  name: string
+  relativePath: string
+}
+
 function getOpenCodeDirectoryRoot(kind: OpenCodeDirectoryFileKind): string {
   return path.join(getWorkspacePath(), '.config', 'opencode', kind)
+}
+
+function getNameFromRelativePath(relativePath: string): string {
+  return relativePath.replace(/\.md$/i, '').split('/').pop() ?? relativePath
+}
+
+async function listMarkdownFiles(rootDir: string, currentDir = rootDir): Promise<string[]> {
+  let entries
+  try {
+    entries = await fs.readdir(currentDir, { withFileTypes: true })
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return []
+    throw error
+  }
+
+  const files = await Promise.all(entries.map(async entry => {
+    const absolutePath = path.join(currentDir, entry.name)
+    if (entry.isDirectory()) return listMarkdownFiles(rootDir, absolutePath)
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) return []
+
+    return [path.relative(rootDir, absolutePath).replace(/\\/g, '/')]
+  }))
+
+  return files.flat().sort((a, b) => a.localeCompare(b))
 }
 
 function getTargetRelativePath(relativePath: string, kind: OpenCodeDirectoryFileKind): string | null {
@@ -65,4 +95,15 @@ export async function installOpenCodeDirectoryFiles(
     kind,
     filesInstalled: preparedFiles.map(file => file.relativePath),
   }
+}
+
+export async function listOpenCodeDirectoryFiles(kind: OpenCodeDirectoryFileKind): Promise<OpenCodeDirectoryFileInfo[]> {
+  const rootDir = getOpenCodeDirectoryRoot(kind)
+  const files = await listMarkdownFiles(rootDir)
+
+  return files.map(relativePath => ({
+    kind,
+    name: getNameFromRelativePath(relativePath),
+    relativePath,
+  }))
 }

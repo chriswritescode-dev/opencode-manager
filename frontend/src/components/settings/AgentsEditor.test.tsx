@@ -49,6 +49,23 @@ describe('AgentsEditor', () => {
     expect(screen.getByText('helper')).toBeInTheDocument()
   })
 
+  it('renders uploaded directory agent files', () => {
+    const onChange = vi.fn()
+    render(
+      <AgentsEditor
+        agents={{}}
+        directoryAgents={[{ kind: 'agents', name: 'planner', relativePath: 'team/planner.md' }]}
+        onChange={onChange}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    expect(screen.getByText('planner')).toBeInTheDocument()
+    expect(screen.getByText('Uploaded file: team/planner.md')).toBeInTheDocument()
+    expect(screen.getByText('File')).toBeInTheDocument()
+    expect(screen.queryByText('No agents configured')).not.toBeInTheDocument()
+  })
+
   it('opens AgentDialog when clicking Edit on a row', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()

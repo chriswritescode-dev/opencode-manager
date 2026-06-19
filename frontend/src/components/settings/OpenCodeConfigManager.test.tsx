@@ -11,12 +11,14 @@ const {
   mockRestartOpenCodeServer,
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
+  mockListOpenCodeDirectoryFiles,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfigs: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
   mockRestartOpenCodeServer: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
+  mockListOpenCodeDirectoryFiles: vi.fn(),
 }))
 
 vi.mock('@/hooks/useServerHealth', () => ({
@@ -34,6 +36,7 @@ vi.mock('@/api/settings', () => ({
     restartOpenCodeServer: mockRestartOpenCodeServer,
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
     listManagedSkills: mockListManagedSkills,
+    listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
     syncOpenCodeImport: vi.fn(),
     upgradeOpenCode: vi.fn(),
   },
@@ -73,8 +76,37 @@ describe('OpenCodeConfigManager', () => {
     mockGetOpenCodeConfigs.mockResolvedValue({ configs: [defaultConfig] })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockListManagedSkills.mockResolvedValue([])
+    mockListOpenCodeDirectoryFiles.mockImplementation((kind: 'agents' | 'commands') => {
+      if (kind === 'commands') return Promise.resolve([])
+      return Promise.resolve([])
+    })
     mockUpdateOpenCodeConfig.mockResolvedValue(defaultConfig)
     mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
+  })
+
+  it('shows uploaded command and agent directory files in settings', async () => {
+    mockListOpenCodeDirectoryFiles.mockImplementation((kind: 'agents' | 'commands') => {
+      if (kind === 'commands') return Promise.resolve([{ kind, name: 'deploy', relativePath: 'project/deploy.md' }])
+      return Promise.resolve([{ kind, name: 'planner', relativePath: 'team/planner.md' }])
+    })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+
+    await screen.findByText('Commands')
+    await vi.waitFor(() => {
+      expect(screen.getAllByText('1 configured').length).toBeGreaterThanOrEqual(2)
+    })
+
+    await user.click(screen.getByRole('button', { name: /Commands/i }))
+    expect(await screen.findByText('/deploy')).toBeInTheDocument()
+    expect(screen.getByText('Uploaded file: project/deploy.md')).toBeInTheDocument()
+
+    const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))
+    expect(agentsButton).toBeDefined()
+    await user.click(agentsButton!)
+    expect(await screen.findByText('planner')).toBeInTheDocument()
+    expect(screen.getByText('Uploaded file: team/planner.md')).toBeInTheDocument()
   })
 
   it('optimistic delete + restart prompt', async () => {

@@ -13,6 +13,7 @@ import type {
   SkillScope,
   InstallSkillFromGithubRequest,
   InstallSkillResponse,
+  OpenCodeDirectoryFileInfo,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
@@ -324,6 +325,12 @@ export const settingsApi = {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/install`, {
       method: 'POST',
       body: formData,
+    })
+  },
+
+  listOpenCodeDirectoryFiles: async (kind: 'agents' | 'commands'): Promise<OpenCodeDirectoryFileInfo[]> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      params: { kind },
     })
   },
 }

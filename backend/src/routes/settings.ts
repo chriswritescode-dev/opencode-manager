@@ -44,7 +44,7 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
-import { installOpenCodeDirectoryFiles } from '../services/opencode-directory-files'
+import { installOpenCodeDirectoryFiles, listOpenCodeDirectoryFiles } from '../services/opencode-directory-files'
 import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
 import { getRepoById } from '../db/queries'
 import { githubFetch } from '../utils/github'
@@ -1272,6 +1272,21 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       return c.json({ error: 'Failed to install OpenCode directory files' }, 500)
+    }
+  })
+
+  app.get('/opencode-directory-files', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      return c.json(await listOpenCodeDirectoryFiles(kind))
+    } catch (error) {
+      logger.error('Failed to list OpenCode directory files:', error)
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid file kind', details: error.issues }, 400)
+      }
+
+      return c.json({ error: 'Failed to list OpenCode directory files' }, 500)
     }
   })
 

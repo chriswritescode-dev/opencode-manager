@@ -69,6 +69,23 @@ describe('CommandsEditor', () => {
     expect(screen.getByText('/build')).toBeInTheDocument()
   })
 
+  it('renders uploaded directory command files', () => {
+    const onChange = vi.fn()
+    render(
+      <CommandsEditor
+        commands={{}}
+        directoryCommands={[{ kind: 'commands', name: 'deploy', relativePath: 'project/deploy.md' }]}
+        onChange={onChange}
+      />,
+      { wrapper: createWrapper() },
+    )
+
+    expect(screen.getByText('/deploy')).toBeInTheDocument()
+    expect(screen.getByText('Uploaded file: project/deploy.md')).toBeInTheDocument()
+    expect(screen.getByText('File')).toBeInTheDocument()
+    expect(screen.queryByText('No commands configured')).not.toBeInTheDocument()
+  })
+
   it('opens CommandDialog when clicking Edit on a row', async () => {
     const user = userEvent.setup()
     const onChange = vi.fn()

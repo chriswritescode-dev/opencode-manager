@@ -6,6 +6,7 @@ import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { CommandDialog } from './CommandDialog'
 import { UploadFolderButton } from './UploadFolderButton'
+import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 
 interface Command {
   template: string
@@ -18,12 +19,14 @@ interface Command {
 
 interface CommandsEditorProps {
   commands: Record<string, Command>
+  directoryCommands?: OpenCodeDirectoryFileInfo[]
   onChange: (commands: Record<string, Command>) => void
 }
 
-export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
+export function CommandsEditor({ commands, directoryCommands = [], onChange }: CommandsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingCommand, setEditingCommand] = useState<{ name: string; command: Command } | null>(null)
+  const hasCommands = Object.keys(commands).length > 0 || directoryCommands.length > 0
 
   const handleCommandSubmit = (name: string, command: Command) => {
     if (editingCommand) {
@@ -72,7 +75,7 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
       </div>
 
       <SettingsList
-        isEmpty={Object.keys(commands).length === 0}
+        isEmpty={!hasCommands}
         emptyTitle="No commands configured"
         emptyHint="Add your first command to get started."
         maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
@@ -89,6 +92,14 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
             primaryAction={{ label: 'Edit', onClick: () => startEdit(name, command) }}
             actions={[{ label: 'Delete', destructive: true, onClick: () => deleteCommand(name) }]}
             actionsLabel={`Actions for /${name}`}
+          />
+        ))}
+        {directoryCommands.map((command) => (
+          <SettingsListRow
+            key={`file:${command.relativePath}`}
+            title={`/${command.name}`}
+            description={`Uploaded file: ${command.relativePath}`}
+            badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
           />
         ))}
       </SettingsList>

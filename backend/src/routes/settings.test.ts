@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { migrate } from '../db/migration-runner'
@@ -343,5 +343,25 @@ describe('settings routes — OpenCode directory file upload', () => {
     })
     await expect(readFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'utf8')).resolves.toBe('commit body')
     expect(restart).toHaveBeenCalledTimes(1)
+  })
+
+  it('lists uploaded command and agent directory files', async () => {
+    await mkdir(join(workspacePath, '.config/opencode/commands/git'), { recursive: true })
+    await mkdir(join(workspacePath, '.config/opencode/agents/team'), { recursive: true })
+    await writeFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'commit body')
+    await writeFile(join(workspacePath, '.config/opencode/commands/git/.DS_Store'), 'metadata')
+    await writeFile(join(workspacePath, '.config/opencode/agents/team/planner.md'), 'planner body')
+
+    const commandsRes = await app.request('/settings/opencode-directory-files?kind=commands')
+    const agentsRes = await app.request('/settings/opencode-directory-files?kind=agents')
+
+    expect(commandsRes.status).toBe(200)
+    expect(agentsRes.status).toBe(200)
+    await expect(commandsRes.json()).resolves.toEqual([
+      { kind: 'commands', name: 'commit', relativePath: 'git/commit.md' },
+    ])
+    await expect(agentsRes.json()).resolves.toEqual([
+      { kind: 'agents', name: 'planner', relativePath: 'team/planner.md' },
+    ])
   })
 })
