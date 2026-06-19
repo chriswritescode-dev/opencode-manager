@@ -12,6 +12,16 @@ const KIND_NOUN: Record<'agents' | 'commands', string> = {
   commands: 'command',
 }
 
+const DIRECTORY_INPUT_PROPS = {
+  webkitdirectory: '',
+  directory: '',
+  mozdirectory: '',
+} as React.InputHTMLAttributes<HTMLInputElement>
+
+function isMarkdownFile(file: File): boolean {
+  return (file.webkitRelativePath || file.name).toLowerCase().endsWith('.md')
+}
+
 interface UploadFolderButtonProps {
   kind: 'agents' | 'commands'
 }
@@ -22,9 +32,18 @@ export function UploadFolderButton({ kind }: UploadFolderButtonProps) {
   const noun = KIND_NOUN[kind]
 
   const handleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
+    const selectedFiles = Array.from(event.target.files ?? [])
     event.target.value = ''
-    if (files.length === 0) return
+    if (selectedFiles.length === 0) {
+      toast.error(`No ${noun} files selected`)
+      return
+    }
+
+    const files = selectedFiles.filter(isMarkdownFile)
+    if (files.length === 0) {
+      toast.error(`No markdown ${kind} files found`)
+      return
+    }
 
     try {
       setIsUploading(true)
@@ -49,7 +68,7 @@ export function UploadFolderButton({ kind }: UploadFolderButtonProps) {
           className="sr-only"
           multiple
           disabled={isUploading}
-          {...{ webkitdirectory: '', directory: '' } as React.InputHTMLAttributes<HTMLInputElement>}
+          {...DIRECTORY_INPUT_PROPS}
           onChange={handleChange}
         />
       </label>

@@ -13,6 +13,7 @@ describe('SettingsList', () => {
     expect(screen.getByText('Nothing here')).toBeInTheDocument()
     expect(screen.getByText('Try adding something')).toBeInTheDocument()
     expect(screen.queryByText('child')).not.toBeInTheDocument()
+    expect(screen.getByText('Nothing here').parentElement).toHaveClass('max-h-40')
   })
 
   it('renders loadingLabel when isLoading', () => {

@@ -204,6 +204,10 @@ function parseBooleanFormValue(value: unknown): boolean | undefined {
   return undefined
 }
 
+function getMarkdownUploadManifest(manifest: ReturnType<typeof parseUploadManifest>) {
+  return manifest.filter(entry => entry.relativePath.toLowerCase().endsWith('.md'))
+}
+
 function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
   return Array.isArray(config?.plugin) && config.plugin.length > 0
 }
@@ -1238,11 +1242,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const kind = z.enum(['agents', 'commands']).parse(formData['kind'])
 
       const manifest = parseUploadManifest(formData['fileManifest'])
-      if (manifest.length === 0) {
-        return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
+      const markdownManifest = getMarkdownUploadManifest(manifest)
+      if (markdownManifest.length === 0) {
+        return c.json({ error: `No markdown ${kind} files found` }, 400)
       }
 
-      const files = await readUploadedManifestFiles(formData, manifest)
+      const files = await readUploadedManifestFiles(formData, markdownManifest)
 
       const result = await installOpenCodeDirectoryFiles(kind, files)
       await restartOpenCodeSafe(openCodeSupervisor, `${kind} upload`)

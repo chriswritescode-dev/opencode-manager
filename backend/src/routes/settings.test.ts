@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
+import { mkdtemp, readFile, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { createSettingsRoutes } from './settings'
 import type { GitAuthService } from '../services/git-auth'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 
 interface TestUserPreferenceRow {
@@ -205,9 +209,9 @@ function createTestDb(): Database {
   return db
 }
 
-function createTestApp(db: Database): Hono {
+function createTestApp(db: Database, openCodeSupervisor?: OpenCodeSupervisor): Hono {
   const app = new Hono()
-  app.route('/settings', createSettingsRoutes(db, mockGitAuthService, createStubOpenCodeClient()))
+  app.route('/settings', createSettingsRoutes(db, mockGitAuthService, createStubOpenCodeClient(), openCodeSupervisor))
   return app
 }
 
@@ -289,5 +293,55 @@ describe('settings routes — serverEnvVars', () => {
         value: '1',
       },
     ])
+  })
+})
+
+describe('settings routes — OpenCode directory file upload', () => {
+  let db: Database
+  let app: Hono
+  let originalWorkspacePath: string | undefined
+  let workspacePath: string
+  const restart = vi.fn(async () => undefined)
+
+  beforeEach(async () => {
+    db = createTestDb()
+    restart.mockClear()
+    originalWorkspacePath = process.env.WORKSPACE_PATH
+    workspacePath = await mkdtemp(join(tmpdir(), 'ocm-command-upload-'))
+    process.env.WORKSPACE_PATH = workspacePath
+    app = createTestApp(db, { restart } as unknown as OpenCodeSupervisor)
+  })
+
+  afterEach(async () => {
+    if (originalWorkspacePath) {
+      process.env.WORKSPACE_PATH = originalWorkspacePath
+    } else {
+      delete process.env.WORKSPACE_PATH
+    }
+    await rm(workspacePath, { recursive: true, force: true })
+    db.close()
+  })
+
+  it('installs uploaded command markdown files into the OpenCode commands directory', async () => {
+    const formData = new FormData()
+    formData.append('kind', 'commands')
+    formData.append('fileManifest', JSON.stringify([
+      { fieldName: 'file0', relativePath: 'commands/git/commit.md' },
+      { fieldName: 'file1', relativePath: 'commands/.DS_Store' },
+    ]))
+    formData.append('file0', new File(['commit body'], 'commit.md', { type: 'text/markdown' }))
+
+    const res = await app.request('/settings/opencode-directory-files/install', {
+      method: 'POST',
+      body: formData,
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({
+      kind: 'commands',
+      filesInstalled: ['git/commit.md'],
+    })
+    await expect(readFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'utf8')).resolves.toBe('commit body')
+    expect(restart).toHaveBeenCalledTimes(1)
   })
 })

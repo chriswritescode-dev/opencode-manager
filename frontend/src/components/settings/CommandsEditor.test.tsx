@@ -1,12 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { CommandsEditor } from './CommandsEditor'
 
+const mocks = vi.hoisted(() => ({
+  installOpenCodeDirectoryFiles: vi.fn(),
+  toastError: vi.fn(),
+  toastSuccess: vi.fn(),
+}))
+
 vi.mock('./CommandDialog', () => ({
   CommandDialog: ({ open, editingCommand }: { open: boolean; editingCommand?: { name: string } | null }) =>
     open ? <div data-testid="command-dialog">{editingCommand ? 'Edit Command' : 'Create Command'}</div> : null,
+}))
+
+vi.mock('@/api/settings', () => ({
+  settingsApi: {
+    installOpenCodeDirectoryFiles: mocks.installOpenCodeDirectoryFiles,
+  },
+}))
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: mocks.toastError,
+    success: mocks.toastSuccess,
+  },
 }))
 
 const createWrapper = () => {
@@ -31,6 +50,7 @@ const mockCommands = {
 describe('CommandsEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.installOpenCodeDirectoryFiles.mockResolvedValue({ kind: 'commands', filesInstalled: ['git/commit.md'] })
   })
 
   it('renders empty state when no commands configured', () => {
@@ -99,5 +119,37 @@ describe('CommandsEditor', () => {
     render(<CommandsEditor commands={mockCommands} onChange={onChange} />, { wrapper: createWrapper() })
 
     expect(screen.getByText('code-reviewer')).toBeInTheDocument()
+  })
+
+  it('uploads only markdown files from a selected commands folder', async () => {
+    const onChange = vi.fn()
+    const markdownFile = new File(['commit body'], 'commit.md', { type: 'text/markdown' })
+    const systemFile = new File(['metadata'], '.DS_Store')
+    Object.defineProperty(markdownFile, 'webkitRelativePath', { value: 'commands/git/commit.md' })
+    Object.defineProperty(systemFile, 'webkitRelativePath', { value: 'commands/.DS_Store' })
+
+    const { container } = render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(input, { target: { files: [markdownFile, systemFile] } })
+
+    await waitFor(() => {
+      expect(mocks.installOpenCodeDirectoryFiles).toHaveBeenCalledWith({ kind: 'commands', files: [markdownFile] })
+    })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('Uploaded 1 command file')
+  })
+
+  it('shows an error when a selected commands folder has no markdown files', async () => {
+    const onChange = vi.fn()
+    const systemFile = new File(['metadata'], '.DS_Store')
+    Object.defineProperty(systemFile, 'webkitRelativePath', { value: 'commands/.DS_Store' })
+
+    const { container } = render(<CommandsEditor commands={{}} onChange={onChange} />, { wrapper: createWrapper() })
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    fireEvent.change(input, { target: { files: [systemFile] } })
+
+    expect(mocks.installOpenCodeDirectoryFiles).not.toHaveBeenCalled()
+    expect(mocks.toastError).toHaveBeenCalledWith('No markdown commands files found')
   })
 })

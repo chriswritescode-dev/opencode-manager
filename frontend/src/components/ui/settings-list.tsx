@@ -77,7 +77,7 @@ export function SettingsList({
 
   if (isEmpty) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-muted-foreground">
+      <div className="h-auto max-h-40 min-h-24 rounded-lg border border-dashed border-border bg-card/50 p-6 text-center text-muted-foreground">
         <p className="text-sm font-medium text-foreground">{emptyTitle}</p>
         <p className="text-xs mt-1">{emptyHint}</p>
       </div>
