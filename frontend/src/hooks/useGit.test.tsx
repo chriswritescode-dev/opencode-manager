@@ -4,6 +4,7 @@ import { useGit } from './useGit'
 import * as gitApi from '../api/git'
 import * as toast from '../lib/toast'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { GitStatusResponse } from '../types/git'
 
 vi.mock('../api/git', () => ({
   gitFetch: vi.fn(),
@@ -14,6 +15,7 @@ vi.mock('../api/git', () => ({
   gitUnstageFiles: vi.fn(),
   gitDiscardFiles: vi.fn(),
   gitReset: vi.fn(),
+  fetchGitStatus: vi.fn(),
   fetchGitLog: vi.fn(),
   fetchGitDiff: vi.fn(),
   createBranch: vi.fn(),
@@ -34,6 +36,15 @@ vi.mock('../lib/toast', () => ({
 
 const mockInvalidateQueries = vi.fn()
 const mockSetQueryData = vi.fn()
+const mockSetQueriesData = vi.fn()
+
+const mockGitStatus: GitStatusResponse = {
+  branch: 'main',
+  ahead: 0,
+  behind: 0,
+  files: [],
+  hasChanges: false,
+}
 
 vi.mock('@tanstack/react-query', async () => {
   const actual = await vi.importActual('@tanstack/react-query')
@@ -42,6 +53,7 @@ vi.mock('@tanstack/react-query', async () => {
     useQueryClient: vi.fn(() => ({
       invalidateQueries: mockInvalidateQueries,
       setQueryData: mockSetQueryData,
+      setQueriesData: mockSetQueriesData,
     }))
   }
 })
@@ -62,7 +74,39 @@ describe('useGit', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockInvalidateQueries.mockClear()
+    vi.mocked(gitApi.gitFetch).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitPull).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitPush).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitCommit).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitStageFiles).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitUnstageFiles).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitDiscardFiles).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.gitReset).mockResolvedValue(mockGitStatus)
+    vi.mocked(gitApi.fetchGitStatus).mockResolvedValue(mockGitStatus)
   })
+
+  const expectTargetedStatusCacheUpdate = () => {
+    expect(mockSetQueryData).toHaveBeenCalledWith(['gitStatus', 1], mockGitStatus)
+    expect(mockSetQueriesData).toHaveBeenCalledWith(
+      expect.objectContaining({
+        queryKey: ['reposGitStatus'],
+        predicate: expect.any(Function),
+      }),
+      expect.any(Function),
+    )
+
+    const [filters, updater] = mockSetQueriesData.mock.calls[0]
+    expect(filters.predicate({ queryKey: ['reposGitStatus', [1, 2]] })).toBe(true)
+    expect(filters.predicate({ queryKey: ['reposGitStatus', [2, 3]] })).toBe(false)
+    expect(filters.predicate({ queryKey: ['other', [1]] })).toBe(false)
+
+    const otherStatus = { ...mockGitStatus, branch: 'dev' }
+    const oldData = new Map<number, GitStatusResponse>([[1, otherStatus], [2, otherStatus]])
+    const updated = updater(oldData)
+    expect(updated).not.toBe(oldData)
+    expect(updated.get(1)).toBe(mockGitStatus)
+    expect(updated.get(2)).toBe(otherStatus)
+  }
 
   it('returns all mutations', () => {
     const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
@@ -86,7 +130,9 @@ describe('useGit', () => {
       })
 
       expect(gitApi.gitFetch).toHaveBeenCalledWith(1)
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
+      expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
     })
@@ -113,7 +159,9 @@ describe('useGit', () => {
       })
 
       expect(gitApi.gitPull).toHaveBeenCalledWith(1)
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
+      expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
     })
@@ -136,10 +184,12 @@ describe('useGit', () => {
       const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
 
       await waitFor(() => {
-        result.current.push.mutateAsync()
+        result.current.push.mutateAsync(undefined)
       })
 
       expect(gitApi.gitPush).toHaveBeenCalledWith(1, false)
+      expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
     })
@@ -150,7 +200,7 @@ describe('useGit', () => {
       const { result } = renderHook(() => useGit(1), { wrapper: createWrapper() })
 
       await waitFor(() => {
-        result.current.push.mutateAsync().catch(() => {})
+        result.current.push.mutateAsync(undefined).catch(() => {})
       })
 
       expect(toast.showToast.error).toHaveBeenCalledWith('Push failed')
@@ -166,7 +216,9 @@ describe('useGit', () => {
       })
 
       expect(gitApi.gitCommit).toHaveBeenCalledWith(1, 'test commit', undefined)
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
+      expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
     })
@@ -193,7 +245,9 @@ describe('useGit', () => {
       })
 
       expect(gitApi.gitStageFiles).toHaveBeenCalledWith(1, ['file.txt'])
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
+      expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
     })
@@ -220,7 +274,9 @@ describe('useGit', () => {
       })
 
       expect(gitApi.gitUnstageFiles).toHaveBeenCalledWith(1, ['file.txt'])
-      expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
+      expectTargetedStatusCacheUpdate()
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['reposGitStatus'] })
+      expect(mockInvalidateQueries).not.toHaveBeenCalledWith({ queryKey: ['gitStatus', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['fileDiff', 1] })
       expect(mockInvalidateQueries).toHaveBeenCalledWith({ queryKey: ['gitLog', 1] })
     })

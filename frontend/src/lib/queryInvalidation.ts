@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
+import type { GitStatusResponse } from '@/types/git'
 
 export function messagesQueryKey(
   opcodeUrl: string | null | undefined,
@@ -47,7 +48,15 @@ export function invalidateRepoListCaches(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
 }
 
-export function invalidateRepoGitCaches(queryClient: QueryClient, repoId?: number | null) {
+interface RepoGitInvalidationOptions {
+  invalidateStatus?: boolean
+}
+
+export function invalidateRepoGitCaches(
+  queryClient: QueryClient,
+  repoId?: number | null,
+  options: RepoGitInvalidationOptions = {},
+) {
   if (!repoId) {
     invalidateRepoListCaches(queryClient)
     queryClient.invalidateQueries({ queryKey: ['repo'] })
@@ -61,9 +70,32 @@ export function invalidateRepoGitCaches(queryClient: QueryClient, repoId?: numbe
   queryClient.invalidateQueries({ queryKey: ['repos'] })
   queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
   queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
-  queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
+  if (options.invalidateStatus ?? true) {
+    queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
+  }
   queryClient.invalidateQueries({ queryKey: ['gitLog', repoId] })
   queryClient.invalidateQueries({ queryKey: ['fileDiff', repoId] })
+}
+
+function reposGitStatusQueryIncludesRepo(queryKey: readonly unknown[], repoId: number) {
+  const repoIds = queryKey[1]
+  return queryKey[0] === 'reposGitStatus' && Array.isArray(repoIds) && repoIds.includes(repoId)
+}
+
+export function setRepoGitStatusCaches(queryClient: QueryClient, repoId: number, data: GitStatusResponse) {
+  queryClient.setQueryData(['gitStatus', repoId], data)
+  queryClient.setQueriesData<Map<number, GitStatusResponse>>(
+    {
+      queryKey: ['reposGitStatus'],
+      predicate: (query) => reposGitStatusQueryIncludesRepo(query.queryKey, repoId),
+    },
+    (oldData) => {
+      if (!oldData) return oldData
+      const updated = new Map(oldData)
+      updated.set(repoId, data)
+      return updated
+    },
+  )
 }
 
 const repoGitInvalidationTimers = new WeakMap<QueryClient, Map<number, ReturnType<typeof setTimeout>>>()
