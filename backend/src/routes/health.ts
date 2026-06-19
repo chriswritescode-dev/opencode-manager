@@ -91,6 +91,7 @@ export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSu
         opencodeMinVersion: opencodeServerManager.getMinVersion(),
         opencodeVersionSupported: opencodeServerManager.isVersionSupported(),
         opencodeManagerVersion,
+        opencodeRestartPending: opencodeServerManager.isRestartPending(),
       }
 
       if (lifecycle) {

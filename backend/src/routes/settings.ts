@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -44,7 +44,13 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
-import { installOpenCodeDirectoryFiles, listOpenCodeDirectoryFiles } from '../services/opencode-directory-files'
+import {
+  installOpenCodeDirectoryFiles,
+  listOpenCodeDirectoryFiles,
+  getOpenCodeDirectoryFile,
+  updateOpenCodeDirectoryFile,
+  deleteOpenCodeDirectoryFile,
+} from '../services/opencode-directory-files'
 import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
 import { getRepoById } from '../db/queries'
 import { githubFetch } from '../utils/github'
@@ -142,22 +148,46 @@ async function reloadAfterSkillInstall(
   openCodeSupervisor: OpenCodeSupervisor | undefined,
   scope: SkillScope,
   repoId: number | undefined,
-): Promise<void> {
+): Promise<boolean> {
   if (scope === 'project' && repoId !== undefined) {
     await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
-  } else {
-    await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
+    return false
   }
+
+  opencodeServerManager.markRestartPending()
+  return true
 }
 
 const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
   ['No markdown', 400],
   ['Path must be relative', 400],
   ['Path must not contain', 400],
+  ['Path must reference', 400],
   ['escapes', 400],
   ['Missing upload file', 400],
   ['not a valid file', 400],
 ]
+
+function handleOpenCodeDirectoryFileError(c: Context, error: unknown, operation: string) {
+  logger.error(`Failed to ${operation} OpenCode directory file:`, error)
+
+  if (error instanceof z.ZodError) {
+    return c.json({ error: 'Invalid request', details: error.issues }, 400)
+  }
+
+  if (error instanceof Error) {
+    if ('code' in error && error.code === 'ENOENT') {
+      return c.json({ error: 'File not found' }, 404)
+    }
+
+    const match = OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
+    if (match) {
+      return c.json({ error: error.message }, match[1])
+    }
+  }
+
+  return c.json({ error: `Failed to ${operation} OpenCode directory file` }, 500)
+}
 
 const SKILL_INSTALL_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 404 | 409]> = [
   ['already exists', 409],
@@ -536,9 +566,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         if (restartRequired) {
           await writeFileContent(configPath, config.rawContent)
           logger.info(`Wrote default config to: ${configPath}`)
-          logger.info('OpenCode configuration requires process restart')
-          opencodeServerManager.clearStartupError()
-          await restartOpenCode(openCodeSupervisor)
+          logger.info('OpenCode configuration change requires a server restart; deferring until requested')
+          opencodeServerManager.markRestartPending()
+          return c.json({ ...config, restartRequired: true })
         } else {
           const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
           if (!patchResult.success) {
@@ -1250,9 +1280,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       const files = await readUploadedManifestFiles(formData, markdownManifest)
 
       const result = await installOpenCodeDirectoryFiles(kind, files)
-      await restartOpenCodeSafe(openCodeSupervisor, `${kind} upload`)
+      opencodeServerManager.markRestartPending()
 
-      return c.json(result)
+      return c.json({ ...result, restartRequired: true })
     } catch (error) {
       logger.error('Failed to install OpenCode directory files:', error)
 
@@ -1290,6 +1320,50 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
+  app.get('/opencode-directory-files/content', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
+      return c.json(await getOpenCodeDirectoryFile(kind, relativePath))
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'read')
+    }
+  })
+
+  app.put('/opencode-directory-files', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { kind, relativePath, content } = z
+        .object({
+          kind: z.enum(['agents', 'commands']),
+          relativePath: z.string().min(1),
+          content: z.string(),
+        })
+        .parse(body)
+
+      const result = await updateOpenCodeDirectoryFile(kind, relativePath, content)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...result, restartRequired: true })
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'update')
+    }
+  })
+
+  app.delete('/opencode-directory-files', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
+
+      await deleteOpenCodeDirectoryFile(kind, relativePath)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ kind, relativePath, restartRequired: true })
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'delete')
+    }
+  })
+
   app.post('/skills/install', async (c) => {
     try {
       const contentType = c.req.header('content-type') || ''
@@ -1304,9 +1378,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromGithubTree(db, validated)
 
-        await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
+        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
 
-        return c.json(result)
+        return c.json({ ...result, restartRequired })
       }
 
       if (contentType.includes('multipart/form-data')) {
@@ -1340,9 +1414,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
 
-        await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
+        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
 
-        return c.json(result)
+        return c.json({ ...result, restartRequired })
       }
 
       return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
@@ -1405,9 +1479,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await createSkill(db, validated)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'skill creation')
+      opencodeServerManager.markRestartPending()
 
-      return c.json(skill)
+      return c.json({ ...skill, restartRequired: true })
     } catch (error) {
       logger.error('Failed to create skill:', error)
       if (error instanceof z.ZodError) {
@@ -1434,9 +1508,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'skill update')
+      opencodeServerManager.markRestartPending()
 
-      return c.json(skill)
+      return c.json({ ...skill, restartRequired: true })
     } catch (error) {
       logger.error('Failed to update skill:', error)
       if (error instanceof z.ZodError) {
@@ -1467,9 +1541,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       await deleteSkill(db, name, scope, repoId)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'skill deletion')
+      opencodeServerManager.markRestartPending()
 
-      return c.json({ success: true })
+      return c.json({ success: true, restartRequired: true })
     } catch (error) {
       logger.error('Failed to delete skill:', error)
       if (error instanceof z.ZodError) {

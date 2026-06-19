@@ -6,6 +6,7 @@ import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { CommandDialog } from './CommandDialog'
 import { UploadFolderButton } from './UploadFolderButton'
+import { DirectoryFilesList } from './DirectoryFilesList'
 import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 
 interface Command {
@@ -94,14 +95,7 @@ export function CommandsEditor({ commands, directoryCommands = [], onChange }: C
             actionsLabel={`Actions for /${name}`}
           />
         ))}
-        {directoryCommands.map((command) => (
-          <SettingsListRow
-            key={`file:${command.relativePath}`}
-            title={`/${command.name}`}
-            description={`Uploaded file: ${command.relativePath}`}
-            badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
-          />
-        ))}
+        <DirectoryFilesList kind="commands" files={directoryCommands} titlePrefix="/" />
       </SettingsList>
 
       <CommandDialog

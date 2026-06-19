@@ -92,6 +92,7 @@ export interface OpenCodeConfig {
     message: string
   }>
   removedFields?: string[]
+  restartRequired?: boolean
   isValid: boolean
   isDefault: boolean
   createdAt: number

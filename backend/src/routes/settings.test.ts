@@ -7,6 +7,7 @@ import { join } from 'path'
 import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { createSettingsRoutes } from './settings'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
@@ -302,10 +303,12 @@ describe('settings routes — OpenCode directory file upload', () => {
   let originalWorkspacePath: string | undefined
   let workspacePath: string
   const restart = vi.fn(async () => undefined)
+  let markRestartPendingSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
     db = createTestDb()
     restart.mockClear()
+    markRestartPendingSpy = vi.spyOn(opencodeServerManager, 'markRestartPending').mockImplementation(() => undefined)
     originalWorkspacePath = process.env.WORKSPACE_PATH
     workspacePath = await mkdtemp(join(tmpdir(), 'ocm-command-upload-'))
     process.env.WORKSPACE_PATH = workspacePath
@@ -320,6 +323,7 @@ describe('settings routes — OpenCode directory file upload', () => {
     }
     await rm(workspacePath, { recursive: true, force: true })
     db.close()
+    markRestartPendingSpy.mockRestore()
   })
 
   it('installs uploaded command markdown files into the OpenCode commands directory', async () => {
@@ -340,9 +344,11 @@ describe('settings routes — OpenCode directory file upload', () => {
     await expect(res.json()).resolves.toEqual({
       kind: 'commands',
       filesInstalled: ['git/commit.md'],
+      restartRequired: true,
     })
     await expect(readFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'utf8')).resolves.toBe('commit body')
-    expect(restart).toHaveBeenCalledTimes(1)
+    expect(restart).not.toHaveBeenCalled()
+    expect(markRestartPendingSpy).toHaveBeenCalledTimes(1)
   })
 
   it('lists uploaded command and agent directory files', async () => {

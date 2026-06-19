@@ -6,6 +6,7 @@ import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { AgentDialog } from './AgentDialog'
 import { UploadFolderButton } from './UploadFolderButton'
+import { DirectoryFilesList } from './DirectoryFilesList'
 import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 
 interface Agent {
@@ -106,14 +107,7 @@ export function AgentsEditor({ agents, directoryAgents = [], onChange }: AgentsE
             actionsLabel={`Actions for ${name}`}
           />
         ))}
-        {directoryAgents.map((agent) => (
-          <SettingsListRow
-            key={`file:${agent.relativePath}`}
-            title={agent.name}
-            description={`Uploaded file: ${agent.relativePath}`}
-            badges={<Badge variant="secondary" className="shrink-0">File</Badge>}
-          />
-        ))}
+        <DirectoryFilesList kind="agents" files={directoryAgents} />
       </SettingsList>
 
       <AgentDialog

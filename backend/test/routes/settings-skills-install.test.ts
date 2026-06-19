@@ -71,6 +71,8 @@ vi.mock('../../src/services/opencode-single-server', () => {
       restart: vi.fn(),
       clearStartupError: vi.fn(),
       getLastStartupError: vi.fn(),
+      markRestartPending: vi.fn(),
+      isRestartPending: vi.fn(),
       setDatabase: vi.fn(),
       reinitializeBinDirectory: vi.fn(),
     },
@@ -124,6 +126,7 @@ const mockInstallFromGithubTree = installSkillFromGithubTree as ReturnType<typeo
 const mockInstallFromUploadedFiles = installSkillFromUploadedFiles as ReturnType<typeof vi.fn>
 const mockDeleteSkill = deleteSkill as ReturnType<typeof vi.fn>
 const mockRestart = opencodeServerManager.restart as ReturnType<typeof vi.fn>
+const mockMarkRestartPending = opencodeServerManager.markRestartPending as ReturnType<typeof vi.fn>
 
 const mockSuccessResponse = {
   skill: {
@@ -166,14 +169,15 @@ describe('Settings Routes - Skill Install', () => {
 
       expect(res.status).toBe(200)
       const body = await res.json() as Record<string, unknown>
-      expect(body).toEqual(mockSuccessResponse)
+      expect(body).toEqual({ ...mockSuccessResponse, restartRequired: true })
       expect(mockInstallFromGithubTree).toHaveBeenCalledTimes(1)
       expect(mockInstallFromGithubTree).toHaveBeenCalledWith(testDb, {
         sourceType: 'github',
         url: 'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach',
         scope: 'global',
       })
-      expect(mockRestart).toHaveBeenCalledTimes(1)
+      expect(mockMarkRestartPending).toHaveBeenCalledTimes(1)
+      expect(mockRestart).not.toHaveBeenCalled()
     })
 
     it('installs from multipart upload', async () => {
@@ -209,7 +213,8 @@ describe('Settings Routes - Skill Install', () => {
           }),
         ],
       )
-      expect(mockRestart).toHaveBeenCalledTimes(1)
+      expect(mockMarkRestartPending).toHaveBeenCalledTimes(1)
+      expect(mockRestart).not.toHaveBeenCalled()
     })
 
     it('returns 409 on existing skill', async () => {

@@ -107,3 +107,50 @@ export async function listOpenCodeDirectoryFiles(kind: OpenCodeDirectoryFileKind
     relativePath,
   }))
 }
+
+function resolveDirectoryFilePath(kind: OpenCodeDirectoryFileKind, relativePath: string): string {
+  const normalized = normalizeUploadRelativePath(relativePath, { collapseEmptySegments: true })
+  if (!normalized.toLowerCase().endsWith('.md')) {
+    throw new Error(`Path must reference a markdown file: "${relativePath}"`)
+  }
+  return resolveWithinDirectory(getOpenCodeDirectoryRoot(kind), normalized, `${kind} directory`)
+}
+
+export async function getOpenCodeDirectoryFile(
+  kind: OpenCodeDirectoryFileKind,
+  relativePath: string,
+): Promise<OpenCodeDirectoryFileInfo & { content: string }> {
+  const filePath = resolveDirectoryFilePath(kind, relativePath)
+  const content = await fs.readFile(filePath, 'utf8')
+
+  return {
+    kind,
+    name: getNameFromRelativePath(relativePath),
+    relativePath,
+    content,
+  }
+}
+
+export async function updateOpenCodeDirectoryFile(
+  kind: OpenCodeDirectoryFileKind,
+  relativePath: string,
+  content: string,
+): Promise<OpenCodeDirectoryFileInfo> {
+  const filePath = resolveDirectoryFilePath(kind, relativePath)
+  await fs.access(filePath)
+  await fs.writeFile(filePath, content, 'utf8')
+
+  return {
+    kind,
+    name: getNameFromRelativePath(relativePath),
+    relativePath,
+  }
+}
+
+export async function deleteOpenCodeDirectoryFile(
+  kind: OpenCodeDirectoryFileKind,
+  relativePath: string,
+): Promise<void> {
+  const filePath = resolveDirectoryFilePath(kind, relativePath)
+  await fs.unlink(filePath)
+}

@@ -22,6 +22,7 @@ interface HealthResponse {
   opencodeMinVersion: string
   opencodeVersionSupported: boolean
   opencodeManagerVersion: string | null
+  opencodeRestartPending?: boolean
   error?: string
 }
 

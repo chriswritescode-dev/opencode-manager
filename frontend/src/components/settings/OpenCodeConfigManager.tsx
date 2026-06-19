@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { cn } from '@/lib/utils'
-import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown } from 'lucide-react'
+import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
@@ -252,7 +252,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     const previousConfig = configs.find(c => c.name === configName)
     const previousContent = previousConfig?.content
     const previousSelectedConfig = selectedConfig
-    const shouldPromptRestart = Boolean(previousConfig?.isDefault)
     const now = Date.now()
 
     setConfigs(prev => prev.map(config =>
@@ -261,15 +260,14 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     if (selectedConfig && selectedConfig.name === configName) {
       setSelectedConfig({ ...selectedConfig, content: newContent, updatedAt: now })
     }
-    if (shouldPromptRestart) {
-      setIsRestartPromptOpen(true)
-    }
 
     try {
       setIsUpdating(true)
       const result = await settingsApi.updateOpenCodeConfig(configName, { content: newContent })
       if (result.removedFields && result.removedFields.length > 0) {
         showToast.info(`Configuration updated after removing invalid fields: ${result.removedFields.join(', ')}`)
+      } else if (result.restartRequired) {
+        showToast.success('Configuration saved. Restart the server to apply changes.')
       } else {
         showToast.success('Configuration updated')
       }
@@ -280,9 +278,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
       ))
       if (previousSelectedConfig && previousSelectedConfig.name === configName) {
         setSelectedConfig(previousSelectedConfig)
-      }
-      if (shouldPromptRestart) {
-        setIsRestartPromptOpen(false)
       }
       console.error('Failed to update config:', error)
       showToast.error(getApiErrorMessage(error, 'Failed to update config'))
@@ -512,6 +507,30 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
             </div>
           </CardContent>
         </Card>
+       )}
+
+       {health?.opencodeRestartPending && (
+         <div className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 sm:flex-row sm:items-center sm:justify-between">
+           <div className="flex items-center gap-2">
+             <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+             <p className="text-sm">
+               Configuration changes are saved but require a server restart to take effect.
+             </p>
+           </div>
+           <Button
+             size="sm"
+             onClick={() => setIsRestartPromptOpen(true)}
+             disabled={restartServerMutation.isPending}
+             className="shrink-0"
+           >
+             {restartServerMutation.isPending ? (
+               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+             ) : (
+               <RotateCcw className="h-3 w-3 mr-1" />
+             )}
+             Restart Now
+           </Button>
+         </div>
        )}
 
        <Card>
@@ -1061,7 +1080,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
       <RestartServerDialog
         open={isRestartPromptOpen}
         onOpenChange={setIsRestartPromptOpen}
-        isSaving={isUpdating && !restartServerMutation.isPending}
         isRestarting={restartServerMutation.isPending}
         onCancel={() => setIsRestartPromptOpen(false)}
         onConfirm={async () => {

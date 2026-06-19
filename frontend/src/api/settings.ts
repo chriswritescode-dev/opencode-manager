@@ -333,6 +333,37 @@ export const settingsApi = {
       params: { kind },
     })
   },
+
+  getOpenCodeDirectoryFile: async (
+    kind: 'agents' | 'commands',
+    relativePath: string,
+  ): Promise<OpenCodeDirectoryFileInfo & { content: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/content`, {
+      params: { kind, relativePath },
+    })
+  },
+
+  updateOpenCodeDirectoryFile: async (data: {
+    kind: 'agents' | 'commands'
+    relativePath: string
+    content: string
+  }): Promise<OpenCodeDirectoryFileInfo> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteOpenCodeDirectoryFile: async (
+    kind: 'agents' | 'commands',
+    relativePath: string,
+  ): Promise<{ kind: 'agents' | 'commands'; relativePath: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      method: 'DELETE',
+      params: { kind, relativePath },
+    })
+  },
 }
 
 export interface VersionInfo {
