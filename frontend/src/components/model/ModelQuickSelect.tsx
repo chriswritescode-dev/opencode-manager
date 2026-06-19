@@ -1,5 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, Clock, Search, Star, Trash2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Search, Star, Trash2, X } from 'lucide-react'
 import { useModelSelection } from '@/hooks/useModelSelection'
 import { useVariants } from '@/hooks/useVariants'
 import { formatModelName, formatProviderName, getProviders } from '@/api/providers'
@@ -610,10 +610,11 @@ export function ModelQuickSelect({
                     <button
                       type="button"
                       disabled={!model && !hasVariants}
-                      className="flex h-9 max-w-24 items-center justify-center rounded-full px-3 text-sm font-medium capitalize text-white/70 hover:bg-white/10 disabled:opacity-30"
+                      className="flex h-9 w-24 items-center justify-center gap-1 rounded-md border border-white/10 bg-white/5 px-1.5 text-sm font-medium capitalize text-white/70 hover:bg-white/10 disabled:opacity-30"
                       aria-label={`Current variant: ${selectedVariantLabel}`}
                     >
                       <span className="truncate">{selectedVariantLabel}</span>
+                      <ChevronDown className="h-3.5 w-3.5 shrink-0 text-white/40" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="z-[350] min-w-56">
