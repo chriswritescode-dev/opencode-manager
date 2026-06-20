@@ -8,8 +8,8 @@ describe('getAssistantPath', () => {
 });
 
 describe('getAssistantSessionListPath', () => {
-  it('returns /assistant?view=sessions', () => {
-    expect(getAssistantSessionListPath()).toBe('/assistant?view=sessions');
+  it('returns /assistant', () => {
+    expect(getAssistantSessionListPath()).toBe('/assistant');
   });
 });
 
@@ -42,8 +42,8 @@ describe('getSessionListPath', () => {
   });
 
   it('returns assistant session list path for assistant sessions', () => {
-    expect(getSessionListPath(42, true)).toBe('/assistant?view=sessions');
-    expect(getSessionListPath('123', true)).toBe('/assistant?view=sessions');
+    expect(getSessionListPath(42, true)).toBe('/assistant');
+    expect(getSessionListPath('123', true)).toBe('/assistant');
   });
 
   it('includes tab param when tab is workspaces', () => {
@@ -56,7 +56,7 @@ describe('getSessionListPath', () => {
   });
 
   it('ignores tab param for assistant sessions', () => {
-    expect(getSessionListPath(42, true, 'workspaces')).toBe('/assistant?view=sessions');
+    expect(getSessionListPath(42, true, 'workspaces')).toBe('/assistant');
   });
 });
 
@@ -84,10 +84,10 @@ describe('getSwipeBackTarget', () => {
 
     it('returns assistant session list path for assistant session detail with assistant=1', () => {
       expect(getSwipeBackTarget('/repos/42/sessions/abc', '?assistant=1')).toBe(
-        '/assistant?view=sessions'
+        '/assistant'
       );
       expect(getSwipeBackTarget('/repos/123/sessions/xyz', '?assistant=1')).toBe(
-        '/assistant?view=sessions'
+        '/assistant'
       );
     });
 
@@ -99,26 +99,18 @@ describe('getSwipeBackTarget', () => {
     it('preserves tab param in back target', () => {
       expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces')).toBe('/repos/42?repoTab=workspaces');
       expect(getSwipeBackTarget('/repos/42/sessions/abc', '?repoTab=workspaces&assistant=1')).toBe(
-        '/assistant?view=sessions'
+        '/assistant'
       );
     });
   });
 
   describe('assistant route', () => {
-    it('returns assistant session list path for canonical assistant route', () => {
-      expect(getSwipeBackTarget('/assistant', '')).toBe('/assistant?view=sessions');
+    it('returns root for canonical assistant route', () => {
+      expect(getSwipeBackTarget('/assistant', '')).toBe('/');
     });
 
-    it('returns root for assistant session list route', () => {
-      expect(getSwipeBackTarget('/assistant', '?view=sessions')).toBe('/');
-    });
-
-    it('returns assistant session list path for legacy assistant route', () => {
-      expect(getSwipeBackTarget('/repos/123/assistant', '')).toBe('/assistant?view=sessions');
-    });
-
-    it('returns root for legacy assistant session list route', () => {
-      expect(getSwipeBackTarget('/repos/42/assistant', '?view=sessions')).toBe('/');
+    it('returns root for legacy assistant route', () => {
+      expect(getSwipeBackTarget('/repos/123/assistant', '')).toBe('/');
     });
   });
 

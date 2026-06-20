@@ -5,7 +5,15 @@ import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useSwipeBack } from '@/hooks/useMobile'
 
-const Dialog = DialogPrimitive.Root
+const DialogOpenContext = React.createContext<boolean>(true)
+
+function Dialog({ open, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  return (
+    <DialogOpenContext.Provider value={open ?? true}>
+      <DialogPrimitive.Root open={open} {...props} />
+    </DialogOpenContext.Provider>
+  )
+}
 
 const DialogTrigger = DialogPrimitive.Trigger
 
@@ -45,8 +53,9 @@ const DialogContent = React.forwardRef<
   DialogContentProps
 >(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, canSwipeBack, onSwipeBack, overlayClassName, style, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
+  const isDialogOpen = React.useContext(DialogOpenContext)
   const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
-  const shouldEnableMobileSwipe = mobileSwipeToClose !== false && isMobile
+  const shouldEnableMobileSwipe = mobileSwipeToClose !== false && isMobile && isDialogOpen
   const shouldAnimateSwipe = shouldEnableMobileSwipe && isMobileFullscreenMode
   const swipeContainerRef = React.useRef<HTMLDivElement>(null)
   const closeTriggerRef = React.useRef<HTMLButtonElement>(null)
