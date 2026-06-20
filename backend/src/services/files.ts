@@ -253,6 +253,7 @@ function getMimeType(filePath: string): AllowedMimeType {
   const mimeTypes: Record<string, AllowedMimeType> = {
     '.txt': 'text/plain',
     '.html': 'text/html',
+    '.htm': 'text/html',
     '.css': 'text/css',
     '.js': 'text/javascript',
     '.ts': 'text/typescript',

@@ -7,6 +7,7 @@ import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import type { components } from '@/api/opencode-types'
+import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
 import { useTheme } from '@/hooks/useTheme'
 import 'highlight.js/styles/github-dark.css'
 
@@ -14,6 +15,7 @@ type TextPart = components['schemas']['TextPart']
 
 interface TextPartProps {
   part: TextPart
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
 }
 
 interface MermaidBlockProps {
@@ -146,10 +148,11 @@ function MermaidBlock({ code }: MermaidBlockProps) {
 interface CodeBlockProps {
   children?: React.ReactNode
   className?: string
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
   [key: string]: unknown
 }
 
-function CodeBlock({ children, className, ...props }: CodeBlockProps) {
+function CodeBlock({ children, className, onHtmlArtifactOpen, ...props }: CodeBlockProps) {
   const extractTextContent = (node: React.ReactNode): string => {
     if (typeof node === 'string') return node
     if (typeof node === 'number') return node.toString()
@@ -163,14 +166,31 @@ function CodeBlock({ children, className, ...props }: CodeBlockProps) {
     return ''
   }
   
-  const codeContent = extractTextContent(children)
+  const rawCodeContent = extractTextContent(children)
+  const codeContent = rawCodeContent.trim()
+
+  const childArray = React.Children.toArray(children)
+  const codeElement = childArray.find((child): child is React.ReactElement => React.isValidElement(child))
+  const codeClassName = codeElement?.props?.className
+  const isHtmlCode = typeof codeClassName === 'string' && (codeClassName.includes('language-html') || codeClassName.includes('language-htm'))
 
   return (
     <div className="relative">
       <pre className={`bg-accent p-1 rounded-lg overflow-x-auto whitespace-pre-wrap break-words border border-border my-4 ${className || ''}`} {...props}>
         {children}
       </pre>
-      <CopyButton content={codeContent} title="Copy code" className="absolute top-2 right-2" />
+      <div className="absolute top-2 right-2 flex gap-1">
+        {isHtmlCode && onHtmlArtifactOpen && (
+          <button
+            onClick={() => onHtmlArtifactOpen({ source: 'inline', html: codeContent, title: 'HTML artifact' })}
+            className="p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground text-xs"
+            title="Preview HTML artifact"
+          >
+            Preview HTML
+          </button>
+        )}
+        <CopyButton content={rawCodeContent} title="Copy code" />
+      </div>
     </div>
   )
 }
@@ -184,7 +204,7 @@ function isMermaidBlockComplete(text: string): boolean {
   return false
 }
 
-export function TextPart({ part }: TextPartProps) {
+export function TextPart({ part, onHtmlArtifactOpen }: TextPartProps) {
   const mermaidComplete = React.useMemo(() => {
     return part.text ? isMermaidBlockComplete(part.text) : false
   }, [part.text])
@@ -234,7 +254,7 @@ export function TextPart({ part }: TextPartProps) {
           },
           pre({ children }) {
             return (
-              <CodeBlock>
+              <CodeBlock onHtmlArtifactOpen={onHtmlArtifactOpen}>
                 {children}
               </CodeBlock>
             )

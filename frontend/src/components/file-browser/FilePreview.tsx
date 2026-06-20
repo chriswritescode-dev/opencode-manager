@@ -2,9 +2,11 @@ import { useState, useCallback, useRef, useEffect, memo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Download, X, Edit3, Save, X as XIcon, WrapText, Eye, Code } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
-import { getFileApiUrl } from '@/api/files'
+import { getFileApiUrl, getFilePreviewUrl } from '@/api/files'
 import { VirtualizedTextView, type VirtualizedTextViewHandle } from '@/components/ui/virtualized-text-view'
 import { MarkdownRenderer } from './MarkdownRenderer'
+import { HtmlPreviewFrame } from '@/components/html-preview/HtmlPreviewFrame'
+import { isHtmlPath } from '@/lib/htmlArtifacts'
 
 
 const VIRTUALIZATION_THRESHOLD_BYTES = 50_000
@@ -21,6 +23,7 @@ interface FilePreviewProps {
 
 export const FilePreview = memo(function FilePreview({ file, hideHeader = false, isMobileModal = false, onCloseModal, onFileSaved, initialLineNumber }: FilePreviewProps) {
   const isMarkdownFile = file.name.toLowerCase().endsWith('.md') || file.name.toLowerCase().endsWith('.mdx') || file.mimeType === 'text/markdown'
+  const isHtmlFile = isHtmlPath(file.name) || file.mimeType === 'text/html'
   
   const [viewMode, setViewMode] = useState<'preview' | 'edit'>('preview')
   const [editContent, setEditContent] = useState('')
@@ -29,6 +32,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   const [highlightedLine, setHighlightedLine] = useState<number | undefined>(initialLineNumber)
   const [lineWrap, setLineWrap] = useState(true)
   const [markdownPreview, setMarkdownPreview] = useState(isMarkdownFile)
+  const [htmlPreview, setHtmlPreview] = useState(isHtmlFile)
   const [isLoadingAllContent, setIsLoadingAllContent] = useState(false)
   const [fullContentLoaded, setFullContentLoaded] = useState(false)
   const [fullContent, setFullContent] = useState<string | null>(null)
@@ -42,9 +46,10 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
   useEffect(() => {
     setFullContentLoaded(false)
     setMarkdownPreview(isMarkdownFile)
+    setHtmlPreview(isHtmlFile)
     setFullContent(null)
     setLocalMdContent(null)
-  }, [file.path, isMarkdownFile])
+  }, [file.path, isMarkdownFile, isHtmlFile])
   
   useEffect(() => {
     if (shouldVirtualize && isMarkdownFile && markdownPreview && !isMarkdownTooLarge && !fullContentLoaded) {
@@ -227,7 +232,16 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     }
 
     if (shouldVirtualize && isTextFile) {
+      const showHtmlPreview = isHtmlFile && htmlPreview && viewMode !== 'edit'
       const showMarkdownPreview = isMarkdownFile && markdownPreview && viewMode !== 'edit'
+      
+      if (showHtmlPreview) {
+        return (
+          <div className="h-[calc(100vh-12rem)] min-h-[480px] rounded border border-border overflow-hidden bg-white">
+            <HtmlPreviewFrame title={`HTML preview: ${file.name}`} src={getFilePreviewUrl(file.path)} />
+          </div>
+        )
+      }
       
       return (
         <>
@@ -283,6 +297,14 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
             autoFocus
             data-file-editor="true"
           />
+        )
+      }
+
+      if (isHtmlFile && htmlPreview) {
+        return (
+          <div className="h-[calc(100vh-12rem)] min-h-[480px] rounded border border-border overflow-hidden bg-white">
+            <HtmlPreviewFrame title={`HTML preview: ${file.name}`} src={getFilePreviewUrl(file.path)} />
+          </div>
         )
       }
       
@@ -392,8 +414,20 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
                   {markdownPreview ? <Code className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
                 </Button>
               )}
+
+              {isHtmlFile && viewMode !== 'edit' && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={(e) => { e.stopPropagation(); e.preventDefault(); setHtmlPreview(!htmlPreview) }} 
+                  className={`h-7 w-7 p-0 ${htmlPreview ? 'bg-primary text-primary-foreground' : ''}`}
+                  title={htmlPreview ? "Show HTML source" : "Preview rendered HTML"}
+                >
+                  {htmlPreview ? <Code className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </Button>
+              )}
               
-              {isTextFile && !markdownPreview && (
+              {isTextFile && !markdownPreview && !htmlPreview && (
                 <Button 
                   variant="outline" 
                   size="sm" 

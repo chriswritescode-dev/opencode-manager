@@ -23,11 +23,102 @@ function getSpecialRoutePathFromRequest(c: Context, routeName: string): string |
   return match?.[1] ? decodeFilePath(match[1]) : undefined
 }
 
+function getPreviewPathFromRequest(c: Context): string | undefined {
+  const path = c.req.path
+  const prefix = '/api/files/preview'
+
+  const queryPath = c.req.query('path')
+  if (queryPath !== undefined) {
+    return queryPath
+  }
+
+  if (path.startsWith(prefix + '/')) {
+    const previewPath = path.slice(prefix.length + 1)
+    return decodeURIComponent(previewPath)
+  }
+
+  return undefined
+}
+
+const PREVIEWABLE_MIME_TYPES = new Set([
+  'text/html',
+  'text/css',
+  'text/javascript',
+  'application/javascript',
+  'application/json',
+  'application/xml',
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/svg+xml',
+])
+
+function isPreviewableMimeType(mimeType?: string): boolean {
+  return mimeType !== undefined && PREVIEWABLE_MIME_TYPES.has(mimeType)
+}
+
+function getPreviewHeaders(result: { name: string; size: number; mimeType?: string }): Record<string, string> {
+  const isHtmlSvg = result.mimeType === 'text/html' || result.mimeType === 'image/svg+xml'
+  const headers: Record<string, string> = {
+    'Content-Type': result.mimeType || 'application/octet-stream',
+    'Content-Length': result.size.toString(),
+    'Content-Disposition': `inline; filename="${result.name}"`,
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'no-referrer',
+  }
+
+  if (isHtmlSvg) {
+    headers['Content-Security-Policy'] = [
+      'sandbox allow-scripts;',
+      "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval';",
+      "script-src 'self' http: https: 'unsafe-inline' 'unsafe-eval';",
+      "style-src 'self' http: https: 'unsafe-inline';",
+      "img-src 'self' http: https: data: blob:;",
+      "font-src 'self' http: https: data:;",
+      "connect-src 'self' http: https:;",
+      "media-src 'self' http: https: data: blob:;",
+      "object-src 'none';",
+      "base-uri 'none';",
+      "frame-ancestors 'self'",
+    ].join(' ')
+  }
+
+  return headers
+}
+
 export function createFileRoutes() {
   const app = new Hono()
 
   app.get('*', async (c) => {
     const path = c.req.path
+
+    if (path === '/api/files/preview' || path.startsWith('/api/files/preview/')) {
+      const userPath = getPreviewPathFromRequest(c)
+
+      if (!userPath) {
+        return c.json({ error: 'No path provided' }, 400)
+      }
+
+      try {
+        const result = await fileService.getFile(userPath)
+
+        if (result.isDirectory) {
+          return c.json({ error: 'Cannot preview directories' }, 400)
+        }
+
+        if (!isPreviewableMimeType(result.mimeType)) {
+          return c.json({ error: 'File type cannot be previewed' }, 415)
+        }
+
+        const content = await fileService.getRawFileContent(userPath)
+        const headers = getPreviewHeaders(result)
+
+        return new Response(content, { headers })
+      } catch (error: unknown) {
+        logger.error('Failed to preview file:', error)
+        return c.json({ error: getErrorMessage(error) || 'Failed to preview file' }, getStatusCode(error) as ContentfulStatusCode)
+      }
+    }
 
     if (path.endsWith('/download-zip')) {
       const userPath = getSpecialRoutePathFromRequest(c, 'download-zip')
