@@ -8,6 +8,7 @@ vi.mock('../../src/services/opencode-single-server', () => ({
     getVersion: vi.fn(() => '1.0.0'),
     getMinVersion: vi.fn(() => '1.0.137'),
     isVersionSupported: vi.fn(() => true),
+    isRestartPending: vi.fn(() => false),
   },
 }))
 

@@ -8,6 +8,7 @@ import { useUrlParams } from '@/hooks/useUrlParams'
 import { useUIState } from '@/stores/uiStateStore'
 import { useQuery } from '@tanstack/react-query'
 import { getRepo } from '@/api/repos'
+import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { SideDrawer, SideDrawerContent } from '@/components/ui/side-drawer'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
@@ -51,11 +52,13 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     }
   }, [isOpen, bind])
 
-  const { data: repo } = useQuery({
+  const { data: repo, refetch: refetchRepo } = useQuery({
     queryKey: ['repo', repoId],
     queryFn: () => repoId ? getRepo(repoId) : null,
     enabled: !!repoId,
   })
+
+  useRefreshOnOpen(isOpen && repoId != null, () => { void refetchRepo() })
 
   const currentBranch = repo?.currentBranch || repo?.branch
   const repoDisplayName = isAssistantRoute || isAssistantSession

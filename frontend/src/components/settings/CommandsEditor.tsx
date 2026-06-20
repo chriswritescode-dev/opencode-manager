@@ -5,6 +5,9 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { CommandDialog } from './CommandDialog'
+import { UploadFolderButton } from './UploadFolderButton'
+import { DirectoryFilesList } from './DirectoryFilesList'
+import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 
 interface Command {
   template: string
@@ -17,12 +20,14 @@ interface Command {
 
 interface CommandsEditorProps {
   commands: Record<string, Command>
+  directoryCommands?: OpenCodeDirectoryFileInfo[]
   onChange: (commands: Record<string, Command>) => void
 }
 
-export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
+export function CommandsEditor({ commands, directoryCommands = [], onChange }: CommandsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingCommand, setEditingCommand] = useState<{ name: string; command: Command } | null>(null)
+  const hasCommands = Object.keys(commands).length > 0 || directoryCommands.length > 0
 
   const handleCommandSubmit = (name: string, command: Command) => {
     if (editingCommand) {
@@ -53,7 +58,8 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <UploadFolderButton kind="commands" />
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
@@ -70,7 +76,7 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
       </div>
 
       <SettingsList
-        isEmpty={Object.keys(commands).length === 0}
+        isEmpty={!hasCommands}
         emptyTitle="No commands configured"
         emptyHint="Add your first command to get started."
         maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
@@ -89,6 +95,7 @@ export function CommandsEditor({ commands, onChange }: CommandsEditorProps) {
             actionsLabel={`Actions for /${name}`}
           />
         ))}
+        <DirectoryFilesList kind="commands" files={directoryCommands} titlePrefix="/" />
       </SettingsList>
 
       <CommandDialog

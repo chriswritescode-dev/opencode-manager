@@ -13,11 +13,25 @@ import type {
   SkillScope,
   InstallSkillFromGithubRequest,
   InstallSkillResponse,
+  OpenCodeDirectoryFileInfo,
 } from './types/settings'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
 
 const DEFAULT_USER_ID = 'default'
+
+function appendFilesWithManifest(formData: FormData, files: File[]): void {
+  const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
+
+  files.forEach((file, index) => {
+    const fieldName = `file${index}`
+    const relativePath = file.webkitRelativePath || file.name
+    fileManifest.push({ fieldName, relativePath })
+    formData.append(fieldName, file)
+  })
+
+  formData.append('fileManifest', JSON.stringify(fileManifest))
+}
 
 export const settingsApi = {
   getSettings: async (userId = DEFAULT_USER_ID): Promise<SettingsResponse> => {
@@ -291,20 +305,63 @@ export const settingsApi = {
     if (data.repoId !== undefined) formData.append('repoId', String(data.repoId))
     if (data.overwrite !== undefined) formData.append('overwrite', String(data.overwrite))
 
-    const fileManifest: Array<{ fieldName: string; relativePath: string }> = []
-
-    data.files.forEach((file, index) => {
-      const fieldName = `file${index}`
-      const relativePath = file.webkitRelativePath || file.name
-      fileManifest.push({ fieldName, relativePath })
-      formData.append(fieldName, file)
-    })
-
-    formData.append('fileManifest', JSON.stringify(fileManifest))
+    appendFilesWithManifest(formData, data.files)
 
     return fetchWrapper(`${API_BASE_URL}/api/settings/skills/install`, {
       method: 'POST',
       body: formData,
+    })
+  },
+
+  installOpenCodeDirectoryFiles: async (data: {
+    kind: 'agents' | 'commands'
+    files: File[]
+  }): Promise<{ kind: 'agents' | 'commands'; filesInstalled: string[] }> => {
+    const formData = new FormData()
+    formData.append('kind', data.kind)
+
+    appendFilesWithManifest(formData, data.files)
+
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/install`, {
+      method: 'POST',
+      body: formData,
+    })
+  },
+
+  listOpenCodeDirectoryFiles: async (kind: 'agents' | 'commands'): Promise<OpenCodeDirectoryFileInfo[]> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      params: { kind },
+    })
+  },
+
+  getOpenCodeDirectoryFile: async (
+    kind: 'agents' | 'commands',
+    relativePath: string,
+  ): Promise<OpenCodeDirectoryFileInfo & { content: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files/content`, {
+      params: { kind, relativePath },
+    })
+  },
+
+  updateOpenCodeDirectoryFile: async (data: {
+    kind: 'agents' | 'commands'
+    relativePath: string
+    content: string
+  }): Promise<OpenCodeDirectoryFileInfo> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+  },
+
+  deleteOpenCodeDirectoryFile: async (
+    kind: 'agents' | 'commands',
+    relativePath: string,
+  ): Promise<{ kind: 'agents' | 'commands'; relativePath: string }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-directory-files`, {
+      method: 'DELETE',
+      params: { kind, relativePath },
     })
   },
 }

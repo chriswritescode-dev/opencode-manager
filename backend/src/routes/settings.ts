@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { execSync, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
@@ -20,7 +20,6 @@ import {
   SkillScopeSchema,
   InstallSkillFromGithubRequestSchema,
   InstallSkillUploadRequestSchema,
-  InstallSkillUploadManifestEntrySchema,
   type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
@@ -45,6 +44,14 @@ import {
   installSkillFromGithubTree,
   installSkillFromUploadedFiles,
 } from '../services/skills'
+import {
+  installOpenCodeDirectoryFiles,
+  listOpenCodeDirectoryFiles,
+  getOpenCodeDirectoryFile,
+  updateOpenCodeDirectoryFile,
+  deleteOpenCodeDirectoryFile,
+} from '../services/opencode-directory-files'
+import { parseUploadManifest, readUploadedManifestFiles, UploadValidationError } from './upload-utils'
 import { getRepoById } from '../db/queries'
 import { githubFetch } from '../utils/github'
 
@@ -103,9 +110,9 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
 async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
   try {
     await restartOpenCode(openCodeSupervisor)
-    logger.info(`Restarted OpenCode server after skill ${context}`)
+    logger.info(`Restarted OpenCode server after ${context}`)
   } catch (restartError) {
-    logger.warn(`Failed to restart OpenCode server after skill ${context}:`, restartError)
+    logger.warn(`Failed to restart OpenCode server after ${context}:`, restartError)
   }
 }
 
@@ -121,7 +128,7 @@ async function dispatchSkillReload(
     return
   }
 
-  await restartOpenCodeSafe(openCodeSupervisor, 'install')
+  await restartOpenCodeSafe(openCodeSupervisor, 'skill install')
 
   try {
     await openCodeClient.forward({
@@ -141,12 +148,53 @@ async function reloadAfterSkillInstall(
   openCodeSupervisor: OpenCodeSupervisor | undefined,
   scope: SkillScope,
   repoId: number | undefined,
-): Promise<void> {
+): Promise<boolean> {
   if (scope === 'project' && repoId !== undefined) {
     await dispatchSkillReload(db, openCodeClient, openCodeSupervisor, repoId)
-  } else {
-    await restartOpenCodeSafe(openCodeSupervisor, 'install')
+    return false
   }
+
+  opencodeServerManager.markRestartPending()
+  return true
+}
+
+const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 400]> = [
+  ['No markdown', 400],
+  ['Path must be relative', 400],
+  ['Path must not contain', 400],
+  ['Path must reference', 400],
+  ['escapes', 400],
+  ['Missing upload file', 400],
+  ['not a valid file', 400],
+]
+
+function matchErrorStatus<T extends number>(
+  table: ReadonlyArray<readonly [string, T]>,
+  error: Error,
+): T | null {
+  const match = table.find(([needle]) => error.message.includes(needle))
+  return match ? match[1] : null
+}
+
+function handleOpenCodeDirectoryFileError(c: Context, error: unknown, operation: string) {
+  logger.error(`Failed to ${operation} OpenCode directory file:`, error)
+
+  if (error instanceof z.ZodError) {
+    return c.json({ error: 'Invalid request', details: error.issues }, 400)
+  }
+
+  if (error instanceof Error) {
+    if ('code' in error && error.code === 'ENOENT') {
+      return c.json({ error: 'File not found' }, 404)
+    }
+
+    const status = matchErrorStatus(OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS, error)
+    if (status) {
+      return c.json({ error: error.message }, status)
+    }
+  }
+
+  return c.json({ error: `Failed to ${operation} OpenCode directory file` }, 500)
 }
 
 const SKILL_INSTALL_ERROR_STATUS: ReadonlyArray<readonly [string, 400 | 404 | 409]> = [
@@ -192,6 +240,10 @@ function parseBooleanFormValue(value: unknown): boolean | undefined {
   if (value === true || value === 'true') return true
   if (value === false || value === 'false') return false
   return undefined
+}
+
+function getMarkdownUploadManifest(manifest: ReturnType<typeof parseUploadManifest>) {
+  return manifest.filter(entry => entry.relativePath.toLowerCase().endsWith('.md'))
 }
 
 function hasConfiguredPlugins(config: Record<string, unknown> | undefined): boolean {
@@ -522,9 +574,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         if (restartRequired) {
           await writeFileContent(configPath, config.rawContent)
           logger.info(`Wrote default config to: ${configPath}`)
-          logger.info('OpenCode configuration requires process restart')
-          opencodeServerManager.clearStartupError()
-          await restartOpenCode(openCodeSupervisor)
+          logger.info('OpenCode configuration change requires a server restart; deferring until requested')
+          opencodeServerManager.markRestartPending()
+          return c.json({ ...config, restartRequired: true })
         } else {
           const patchResult = await patchConfigWithRecovery(openCodeClient, config.content)
           if (!patchResult.success) {
@@ -1217,6 +1269,109 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     }
   })
 
+  app.post('/opencode-directory-files/install', async (c) => {
+    try {
+      const contentType = c.req.header('content-type') || ''
+      if (!contentType.includes('multipart/form-data')) {
+        return c.json({ error: 'Unsupported content type. Use multipart/form-data' }, 400)
+      }
+
+      const formData = await c.req.parseBody({ all: true })
+      const kind = z.enum(['agents', 'commands']).parse(formData['kind'])
+
+      const manifest = parseUploadManifest(formData['fileManifest'])
+      const markdownManifest = getMarkdownUploadManifest(manifest)
+      if (markdownManifest.length === 0) {
+        return c.json({ error: `No markdown ${kind} files found` }, 400)
+      }
+
+      const files = await readUploadedManifestFiles(formData, markdownManifest)
+
+      const result = await installOpenCodeDirectoryFiles(kind, files)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...result, restartRequired: true })
+    } catch (error) {
+      logger.error('Failed to install OpenCode directory files:', error)
+
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid upload data', details: error.issues }, 400)
+      }
+
+      if (error instanceof Error) {
+        const status = matchErrorStatus(OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
+        }
+      }
+
+      return c.json({ error: 'Failed to install OpenCode directory files' }, 500)
+    }
+  })
+
+  app.get('/opencode-directory-files', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      return c.json(await listOpenCodeDirectoryFiles(kind))
+    } catch (error) {
+      logger.error('Failed to list OpenCode directory files:', error)
+
+      if (error instanceof z.ZodError) {
+        return c.json({ error: 'Invalid file kind', details: error.issues }, 400)
+      }
+
+      return c.json({ error: 'Failed to list OpenCode directory files' }, 500)
+    }
+  })
+
+  app.get('/opencode-directory-files/content', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
+      return c.json(await getOpenCodeDirectoryFile(kind, relativePath))
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'read')
+    }
+  })
+
+  app.put('/opencode-directory-files', async (c) => {
+    try {
+      const body = await c.req.json()
+      const { kind, relativePath, content } = z
+        .object({
+          kind: z.enum(['agents', 'commands']),
+          relativePath: z.string().min(1),
+          content: z.string(),
+        })
+        .parse(body)
+
+      const result = await updateOpenCodeDirectoryFile(kind, relativePath, content)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ ...result, restartRequired: true })
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'update')
+    }
+  })
+
+  app.delete('/opencode-directory-files', async (c) => {
+    try {
+      const kind = z.enum(['agents', 'commands']).parse(c.req.query('kind'))
+      const relativePath = z.string().min(1).parse(c.req.query('relativePath'))
+
+      await deleteOpenCodeDirectoryFile(kind, relativePath)
+      opencodeServerManager.markRestartPending()
+
+      return c.json({ kind, relativePath, restartRequired: true })
+    } catch (error) {
+      return handleOpenCodeDirectoryFileError(c, error, 'delete')
+    }
+  })
+
   app.post('/skills/install', async (c) => {
     try {
       const contentType = c.req.header('content-type') || ''
@@ -1231,9 +1386,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
         const result = await installSkillFromGithubTree(db, validated)
 
-        await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
+        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, validated.scope, validated.repoId)
 
-        return c.json(result)
+        return c.json({ ...result, restartRequired })
       }
 
       if (contentType.includes('multipart/form-data')) {
@@ -1242,20 +1397,8 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         const scope = formData['scope']
         const repoIdValue = formData['repoId']
         const overwriteValue = formData['overwrite']
-        const fileManifestRaw = formData['fileManifest']
 
-        if (typeof fileManifestRaw !== 'string') {
-          return c.json({ error: 'fileManifest is required as a JSON string' }, 400)
-        }
-
-        let manifestEntries: unknown
-        try {
-          manifestEntries = JSON.parse(fileManifestRaw)
-        } catch {
-          return c.json({ error: 'fileManifest must be valid JSON' }, 400)
-        }
-
-        const manifest = InstallSkillUploadManifestEntrySchema.array().parse(manifestEntries)
+        const manifest = parseUploadManifest(formData['fileManifest'])
 
         const repoId = parseOptionalRepoId(repoIdValue as string | undefined)
         const overwrite = parseBooleanFormValue(overwriteValue)
@@ -1275,43 +1418,31 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
           return c.json({ error: 'fileManifest must contain at least one entry' }, 400)
         }
 
-        const missingFields = manifest.filter((entry) => !formData[entry.fieldName])
-        if (missingFields.length > 0) {
-          return c.json({
-            error: `Missing upload file(s): ${missingFields.map((e) => e.fieldName).join(', ')}`,
-          }, 400)
-        }
-
-        const files = await Promise.all(
-          manifest.map(async (entry) => {
-            const file = formData[entry.fieldName]
-            if (!file || !(file instanceof File)) {
-              throw new Error(`Field "${entry.fieldName}" is not a valid file`)
-            }
-            const content = Buffer.from(await file.arrayBuffer())
-            return { relativePath: entry.relativePath, content }
-          }),
-        )
+        const files = await readUploadedManifestFiles(formData, manifest)
 
         const result = await installSkillFromUploadedFiles(db, uploadRequest, files)
 
-        await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
+        const restartRequired = await reloadAfterSkillInstall(db, openCodeClient, openCodeSupervisor, uploadRequest.scope, uploadRequest.repoId)
 
-        return c.json(result)
+        return c.json({ ...result, restartRequired })
       }
 
       return c.json({ error: 'Unsupported content type. Use application/json or multipart/form-data' }, 400)
     } catch (error) {
       logger.error('Failed to install skill:', error)
 
+      if (error instanceof UploadValidationError) {
+        return c.json({ error: error.message }, 400)
+      }
+
       if (error instanceof z.ZodError) {
         return c.json({ error: 'Invalid skill install data', details: error.issues }, 400)
       }
 
       if (error instanceof Error) {
-        const match = SKILL_INSTALL_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
-        if (match) {
-          return c.json({ error: error.message }, match[1])
+        const status = matchErrorStatus(SKILL_INSTALL_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
         }
       }
 
@@ -1356,9 +1487,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await createSkill(db, validated)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'creation')
+      opencodeServerManager.markRestartPending()
 
-      return c.json(skill)
+      return c.json({ ...skill, restartRequired: true })
     } catch (error) {
       logger.error('Failed to create skill:', error)
       if (error instanceof z.ZodError) {
@@ -1385,9 +1516,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       const skill = await updateSkill(db, openCodeClient, name, scope, validated, repoId)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'update')
+      opencodeServerManager.markRestartPending()
 
-      return c.json(skill)
+      return c.json({ ...skill, restartRequired: true })
     } catch (error) {
       logger.error('Failed to update skill:', error)
       if (error instanceof z.ZodError) {
@@ -1418,9 +1549,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
       await deleteSkill(db, name, scope, repoId)
 
-      await restartOpenCodeSafe(openCodeSupervisor, 'deletion')
+      opencodeServerManager.markRestartPending()
 
-      return c.json({ success: true })
+      return c.json({ success: true, restartRequired: true })
     } catch (error) {
       logger.error('Failed to delete skill:', error)
       if (error instanceof z.ZodError) {

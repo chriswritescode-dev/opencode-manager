@@ -92,6 +92,7 @@ export interface OpenCodeConfig {
     message: string
   }>
   removedFields?: string[]
+  restartRequired?: boolean
   isValid: boolean
   isDefault: boolean
   createdAt: number
@@ -136,4 +137,10 @@ export interface SyncOpenCodeImportResponse extends OpenCodeImportStatus {
     duplicatePathCount: number
     errors: Array<{ path: string; error: string }>
   }
+}
+
+export interface OpenCodeDirectoryFileInfo {
+  kind: 'agents' | 'commands'
+  name: string
+  relativePath: string
 }

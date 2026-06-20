@@ -7,7 +7,6 @@ interface RestartServerDialogProps {
   onOpenChange: (open: boolean) => void
   onConfirm: () => void
   onCancel: () => void
-  isSaving?: boolean
   isRestarting?: boolean
 }
 
@@ -16,10 +15,9 @@ export function RestartServerDialog({
   onOpenChange,
   onConfirm,
   onCancel,
-  isSaving = false,
   isRestarting = false,
 }: RestartServerDialogProps) {
-  const isConfirmDisabled = isSaving || isRestarting
+  const isConfirmDisabled = isRestarting
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -35,12 +33,7 @@ export function RestartServerDialog({
             Later
           </Button>
           <Button onClick={onConfirm} disabled={isConfirmDisabled}>
-            {isSaving ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                Saving...
-              </>
-            ) : isRestarting ? (
+            {isRestarting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                 Restarting...

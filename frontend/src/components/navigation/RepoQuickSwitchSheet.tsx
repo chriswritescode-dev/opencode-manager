@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useRefreshOnOpen } from '@/hooks/useRefreshOnOpen'
 import { Input } from '@/components/ui/input'
 import { BottomSheet, BottomSheetHeader, BottomSheetContent } from '@/components/ui/bottom-sheet'
 import { Button } from '@/components/ui/button'
@@ -30,11 +31,13 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     return match ? Number(match[1]) : null
   }, [location.pathname])
 
-  const { data: repos, isLoading } = useQuery({
+  const { data: repos, isLoading, refetch } = useQuery({
     queryKey: ['repos'],
     queryFn: listRepos,
     enabled: isOpen,
   })
+
+  useRefreshOnOpen(isOpen, () => { void refetch() })
 
   const regularRepos = useMemo(
     () => repos?.filter((r) => r.id !== ASSISTANT_REPO_ID) ?? null,

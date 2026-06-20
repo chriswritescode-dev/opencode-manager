@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import { act, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
@@ -11,16 +11,20 @@ const {
   mockRestartOpenCodeServer,
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
+  mockListOpenCodeDirectoryFiles,
+  healthState,
 } = vi.hoisted(() => ({
   mockGetOpenCodeConfigs: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
   mockRestartOpenCodeServer: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
+  mockListOpenCodeDirectoryFiles: vi.fn(),
+  healthState: { data: { opencode: 'healthy', opencodeRestartPending: false } as Record<string, unknown> },
 }))
 
 vi.mock('@/hooks/useServerHealth', () => ({
-  useServerHealth: () => ({ data: { opencode: 'healthy' } }),
+  useServerHealth: () => healthState,
 }))
 
 vi.mock('@/lib/toast', () => ({
@@ -34,6 +38,7 @@ vi.mock('@/api/settings', () => ({
     restartOpenCodeServer: mockRestartOpenCodeServer,
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
     listManagedSkills: mockListManagedSkills,
+    listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
     syncOpenCodeImport: vi.fn(),
     upgradeOpenCode: vi.fn(),
   },
@@ -70,18 +75,45 @@ describe('OpenCodeConfigManager', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: false }
     mockGetOpenCodeConfigs.mockResolvedValue({ configs: [defaultConfig] })
     mockGetOpenCodeImportStatus.mockResolvedValue({})
     mockListManagedSkills.mockResolvedValue([])
+    mockListOpenCodeDirectoryFiles.mockImplementation((kind: 'agents' | 'commands') => {
+      if (kind === 'commands') return Promise.resolve([])
+      return Promise.resolve([])
+    })
     mockUpdateOpenCodeConfig.mockResolvedValue(defaultConfig)
     mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
   })
 
-  it('optimistic delete + restart prompt', async () => {
-    let resolveUpdate: (config: OpenCodeConfig) => void = () => {}
-    mockUpdateOpenCodeConfig.mockImplementationOnce(() => new Promise<OpenCodeConfig>((resolve) => {
-      resolveUpdate = resolve
-    }))
+  it('shows uploaded command and agent directory files in settings', async () => {
+    mockListOpenCodeDirectoryFiles.mockImplementation((kind: 'agents' | 'commands') => {
+      if (kind === 'commands') return Promise.resolve([{ kind, name: 'deploy', relativePath: 'project/deploy.md' }])
+      return Promise.resolve([{ kind, name: 'planner', relativePath: 'team/planner.md' }])
+    })
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+
+    await screen.findByText('Commands')
+    await vi.waitFor(() => {
+      expect(screen.getAllByText('1 configured').length).toBeGreaterThanOrEqual(2)
+    })
+
+    await user.click(screen.getByRole('button', { name: /Commands/i }))
+    expect(await screen.findByText('/deploy')).toBeInTheDocument()
+    expect(screen.getByText('Uploaded file: project/deploy.md')).toBeInTheDocument()
+
+    const agentsButton = screen.getAllByRole('button', { name: /Agents/i }).find(button => button.textContent?.startsWith('Agents'))
+    expect(agentsButton).toBeDefined()
+    await user.click(agentsButton!)
+    expect(await screen.findByText('planner')).toBeInTheDocument()
+    expect(screen.getByText('Uploaded file: team/planner.md')).toBeInTheDocument()
+  })
+
+  it('optimistic delete saves without eager restart modal', async () => {
+    mockUpdateOpenCodeConfig.mockResolvedValueOnce({ ...defaultConfig, restartRequired: true })
 
     const user = userEvent.setup()
     renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
@@ -98,17 +130,19 @@ describe('OpenCodeConfigManager', () => {
     expect(configName).toBe('default')
     expect(payload.content.provider.openai.models).not.toHaveProperty('gpt-4o')
 
+    expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+  })
+
+  it('deferred restart banner triggers server restart', async () => {
+    healthState.data = { opencode: 'healthy', opencodeRestartPending: true }
+
+    const user = userEvent.setup()
+    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+
+    const restartNowButton = await screen.findByRole('button', { name: /restart now/i })
+    await user.click(restartNowButton)
+
     await screen.findByText('Restart OpenCode Server?')
-    expect(screen.getByRole('button', { name: /saving/i })).toBeDisabled()
-
-    await act(async () => {
-      resolveUpdate(defaultConfig)
-    })
-
-    await vi.waitFor(() => {
-      expect(screen.getByRole('button', { name: /restart now/i })).not.toBeDisabled()
-    })
-
     await user.click(screen.getByRole('button', { name: /restart now/i }))
 
     expect(mockRestartOpenCodeServer).toHaveBeenCalledTimes(1)

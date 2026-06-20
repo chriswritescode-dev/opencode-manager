@@ -7,7 +7,7 @@ import { SKILL_NAME_REGEX, SkillFrontmatterSchema } from '@opencode-manager/shar
 import { getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
 import { getRepoById, listRepos } from '../db/queries'
 import type { Repo } from '@opencode-manager/shared/types'
-import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory } from './file-operations'
+import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory, normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
 import type { OpenCodeClient } from './opencode/client'
 import { logger } from '../utils/logger'
 import { githubFetchJson, githubFetchBinary, type GithubFetchFn } from '../utils/github'
@@ -46,23 +46,6 @@ function getSkillTargetRoot(db: Database, scope: SkillScope, repoId?: number): s
   return getProjectSkillsPath(repo)
 }
 
-function normalizeInstallRelativePath(relativePath: string): string {
-  const normalized = relativePath.replace(/\\/g, '/')
-  if (path.isAbsolute(normalized) || /^[A-Za-z]:\//.test(normalized)) {
-    throw new Error(`Path must be relative, got absolute path: "${relativePath}"`)
-  }
-  if (normalized === '' || normalized === '.') {
-    throw new Error('Path must not be empty')
-  }
-  const parts = normalized.split('/')
-  for (const part of parts) {
-    if (part === '..') {
-      throw new Error(`Path must not contain "..": "${relativePath}"`)
-    }
-  }
-  return normalized
-}
-
 function parseSkillMarkdown(content: string): { name: string; description: string; body: string } {
   if (!content.startsWith('---\n')) {
     throw new Error('Skill markdown must start with a frontmatter block')
@@ -99,7 +82,7 @@ function parseSkillMarkdown(content: string): { name: string; description: strin
 function prepareSingleSkillFiles(files: SkillInstallFile[]): PreparedSkillFiles {
   const normalized = files.map(f => ({
     ...f,
-    relativePath: normalizeInstallRelativePath(f.relativePath),
+    relativePath: normalizeUploadRelativePath(f.relativePath),
   }))
   const skillMdFiles = normalized.filter(f => path.basename(f.relativePath) === 'SKILL.md')
   if (skillMdFiles.length === 0) {
@@ -119,7 +102,7 @@ function prepareSingleSkillFiles(files: SkillInstallFile[]): PreparedSkillFiles 
       relativePath: skillDir === '.' ? f.relativePath : f.relativePath.substring(prefix.length),
     }))
   for (const f of strippedFiles) {
-    const checkPath = normalizeInstallRelativePath(f.relativePath)
+    const checkPath = normalizeUploadRelativePath(f.relativePath)
     if (checkPath.startsWith('..')) {
       throw new Error(`File "${f.relativePath}" escapes the skill directory`)
     }
@@ -157,10 +140,7 @@ async function installSkillFiles(
 
   try {
     for (const file of prepared.files) {
-      const targetFilePath = path.resolve(stagingDir, file.relativePath)
-      if (!targetFilePath.startsWith(stagingDir + path.sep)) {
-        throw new Error(`File "${file.relativePath}" escapes the staging directory`)
-      }
+      const targetFilePath = resolveWithinDirectory(stagingDir, file.relativePath, 'staging directory')
       await fs.mkdir(path.dirname(targetFilePath), { recursive: true })
       await fs.writeFile(targetFilePath, file.content)
     }

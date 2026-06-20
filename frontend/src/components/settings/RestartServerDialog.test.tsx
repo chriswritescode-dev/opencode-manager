@@ -52,14 +52,6 @@ describe('RestartServerDialog', () => {
     expect(screen.getByText('Restarting...')).toBeInTheDocument()
   })
 
-  it('disables confirm button and shows Saving... when isSaving is true', () => {
-    render(<RestartServerDialog {...baseProps} isSaving={true} />)
-
-    const confirmButton = screen.getByRole('button', { name: /saving/i })
-    expect(confirmButton).toBeDisabled()
-    expect(screen.getByText('Saving...')).toBeInTheDocument()
-  })
-
   it('disables Later button when isRestarting is true', () => {
     render(<RestartServerDialog {...baseProps} isRestarting={true} />)
 

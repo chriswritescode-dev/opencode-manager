@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { Hono } from 'hono'
 import { Database } from 'bun:sqlite'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { createSettingsRoutes } from './settings'
+import { opencodeServerManager } from '../services/opencode-single-server'
 import type { GitAuthService } from '../services/git-auth'
+import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 
 interface TestUserPreferenceRow {
@@ -205,9 +210,9 @@ function createTestDb(): Database {
   return db
 }
 
-function createTestApp(db: Database): Hono {
+function createTestApp(db: Database, openCodeSupervisor?: OpenCodeSupervisor): Hono {
   const app = new Hono()
-  app.route('/settings', createSettingsRoutes(db, mockGitAuthService, createStubOpenCodeClient()))
+  app.route('/settings', createSettingsRoutes(db, mockGitAuthService, createStubOpenCodeClient(), openCodeSupervisor))
   return app
 }
 
@@ -288,6 +293,81 @@ describe('settings routes — serverEnvVars', () => {
         key: 'MY_FLAG',
         value: '1',
       },
+    ])
+  })
+})
+
+describe('settings routes — OpenCode directory file upload', () => {
+  let db: Database
+  let app: Hono
+  let originalWorkspacePath: string | undefined
+  let workspacePath: string
+  const restart = vi.fn(async () => undefined)
+  let markRestartPendingSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(async () => {
+    db = createTestDb()
+    restart.mockClear()
+    markRestartPendingSpy = vi.spyOn(opencodeServerManager, 'markRestartPending').mockImplementation(() => undefined)
+    originalWorkspacePath = process.env.WORKSPACE_PATH
+    workspacePath = await mkdtemp(join(tmpdir(), 'ocm-command-upload-'))
+    process.env.WORKSPACE_PATH = workspacePath
+    app = createTestApp(db, { restart } as unknown as OpenCodeSupervisor)
+  })
+
+  afterEach(async () => {
+    if (originalWorkspacePath) {
+      process.env.WORKSPACE_PATH = originalWorkspacePath
+    } else {
+      delete process.env.WORKSPACE_PATH
+    }
+    await rm(workspacePath, { recursive: true, force: true })
+    db.close()
+    markRestartPendingSpy.mockRestore()
+  })
+
+  it('installs uploaded command markdown files into the OpenCode commands directory', async () => {
+    const formData = new FormData()
+    formData.append('kind', 'commands')
+    formData.append('fileManifest', JSON.stringify([
+      { fieldName: 'file0', relativePath: 'commands/git/commit.md' },
+      { fieldName: 'file1', relativePath: 'commands/.DS_Store' },
+    ]))
+    formData.append('file0', new File(['commit body'], 'commit.md', { type: 'text/markdown' }))
+
+    const res = await app.request('/settings/opencode-directory-files/install', {
+      method: 'POST',
+      body: formData,
+    })
+
+    expect(res.status).toBe(200)
+    await expect(res.json()).resolves.toEqual({
+      kind: 'commands',
+      filesInstalled: ['git/commit.md'],
+      restartRequired: true,
+    })
+    await expect(readFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'utf8')).resolves.toBe('commit body')
+    expect(restart).not.toHaveBeenCalled()
+    expect(markRestartPendingSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('lists uploaded command and agent directory files', async () => {
+    await mkdir(join(workspacePath, '.config/opencode/commands/git'), { recursive: true })
+    await mkdir(join(workspacePath, '.config/opencode/agents/team'), { recursive: true })
+    await writeFile(join(workspacePath, '.config/opencode/commands/git/commit.md'), 'commit body')
+    await writeFile(join(workspacePath, '.config/opencode/commands/git/.DS_Store'), 'metadata')
+    await writeFile(join(workspacePath, '.config/opencode/agents/team/planner.md'), 'planner body')
+
+    const commandsRes = await app.request('/settings/opencode-directory-files?kind=commands')
+    const agentsRes = await app.request('/settings/opencode-directory-files?kind=agents')
+
+    expect(commandsRes.status).toBe(200)
+    expect(agentsRes.status).toBe(200)
+    await expect(commandsRes.json()).resolves.toEqual([
+      { kind: 'commands', name: 'commit', relativePath: 'git/commit.md' },
+    ])
+    await expect(agentsRes.json()).resolves.toEqual([
+      { kind: 'agents', name: 'planner', relativePath: 'team/planner.md' },
     ])
   })
 })

@@ -5,6 +5,9 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogTrigger } from '@/components/ui/dialog'
 import { SettingsList, SettingsListRow } from '@/components/ui/settings-list'
 import { AgentDialog } from './AgentDialog'
+import { UploadFolderButton } from './UploadFolderButton'
+import { DirectoryFilesList } from './DirectoryFilesList'
+import type { OpenCodeDirectoryFileInfo } from '@/api/types/settings'
 
 interface Agent {
   prompt?: string
@@ -26,12 +29,14 @@ interface Agent {
 
 interface AgentsEditorProps {
   agents: Record<string, Agent>
+  directoryAgents?: OpenCodeDirectoryFileInfo[]
   onChange: (agents: Record<string, Agent>) => void
 }
 
-export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
+export function AgentsEditor({ agents, directoryAgents = [], onChange }: AgentsEditorProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
   const [editingAgent, setEditingAgent] = useState<{ name: string; agent: Agent } | null>(null)
+  const hasAgents = Object.keys(agents).length > 0 || directoryAgents.length > 0
 
   const handleAgentSubmit = (name: string, agent: Agent) => {
     if (editingAgent) {
@@ -62,7 +67,8 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        <UploadFolderButton kind="agents" />
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
@@ -79,7 +85,7 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
       </div>
 
       <SettingsList
-        isEmpty={Object.keys(agents).length === 0}
+        isEmpty={!hasAgents}
         emptyTitle="No agents configured"
         emptyHint="Add your first agent to get started."
         maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
@@ -101,6 +107,7 @@ export function AgentsEditor({ agents, onChange }: AgentsEditorProps) {
             actionsLabel={`Actions for ${name}`}
           />
         ))}
+        <DirectoryFilesList kind="agents" files={directoryAgents} />
       </SettingsList>
 
       <AgentDialog

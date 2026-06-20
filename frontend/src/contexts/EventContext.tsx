@@ -4,11 +4,12 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
 import { OpenCodeClient } from '@/api/opencode'
 import { listRepos } from '@/api/repos'
-import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, SSHHostKeyRequest, MessageWithParts } from '@/api/types'
+import type { PermissionRequest, PermissionResponse, QuestionRequest, SSEEvent, SSHHostKeyRequest, MessageWithParts, Repo } from '@/api/types'
 import { showToast } from '@/lib/toast'
 import { openCodeEventStream, type EventStreamHealthState } from '@/lib/opencode-event-stream'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { addToSessionKeyedState, removeFromSessionKeyedState } from '@/lib/sessionKeyedState'
+import { invalidateRepoGitCachesDebounced } from '@/lib/queryInvalidation'
 
 type PermissionsBySession = Record<string, PermissionRequest[]>
 type QuestionsBySession = Record<string, QuestionRequest[]>
@@ -27,6 +28,18 @@ function groupBySession<T extends SessionScopedItem>(items: T[]): Record<string,
 
 function sortById<T extends SessionScopedItem>(items: T[]): T[] {
   return [...items].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+function normalizeDirectory(directory?: string | null) {
+  return directory?.replace(/\/+$/, '') ?? null
+}
+
+function repoMatchesDirectory(repo: Repo, directory?: string | null) {
+  const normalizedDirectory = normalizeDirectory(directory)
+  if (!normalizedDirectory) return false
+
+  return [repo.fullPath, repo.localPath, repo.sourcePath]
+    .some((path) => normalizeDirectory(path) === normalizedDirectory)
 }
 
 function reconcileBySessionForDirectory<T extends SessionScopedItem>(
@@ -265,7 +278,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     if (!repos) return null
     const directory = findSessionDirectory(sessionID)
     if (!directory) return null
-    const repo = repos.find(r => r.fullPath === directory)
+    const repo = repos.find(r => repoMatchesDirectory(r, directory))
     return repo?.id ?? null
   }, [repos, findSessionDirectory])
 
@@ -503,6 +516,22 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
             queryKey: ['opencode', 'lsp']
           })
           break
+        case 'vcs.branch.updated': {
+          const repo = reposRef.current?.find((candidate) => repoMatchesDirectory(candidate, event.directory))
+          if (!repo) break
+
+          const branch = event.properties.branch
+          if (branch) {
+            const updatedRepo = { ...repo, currentBranch: branch, branch }
+            queryClient.setQueryData(['repo', repo.id], updatedRepo)
+            queryClient.setQueryData<Repo[]>(['repos'], (current) =>
+              current?.map((candidate) => candidate.id === repo.id ? updatedRepo : candidate)
+            )
+          }
+
+          invalidateRepoGitCachesDebounced(queryClient, repo.id)
+          break
+        }
       }
     }
 

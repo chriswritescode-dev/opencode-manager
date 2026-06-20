@@ -30,6 +30,8 @@ const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
 const HEALTH_CHECK_TIMEOUT_MS = 3000
 const PLUGIN_INSTALL_TIMEOUT_MS = 120000
+const PROCESS_EXIT_GRACE_MS = 2000
+const PROCESS_EXIT_POLL_MS = 50
 const DEPRECATED_PLUGIN_PACKAGES = ['opencode-openai-codex-auth', 'opencode-copilot-auth']
 
 type StartupValidationIssue = {
@@ -106,6 +108,7 @@ class OpenCodeServerManager {
   private db: Database | null = null
   private version: string | null = null
   private lastStartupError: string | null = null
+  private restartPending: boolean = false
   private opInProgress: boolean = false
   private openCodeClient: OpenCodeClient | null = null
 
@@ -405,6 +408,7 @@ class OpenCodeServerManager {
     }
 
     this.isHealthy = true
+    this.restartPending = false
     logger.info('OpenCode server is healthy')
 
     await this.fetchVersion()
@@ -441,16 +445,18 @@ class OpenCodeServerManager {
         }
       }
 
-      await new Promise(r => setTimeout(r, 2000))
+      const exited = await this.waitForProcessExit(this.serverPid, PROCESS_EXIT_GRACE_MS)
 
-      try {
-        process.kill(this.serverPid, 'SIGKILL')
-      } catch (error) {
-        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
-        if (errorCode === 'ESRCH') {
-          logger.debug(`Process ${this.serverPid} already stopped`)
-        } else {
-          logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
+      if (!exited) {
+        try {
+          process.kill(this.serverPid, 'SIGKILL')
+        } catch (error) {
+          const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+          if (errorCode === 'ESRCH') {
+            logger.debug(`Process ${this.serverPid} already stopped`)
+          } else {
+            logger.warn(`Failed to send SIGKILL to ${this.serverPid}:`, error)
+          }
         }
       }
 
@@ -617,7 +623,6 @@ class OpenCodeServerManager {
     try {
       logger.info('Restarting OpenCode server (full process restart)')
       await this.stop(true)
-      await new Promise(r => setTimeout(r, 1000))
       await this.start(false, true)
     } finally {
       this.releaseOp(acquired)
@@ -698,6 +703,14 @@ class OpenCodeServerManager {
     this.lastStartupError = null
   }
 
+  isRestartPending(): boolean {
+    return this.restartPending
+  }
+
+  markRestartPending(): void {
+    this.restartPending = true
+  }
+
   async reinitializeBinDirectory(): Promise<void> {
     logger.info('Reinitializing OpenCode bin directory')
     await this.initializeOpencodeBinDirectory()
@@ -731,6 +744,22 @@ class OpenCodeServerManager {
       logger.warn('Failed to get OpenCode version:', error)
     }
     return null
+  }
+
+  private async waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      try {
+        process.kill(pid, 0)
+      } catch (error) {
+        const errorCode = error && typeof error === 'object' && 'code' in error ? (error as { code: string }).code : ''
+        if (errorCode === 'ESRCH') {
+          return true
+        }
+      }
+      await new Promise(r => setTimeout(r, PROCESS_EXIT_POLL_MS))
+    }
+    return false
   }
 
   private async waitForHealth(timeoutMs: number): Promise<boolean> {

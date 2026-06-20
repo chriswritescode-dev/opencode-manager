@@ -210,6 +210,14 @@ export interface SSELspUpdatedEvent {
   properties: Record<string, never>
 }
 
+export interface SSEVcsBranchUpdatedEvent {
+  type: 'vcs.branch.updated'
+  directory?: string
+  properties: {
+    branch?: string
+  }
+}
+
 export interface SSESSHHostKeyRequestEvent {
   type: 'ssh.host-key-request'
   properties: SSHHostKeyRequest
@@ -237,6 +245,7 @@ export type SSEEvent =
   | SSEInstallationUpdatedEvent
   | SSEInstallationUpdateAvailableEvent
   | SSELspUpdatedEvent
+  | SSEVcsBranchUpdatedEvent
   | SSESSHHostKeyRequestEvent
 
 export type ContentPart = 

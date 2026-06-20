@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Bot, FileText } from 'lucide-react'
+import { useTouchTapSelect } from '@/hooks/useTouchTapSelect'
 
 export interface MentionItem {
   type: 'file' | 'agent'
@@ -24,6 +25,7 @@ export function MentionSuggestions({
   selectedIndex = 0
 }: MentionSuggestionsProps) {
   const listRef = useRef<HTMLDivElement>(null)
+  const touchTapSelect = useTouchTapSelect(onSelect)
 
   useEffect(() => {
     if (!isOpen) return
@@ -64,11 +66,10 @@ export function MentionSuggestions({
         <button
           key={`${item.type}-${item.value}`}
           onMouseDown={(e) => e.preventDefault()}
-          onTouchEnd={(e) => {
-            e.preventDefault()
-            onSelect(item)
-          }}
-          onClick={() => onSelect(item)}
+          onTouchStart={touchTapSelect.onTouchStart}
+          onTouchMove={touchTapSelect.onTouchMove}
+          onTouchEnd={(e) => touchTapSelect.onTouchEnd(e, item)}
+          onClick={() => touchTapSelect.onClick(item)}
           className={`w-full px-3 py-2 text-left transition-colors flex items-start gap-2 ${
             idx === selectedIndex
               ? 'bg-primary text-primary-foreground'

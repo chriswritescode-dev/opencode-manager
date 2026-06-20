@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, gitDiscardFiles, fetchGitLog, fetchGitDiff, gitReset, getApiErrorMessage } from '@/api/git'
+import { gitFetch, gitPull, gitPush, gitCommit, gitStageFiles, gitUnstageFiles, gitDiscardFiles, fetchGitLog, fetchGitDiff, gitReset, getApiErrorMessage, fetchGitStatus } from '@/api/git'
 import { createBranch, switchBranch } from '@/api/repos'
 import { showToast } from '@/lib/toast'
+import { invalidateRepoGitCaches, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
 
 export function useGit(repoId: number | undefined, onError?: (error: unknown) => void) {
   const queryClient = useQueryClient()
@@ -14,19 +15,14 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     }
   }
 
-  const invalidateCache = (additionalKeys: string[] = []) => {
-    if (!repoId) return
-    const keys = ['gitStatus', 'fileDiff', 'gitLog', ...additionalKeys]
-    keys.forEach(key => queryClient.invalidateQueries({ queryKey: [key, repoId] }))
-  }
-
   const fetch = useMutation({
     mutationFn: () => {
       if (!repoId) throw new Error('No repo ID')
       return gitFetch(repoId)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Fetch completed')
     },
     onError: handleError,
@@ -37,8 +33,9 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       if (!repoId) throw new Error('No repo ID')
       return gitPull(repoId)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Pull completed')
     },
     onError: handleError,
@@ -50,9 +47,8 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       return gitPush(repoId, options?.setUpstream ?? false)
     },
     onSuccess: (data) => {
-      queryClient.setQueryData(['gitStatus', repoId], data)
-      const keysToInvalidate = ['fileDiff', 'gitLog', 'repo', 'branches']
-      keysToInvalidate.forEach(key => queryClient.invalidateQueries({ queryKey: [key, repoId] }))
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Push completed')
     },
     onError: handleError,
@@ -63,8 +59,9 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       if (!repoId) throw new Error('No repo ID')
       return gitCommit(repoId, message, stagedPaths)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Commit created')
     },
     onError: handleError,
@@ -75,8 +72,9 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       if (!repoId) throw new Error('No repo ID')
       return gitStageFiles(repoId, paths)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Files staged')
     },
     onError: handleError,
@@ -87,8 +85,9 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       if (!repoId) throw new Error('No repo ID')
       return gitUnstageFiles(repoId, paths)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Files unstaged')
     },
     onError: handleError,
@@ -99,8 +98,9 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       if (!repoId) throw new Error('No repo ID')
       return gitDiscardFiles(repoId, paths, staged)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
     },
     onError: handleError,
   })
@@ -122,24 +122,28 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
   })
 
   const createBranchMutation = useMutation({
-    mutationFn: (branchName: string) => {
+    mutationFn: async (branchName: string) => {
       if (!repoId) throw new Error('No repo ID')
-      return createBranch(repoId, branchName)
+      await createBranch(repoId, branchName)
+      return fetchGitStatus(repoId)
     },
-    onSuccess: () => {
-      invalidateCache(['branches'])
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
       showToast.success('Branch created')
     },
     onError: handleError,
   })
 
   const switchBranchMutation = useMutation({
-    mutationFn: (branchName: string) => {
+    mutationFn: async (branchName: string) => {
       if (!repoId) throw new Error('No repo ID')
-      return switchBranch(repoId, branchName)
+      await switchBranch(repoId, branchName)
+      return fetchGitStatus(repoId)
     },
-    onSuccess: () => {
-      invalidateCache(['branches'])
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
       showToast.success('Switched to branch')
     },
     onError: handleError,
@@ -150,8 +154,9 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
       if (!repoId) throw new Error('No repo ID')
       return gitReset(repoId, commitHash)
     },
-    onSuccess: () => {
-      invalidateCache()
+    onSuccess: (data) => {
+      if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Reset to commit')
     },
     onError: handleError,

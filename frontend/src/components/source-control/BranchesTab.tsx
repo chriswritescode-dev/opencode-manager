@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { listBranches, switchBranch, GitAuthError, getRepo } from '@/api/repos'
-import { useGitStatus } from '@/api/git'
+import { fetchGitStatus, useGitStatus } from '@/api/git'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Loader2, GitBranch, GitBranchPlus, Check, Plus, AlertCircle, ArrowUp, ArrowDown, Globe } from 'lucide-react'
@@ -10,6 +10,7 @@ import { showToast } from '@/lib/toast'
 import { useGit } from '@/hooks/useGit'
 import { GIT_UI_COLORS } from '@/lib/git-status-styles'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
+import { invalidateRepoGitCaches, setRepoGitStatusCaches } from '@/lib/queryInvalidation'
 
 interface BranchesTabProps {
   repoId: number
@@ -41,12 +42,15 @@ export function BranchesTab({ repoId, currentBranch }: BranchesTabProps) {
   const isRepoWorktree = repo?.isWorktree ?? false
 
   const switchBranchMutation = useMutation({
-    mutationFn: (branch: string) => switchBranch(repoId, branch),
-    onSuccess: (updatedRepo) => {
+    mutationFn: async (branch: string) => {
+      const updatedRepo = await switchBranch(repoId, branch)
+      const status = await fetchGitStatus(repoId)
+      return { updatedRepo, status }
+    },
+    onSuccess: ({ updatedRepo, status }) => {
       queryClient.setQueryData(['repo', repoId], updatedRepo)
-      queryClient.invalidateQueries({ queryKey: ['repos'] })
-      queryClient.invalidateQueries({ queryKey: ['reposGitStatus'] })
-      queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
+      setRepoGitStatusCaches(queryClient, repoId, status)
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
       refetch()
       showToast.success(`Switched to branch: ${updatedRepo.currentBranch}`)
     },
