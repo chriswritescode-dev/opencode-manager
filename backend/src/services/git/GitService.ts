@@ -6,15 +6,16 @@ import { getRepoById } from '../../db/queries'
 import { resolveGitIdentity, createGitIdentityEnv, isSSHUrl } from '../../utils/git-auth'
 import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
 import { SettingsService } from '../settings'
+import { CredentialProvider } from '../credential-provider'
 import type { Database } from 'bun:sqlite'
 import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
-import type { GitCredential } from '@opencode-manager/shared'
 import path from 'path'
 
 export class GitService {
   constructor(
     private gitAuthService: GitAuthService,
-    private settingsService: SettingsService
+    private settingsService: SettingsService,
+    private credentialProvider: CredentialProvider
   ) {}
 
   async getStatus(repoId: number, database: Database): Promise<GitStatusResponse> {
@@ -199,7 +200,7 @@ export class GitService {
       const authEnv = this.gitAuthService.getGitEnvironment()
 
       const settings = this.settingsService.getSettings('default')
-      const gitCredentials = (settings.preferences.gitCredentials || []) as GitCredential[]
+      const gitCredentials = this.credentialProvider.getGitCredentials()
       const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
       const identityEnv = identity ? createGitIdentityEnv(identity) : {}
 

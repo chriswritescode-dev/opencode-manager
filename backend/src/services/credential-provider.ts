@@ -4,6 +4,7 @@ import { SettingsService } from './settings'
 import {
   findPatCredentialForHost,
   getSSHCredentialsForHost,
+  createGitEnv,
   createGhCliEnv,
   type ResolvedGitCredential,
 } from '../utils/git-auth'
@@ -26,6 +27,14 @@ export class CredentialProvider {
 
   getSshCredentialsForHost(host: string): GitCredential[] {
     return getSSHCredentialsForHost(this.getGitCredentials(), host)
+  }
+
+  getSshCredentialsWithPrivateKey(): GitCredential[] {
+    return this.getGitCredentials().filter((cred) => cred.type === 'ssh' && cred.sshPrivateKeyEncrypted)
+  }
+
+  getGitEnv(): Record<string, string> {
+    return createGitEnv(this.getGitCredentials())
   }
 
   getGhCliEnv(): Record<string, string> {

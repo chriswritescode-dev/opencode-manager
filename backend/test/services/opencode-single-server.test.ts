@@ -179,7 +179,7 @@ describe('OpenCodeServerManager - server auth', () => {
   function createPasswordDb(password: string | null) {
     const encrypted = password ? encryptSecret(password) : null
 
-    return {
+    const db = {
       prepare: vi.fn((sql: string) => ({
         get: (key?: string) => {
           if (key === 'opencode_server_password' && sql.includes('SELECT value FROM app_secrets') && encrypted) {
@@ -190,7 +190,10 @@ describe('OpenCodeServerManager - server auth', () => {
         run: vi.fn(),
         all: vi.fn(() => []),
       })),
-    } as any
+      query: vi.fn((sql: string) => db.prepare(sql)),
+    }
+
+    return db as any
   }
 })
 

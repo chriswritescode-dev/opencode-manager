@@ -15,11 +15,12 @@ function createPatCredential(name: string, host: string, token: string, username
   } as GitCredential
 }
 
-function createSshCredential(name: string, host: string): GitCredential {
+function createSshCredential(name: string, host: string, sshPrivateKeyEncrypted?: string): GitCredential {
   return {
     name,
     host,
     type: 'ssh',
+    ...(sshPrivateKeyEncrypted ? { sshPrivateKeyEncrypted } : {}),
   } as GitCredential
 }
 
@@ -63,6 +64,12 @@ describe('CredentialProvider', () => {
       expect(env).toEqual({ GH_TOKEN: 'ghp_test_token', GITHUB_TOKEN: 'ghp_test_token' })
     })
 
+    it('getGitEnv returns git config env for configured PATs', () => {
+      const env = provider.getGitEnv()
+      expect(env.GIT_TERMINAL_PROMPT).toBe('0')
+      expect(env.GIT_CONFIG_COUNT).toBe('2')
+    })
+
     it('getSshCredentialsForHost returns SSH credentials and excludes PATs', () => {
       const sshCreds = provider.getSshCredentialsForHost('github.com')
       expect(sshCreds).toHaveLength(1)
@@ -71,6 +78,12 @@ describe('CredentialProvider', () => {
 
     it('getSshCredentialsForHost returns empty array for unmatched host', () => {
       expect(provider.getSshCredentialsForHost('gitlab.com')).toEqual([])
+    })
+
+    it('getSshCredentialsWithPrivateKey returns only encrypted SSH credentials', () => {
+      const encryptedSsh = createSshCredential('encrypted-ssh', 'example.com', 'encrypted-key')
+      settingsService.updateSettings({ gitCredentials: [githubPat, githubSsh, encryptedSsh] })
+      expect(provider.getSshCredentialsWithPrivateKey()).toEqual([encryptedSsh])
     })
   })
 
@@ -83,8 +96,16 @@ describe('CredentialProvider', () => {
       expect(provider.getGhCliEnv()).toEqual({})
     })
 
+    it('getGitEnv returns disabled terminal prompt defaults', () => {
+      expect(provider.getGitEnv()).toEqual({ GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_COUNT: '0' })
+    })
+
     it('getSshCredentialsForHost returns empty array', () => {
       expect(provider.getSshCredentialsForHost('github.com')).toEqual([])
+    })
+
+    it('getSshCredentialsWithPrivateKey returns empty array', () => {
+      expect(provider.getSshCredentialsWithPrivateKey()).toEqual([])
     })
   })
 

@@ -49,6 +49,7 @@ describe('GitService', () => {
   let database: Database
   let mockGitAuthService: GitAuthService
   let mockSettingsService: any
+  let mockCredentialProvider: any
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -70,7 +71,10 @@ describe('GitService', () => {
         },
       }),
     }
-    service = new GitService(mockGitAuthService, mockSettingsService)
+    mockCredentialProvider = {
+      getGitCredentials: vi.fn().mockReturnValue([]),
+    }
+    service = new GitService(mockGitAuthService, mockSettingsService, mockCredentialProvider)
   })
 
   describe('getStatus', () => {
