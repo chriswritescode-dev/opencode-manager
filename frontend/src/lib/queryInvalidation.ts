@@ -50,6 +50,7 @@ export function invalidateRepoListCaches(queryClient: QueryClient) {
 
 interface RepoGitInvalidationOptions {
   invalidateStatus?: boolean
+  invalidateRepoMeta?: boolean
 }
 
 export function invalidateRepoGitCaches(
@@ -67,9 +68,11 @@ export function invalidateRepoGitCaches(
     return
   }
 
-  queryClient.invalidateQueries({ queryKey: ['repos'] })
-  queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
-  queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
+  if (options.invalidateRepoMeta ?? true) {
+    queryClient.invalidateQueries({ queryKey: ['repos'] })
+    queryClient.invalidateQueries({ queryKey: ['repo', repoId] })
+    queryClient.invalidateQueries({ queryKey: ['branches', repoId] })
+  }
   if (options.invalidateStatus ?? true) {
     queryClient.invalidateQueries({ queryKey: ['gitStatus', repoId] })
   }

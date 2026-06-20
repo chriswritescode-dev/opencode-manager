@@ -163,6 +163,8 @@ const BUILTIN_COMMANDS: CommandType[] = [
   }
 ]
 
+const SORTED_BUILTIN_COMMANDS = sortCommandsByName(BUILTIN_COMMANDS)
+
 export function useCommands(opcodeUrl: string | null) {
   const { data: commands, isLoading: loading, error } = useQuery({
     queryKey: ['opencode', 'commands', opcodeUrl],
@@ -176,7 +178,7 @@ export function useCommands(opcodeUrl: string | null) {
       return sortCommandsByName(uniqueCommands)
     },
     enabled: !!opcodeUrl,
-    initialData: sortCommandsByName(BUILTIN_COMMANDS),
+    initialData: SORTED_BUILTIN_COMMANDS,
   })
 
   const filterCommands = (query: string) => {

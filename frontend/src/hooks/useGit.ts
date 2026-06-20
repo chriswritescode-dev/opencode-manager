@@ -22,7 +22,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Fetch completed')
     },
     onError: handleError,
@@ -35,7 +35,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Pull completed')
     },
     onError: handleError,
@@ -48,7 +48,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Push completed')
     },
     onError: handleError,
@@ -61,7 +61,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Commit created')
     },
     onError: handleError,
@@ -74,7 +74,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Files staged')
     },
     onError: handleError,
@@ -87,7 +87,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Files unstaged')
     },
     onError: handleError,
@@ -100,7 +100,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
     },
     onError: handleError,
   })
@@ -156,7 +156,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
       showToast.success('Reset to commit')
     },
     onError: handleError,

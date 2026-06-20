@@ -778,10 +778,10 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
           if (!editingConfig) return
           showToast.loading('Saving configuration...', { id: 'edit-config' })
           try {
-            await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
+            const result = await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
             await fetchConfigs()
-            const successMsg = editingConfig.isDefault
-              ? 'Configuration saved and server reloaded'
+            const successMsg = result.restartRequired
+              ? 'Configuration saved. Restart the server to apply changes.'
               : 'Configuration saved'
             showToast.success(successMsg, { id: 'edit-config' })
             invalidateConfigCaches(queryClient)

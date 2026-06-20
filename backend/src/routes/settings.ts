@@ -168,6 +168,14 @@ const OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS: ReadonlyArray<readonly [string, 40
   ['not a valid file', 400],
 ]
 
+function matchErrorStatus<T extends number>(
+  table: ReadonlyArray<readonly [string, T]>,
+  error: Error,
+): T | null {
+  const match = table.find(([needle]) => error.message.includes(needle))
+  return match ? match[1] : null
+}
+
 function handleOpenCodeDirectoryFileError(c: Context, error: unknown, operation: string) {
   logger.error(`Failed to ${operation} OpenCode directory file:`, error)
 
@@ -180,9 +188,9 @@ function handleOpenCodeDirectoryFileError(c: Context, error: unknown, operation:
       return c.json({ error: 'File not found' }, 404)
     }
 
-    const match = OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
-    if (match) {
-      return c.json({ error: error.message }, match[1])
+    const status = matchErrorStatus(OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS, error)
+    if (status) {
+      return c.json({ error: error.message }, status)
     }
   }
 
@@ -1295,9 +1303,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       if (error instanceof Error) {
-        const match = OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
-        if (match) {
-          return c.json({ error: error.message }, match[1])
+        const status = matchErrorStatus(OPENCODE_DIRECTORY_UPLOAD_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
         }
       }
 
@@ -1432,9 +1440,9 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       if (error instanceof Error) {
-        const match = SKILL_INSTALL_ERROR_STATUS.find(([needle]) => error.message.includes(needle))
-        if (match) {
-          return c.json({ error: error.message }, match[1])
+        const status = matchErrorStatus(SKILL_INSTALL_ERROR_STATUS, error)
+        if (status) {
+          return c.json({ error: error.message }, status)
         }
       }
 
