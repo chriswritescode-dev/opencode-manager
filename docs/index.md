@@ -14,7 +14,7 @@ git clone https://github.com/chriswritescode-dev/opencode-manager.git
 cd opencode-manager
 cp .env.example .env
 echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
-docker-compose up -d
+docker compose up -d
 ```
 
 Open [http://localhost:5003](http://localhost:5003) and create your admin account. That's it!
@@ -56,11 +56,12 @@ OpenCode Manager runs as a pnpm workspace:
 
 ## Project Layout
 
-- `backend/` — Bun + Hono API routes, services, database migrations, auth, schedules, and OpenCode integration.
-- `frontend/` — React + Vite app, pages, components, hooks, API clients, stores, contexts, and PWA assets.
-- `shared/` — Workspace package for schemas, types, config, and utilities.
-- `docs/` — MkDocs Material documentation.
-- `scripts/`, `Dockerfile`, `docker-compose.yml` — Setup, build, and deployment support.
+- `backend/` — Bun + Hono API server: routes, services, database (SQLite) with migrations, auth with Better Auth, IPC server for SSH handling, OpenCode process management, and schedules.
+- `frontend/` — React + Vite SPA: pages, components, hooks, API clients, Zustand stores, contexts, service worker (PWA), and tests.
+- `shared/` — Workspace package for Zod schemas, TypeScript types, config defaults, and utilities used by both backend and frontend.
+- `ocm-cli/` — `@opencode-manager/ocm-cli` CLI tool for attaching a local OpenCode TUI to Manager-hosted repos.
+- `docs/` — MkDocs Material documentation (this site).
+- `scripts/`, `Dockerfile`, `docker-compose.yml` — Setup scripts, Docker image build, and Compose deployment support.
 
 ## Next Steps
 

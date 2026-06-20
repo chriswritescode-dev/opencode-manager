@@ -50,7 +50,7 @@ ADMIN_PASSWORD_RESET=true
 2. Restart the application:
 
 ```bash
-docker-compose restart
+docker compose restart
 ```
 
 3. Log in with new password

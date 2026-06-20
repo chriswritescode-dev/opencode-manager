@@ -41,28 +41,37 @@ This starts:
 opencode-manager/
 ├── backend/              # Bun + Hono API server
 │   ├── src/
-│   │   ├── routes/       # API route handlers
-│   │   ├── services/     # Business logic
+│   │   ├── auth/         # Better Auth configuration and middleware
+│   │   ├── config/       # Backend configuration helpers
 │   │   ├── db/           # Database migrations and queries
 │   │   │   └── migrations/  # Numbered migration files
+│   │   ├── ipc/          # IPC server for SSH credential handling
+│   │   ├── routes/       # API route handlers
+│   │   ├── services/     # Business logic
 │   │   ├── types/        # TypeScript types
 │   │   ├── utils/        # Utility functions
 │   │   └── index.ts      # Entry point
 │   └── test/             # Backend tests
 ├── frontend/             # React + Vite SPA
 │   ├── src/
-│   │   ├── components/   # UI components
-│   │   ├── pages/        # Page components
-│   │   ├── hooks/        # Custom React hooks
 │   │   ├── api/          # API client
+│   │   ├── components/   # UI components
+│   │   ├── config/       # Frontend configuration
+│   │   ├── contexts/     # React contexts
+│   │   ├── hooks/        # Custom React hooks
 │   │   ├── lib/          # Utilities
-│   │   ├── stores/       # Zustand stores
-│   │   └── contexts/     # React contexts
+│   │   ├── pages/        # Page components
+│   │   ├── stores/       # Zustand state stores
+│   │   ├── sw.ts         # Service Worker (PWA)
+│   │   ├── test/         # Frontend tests
+│   │   ├── types/        # TypeScript types
+│   │   └── main.tsx      # Entry point
 │   └── public/           # Static assets
 ├── shared/               # @opencode-manager/shared types and utilities
-├── workspace/            # Runtime workspace for OpenCode
-├── docs/                 # Documentation
-├── scripts/              # Build and utility scripts
+├── ocm-cli/              # @opencode-manager/ocm-cli CLI tool
+├── workspace/            # Runtime workspace for OpenCode (gitignored)
+├── docs/                 # MkDocs Material documentation
+├── scripts/              # Build, setup, and utility scripts
 ├── Dockerfile            # Docker image definition
 └── docker-compose.yml    # Docker Compose configuration
 ```

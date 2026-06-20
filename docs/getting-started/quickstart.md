@@ -11,7 +11,7 @@ Get up and running with OpenCode Manager in minutes.
     cd opencode-manager
     cp .env.example .env
     echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
-    docker-compose up -d
+    docker compose up -d
     ```
     
     Open [http://localhost:5003](http://localhost:5003)

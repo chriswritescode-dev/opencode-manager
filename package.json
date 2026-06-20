@@ -28,11 +28,11 @@
     "generate:openapi": "bun scripts/generate-openapi.ts",
     "test:cli": "pnpm --filter @opencode-manager/ocm-cli test",
     "typecheck:cli": "pnpm --filter @opencode-manager/ocm-cli typecheck",
-    "docker:build": "docker-compose build",
-    "docker:up": "docker-compose up -d",
-    "docker:down": "docker-compose down -v",
-    "docker:logs": "docker-compose logs -f",
-    "docker:restart": "docker-compose restart"
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down -v",
+    "docker:logs": "docker compose logs -f",
+    "docker:restart": "docker compose restart"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

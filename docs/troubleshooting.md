@@ -12,7 +12,7 @@ Common issues and their solutions.
 
 1. Check logs:
 ```bash
-docker-compose logs -f
+docker compose logs -f
 ```
 
 2. Verify Docker resources (2GB RAM minimum)
@@ -24,7 +24,7 @@ lsof -i :5003
 
 4. Rebuild without cache:
 ```bash
-docker-compose build --no-cache
+docker compose build --no-cache
 ```
 
 ### Port Already in Use
@@ -201,7 +201,7 @@ docker stats
 2. Delete unused sessions
 3. Restart container:
 ```bash
-docker-compose restart
+docker compose restart
 ```
 
 ### Database Errors
@@ -250,6 +250,6 @@ If your issue isn't covered:
 3. Open a new issue with:
    - Steps to reproduce
    - Expected vs actual behavior
-   - Container logs: `docker-compose logs`
+   - Container logs: `docker compose logs`
    - Browser console errors
    - Environment info (OS, browser, Docker version)

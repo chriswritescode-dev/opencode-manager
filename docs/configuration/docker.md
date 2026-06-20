@@ -16,7 +16,7 @@ openssl rand -base64 32
 # Add the output to AUTH_SECRET in .env
 
 # Start the container
-docker-compose up -d
+docker compose up -d
 ```
 
 !!! warning "AUTH_SECRET Required"
@@ -95,7 +95,7 @@ volumes:
 
 ## Environment Variables
 
-Create a `.env` file in the project root. The docker-compose.yml automatically reads variables from `.env`:
+Create a `.env` file in the project root. Docker Compose automatically reads variables from `.env`:
 
 ```bash
 # Required
@@ -317,35 +317,35 @@ services:
 
 ```bash
 # Start
-docker-compose up -d
+docker compose up -d
 
 # Stop
-docker-compose down
+docker compose down
 
 # Restart
-docker-compose restart
+docker compose restart
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # View logs (last 100 lines)
-docker-compose logs --tail 100
+docker compose logs --tail 100
 ```
 
 ### Maintenance
 
 ```bash
 # Rebuild image
-docker-compose build
+docker compose build
 
 # Rebuild without cache
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # Update and restart (uses upgrade script)
-docker-compose down
+docker compose down
 git pull
-docker-compose build --no-cache
-docker-compose up -d
+docker compose build --no-cache
+docker compose up -d
 ```
 
 ### Debugging

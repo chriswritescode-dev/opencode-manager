@@ -12,7 +12,7 @@ cd opencode-manager
 cp .env.example .env
 # Generate AUTH_SECRET and add to .env
 echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
-docker-compose up -d
+docker compose up -d
 ```
 
 Open [http://localhost:5003](http://localhost:5003) in your browser.
@@ -30,19 +30,19 @@ The container automatically:
 
 ```bash
 # Start the container
-docker-compose up -d
+docker compose up -d
 
 # Stop and remove container
-docker-compose down
+docker compose down
 
 # Rebuild the image
-docker-compose build
+docker compose build
 
 # View logs
-docker-compose logs -f
+docker compose logs -f
 
 # Restart
-docker-compose restart
+docker compose restart
 
 # Access container shell
 docker exec -it opencode-manager sh
@@ -94,7 +94,7 @@ After starting the application:
 
 1. Open your browser to the appropriate URL
 2. You should see the login page or setup wizard
-3. Check logs if you encounter issues: `docker-compose logs -f`
+3. Check logs if you encounter issues: `docker compose logs -f`
 
 ## Next Steps
 
