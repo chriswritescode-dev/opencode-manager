@@ -3,7 +3,7 @@ export function getAssistantPath(): string {
 }
 
 export function getAssistantSessionListPath(): string {
-  return '/assistant?view=sessions';
+  return '/assistant';
 }
 
 export function isAssistantPath(pathname: string): boolean {
@@ -52,10 +52,6 @@ export function getSwipeBackTarget(pathname: string, search = ''): string | null
   }
 
   if (isAssistantPath(pathname)) {
-    const params = new URLSearchParams(search);
-    if (params.get('view') !== 'sessions') {
-      return getAssistantSessionListPath();
-    }
     return '/';
   }
 
