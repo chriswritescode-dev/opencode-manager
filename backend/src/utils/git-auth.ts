@@ -112,6 +112,36 @@ export function findGitHubCredential(credentials: GitCredential[]): GitCredentia
   }) || null
 }
 
+export function createGhCliEnv(credentials: GitCredential[]): Record<string, string> {
+  const githubCred = findGitHubCredential(credentials)
+  if (!githubCred?.token) return {}
+  return { GH_TOKEN: githubCred.token, GITHUB_TOKEN: githubCred.token }
+}
+
+export interface ResolvedGitCredential {
+  username: string
+  password: string
+}
+
+export function findPatCredentialForHost(
+  credentials: GitCredential[],
+  hostname: string
+): ResolvedGitCredential | null {
+  const target = normalizeGitCredentialUrl(hostname)?.hostname.toLowerCase()
+  if (!target) return null
+  for (const cred of credentials) {
+    if (cred.type && cred.type !== 'pat') continue
+    const credHost = normalizeGitCredentialUrl(cred.host)?.hostname.toLowerCase()
+    if (credHost && credHost === target) {
+      return {
+        username: cred.username || getDefaultUsername(cred.host),
+        password: cred.token || '',
+      }
+    }
+  }
+  return null
+}
+
 export function getSSHCredentialsForHost(credentials: GitCredential[], host: string): GitCredential[] {
   return credentials.filter(cred => {
     if (cred.type !== 'ssh') return false

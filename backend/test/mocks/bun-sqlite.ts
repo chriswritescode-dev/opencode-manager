@@ -17,6 +17,10 @@ export class Database {
     }
   }
 
+  query(sql: string) {
+    return this.prepare(sql)
+  }
+
   exec(sql: string) {
     this.db.exec(sql)
   }

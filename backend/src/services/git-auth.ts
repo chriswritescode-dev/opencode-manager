@@ -4,10 +4,10 @@ import { AskpassHandler } from '../ipc/askpassHandler'
 import { SSHHostKeyHandler } from '../ipc/sshHostKeyHandler'
 import { writeTemporarySSHKey, buildSSHCommand, buildSSHCommandWithKnownHosts, cleanupSSHKey, parseSSHHost } from '../utils/ssh-key-manager'
 import { decryptSecret } from '../utils/crypto'
-import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl, getSSHCredentialsForHost } from '../utils/git-auth'
+import { isSSHUrl, normalizeSSHUrl, extractHostFromSSHUrl } from '../utils/git-auth'
 import type { GitCredential } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
-import { SettingsService } from './settings'
+import { CredentialProvider } from './credential-provider'
 
 export class GitAuthService {
   private askpassHandler: AskpassHandler | null = null
@@ -15,9 +15,11 @@ export class GitAuthService {
   private sshKeyPath: string | null = null
   private sshPassphrase: string | null = null
   private sshPort: string | null = null
+  private credentialProvider: CredentialProvider | null = null
 
   async initialize(ipcServer: IPCServer | undefined, database: Database): Promise<void> {
-    this.askpassHandler = new AskpassHandler(ipcServer, database)
+    this.credentialProvider = new CredentialProvider(database)
+    this.askpassHandler = new AskpassHandler(ipcServer, this.credentialProvider)
     this.sshHostKeyHandler = new SSHHostKeyHandler(database, 120_000)
     await this.sshHostKeyHandler.initialize()
 
@@ -97,10 +99,7 @@ export class GitAuthService {
     const { port } = parseSSHHost(normalizedUrl)
     this.setSSHPort(port && port !== '22' ? port : null)
 
-    const settingsService = new SettingsService(database)
-    const settings = settingsService.getSettings('default')
-    const gitCredentials = (settings.preferences.gitCredentials || []) as GitCredential[]
-    const sshCredentials = getSSHCredentialsForHost(gitCredentials, sshHost)
+    const sshCredentials = this.credentialProvider!.getSshCredentialsForHost(sshHost)
 
     if (sshCredentials.length > 0 && sshCredentials[0]) {
       try {
@@ -177,6 +176,8 @@ export class GitAuthService {
         Object.assign(env, this.sshHostKeyHandler.getEnv())
       }
     }
+
+    Object.assign(env, this.credentialProvider?.getGhCliEnv() || {})
 
     return env
   }

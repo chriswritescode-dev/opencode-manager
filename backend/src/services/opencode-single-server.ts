@@ -2,7 +2,7 @@ import { spawn, execSync, spawnSync } from 'child_process'
 import path from 'path'
 import { promises as fs } from 'fs'
 import { logger } from '../utils/logger'
-import { createGitEnv, createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
+import { createGitEnv, createGitIdentityEnv, createGhCliEnv, resolveGitIdentity } from '../utils/git-auth'
 import type { GitCredential } from '@opencode-manager/shared'
 import {
   buildSSHCommandWithKnownHosts,
@@ -351,6 +351,7 @@ class OpenCodeServerManager {
           ...cleanEnv,
           ...userEnvVars,
           ...gitEnv,
+          ...createGhCliEnv(gitCredentials),
           ...gitIdentityEnv,
           GIT_SSH_COMMAND: gitSshCommand,
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
