@@ -4,7 +4,6 @@ import { SettingsService } from './settings'
 import {
   findPatCredentialForHost,
   getSSHCredentialsForHost,
-  findGitHubCredential,
   createGhCliEnv,
   type ResolvedGitCredential,
 } from '../utils/git-auth'
@@ -27,10 +26,6 @@ export class CredentialProvider {
 
   getSshCredentialsForHost(host: string): GitCredential[] {
     return getSSHCredentialsForHost(this.getGitCredentials(), host)
-  }
-
-  getGitHubCredential(): GitCredential | null {
-    return findGitHubCredential(this.getGitCredentials())
   }
 
   getGhCliEnv(): Record<string, string> {

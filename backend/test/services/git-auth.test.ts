@@ -108,7 +108,6 @@ vi.mock('../../src/services/credential-provider', () => ({
     getGhCliEnv: vi.fn().mockReturnValue({}),
     getSshCredentialsForHost: vi.fn().mockReturnValue([]),
     getPatCredentialForHost: vi.fn().mockReturnValue(null),
-    getGitHubCredential: vi.fn().mockReturnValue(null),
     getGitCredentials: vi.fn().mockReturnValue([]),
   })),
 }))
@@ -299,27 +298,6 @@ describe('GitAuthService with passphrase support', () => {
       await gitAuthService['cleanupSSHKey']()
       expect(gitAuthService['sshPassphrase']).toBeNull()
       expect(gitAuthService['sshKeyPath']).toBeNull()
-    })
-  })
-
-  describe('getGitEnvironment', () => {
-    it('includes GH_TOKEN and GITHUB_TOKEN when a GitHub PAT is configured', () => {
-      const mockProvider = gitAuthService['credentialProvider']!
-      vi.mocked(mockProvider.getGhCliEnv).mockReturnValue({
-        GH_TOKEN: 'ghp_test_token',
-        GITHUB_TOKEN: 'ghp_test_token',
-      })
-
-      const env = gitAuthService.getGitEnvironment()
-
-      expect(env.GH_TOKEN).toBe('ghp_test_token')
-      expect(env.GITHUB_TOKEN).toBe('ghp_test_token')
-    })
-
-    it('does not include GH_TOKEN when no GitHub credential is available', () => {
-      const env = gitAuthService.getGitEnvironment()
-      expect(env.GH_TOKEN).toBeUndefined()
-      expect(env.GITHUB_TOKEN).toBeUndefined()
     })
   })
 

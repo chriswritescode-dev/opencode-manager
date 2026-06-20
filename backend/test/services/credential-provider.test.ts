@@ -72,18 +72,6 @@ describe('CredentialProvider', () => {
     it('getSshCredentialsForHost returns empty array for unmatched host', () => {
       expect(provider.getSshCredentialsForHost('gitlab.com')).toEqual([])
     })
-
-    it('getGitHubCredential returns the GitHub PAT', () => {
-      const cred = provider.getGitHubCredential()
-      expect(cred).not.toBeNull()
-      expect(cred!.host).toBe('github.com')
-      expect(cred!.token).toBe('ghp_test_token')
-    })
-
-    it('getGitHubCredential excludes SSH credentials', () => {
-      const cred = provider.getGitHubCredential()
-      expect(cred!.type).not.toBe('ssh')
-    })
   })
 
   describe('with no credentials', () => {
@@ -97,10 +85,6 @@ describe('CredentialProvider', () => {
 
     it('getSshCredentialsForHost returns empty array', () => {
       expect(provider.getSshCredentialsForHost('github.com')).toEqual([])
-    })
-
-    it('getGitHubCredential returns null', () => {
-      expect(provider.getGitHubCredential()).toBeNull()
     })
   })
 

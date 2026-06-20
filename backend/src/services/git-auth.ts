@@ -177,8 +177,6 @@ export class GitAuthService {
       }
     }
 
-    Object.assign(env, this.credentialProvider?.getGhCliEnv() || {})
-
     return env
   }
 }
