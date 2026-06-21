@@ -89,7 +89,7 @@ vi.mock('../ipc/ipcServer', () => ({
   IPCServer: vi.fn(),
 }))
 
-vi.mock('../ipc/askpassHandler', () => ({
+vi.mock('../../src/ipc/askpassHandler', () => ({
   AskpassHandler: vi.fn().mockImplementation(() => ({
     getEnv: vi.fn().mockReturnValue({}),
   })),
@@ -100,6 +100,15 @@ vi.mock('../../src/ipc/sshHostKeyHandler', () => ({
     initialize: vi.fn().mockResolvedValue(undefined),
     getKnownHostsPath: vi.fn().mockReturnValue(null),
     getEnv: vi.fn().mockReturnValue({}),
+  })),
+}))
+
+vi.mock('../../src/services/credential-provider', () => ({
+  CredentialProvider: vi.fn().mockImplementation(() => ({
+    getGhCliEnv: vi.fn().mockReturnValue({}),
+    getSshCredentialsForHost: vi.fn().mockReturnValue([]),
+    getPatCredentialForHost: vi.fn().mockReturnValue(null),
+    getGitCredentials: vi.fn().mockReturnValue([]),
   })),
 }))
 

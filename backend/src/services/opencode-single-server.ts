@@ -2,8 +2,7 @@ import { spawn, execSync, spawnSync } from 'child_process'
 import path from 'path'
 import { promises as fs } from 'fs'
 import { logger } from '../utils/logger'
-import { createGitEnv, createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
-import type { GitCredential } from '@opencode-manager/shared'
+import { createGitIdentityEnv, resolveGitIdentity } from '../utils/git-auth'
 import {
   buildSSHCommandWithKnownHosts,
   buildSSHCommandWithConfig,
@@ -24,6 +23,9 @@ import { compareVersions } from '../utils/version-utils'
 import { patchConfigWithRecovery } from './opencode/config-recovery'
 import type { OpenCodeClient } from './opencode/client'
 import { writeFileContent } from './file-operations'
+import { getOrCreateInternalToken } from './internal-token'
+import { installGhEnvPlugin } from './opencode-gh-env-plugin'
+import { CredentialProvider } from './credential-provider'
 
 
 const MIN_OPENCODE_VERSION = '1.0.137'
@@ -202,14 +204,15 @@ class OpenCodeServerManager {
       throw new Error(msg)
     }
 
-    let gitCredentials: GitCredential[] = []
+    let credentialProvider: CredentialProvider | null = null
     let gitIdentityEnv: Record<string, string> = {}
     let userEnvVars: Record<string, string> = {}
     if (this.db) {
       try {
+        credentialProvider = new CredentialProvider(this.db)
         const settingsService = new SettingsService(this.db)
         const settings = settingsService.getSettings('default')
-        gitCredentials = settings.preferences.gitCredentials || []
+        const gitCredentials = credentialProvider.getGitCredentials()
         const disabledDefaultEnvVars = new Set(settings.preferences.disabledDefaultServerEnvVars || [])
         const rawEnvVars = [
           ...DEFAULT_SERVER_ENV_VARS.filter((envVar) => !disabledDefaultEnvVars.has(envVar.key)),
@@ -279,12 +282,12 @@ class OpenCodeServerManager {
     logger.info(`OpenCode XDG_CONFIG_HOME: ${path.join(openCodeServerDirectory, '.config')}`)
     logger.info(`OpenCode will use ?directory= parameter for session isolation`)
 
-    const gitEnv = createGitEnv(gitCredentials)
+    const gitEnv = credentialProvider?.getGitEnv() ?? {}
     const knownHostsPath = path.join(getWorkspacePath(), 'config', 'known_hosts')
     let gitSshCommand: string
     let sshConfigPath: string | null = null
 
-    const sshCredentials = gitCredentials.filter(cred => cred.type === 'ssh' && cred.sshPrivateKeyEncrypted)
+    const sshCredentials = credentialProvider?.getSshCredentialsWithPrivateKey() ?? []
     if (sshCredentials.length > 0) {
       logger.info(`Setting up ${sshCredentials.length} SSH credential(s) for OpenCode server`)
 
@@ -327,6 +330,7 @@ class OpenCodeServerManager {
     logger.info(`OpenCode server GIT_SSH_COMMAND: ${gitSshCommand}`)
 
     await this.initializeOpencodeBinDirectory()
+    await installGhEnvPlugin(path.join(openCodeServerDirectory, '.config'))
     const configuredPlugins = await this.getConfiguredPlugins(openCodeConfigPath)
     await this.installConfiguredPlugins(configuredPlugins)
     const configuredPluginCount = configuredPlugins.length
@@ -352,6 +356,12 @@ class OpenCodeServerManager {
           ...userEnvVars,
           ...gitEnv,
           ...gitIdentityEnv,
+          ...(this.db
+            ? {
+              OCM_INTERNAL_API_URL: `http://localhost:${ENV.SERVER.PORT}/api/internal`,
+              OCM_INTERNAL_TOKEN: getOrCreateInternalToken(this.db),
+            }
+            : {}),
           GIT_SSH_COMMAND: gitSshCommand,
           XDG_DATA_HOME: path.join(openCodeServerDirectory, '.opencode/state'),
           XDG_STATE_HOME: path.join(openCodeServerDirectory, '.opencode/state'),

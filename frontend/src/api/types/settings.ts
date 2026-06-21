@@ -30,6 +30,7 @@ export interface CustomCommand {
 }
 
 export interface GitCredential {
+  id?: string
   name: string
   host: string
   type: 'pat' | 'ssh'
@@ -61,6 +62,7 @@ export interface UserPreferences {
   keyboardShortcuts: Record<string, string>
   customCommands: CustomCommand[]
   gitCredentials?: GitCredential[]
+  defaultGitCredentialId?: string
   gitIdentity?: GitIdentity
   tts?: TTSConfig
   stt?: STTConfig

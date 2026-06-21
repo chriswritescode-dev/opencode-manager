@@ -6,15 +6,16 @@ import { getRepoById } from '../../db/queries'
 import { resolveGitIdentity, createGitIdentityEnv, isSSHUrl } from '../../utils/git-auth'
 import { isNoUpstreamError, parseBranchNameFromError } from '../../utils/git-errors'
 import { SettingsService } from '../settings'
+import { CredentialProvider } from '../credential-provider'
 import type { Database } from 'bun:sqlite'
 import type { GitBranch, GitCommit, FileDiffResponse, GitDiffOptions, GitStatusResponse, GitFileStatus, GitFileStatusType, CommitDetails, CommitFile } from '../../types/git'
-import type { GitCredential } from '@opencode-manager/shared'
 import path from 'path'
 
 export class GitService {
   constructor(
     private gitAuthService: GitAuthService,
-    private settingsService: SettingsService
+    private settingsService: SettingsService,
+    private credentialProvider: CredentialProvider
   ) {}
 
   async getStatus(repoId: number, database: Database): Promise<GitStatusResponse> {
@@ -196,10 +197,10 @@ export class GitService {
       }
 
       const repoPath = repo.fullPath
-      const authEnv = this.gitAuthService.getGitEnvironment()
+      const authEnv = this.getEnvironmentForRepo(repo)
 
       const settings = this.settingsService.getSettings('default')
-      const gitCredentials = (settings.preferences.gitCredentials || []) as GitCredential[]
+      const gitCredentials = this.credentialProvider.getGitCredentials()
       const identity = await resolveGitIdentity(settings.preferences.gitIdentity, gitCredentials)
       const identityEnv = identity ? createGitIdentityEnv(identity) : {}
 
@@ -523,13 +524,18 @@ export class GitService {
     await this.gitAuthService.cleanupSSHKey()
   }
 
-  private getEnvironmentForRepo(repo: { repoUrl?: string; fullPath: string }, silent: boolean = false): Record<string, string> {
+  private getEnvironmentForRepo(repo: { id?: number; repoUrl?: string; fullPath: string }, silent: boolean = false): Record<string, string> {
+    const repoContextEnv = {
+      ...(repo.id ? { OCM_GIT_REPO_ID: String(repo.id) } : {}),
+      OCM_GIT_REPO_CWD: repo.fullPath,
+    }
+
     if (!repo.repoUrl) {
-      return this.gitAuthService.getGitEnvironment(silent)
+      return { ...this.gitAuthService.getGitEnvironment(silent), ...repoContextEnv }
     }
 
     const isSSH = isSSHUrl(repo.repoUrl)
-    const baseEnv = this.gitAuthService.getGitEnvironment(silent)
+    const baseEnv = { ...this.gitAuthService.getGitEnvironment(silent), ...repoContextEnv }
 
     if (!isSSH) {
       return baseEnv

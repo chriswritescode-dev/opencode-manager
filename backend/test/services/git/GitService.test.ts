@@ -49,6 +49,7 @@ describe('GitService', () => {
   let database: Database
   let mockGitAuthService: GitAuthService
   let mockSettingsService: any
+  let mockCredentialProvider: any
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -70,7 +71,10 @@ describe('GitService', () => {
         },
       }),
     }
-    service = new GitService(mockGitAuthService, mockSettingsService)
+    mockCredentialProvider = {
+      getGitCredentials: vi.fn().mockReturnValue([]),
+    }
+    service = new GitService(mockGitAuthService, mockSettingsService, mockCredentialProvider)
   })
 
   describe('getStatus', () => {
@@ -639,7 +643,7 @@ describe('GitService', () => {
       expect(getRepoById).toHaveBeenCalledWith(database, 1)
       expect(executeCommand).toHaveBeenCalledWith(
         ['git', '-C', '/path/to/repo', 'push'],
-        { env: expect.any(Object) }
+        { env: expect.objectContaining({ OCM_GIT_REPO_ID: '1', OCM_GIT_REPO_CWD: '/path/to/repo' }) }
       )
       expect(result).toBe('Everything up-to-date')
     })
@@ -681,6 +685,10 @@ describe('GitService', () => {
 
       const result = await service.fetch(1, database)
 
+      expect(executeCommand).toHaveBeenCalledWith(
+        ['git', '-C', '/path/to/repo', 'fetch', '--all', '--prune'],
+        { env: expect.objectContaining({ OCM_GIT_REPO_ID: '1', OCM_GIT_REPO_CWD: '/path/to/repo' }) }
+      )
       expect(result).toBe('')
     })
   })
@@ -700,6 +708,10 @@ describe('GitService', () => {
 
       const result = await service.pull(1, database)
 
+      expect(executeCommand).toHaveBeenCalledWith(
+        ['git', '-C', '/path/to/repo', 'pull'],
+        { env: expect.objectContaining({ OCM_GIT_REPO_ID: '1', OCM_GIT_REPO_CWD: '/path/to/repo' }) }
+      )
       expect(result).toBe('')
     })
   })

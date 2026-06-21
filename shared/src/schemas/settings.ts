@@ -83,6 +83,7 @@ export const DEFAULT_KEYBOARD_SHORTCUTS: Record<string, string> = {
 };
 
 export const GitCredentialSchema = z.object({
+  id: z.string().optional(),
   name: z.string(),
   host: z.string(),
   type: z.enum(['pat', 'ssh']).default('pat'),
@@ -146,6 +147,7 @@ export const UserPreferencesSchema = z.object({
   keyboardShortcuts: z.record(z.string(), z.string()),
   customCommands: z.array(CustomCommandSchema),
   gitCredentials: z.array(GitCredentialSchema).optional(),
+  defaultGitCredentialId: z.string().optional(),
   gitIdentity: GitIdentitySchema.optional(),
   tts: TTSConfigSchema.optional(),
   stt: STTConfigSchema.optional(),
@@ -197,6 +199,7 @@ export const DEFAULT_USER_PREFERENCES = {
   customCommands: [],
   customAgents: [],
   gitCredentials: [] as GitCredential[],
+  defaultGitCredentialId: undefined as string | undefined,
   gitIdentity: DEFAULT_GIT_IDENTITY,
   tts: DEFAULT_TTS_CONFIG,
   stt: DEFAULT_STT_CONFIG,

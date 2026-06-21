@@ -5,6 +5,8 @@ import fs from 'fs'
 interface AskpassRequest {
   askpassType: 'https' | 'ssh'
   argv: string[]
+  cwd?: string
+  repoId?: number
 }
 
 function fatal(err: unknown): never {
@@ -86,7 +88,13 @@ function main(argv: string[]): void {
     process.exit(1)
   })
 
-  const requestPayload: AskpassRequest = { askpassType, argv }
+  const repoId = process.env['OCM_GIT_REPO_ID'] ? Number(process.env['OCM_GIT_REPO_ID']) : undefined
+  const requestPayload: AskpassRequest = {
+    askpassType,
+    argv,
+    cwd: process.env['OCM_GIT_REPO_CWD'],
+    repoId: Number.isFinite(repoId) ? repoId : undefined,
+  }
   console.error('[askpass-main] Sending request:', JSON.stringify(requestPayload))
   req.write(JSON.stringify(requestPayload))
   req.end()

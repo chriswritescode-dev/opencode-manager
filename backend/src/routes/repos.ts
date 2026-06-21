@@ -3,7 +3,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
 import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema } from '@opencode-manager/shared/schemas'
-import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName } from '../db/queries'
+import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName, getRepoGitCredentialId, setRepoGitCredentialId } from '../db/queries'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
@@ -34,6 +34,13 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
 
 function resolveRepo(database: Database, id: number): Repo | null {
   return getRepoById(database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null)
+}
+
+function withRepoSettings(database: Database, repo: Repo): Repo {
+  return {
+    ...repo,
+    gitCredentialId: getRepoGitCredentialId(database, repo.id) ?? undefined,
+  }
 }
 
 export function createRepoRoutes(
@@ -128,7 +135,7 @@ app.get('/', async (c) => {
         repos.map(async (repo) => {
           const env = gitAuthService.getGitEnvironment()
           const currentBranch = repo.id === ASSISTANT_REPO_ID ? undefined : await repoService.getCurrentBranch(repo, env)
-          return { ...repo, currentBranch }
+          return { ...withRepoSettings(database, repo), currentBranch }
         })
       )
       return c.json(reposWithCurrentBranch)
@@ -170,7 +177,7 @@ app.get('/', async (c) => {
       
       const currentBranch = id === ASSISTANT_REPO_ID ? undefined : await repoService.getCurrentBranch(repo, gitAuthService.getGitEnvironment())
       
-      return c.json({ ...repo, currentBranch })
+      return c.json({ ...withRepoSettings(database, repo), currentBranch })
     } catch (error: unknown) {
       logger.error('Failed to get repo:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
@@ -208,6 +215,36 @@ app.get('/', async (c) => {
       return c.json({ success: true })
     } catch (error: unknown) {
       logger.error('Failed to update repo access:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.patch('/:id/git-credential', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      const repo = getRepoById(database, id)
+
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+
+      const body = await c.req.json()
+      const credentialId = typeof body.credentialId === 'string' && body.credentialId.trim() !== ''
+        ? body.credentialId.trim()
+        : null
+
+      if (credentialId) {
+        const settingsService = new SettingsService(database)
+        const settings = settingsService.getSettings()
+        if (!(settings.preferences.gitCredentials || []).some((credential) => credential.id === credentialId)) {
+          return c.json({ error: 'Credential not found' }, 400)
+        }
+      }
+
+      setRepoGitCredentialId(database, id, credentialId)
+      return c.json(withRepoSettings(database, repo))
+    } catch (error: unknown) {
+      logger.error('Failed to update repo git credential:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })
