@@ -42,7 +42,8 @@ describe('HtmlArtifactPanel', () => {
 
     const iframe = screen.getByTitle('Test Preview')
     expect(iframe).toBeInTheDocument()
-    expect(iframe).toHaveAttribute('srcdoc', '<h1>Hello World</h1>')
+    expect(iframe.getAttribute('srcdoc')).toContain('<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">')
+    expect(iframe.getAttribute('srcdoc')).toContain('<h1>Hello World</h1>')
     expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
   })
 
@@ -146,21 +147,6 @@ describe('HtmlArtifactPanel', () => {
 
     const sheetRoot = container.querySelector('.fixed.inset-0')
     expect(sheetRoot).toBeInTheDocument()
-  })
-
-  it('shows source label (File artifact / Inline artifact)', () => {
-    const inlineArtifact = createInlineArtifact()
-    render(
-      <HtmlArtifactPanel
-        artifact={inlineArtifact}
-        isFullscreen={false}
-        isMobile={false}
-        onClose={() => {}}
-        onToggleFullscreen={() => {}}
-      />,
-    )
-
-    expect(screen.getByText('(Inline artifact)')).toBeInTheDocument()
   })
 
   it('returns null when artifact is null', () => {

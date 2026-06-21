@@ -4,6 +4,7 @@ import {
   normalizeWorkspaceFilePath,
   createHtmlArtifact,
   getArtifactTitle,
+  normalizeHtmlPreviewDocument,
 } from './htmlArtifacts'
 
 describe('isHtmlPath', () => {
@@ -152,5 +153,30 @@ describe('getArtifactTitle', () => {
 
   it('returns Untitled Artifact for undefined', () => {
     expect(getArtifactTitle(undefined)).toBe('Untitled Artifact')
+  })
+})
+
+describe('normalizeHtmlPreviewDocument', () => {
+  it('adds viewport meta and sizing style to html fragments', () => {
+    const result = normalizeHtmlPreviewDocument('<h1>Hello</h1>')
+
+    expect(result).toContain('name="viewport"')
+    expect(result).toContain('opencode-html-preview-sizing')
+    expect(result).toContain('overflow-y:auto!important')
+    expect(result).toContain('<h1>Hello</h1>')
+  })
+
+  it('does not duplicate an existing viewport meta tag', () => {
+    const result = normalizeHtmlPreviewDocument('<head><meta name="viewport" content="width=device-width"></head>')
+
+    expect(result.match(/name="viewport"/g)).toHaveLength(1)
+    expect(result).toContain('opencode-html-preview-sizing')
+  })
+
+  it('inserts preview sizing before an existing closing head tag', () => {
+    const result = normalizeHtmlPreviewDocument('<html><head><title>Demo</title></head><body>Demo</body></html>')
+
+    expect(result).toContain('<title>Demo</title><meta name="viewport"')
+    expect(result).toContain('opencode-html-preview-sizing')
   })
 })

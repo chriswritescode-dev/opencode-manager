@@ -1,7 +1,6 @@
 import { getFilePreviewUrl } from '@/api/files'
 import {
   FullscreenSheet,
-  FullscreenSheetHeader,
   FullscreenSheetContent,
 } from '@/components/ui/fullscreen-sheet'
 import { Button } from '@/components/ui/button'
@@ -31,34 +30,27 @@ export function HtmlArtifactPanel({
     : undefined
   const previewSrcDoc = artifact.source === 'inline' ? artifact.html : undefined
   const title = artifact.title
-  const sourceLabel = artifact.source === 'file' ? 'File artifact' : 'Inline artifact'
 
-  const header = (
-    <div className="flex items-center justify-between px-4 py-2">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-sm font-medium truncate">{title}</span>
-        <span className="text-xs text-muted-foreground shrink-0">({sourceLabel})</span>
-      </div>
-      <div className="flex items-center gap-1">
-        {!isMobile && (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onToggleFullscreen}
-            aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
-          >
-            {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </Button>
-        )}
+  const headerButtons = (
+    <div className="flex items-center gap-1">
+      {!isMobile && (
         <Button
           variant="ghost"
           size="icon-sm"
-          onClick={onClose}
-          aria-label="Close preview"
+          onClick={onToggleFullscreen}
+          aria-label={isFullscreen ? 'Exit fullscreen' : 'Enter fullscreen'}
         >
-          <X className="size-4" />
+          {isFullscreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
         </Button>
-      </div>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={onClose}
+        aria-label="Close preview"
+      >
+        <X className="size-4" />
+      </Button>
     </div>
   )
 
@@ -72,11 +64,11 @@ export function HtmlArtifactPanel({
 
   if (isMobile || isFullscreen) {
     return (
-      <FullscreenSheet>
-        <FullscreenSheetHeader>
-          {header}
-        </FullscreenSheetHeader>
-        <FullscreenSheetContent>
+      <FullscreenSheet className="h-dvh max-h-dvh w-screen max-w-screen overflow-hidden">
+        <FullscreenSheetContent className="relative h-full max-h-full w-full max-w-full">
+          <div className="absolute top-2 right-2 z-10">
+            {headerButtons}
+          </div>
           {frame}
         </FullscreenSheetContent>
       </FullscreenSheet>
@@ -84,12 +76,12 @@ export function HtmlArtifactPanel({
   }
 
   return (
-    <div className="hidden md:flex w-[45%] max-w-[720px] min-w-[360px] border-l border-border bg-background flex-col">
-      <div className="flex-shrink-0 border-b border-border">
-        {header}
-      </div>
+    <div className="hidden md:flex w-[45%] max-w-[720px] min-w-[360px] border-l border-border bg-background flex-col relative">
       <div className="flex-1 min-h-0">
         {frame}
+      </div>
+      <div className="absolute top-2 right-2 z-10">
+        {headerButtons}
       </div>
     </div>
   )

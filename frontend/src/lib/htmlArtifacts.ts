@@ -14,6 +14,12 @@ export interface OpenHtmlArtifactInput {
 }
 
 const HTML_EXTENSIONS = new Set(['.html', '.htm'])
+const HTML_PREVIEW_STYLE_ID = 'opencode-html-preview-sizing'
+const HTML_PREVIEW_VIEWPORT_META = '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
+const HTML_PREVIEW_SIZING_STYLE = `<style id="${HTML_PREVIEW_STYLE_ID}">html,body{width:100%;max-width:100%;min-width:0;min-height:100%;height:auto!important;margin:0;overflow-x:hidden!important;overflow-y:auto!important;}#root,#__next{min-height:100%;height:auto!important;max-width:100%;overflow-x:hidden;}*,*::before,*::after{box-sizing:border-box;}img,svg,video,canvas{max-width:100%;}</style>`
+const VIEWPORT_META_PATTERN = /<meta\s+[^>]*name=["']viewport["'][^>]*>/i
+const HEAD_OPEN_PATTERN = /<head([^>]*)>/i
+const HEAD_CLOSE_PATTERN = /<\/head>/i
 
 export function isHtmlPath(path: string | undefined): boolean {
   if (!path) return false
@@ -40,6 +46,24 @@ export function createHtmlArtifact(input: OpenHtmlArtifactInput): HtmlArtifact {
   const id = `${Date.now()}-${Math.random().toString(36).slice(2)}`
   const title = input.title ?? getArtifactTitle(input.source === 'file' ? input.path : undefined)
   return { id, title, source: input.source, html: input.html, path: input.path }
+}
+
+export function normalizeHtmlPreviewDocument(html: string): string {
+  const viewportMeta = VIEWPORT_META_PATTERN.test(html) ? '' : HTML_PREVIEW_VIEWPORT_META
+  const sizingStyle = html.includes(HTML_PREVIEW_STYLE_ID) ? '' : HTML_PREVIEW_SIZING_STYLE
+  const headContent = `${viewportMeta}${sizingStyle}`
+
+  if (!headContent) return html
+
+  if (HEAD_CLOSE_PATTERN.test(html)) {
+    return html.replace(HEAD_CLOSE_PATTERN, `${headContent}</head>`)
+  }
+
+  if (HEAD_OPEN_PATTERN.test(html)) {
+    return html.replace(HEAD_OPEN_PATTERN, `<head$1>${headContent}`)
+  }
+
+  return `<head>${headContent}</head>${html}`
 }
 
 export function normalizeWorkspaceFilePath(filePath: string, repoFullPath?: string): string {

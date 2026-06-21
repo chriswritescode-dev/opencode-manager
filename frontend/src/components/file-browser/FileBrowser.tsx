@@ -12,6 +12,9 @@ import { FolderOpen, Upload, RefreshCw, X } from 'lucide-react'
 import type { FileInfo } from '@/types/files'
 import { useMobile } from '@/hooks/useMobile'
 import { getFileApiUrl, useFile } from '@/api/files'
+import { HtmlArtifactPanel } from '@/components/html-preview/HtmlArtifactPanel'
+import type { HtmlArtifact } from '@/lib/htmlArtifacts'
+import { createHtmlArtifact, isHtmlPath } from '@/lib/htmlArtifacts'
 
 export interface FileBrowserHandle {
   goBack: () => void
@@ -50,6 +53,10 @@ const encodeBase64 = (content: string) => {
   }
   return btoa(binary)
 }
+
+const isHtmlFileInfo = (file: FileInfo): boolean => (
+  isHtmlPath(file.path) || isHtmlPath(file.name) || file.mimeType === 'text/html'
+)
 
 async function readFileEntry(entry: FileSystemFileEntry): Promise<File> {
   return new Promise((resolve, reject) => {
@@ -135,6 +142,7 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const [currentPath, setCurrentPath] = useState(basePath)
   const [files, setFiles] = useState<FileInfo | null>(null)
   const [selectedFile, setSelectedFile] = useState<FileInfo | null>(null)
+  const [htmlArtifact, setHtmlArtifact] = useState<HtmlArtifact | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -152,7 +160,17 @@ useEffect(() => {
   if (initialFileData) {
     setSelectedFile(initialFileData)
     if (isMobile) {
-      setIsPreviewModalOpen(true)
+      if (isHtmlFileInfo(initialFileData)) {
+        setHtmlArtifact(createHtmlArtifact({
+          source: 'file',
+          path: initialFileData.path,
+          title: initialFileData.name,
+        }))
+        setIsPreviewModalOpen(false)
+      } else {
+        setHtmlArtifact(null)
+        setIsPreviewModalOpen(true)
+      }
       onPreviewStateChange?.(true)
     }
   }
@@ -262,7 +280,17 @@ useEffect(() => {
       
       // On mobile, open preview in modal
       if (isMobile) {
-        setIsPreviewModalOpen(true)
+        if (isHtmlFileInfo(fullFileData)) {
+          setHtmlArtifact(createHtmlArtifact({
+            source: 'file',
+            path: fullFileData.path,
+            title: fullFileData.name,
+          }))
+          setIsPreviewModalOpen(false)
+        } else {
+          setHtmlArtifact(null)
+          setIsPreviewModalOpen(true)
+        }
         onPreviewStateChange?.(true)
       }
     } catch (err) {
@@ -275,9 +303,18 @@ useEffect(() => {
 
   const handleCloseModal = useCallback(() => {
     setIsPreviewModalOpen(false)
+    setHtmlArtifact(null)
     setSelectedFile(null)
     onPreviewStateChange?.(false)
   }, [onPreviewStateChange])
+
+  const handleCloseHtmlArtifact = useCallback(() => {
+    setHtmlArtifact(null)
+    setSelectedFile(null)
+    onPreviewStateChange?.(false)
+  }, [onPreviewStateChange])
+
+  const handleToggleHtmlArtifactFullscreen = useCallback(() => {}, [])
 
   const handleDirectoryClick = (path: string) => {
     loadFiles(path)
@@ -645,6 +682,16 @@ useEffect(() => {
           file={selectedFile}
           showFilePreviewHeader={true}
         />
+
+        {isMobile && htmlArtifact && (
+          <HtmlArtifactPanel
+            artifact={htmlArtifact}
+            isFullscreen={true}
+            isMobile={true}
+            onClose={handleCloseHtmlArtifact}
+            onToggleFullscreen={handleToggleHtmlArtifactFullscreen}
+          />
+        )}
       </div>
     )
   }
@@ -746,6 +793,16 @@ useEffect(() => {
         onClose={handleCloseModal}
         file={selectedFile}
       />
+
+      {isMobile && htmlArtifact && (
+        <HtmlArtifactPanel
+          artifact={htmlArtifact}
+          isFullscreen={true}
+          isMobile={true}
+          onClose={handleCloseHtmlArtifact}
+          onToggleFullscreen={handleToggleHtmlArtifactFullscreen}
+        />
+      )}
       
       {uploadDialog}
     </div>
