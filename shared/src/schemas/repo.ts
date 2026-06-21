@@ -15,6 +15,7 @@ export const RepoSchema = z.object({
   lastPulled: z.number().optional(),
   lastAccessedAt: z.number().optional(),
   openCodeConfigName: z.string().optional(),
+  gitCredentialId: z.string().optional(),
   isWorktree: z.boolean().optional(),
   isLocal: z.boolean().optional(),
 })

@@ -12,6 +12,7 @@ export interface Repo {
   lastPulled?: number
   lastAccessedAt?: number
   openCodeConfigName?: string
+  gitCredentialId?: string
   isWorktree?: boolean
   isLocal?: boolean
 }

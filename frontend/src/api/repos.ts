@@ -114,6 +114,14 @@ export async function switchRepoConfig(id: number, configName: string): Promise<
   })
 }
 
+export async function updateRepoGitCredential(id: number, credentialId?: string): Promise<Repo> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}/git-credential`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ credentialId }),
+  })
+}
+
 export class GitAuthError extends Error {
   code: string
   constructor(message: string, code: string) {

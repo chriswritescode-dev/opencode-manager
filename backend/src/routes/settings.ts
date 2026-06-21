@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { z } from 'zod'
 import { execSync, spawnSync } from 'child_process'
+import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { resolve, dirname } from 'path'
 import type { Database } from 'bun:sqlite'
@@ -394,6 +395,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
 
               const result: GitCredential = {
                 ...cred,
+                id: cred.id || randomUUID(),
                 sshPrivateKeyEncrypted: encryptSecret(cred.sshPrivateKey),
                 hasPassphrase: validation.hasPassphrase,
                 passphrase: cred.passphrase ? encryptSecret(cred.passphrase) : undefined,
@@ -401,10 +403,13 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
               delete result.sshPrivateKey
               return result
             }
-            return cred
+            return { ...cred, id: cred.id || randomUUID() }
           })
         )
         validated.preferences.gitCredentials = validations
+        if (validated.preferences.defaultGitCredentialId && !validations.some((cred) => cred.id === validated.preferences.defaultGitCredentialId)) {
+          validated.preferences.defaultGitCredentialId = undefined
+        }
       }
 
       const currentSettings = settingsService.getSettings(userId)

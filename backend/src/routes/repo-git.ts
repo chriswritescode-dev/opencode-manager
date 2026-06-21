@@ -7,12 +7,14 @@ import { parseGitError } from '../utils/git-errors'
 import { GitService } from '../services/git/GitService'
 import type { GitAuthService } from '../services/git-auth'
 import { SettingsService } from '../services/settings'
+import { CredentialProvider } from '../services/credential-provider'
 import type { GitStatusResponse } from '../types/git'
 
 export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthService) {
   const app = new Hono()
   const settingsService = new SettingsService(database)
-  const git = new GitService(gitAuthService, settingsService)
+  const credentialProvider = new CredentialProvider(database)
+  const git = new GitService(gitAuthService, settingsService, credentialProvider)
 
   app.get('/:id/git/status', async (c) => {
     try {
