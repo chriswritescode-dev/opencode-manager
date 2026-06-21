@@ -38,10 +38,7 @@ services:
     container_name: opencode-manager
     ports:
       - "5003:5003"
-      - "5100:5100"
-      - "5101:5101"
-      - "5102:5102"
-      - "5103:5103"
+      - "3055:3055"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - HOST=0.0.0.0
@@ -146,19 +143,18 @@ ports:
   - "8080:5003"  # Access at localhost:8080
 ```
 
-### Dev Server Ports
+### Dev Server Port
 
-Ports 5100-5103 are exposed for running dev servers inside repositories:
+The preview proxy reaches a repository's dev server through the main `5003` port at `/api/dev-proxy/<repoId>/`, so the dev server only needs to listen on a single port inside the container. That port defaults to `3055` and is configurable in **Settings** (`devServerPort`); agents receive it as the `$OCM_DEV_SERVER_PORT` environment variable.
+
+Exposing the port to the host is optional — the preview works entirely through `5003`. Map it only if you also want to hit the dev server directly:
 
 ```yaml
 ports:
-  - "5100:5100"
-  - "5101:5101"
-  - "5102:5102"
-  - "5103:5103"
+  - "3055:3055"
 ```
 
-Configure your dev server to use one of these ports:
+Run your dev server on `$OCM_DEV_SERVER_PORT` and bind to `0.0.0.0`:
 
 === "Vite"
 
@@ -166,7 +162,7 @@ Configure your dev server to use one of these ports:
     // vite.config.ts
     export default {
       server: {
-        port: 5100,
+        port: Number(process.env.OCM_DEV_SERVER_PORT) || 3055,
         host: '0.0.0.0'
       }
     }
@@ -175,13 +171,13 @@ Configure your dev server to use one of these ports:
 === "Next.js"
 
     ```bash
-    next dev -p 5100 -H 0.0.0.0
+    next dev -p $OCM_DEV_SERVER_PORT -H 0.0.0.0
     ```
 
 === "Express"
 
     ```javascript
-    app.listen(5100, '0.0.0.0')
+    app.listen(process.env.OCM_DEV_SERVER_PORT || 3055, '0.0.0.0')
     ```
 
 ## Volume Mounts
@@ -372,7 +368,7 @@ The container creates a default `AGENTS.md` file at `/workspace/.config/opencode
 
 Instructions for AI agents working in the container:
 - Reserved ports information
-- Available dev server ports
+- Dev server port (`$OCM_DEV_SERVER_PORT`, default 3055)
 - Docker-specific guidelines
 
 ### Editing

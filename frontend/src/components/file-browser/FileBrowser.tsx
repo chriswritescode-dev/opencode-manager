@@ -154,27 +154,27 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps>(funct
   const uploadCancelledRef = useRef(false)
   const isMobile = useMobile()
 
+  const openMobilePreview = useCallback((file: FileInfo) => {
+    if (isHtmlFileInfo(file)) {
+      setHtmlArtifact(createHtmlArtifact({ source: 'file', path: file.path, title: file.name }))
+      setIsPreviewModalOpen(false)
+    } else {
+      setHtmlArtifact(null)
+      setIsPreviewModalOpen(true)
+    }
+    onPreviewStateChange?.(true)
+  }, [onPreviewStateChange])
+
   const { data: initialFileData, error: initialFileError } = useFile(initialSelectedFile)
 
 useEffect(() => {
   if (initialFileData) {
     setSelectedFile(initialFileData)
     if (isMobile) {
-      if (isHtmlFileInfo(initialFileData)) {
-        setHtmlArtifact(createHtmlArtifact({
-          source: 'file',
-          path: initialFileData.path,
-          title: initialFileData.name,
-        }))
-        setIsPreviewModalOpen(false)
-      } else {
-        setHtmlArtifact(null)
-        setIsPreviewModalOpen(true)
-      }
-      onPreviewStateChange?.(true)
+      openMobilePreview(initialFileData)
     }
   }
-}, [initialFileData, isMobile, onPreviewStateChange])
+}, [initialFileData, isMobile, openMobilePreview])
 
 useEffect(() => {
   if (initialFileError) {
@@ -280,18 +280,7 @@ useEffect(() => {
       
       // On mobile, open preview in modal
       if (isMobile) {
-        if (isHtmlFileInfo(fullFileData)) {
-          setHtmlArtifact(createHtmlArtifact({
-            source: 'file',
-            path: fullFileData.path,
-            title: fullFileData.name,
-          }))
-          setIsPreviewModalOpen(false)
-        } else {
-          setHtmlArtifact(null)
-          setIsPreviewModalOpen(true)
-        }
-        onPreviewStateChange?.(true)
+        openMobilePreview(fullFileData)
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load file')
@@ -299,22 +288,14 @@ useEffect(() => {
     } finally {
       setLoading(false)
     }
-  }, [onFileSelect, isMobile, onPreviewStateChange])
+  }, [onFileSelect, isMobile, openMobilePreview])
 
-  const handleCloseModal = useCallback(() => {
+  const handleClosePreview = useCallback(() => {
     setIsPreviewModalOpen(false)
     setHtmlArtifact(null)
     setSelectedFile(null)
     onPreviewStateChange?.(false)
   }, [onPreviewStateChange])
-
-  const handleCloseHtmlArtifact = useCallback(() => {
-    setHtmlArtifact(null)
-    setSelectedFile(null)
-    onPreviewStateChange?.(false)
-  }, [onPreviewStateChange])
-
-  const handleToggleHtmlArtifactFullscreen = useCallback(() => {}, [])
 
   const handleDirectoryClick = (path: string) => {
     loadFiles(path)
@@ -513,13 +494,13 @@ useEffect(() => {
 
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        handleCloseModal()
+        handleClosePreview()
       }
     }
 
     document.addEventListener('keydown', handleEscape)
     return () => document.removeEventListener('keydown', handleEscape)
-  }, [isPreviewModalOpen, handleCloseModal])
+  }, [isPreviewModalOpen, handleClosePreview])
 
   const showNavigateUp = allowNavigateAboveBase && normalizePath(currentPath) !== '..'
     ? true
@@ -590,6 +571,15 @@ useEffect(() => {
         )}
       </DialogContent>
     </Dialog>
+  )
+
+  const htmlArtifactPanel = isMobile && htmlArtifact && (
+    <HtmlArtifactPanel
+      artifact={htmlArtifact}
+      isFullscreen={true}
+      isMobile={true}
+      onClose={handleClosePreview}
+    />
   )
 
   if (embedded) {
@@ -678,20 +668,12 @@ useEffect(() => {
 {/* Mobile: File Preview Modal */}
         <MobileFilePreviewModal 
           isOpen={isMobile && isPreviewModalOpen}
-          onClose={handleCloseModal}
+          onClose={handleClosePreview}
           file={selectedFile}
           showFilePreviewHeader={true}
         />
 
-        {isMobile && htmlArtifact && (
-          <HtmlArtifactPanel
-            artifact={htmlArtifact}
-            isFullscreen={true}
-            isMobile={true}
-            onClose={handleCloseHtmlArtifact}
-            onToggleFullscreen={handleToggleHtmlArtifactFullscreen}
-          />
-        )}
+        {htmlArtifactPanel}
       </div>
     )
   }
@@ -790,19 +772,11 @@ useEffect(() => {
 {/* Mobile: File Preview Modal */}
       <MobileFilePreviewModal 
         isOpen={isMobile && isPreviewModalOpen}
-        onClose={handleCloseModal}
+        onClose={handleClosePreview}
         file={selectedFile}
       />
 
-      {isMobile && htmlArtifact && (
-        <HtmlArtifactPanel
-          artifact={htmlArtifact}
-          isFullscreen={true}
-          isMobile={true}
-          onClose={handleCloseHtmlArtifact}
-          onToggleFullscreen={handleToggleHtmlArtifactFullscreen}
-        />
-      )}
+      {htmlArtifactPanel}
       
       {uploadDialog}
     </div>

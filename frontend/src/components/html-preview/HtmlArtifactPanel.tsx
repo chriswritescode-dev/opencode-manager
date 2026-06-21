@@ -14,7 +14,7 @@ interface HtmlArtifactPanelProps {
   isFullscreen: boolean
   isMobile: boolean
   onClose: () => void
-  onToggleFullscreen: () => void
+  onToggleFullscreen?: () => void
 }
 
 export function HtmlArtifactPanel({

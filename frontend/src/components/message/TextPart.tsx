@@ -171,7 +171,9 @@ function CodeBlock({ children, className, onHtmlArtifactOpen, ...props }: CodeBl
   const codeContent = rawCodeContent.trim()
 
   const childArray = React.Children.toArray(children)
-  const codeElement = childArray.find((child): child is React.ReactElement => React.isValidElement(child))
+  const codeElement = childArray.find(
+    (child): child is React.ReactElement<{ className?: string }> => React.isValidElement(child)
+  )
   const codeClassName = codeElement?.props?.className
   const isHtmlCode = typeof codeClassName === 'string' && (codeClassName.includes('language-html') || codeClassName.includes('language-htm'))
 

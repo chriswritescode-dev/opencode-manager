@@ -1,6 +1,6 @@
 export const DEV_PROXY_PREFIX = '/api/dev-proxy'
 
-export const HOP_BY_HOP_HEADERS = new Set([
+const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
   'proxy-authenticate',
@@ -166,8 +166,7 @@ function rewriteSrcSetCandidate(candidate: string, basePath: string): string {
 
 function toDevProxyPath(path: string, basePath: string): string {
   const normalizedBasePath = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath
-  const escapedBasePath = escapeRegExp(normalizedBasePath)
-  if (new RegExp(`^${escapedBasePath}(?:/|$)`).test(path)) return path
+  if (path === normalizedBasePath || path.startsWith(`${normalizedBasePath}/`)) return path
   return `${normalizedBasePath}${path}`
 }
 
@@ -177,6 +176,3 @@ function isBaseTagAttribute(html: string, attributeOffset: number): boolean {
   return /^<\s*base\b/i.test(html.slice(tagStart, attributeOffset))
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}

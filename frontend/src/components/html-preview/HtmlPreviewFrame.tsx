@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { cn } from '@/lib/utils'
 import { normalizeHtmlPreviewDocument } from '@/lib/htmlArtifacts'
 
@@ -11,7 +12,7 @@ interface HtmlPreviewFrameProps {
 
 export function HtmlPreviewFrame({ title, src, srcDoc, className, sandbox }: HtmlPreviewFrameProps) {
   const resolvedSandbox = sandbox ?? (src ? 'allow-scripts allow-same-origin' : 'allow-scripts')
-  const normalizedSrcDoc = srcDoc ? normalizeHtmlPreviewDocument(srcDoc) : undefined
+  const normalizedSrcDoc = useMemo(() => (srcDoc ? normalizeHtmlPreviewDocument(srcDoc) : undefined), [srcDoc])
   return (
     <iframe
       title={title}

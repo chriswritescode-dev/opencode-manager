@@ -49,7 +49,6 @@ async function handleProxyRequest(c: Context, db: Database): Promise<Response> {
     return c.json({ error: 'Invalid repoId' }, 400)
   }
 
-  const config = getDevServerConfig(db, repoId)
   const port = getDevServerPort(db)
 
   if (isWebSocketUpgrade((key: string) => c.req.header(key))) {
@@ -91,6 +90,7 @@ async function handleProxyRequest(c: Context, db: Database): Promise<Response> {
   const contentType = upstreamResponse.headers.get('content-type') ?? ''
 
   if (contentType.includes('text/html')) {
+    const config = getDevServerConfig(db, repoId)
     const text = await upstreamResponse.text()
     const basePath = `${DEV_PROXY_PREFIX}/${repoId}/`
     const modified = config.injectBase ? injectBaseTag(text, basePath) : rewriteDevProxyHtmlPaths(text, basePath)
