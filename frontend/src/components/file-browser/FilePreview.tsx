@@ -219,6 +219,12 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
     ['application/json', 'application/xml', 'text/javascript', 'text/typescript'].includes(file.mimeType || '')
 
   const renderContent = () => {
+    const htmlPreviewFrame = (
+      <div className="h-[calc(100vh-12rem)] min-h-[480px] rounded border border-border overflow-hidden bg-white">
+        <HtmlPreviewFrame title={`HTML preview: ${file.name}`} src={getFilePreviewUrl(file.path)} />
+      </div>
+    )
+
     if (file.mimeType?.startsWith('image/')) {
       return (
         <div className="flex justify-center p-4">
@@ -236,11 +242,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       const showMarkdownPreview = isMarkdownFile && markdownPreview && viewMode !== 'edit'
       
       if (showHtmlPreview) {
-        return (
-          <div className="h-[calc(100vh-12rem)] min-h-[480px] rounded border border-border overflow-hidden bg-white">
-            <HtmlPreviewFrame title={`HTML preview: ${file.name}`} src={getFilePreviewUrl(file.path)} />
-          </div>
-        )
+        return htmlPreviewFrame
       }
       
       return (
@@ -301,11 +303,7 @@ export const FilePreview = memo(function FilePreview({ file, hideHeader = false,
       }
 
       if (isHtmlFile && htmlPreview) {
-        return (
-          <div className="h-[calc(100vh-12rem)] min-h-[480px] rounded border border-border overflow-hidden bg-white">
-            <HtmlPreviewFrame title={`HTML preview: ${file.name}`} src={getFilePreviewUrl(file.path)} />
-          </div>
-        )
+        return htmlPreviewFrame
       }
       
       try {

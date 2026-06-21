@@ -62,7 +62,7 @@ describe('HtmlArtifactPanel', () => {
     expect(iframe).toBeInTheDocument()
     expect(iframe).toHaveAttribute('src')
     expect(iframe.getAttribute('src')).toContain('/api/files/preview/')
-    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin')
   })
 
   it('does not include allow-same-origin in sandbox', () => {

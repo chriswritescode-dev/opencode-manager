@@ -30,6 +30,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
 
 vi.mock('../../src/services/files', () => ({
   getFile: vi.fn(),
+  getFilePreviewStat: vi.fn(),
   getRawFileContent: vi.fn(),
   getFileRange: vi.fn(),
   uploadFile: vi.fn(),
@@ -47,6 +48,7 @@ vi.mock('../../src/services/archive', () => ({
 }))
 
 const getFile = fileService.getFile as MockedFunction<typeof fileService.getFile>
+const getFilePreviewStat = fileService.getFilePreviewStat as MockedFunction<typeof fileService.getFilePreviewStat>
 const getRawFileContent = fileService.getRawFileContent as MockedFunction<typeof fileService.getRawFileContent>
 const getFileRange = fileService.getFileRange as MockedFunction<typeof fileService.getFileRange>
 const uploadFile = fileService.uploadFile as MockedFunction<typeof fileService.uploadFile>
@@ -71,18 +73,18 @@ describe('File Routes', () => {
   })
 
   describe('GET /preview/* - HTML Preview Assets', () => {
-    const htmlFileInfo: FileInfo = {
+    const lastModified = new Date('2024-01-01T00:00:00.000Z')
+
+    const htmlStat = {
       name: 'index.html',
-      path: 'test-repo/index.html',
       isDirectory: false,
       size: 31,
-      mimeType: 'text/html',
-      content: '',
-      lastModified: new Date(),
+      mimeType: 'text/html' as const,
+      lastModified,
     }
 
-    it('should serve HTML files with sandbox CSP headers', async () => {
-      getFile.mockResolvedValue(htmlFileInfo)
+    it('should serve HTML files with sandbox CSP and caching headers', async () => {
+      getFilePreviewStat.mockResolvedValue(htmlStat)
       getRawFileContent.mockResolvedValue(Buffer.from('<html><body>Hello</body></html>'))
 
       const response = await app.request('/api/files/preview/test-repo/index.html')
@@ -94,23 +96,40 @@ describe('File Routes', () => {
       expect(response.headers.get('Content-Disposition')).toContain('inline')
       expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
       expect(response.headers.get('Referrer-Policy')).toBe('no-referrer')
-      expect(response.headers.get('Content-Security-Policy')).toContain('sandbox allow-scripts')
+      expect(response.headers.get('Content-Security-Policy')).toContain('sandbox allow-scripts allow-same-origin')
       expect(response.headers.get('Content-Security-Policy')).toContain('https:')
-      expect(getFile).toHaveBeenCalledWith('test-repo/index.html')
+      expect(response.headers.get('Cache-Control')).toBe('private, must-revalidate, max-age=0')
+      expect(response.headers.get('ETag')).toBeTruthy()
+      expect(response.headers.get('Last-Modified')).toBe(lastModified.toUTCString())
+      expect(getFilePreviewStat).toHaveBeenCalledWith('test-repo/index.html')
       expect(getRawFileContent).toHaveBeenCalledWith('test-repo/index.html')
     })
 
+    it('should return 304 when ETag matches If-None-Match without reading the file', async () => {
+      getFilePreviewStat.mockResolvedValue(htmlStat)
+      getRawFileContent.mockResolvedValue(Buffer.from('<html><body>Hello</body></html>'))
+
+      const first = await app.request('/api/files/preview/test-repo/index.html')
+      const etag = first.headers.get('ETag') as string
+      await first.text()
+      getRawFileContent.mockClear()
+
+      const response = await app.request('/api/files/preview/test-repo/index.html', {
+        headers: { 'If-None-Match': etag },
+      })
+
+      expect(response.status).toBe(304)
+      expect(getRawFileContent).not.toHaveBeenCalled()
+    })
+
     it('should serve CSS files with text/css Content-Type', async () => {
-      const cssFileInfo: FileInfo = {
+      getFilePreviewStat.mockResolvedValue({
         name: 'styles.css',
-        path: 'test-repo/styles/app.css',
         isDirectory: false,
         size: 50,
         mimeType: 'text/css',
-        content: '',
-        lastModified: new Date(),
-      }
-      getFile.mockResolvedValue(cssFileInfo)
+        lastModified,
+      })
       getRawFileContent.mockResolvedValue(Buffer.from('body { color: red }'))
 
       const response = await app.request('/api/files/preview/test-repo/styles/app.css')
@@ -118,11 +137,11 @@ describe('File Routes', () => {
       expect(response.status).toBe(200)
       expect(response.headers.get('Content-Type')).toContain('text/css')
       expect(response.headers.get('Content-Security-Policy')).toBeNull()
-      expect(getFile).toHaveBeenCalledWith('test-repo/styles/app.css')
+      expect(getFilePreviewStat).toHaveBeenCalledWith('test-repo/styles/app.css')
     })
 
     it('should support query-based path parameter', async () => {
-      getFile.mockResolvedValue(htmlFileInfo)
+      getFilePreviewStat.mockResolvedValue(htmlStat)
       getRawFileContent.mockResolvedValue(Buffer.from('<html><body>Hello</body></html>'))
 
       const response = await app.request('/api/files/preview?path=test-repo/index.html')
@@ -130,18 +149,17 @@ describe('File Routes', () => {
 
       expect(response.status).toBe(200)
       expect(body).toBe('<html><body>Hello</body></html>')
-      expect(getFile).toHaveBeenCalledWith('test-repo/index.html')
+      expect(getFilePreviewStat).toHaveBeenCalledWith('test-repo/index.html')
     })
 
     it('should return 400 for directory results', async () => {
-      const dirInfo: FileInfo = {
+      getFilePreviewStat.mockResolvedValue({
         name: 'test-repo',
-        path: 'test-repo',
         isDirectory: true,
         size: 0,
-        lastModified: new Date(),
-      }
-      getFile.mockResolvedValue(dirInfo)
+        mimeType: 'text/plain',
+        lastModified,
+      })
 
       const response = await app.request('/api/files/preview/test-repo')
 
@@ -151,22 +169,20 @@ describe('File Routes', () => {
     })
 
     it('should return 415 for non-previewable MIME types', async () => {
-      const pdfFileInfo: FileInfo = {
+      getFilePreviewStat.mockResolvedValue({
         name: 'doc.pdf',
-        path: 'test-repo/doc.pdf',
         isDirectory: false,
         size: 100,
-        mimeType: 'application/pdf',
-        content: '',
-        lastModified: new Date(),
-      }
-      getFile.mockResolvedValue(pdfFileInfo)
+        mimeType: 'application/pdf' as never,
+        lastModified,
+      })
 
       const response = await app.request('/api/files/preview/test-repo/doc.pdf')
 
       expect(response.status).toBe(415)
       const body = await response.json() as { error: string }
       expect(body.error).toContain('File type cannot be previewed')
+      expect(getRawFileContent).not.toHaveBeenCalled()
     })
 
     it('should return 400 when no path is provided', async () => {
@@ -179,7 +195,7 @@ describe('File Routes', () => {
 
     it('should return 403 for path traversal attempts', async () => {
       const error = { message: 'Path traversal detected', statusCode: 403 }
-      getFile.mockRejectedValue(error)
+      getFilePreviewStat.mockRejectedValue(error)
 
       const response = await app.request('/api/files/preview/test-repo/../outside')
 

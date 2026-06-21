@@ -6,6 +6,7 @@ import rehypeRaw from 'rehype-raw'
 import mermaid from 'mermaid'
 import { Maximize2, X, AlertCircle } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
+import { PreviewHtmlButton } from '@/components/html-preview/PreviewHtmlButton'
 import type { components } from '@/api/opencode-types'
 import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
 import { useTheme } from '@/hooks/useTheme'
@@ -181,13 +182,10 @@ function CodeBlock({ children, className, onHtmlArtifactOpen, ...props }: CodeBl
       </pre>
       <div className="absolute top-2 right-2 flex gap-1">
         {isHtmlCode && onHtmlArtifactOpen && (
-          <button
+          <PreviewHtmlButton
             onClick={() => onHtmlArtifactOpen({ source: 'inline', html: codeContent, title: 'HTML artifact' })}
-            className="p-1.5 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground text-xs"
-            title="Preview HTML artifact"
-          >
-            Preview HTML
-          </button>
+            className="p-1.5"
+          />
         )}
         <CopyButton content={rawCodeContent} title="Copy code" />
       </div>

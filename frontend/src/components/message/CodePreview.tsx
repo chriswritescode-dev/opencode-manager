@@ -4,6 +4,7 @@ import { useMobile } from '@/hooks/useMobile'
 import { cn } from '@/lib/utils'
 import { isHtmlPath } from '@/lib/htmlArtifacts'
 import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
+import { PreviewHtmlButton } from '@/components/html-preview/PreviewHtmlButton'
 
 interface CodePreviewProps {
   fileName: string
@@ -92,13 +93,7 @@ export function CodePreview({ fileName, content, onHtmlArtifactOpen }: CodePrevi
         <span className="font-medium truncate flex-1">{extractFileFromPath(fileName)}</span>
         <div className="flex items-center gap-1 flex-shrink-0">
           {isHtmlFile && onHtmlArtifactOpen && (
-            <button
-              onClick={handleHtmlArtifact}
-              className="px-2 py-1 rounded bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground text-xs"
-              title="Preview HTML artifact"
-            >
-              Preview HTML
-            </button>
+            <PreviewHtmlButton onClick={handleHtmlArtifact} className="px-2 py-1" />
           )}
           <CopyButton content={content} title="Copy" iconSize="sm" variant="ghost" />
         </div>

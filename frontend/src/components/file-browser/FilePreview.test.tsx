@@ -47,7 +47,7 @@ describe('FilePreview - HTML preview', () => {
 
     const iframe = screen.getByTitle('HTML preview: dashboard.html')
     expect(iframe).toBeInTheDocument()
-    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts')
+    expect(iframe).toHaveAttribute('sandbox', 'allow-scripts allow-same-origin')
     expect(iframe.getAttribute('src')).toContain('/api/files/preview/test-repo/dashboard.html')
   })
 

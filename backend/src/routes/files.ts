@@ -57,19 +57,50 @@ function isPreviewableMimeType(mimeType?: string): boolean {
   return mimeType !== undefined && PREVIEWABLE_MIME_TYPES.has(mimeType)
 }
 
-function getPreviewHeaders(result: { name: string; size: number; mimeType?: string }): Record<string, string> {
+function buildPreviewValidators(stat: { size: number; lastModified: Date }): { etag: string; lastModified: string } {
+  return {
+    etag: `"${stat.size.toString(16)}-${stat.lastModified.getTime().toString(16)}"`,
+    lastModified: stat.lastModified.toUTCString(),
+  }
+}
+
+function isPreviewFresh(c: Context, validators: { etag: string; lastModified: string }): boolean {
+  const ifNoneMatch = c.req.header('if-none-match')
+  if (ifNoneMatch !== undefined) {
+    return ifNoneMatch.split(',').some((tag: string) => tag.trim() === validators.etag)
+  }
+
+  const ifModifiedSince = c.req.header('if-modified-since')
+  if (ifModifiedSince !== undefined) {
+    const since = Date.parse(ifModifiedSince)
+    return !Number.isNaN(since) && Date.parse(validators.lastModified) <= since
+  }
+
+  return false
+}
+
+function getPreviewHeaders(result: {
+  name: string
+  size: number
+  mimeType?: string
+  lastModified: Date
+}): Record<string, string> {
   const isHtmlSvg = result.mimeType === 'text/html' || result.mimeType === 'image/svg+xml'
+  const validators = buildPreviewValidators(result)
   const headers: Record<string, string> = {
     'Content-Type': result.mimeType || 'application/octet-stream',
     'Content-Length': result.size.toString(),
     'Content-Disposition': `inline; filename="${result.name}"`,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
+    'Cache-Control': 'private, must-revalidate, max-age=0',
+    'ETag': validators.etag,
+    'Last-Modified': validators.lastModified,
   }
 
   if (isHtmlSvg) {
     headers['Content-Security-Policy'] = [
-      'sandbox allow-scripts;',
+      'sandbox allow-scripts allow-same-origin;',
       "default-src 'self' http: https: data: blob: 'unsafe-inline' 'unsafe-eval';",
       "script-src 'self' http: https: 'unsafe-inline' 'unsafe-eval';",
       "style-src 'self' http: https: 'unsafe-inline';",
@@ -100,18 +131,23 @@ export function createFileRoutes() {
       }
 
       try {
-        const result = await fileService.getFile(userPath)
+        const stat = await fileService.getFilePreviewStat(userPath)
 
-        if (result.isDirectory) {
+        if (stat.isDirectory) {
           return c.json({ error: 'Cannot preview directories' }, 400)
         }
 
-        if (!isPreviewableMimeType(result.mimeType)) {
+        if (!isPreviewableMimeType(stat.mimeType)) {
           return c.json({ error: 'File type cannot be previewed' }, 415)
         }
 
+        const headers = getPreviewHeaders(stat)
+
+        if (isPreviewFresh(c, buildPreviewValidators(stat))) {
+          return new Response(null, { status: 304, headers })
+        }
+
         const content = await fileService.getRawFileContent(userPath)
-        const headers = getPreviewHeaders(result)
 
         return new Response(content, { headers })
       } catch (error: unknown) {
