@@ -4,10 +4,12 @@ import { migrate } from '../../src/db/migration-runner'
 import { allMigrations } from '../../src/db/migrations'
 import { SettingsService } from '../../src/services/settings'
 import { CredentialProvider } from '../../src/services/credential-provider'
+import { createRepo, setRepoGitCredentialId } from '../../src/db/queries'
 import type { GitCredential } from '@opencode-manager/shared'
 
-function createPatCredential(name: string, host: string, token: string, username?: string): GitCredential {
+function createPatCredential(name: string, host: string, token: string, username?: string, id?: string): GitCredential {
   return {
+    ...(id ? { id } : {}),
     name,
     host,
     token,
@@ -59,9 +61,65 @@ describe('CredentialProvider', () => {
       expect(provider.getPatCredentialForHost('bitbucket.org')).toBeNull()
     })
 
+    it('getPatCredentialForHost prefers the configured default PAT for the host', () => {
+      const first = createPatCredential('first', 'github.com', 'first-token', undefined, 'first-id')
+      const second = createPatCredential('second', 'github.com', 'second-token', undefined, 'second-id')
+      settingsService.updateSettings({ gitCredentials: [first, second], defaultGitCredentialId: 'second-id' })
+
+      expect(provider.getPatCredentialForHost('github.com')).toEqual({ username: 'x-access-token', password: 'second-token' })
+    })
+
+    it('getPatCredentialForHost prefers repo-specific PAT for the cwd', () => {
+      const first = createPatCredential('first', 'github.com', 'first-token', undefined, 'first-id')
+      const second = createPatCredential('second', 'github.com', 'second-token', undefined, 'second-id')
+      settingsService.updateSettings({ gitCredentials: [first, second], defaultGitCredentialId: 'first-id' })
+      const repo = createRepo(db, {
+        repoUrl: 'https://github.com/acme/repo.git',
+        localPath: 'repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
+      setRepoGitCredentialId(db, repo.id, 'second-id')
+
+      expect(provider.getPatCredentialForHost('github.com', { cwd: repo.fullPath })).toEqual({ username: 'x-access-token', password: 'second-token' })
+    })
+
+    it('getPatCredentialForHost ignores selected credentials for other hosts', () => {
+      const github = createPatCredential('github', 'github.com', 'github-token', undefined, 'github-id')
+      const gitlab = createPatCredential('gitlab', 'gitlab.com', 'gitlab-token', 'custom-user', 'gitlab-id')
+      settingsService.updateSettings({ gitCredentials: [github, gitlab], defaultGitCredentialId: 'github-id' })
+
+      expect(provider.getPatCredentialForHost('gitlab.com')).toEqual({ username: 'custom-user', password: 'gitlab-token' })
+    })
+
     it('getGhCliEnv returns GH_TOKEN and GITHUB_TOKEN for GitHub PAT', () => {
       const env = provider.getGhCliEnv()
       expect(env).toEqual({ GH_TOKEN: 'ghp_test_token', GITHUB_TOKEN: 'ghp_test_token' })
+    })
+
+    it('getGhCliEnv prefers the configured default GitHub PAT', () => {
+      const first = createPatCredential('first', 'github.com', 'first-token', undefined, 'first-id')
+      const second = createPatCredential('second', 'github.com', 'second-token', undefined, 'second-id')
+      settingsService.updateSettings({ gitCredentials: [first, second], defaultGitCredentialId: 'second-id' })
+
+      expect(provider.getGhCliEnv()).toEqual({ GH_TOKEN: 'second-token', GITHUB_TOKEN: 'second-token' })
+    })
+
+    it('getGhCliEnv prefers repo-specific GitHub PAT for the cwd', () => {
+      const first = createPatCredential('first', 'github.com', 'first-token', undefined, 'first-id')
+      const second = createPatCredential('second', 'github.com', 'second-token', undefined, 'second-id')
+      settingsService.updateSettings({ gitCredentials: [first, second], defaultGitCredentialId: 'first-id' })
+      const repo = createRepo(db, {
+        repoUrl: 'https://github.com/acme/repo.git',
+        localPath: 'repo',
+        defaultBranch: 'main',
+        cloneStatus: 'ready',
+        clonedAt: Date.now(),
+      })
+      setRepoGitCredentialId(db, repo.id, 'second-id')
+
+      expect(provider.getGhCliEnv({ cwd: repo.fullPath })).toEqual({ GH_TOKEN: 'second-token', GITHUB_TOKEN: 'second-token' })
     })
 
     it('getGitEnv returns git config env for configured PATs', () => {

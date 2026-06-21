@@ -197,7 +197,7 @@ export class GitService {
       }
 
       const repoPath = repo.fullPath
-      const authEnv = this.gitAuthService.getGitEnvironment()
+      const authEnv = this.getEnvironmentForRepo(repo)
 
       const settings = this.settingsService.getSettings('default')
       const gitCredentials = this.credentialProvider.getGitCredentials()
@@ -524,13 +524,18 @@ export class GitService {
     await this.gitAuthService.cleanupSSHKey()
   }
 
-  private getEnvironmentForRepo(repo: { repoUrl?: string; fullPath: string }, silent: boolean = false): Record<string, string> {
+  private getEnvironmentForRepo(repo: { id?: number; repoUrl?: string; fullPath: string }, silent: boolean = false): Record<string, string> {
+    const repoContextEnv = {
+      ...(repo.id ? { OCM_GIT_REPO_ID: String(repo.id) } : {}),
+      OCM_GIT_REPO_CWD: repo.fullPath,
+    }
+
     if (!repo.repoUrl) {
-      return this.gitAuthService.getGitEnvironment(silent)
+      return { ...this.gitAuthService.getGitEnvironment(silent), ...repoContextEnv }
     }
 
     const isSSH = isSSHUrl(repo.repoUrl)
-    const baseEnv = this.gitAuthService.getGitEnvironment(silent)
+    const baseEnv = { ...this.gitAuthService.getGitEnvironment(silent), ...repoContextEnv }
 
     if (!isSSH) {
       return baseEnv

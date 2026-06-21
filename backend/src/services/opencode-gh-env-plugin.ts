@@ -5,31 +5,36 @@ import { logger } from '../utils/logger'
 const PLUGIN_FILENAME = 'ocm-gh-env.js'
 
 const PLUGIN_SOURCE = `const TTL_MS = 5000
-let cache = { expiry: 0, env: {} }
+let cache = new Map()
 
-async function fetchGhEnv() {
+async function fetchGhEnv(cwd) {
   const baseUrl = process.env.OCM_INTERNAL_API_URL
   const token = process.env.OCM_INTERNAL_TOKEN
   if (!baseUrl || !token) return {}
   const now = Date.now()
-  if (now < cache.expiry) return cache.env
+  const cacheKey = cwd || ''
+  const cached = cache.get(cacheKey)
+  if (cached && now < cached.expiry) return cached.env
   try {
-    const res = await fetch(baseUrl + '/git-credentials/gh-env', {
+    const url = new URL(baseUrl + '/git-credentials/gh-env')
+    if (cwd) url.searchParams.set('cwd', cwd)
+    const res = await fetch(url, {
       headers: { Authorization: 'Bearer ' + token },
     })
-    if (!res.ok) return cache.env
+    if (!res.ok) return cached?.env || {}
     const env = await res.json()
-    cache = { expiry: now + TTL_MS, env: env && typeof env === 'object' ? env : {} }
-    return cache.env
+    const next = { expiry: now + TTL_MS, env: env && typeof env === 'object' ? env : {} }
+    cache.set(cacheKey, next)
+    return next.env
   } catch {
-    return cache.env
+    return cached?.env || {}
   }
 }
 
 export default async function () {
   return {
-    'shell.env': async (_input, output) => {
-      const env = await fetchGhEnv()
+    'shell.env': async (input, output) => {
+      const env = await fetchGhEnv(input.cwd)
       Object.assign(output.env, env)
     },
   }

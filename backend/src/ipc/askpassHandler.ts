@@ -15,6 +15,8 @@ interface Credentials {
 interface AskpassRequest {
   askpassType: 'https' | 'ssh'
   argv: string[]
+  cwd?: string
+  repoId?: number
 }
 
 export class AskpassHandler implements IPCHandler {
@@ -47,13 +49,14 @@ export class AskpassHandler implements IPCHandler {
   async handle(request: AskpassRequest): Promise<string> {
     logger.info(`Askpass request received: type=${request.askpassType}, argv=${JSON.stringify(request.argv)}`)
     if (request.askpassType === 'https') {
-      return this.handleHttpsAskpass(request.argv)
+      return this.handleHttpsAskpass(request)
     }
     return this.handleSshAskpass()
   }
 
-  private async handleHttpsAskpass(argv: string[]): Promise<string> {
-    const request = argv[2] || ''
+  private async handleHttpsAskpass(request: AskpassRequest): Promise<string> {
+    const { argv } = request
+    const prompt = argv[2] || ''
     const host = argv[4]?.replace(/^["']+|["':]+$/g, '') || ''
 
     let authority = ''
@@ -64,18 +67,22 @@ export class AskpassHandler implements IPCHandler {
       authority = host
     }
 
-    const isPassword = /password/i.test(request)
+    const isPassword = /password/i.test(prompt)
 
-    const cached = this.cache.get(authority)
+    const cacheKey = `${authority}:${request.repoId ?? ''}:${request.cwd ?? ''}`
+    const cached = this.cache.get(cacheKey)
     if (cached && isPassword) {
-      this.cache.delete(authority)
+      this.cache.delete(cacheKey)
       return cached.password
     }
 
-    const credentials = this.credentialProvider.getPatCredentialForHost(authority)
+    const credentials = this.credentialProvider.getPatCredentialForHost(authority, {
+      cwd: request.cwd,
+      repoId: request.repoId,
+    })
     if (credentials) {
-      this.cache.set(authority, credentials)
-      setTimeout(() => this.cache.delete(authority), 60_000)
+      this.cache.set(cacheKey, credentials)
+      setTimeout(() => this.cache.delete(cacheKey), 60_000)
       return isPassword ? credentials.password : credentials.username
     }
 

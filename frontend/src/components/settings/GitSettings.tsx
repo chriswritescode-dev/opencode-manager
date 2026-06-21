@@ -1,27 +1,41 @@
 import { useState, useEffect } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSettings } from '@/hooks/useSettings'
 import { Loader2, Plus, Trash2, Save, User, Key, Pencil } from 'lucide-react'
 import { showToast } from '@/lib/toast'
-import { GitCredentialDialog } from './GitCredentialDialog'
+import { GitCredentialDialog, type GitCredentialSaveOptions } from './GitCredentialDialog'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import type { GitCredential, GitIdentity } from '@/api/types/settings'
+import { listRepos, updateRepoGitCredential } from '@/api/repos'
+
+function ensureCredentialId(credential: GitCredential): GitCredential {
+  return credential.id ? credential : { ...credential, id: crypto.randomUUID() }
+}
 
 export function GitSettings() {
   const { preferences, isLoading, updateSettingsAsync, isUpdating } = useSettings()
+  const queryClient = useQueryClient()
   const [gitCredentials, setGitCredentials] = useState<GitCredential[]>([])
   const [gitIdentity, setGitIdentity] = useState<GitIdentity>({ name: '', email: '' })
+  const [defaultGitCredentialId, setDefaultGitCredentialId] = useState<string | undefined>()
   const [isSaving, setIsSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [isCredentialDialogOpen, setIsCredentialDialogOpen] = useState(false)
   const [editingCredentialIndex, setEditingCredentialIndex] = useState<number | null>(null)
+
+  const { data: repos = [] } = useQuery({
+    queryKey: ['repos'],
+    queryFn: listRepos,
+  })
 
 
   useEffect(() => {
     if (preferences) {
       setGitCredentials(preferences.gitCredentials || [])
       setGitIdentity(preferences.gitIdentity || { name: '', email: '' })
+      setDefaultGitCredentialId(preferences.defaultGitCredentialId)
       setHasChanges(false)
     }
   }, [preferences])
@@ -54,20 +68,37 @@ export function GitSettings() {
     removeCredential(index)
   }
 
-  const saveCredential = async (credential: GitCredential) => {
+  const syncRepoAssignments = async (credentialId: string, repoIds: number[]) => {
+    const selectedRepoIds = new Set(repoIds)
+    const affectedRepos = repos.filter((repo) => selectedRepoIds.has(repo.id) || repo.gitCredentialId === credentialId)
+
+    await Promise.all(
+      affectedRepos.map((repo) => updateRepoGitCredential(
+        repo.id,
+        selectedRepoIds.has(repo.id) ? credentialId : undefined
+      ))
+    )
+    await queryClient.invalidateQueries({ queryKey: ['repos'] })
+  }
+
+  const saveCredential = async (credential: GitCredential, options: GitCredentialSaveOptions) => {
     let newCredentials: GitCredential[]
+    const nextCredential = ensureCredentialId(credential)
+    const nextDefaultGitCredentialId = options.makeDefault ? nextCredential.id : defaultGitCredentialId === nextCredential.id ? undefined : defaultGitCredentialId
 
     if (editingCredentialIndex !== null) {
       newCredentials = [...gitCredentials]
-      newCredentials[editingCredentialIndex] = credential
+      newCredentials[editingCredentialIndex] = nextCredential
     } else {
-      newCredentials = [...gitCredentials, credential]
+      newCredentials = [...gitCredentials, nextCredential]
     }
 
     setGitCredentials(newCredentials)
+    setDefaultGitCredentialId(nextDefaultGitCredentialId)
     
     try {
-      await updateSettingsAsync({ gitCredentials: newCredentials, gitIdentity })
+      await updateSettingsAsync({ gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity })
+      await syncRepoAssignments(nextCredential.id!, options.repoIds)
       showToast.success('Credential saved')
     } catch {
       showToast.error('Failed to save credential')
@@ -75,11 +106,19 @@ export function GitSettings() {
   }
 
   const removeCredential = async (index: number) => {
+    const removedCredentialId = gitCredentials[index]?.id
     const newCredentials = gitCredentials.filter((_, i) => i !== index)
+    const nextDefaultGitCredentialId = newCredentials.some((credential) => credential.id === defaultGitCredentialId)
+      ? defaultGitCredentialId
+      : undefined
     setGitCredentials(newCredentials)
+    setDefaultGitCredentialId(nextDefaultGitCredentialId)
 
     try {
-      await updateSettingsAsync({ gitCredentials: newCredentials, gitIdentity })
+      await updateSettingsAsync({ gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity })
+      if (removedCredentialId) {
+        await syncRepoAssignments(removedCredentialId, [])
+      }
       showToast.success('Credential deleted')
     } catch {
       showToast.error('Failed to delete credential')
@@ -96,7 +135,7 @@ export function GitSettings() {
     setIsSaving(true)
     try {
       showToast.loading('Saving git configuration...', { id: 'git-config' })
-      const result = await updateSettingsAsync({ gitCredentials, gitIdentity })
+      const result = await updateSettingsAsync({ gitCredentials, defaultGitCredentialId, gitIdentity })
       setHasChanges(false)
       if (result.reloadError) {
         showToast.success('Git configuration saved (server reload pending)', { id: 'git-config' })
@@ -206,10 +245,10 @@ export function GitSettings() {
                >
                  <Plus className="h-4 w-4 mr-2" />
                  Add
-               </Button>
-             </div>
+                </Button>
+              </div>
 
-             {gitCredentials.length === 0 ? (
+              {gitCredentials.length === 0 ? (
                <div className="rounded-lg border border-dashed border-border p-4 text-center">
                  <p className="text-sm text-muted-foreground">
                    No credentials configured. Click "Add" to add credentials.
@@ -279,13 +318,18 @@ export function GitSettings() {
          </div>
        </div>
 
-       <GitCredentialDialog
+        <GitCredentialDialog
          open={isCredentialDialogOpen}
          onOpenChange={setIsCredentialDialogOpen}
-         onSave={saveCredential}
-         credential={editingCredentialIndex !== null ? gitCredentials[editingCredentialIndex] : undefined}
-         isSaving={isSaving || isUpdating}
-       />
+          onSave={saveCredential}
+          credential={editingCredentialIndex !== null ? gitCredentials[editingCredentialIndex] : undefined}
+          repos={repos}
+          assignedRepoIds={editingCredentialIndex !== null && gitCredentials[editingCredentialIndex]?.id
+            ? repos.filter((repo) => repo.gitCredentialId === gitCredentials[editingCredentialIndex]?.id).map((repo) => repo.id)
+            : []}
+          isDefault={editingCredentialIndex !== null && !!gitCredentials[editingCredentialIndex]?.id && defaultGitCredentialId === gitCredentials[editingCredentialIndex]?.id}
+          isSaving={isSaving || isUpdating}
+        />
     </div>
   )
 }

@@ -21,6 +21,8 @@ interface RepoRow {
   is_local?: number
 }
 
+const REPO_GIT_CREDENTIAL_SETTING_KEY = 'gitCredentialId'
+
 function rowToRepo(row: RepoRow): Repo {
   const fullPath = row.source_path || path.join(getReposPath(), row.local_path)
 
@@ -40,6 +42,55 @@ function rowToRepo(row: RepoRow): Repo {
     isWorktree: row.is_worktree ? Boolean(row.is_worktree) : undefined,
     isLocal: row.is_local ? Boolean(row.is_local) : undefined,
   }
+}
+
+export function getRepoSetting(db: Database, repoId: number, key: string): string | null {
+  const row = db
+    .prepare('SELECT value FROM repo_settings WHERE repo_id = ? AND key = ?')
+    .get(repoId, key) as { value: string } | undefined
+
+  return row?.value ?? null
+}
+
+export function setRepoSetting(db: Database, repoId: number, key: string, value: string | null): void {
+  const now = Date.now()
+  const updateSetting = db.transaction(() => {
+    if (value === null || value === '') {
+      db.prepare('DELETE FROM repo_settings WHERE repo_id = ? AND key = ?').run(repoId, key)
+      return
+    }
+
+    db.prepare(`
+      INSERT INTO repo_settings (repo_id, key, value, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(repo_id, key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `).run(repoId, key, value, now)
+  })
+
+  updateSetting()
+}
+
+export function getRepoGitCredentialId(db: Database, repoId: number): string | null {
+  return getRepoSetting(db, repoId, REPO_GIT_CREDENTIAL_SETTING_KEY)
+}
+
+export function setRepoGitCredentialId(db: Database, repoId: number, credentialId: string | null): void {
+  setRepoSetting(db, repoId, REPO_GIT_CREDENTIAL_SETTING_KEY, credentialId)
+}
+
+export function getRepoByDirectory(db: Database, directory: string): Repo | null {
+  const resolvedDirectory = path.resolve(directory)
+  const repos = listRepos(db)
+
+  return repos
+    .filter((repo) => {
+      const resolvedRepoPath = path.resolve(repo.fullPath)
+      const relativePath = path.relative(resolvedRepoPath, resolvedDirectory)
+      return relativePath === '' || (!!relativePath && !relativePath.startsWith('..') && !path.isAbsolute(relativePath))
+    })
+    .sort((a, b) => b.fullPath.length - a.fullPath.length)[0] ?? null
 }
 
 const TABLES_WITH_REPO_ID = ['schedule_jobs', 'schedule_runs', 'repo_settings'] as const

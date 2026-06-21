@@ -7,7 +7,7 @@ export function createInternalGitCredentialsRoutes(db: Database) {
 
   app.get('/gh-env', (c) => {
     const provider = new CredentialProvider(db)
-    return c.json(provider.getGhCliEnv())
+    return c.json(provider.getGhCliEnv({ cwd: c.req.query('cwd') }))
   })
 
   return app

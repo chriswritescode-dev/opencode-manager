@@ -13,6 +13,8 @@ interface MultiSelectProps {
   onChange: (values: string[]) => void
   options: MultiSelectOption[]
   placeholder?: string
+  searchPlaceholder?: string
+  emptyMessage?: string
   disabled?: boolean
   className?: string
 }
@@ -22,6 +24,8 @@ export function MultiSelect({
   onChange,
   options,
   placeholder = 'Select...',
+  searchPlaceholder = 'Search...',
+  emptyMessage = 'No options found',
   disabled = false,
   className,
 }: MultiSelectProps) {
@@ -167,7 +171,7 @@ export function MultiSelect({
               value={search}
               onChange={e => setSearch(e.target.value)}
               onKeyDown={handleInputKeyDown}
-              placeholder="Search skills..."
+              placeholder={searchPlaceholder}
               className={cn(
                 'flex h-8 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors',
                 'placeholder:text-muted-foreground',
@@ -177,7 +181,7 @@ export function MultiSelect({
           </div>
           <div className="max-h-52 overflow-y-auto" role="listbox">
             {filteredOptions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-sm text-muted-foreground">No skills found</div>
+              <div className="px-3 py-4 text-center text-sm text-muted-foreground">{emptyMessage}</div>
             ) : (
               filteredOptions.map((option, index) => {
                 const isSelected = value.includes(option.value)

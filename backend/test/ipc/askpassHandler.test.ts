@@ -5,15 +5,17 @@ import { allMigrations } from '../../src/db/migrations'
 import { SettingsService } from '../../src/services/settings'
 import { CredentialProvider } from '../../src/services/credential-provider'
 import { AskpassHandler } from '../../src/ipc/askpassHandler'
+import { createRepo, setRepoGitCredentialId } from '../../src/db/queries'
 import type { GitCredential } from '@opencode-manager/shared'
 
-function createGitHubPatCredential(): GitCredential {
+function createGitHubPatCredential(token: string = 'ghp_test_token', id?: string): GitCredential {
   return {
+    ...(id ? { id } : {}),
     name: 'github-pat',
     host: 'github.com',
     type: 'pat' as const,
     username: 'x-access-token',
-    token: 'ghp_test_token',
+    token,
   } as GitCredential
 }
 
@@ -63,5 +65,82 @@ describe('AskpassHandler', () => {
       argv: ['', '', "Username for 'https://unknown.example.com'", '', 'https://unknown.example.com'],
     })
     expect(result).toBe('')
+  })
+
+  it('returns the repo-specific token for askpass requests with repo cwd', async () => {
+    const defaultCredential = createGitHubPatCredential('default-token', 'default-id')
+    const repoCredential = createGitHubPatCredential('repo-token', 'repo-id')
+    settingsService.updateSettings({
+      gitCredentials: [defaultCredential, repoCredential],
+      defaultGitCredentialId: 'default-id',
+    })
+    const repo = createRepo(db, {
+      repoUrl: 'https://github.com/acme/repo.git',
+      localPath: 'repo',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+    })
+    setRepoGitCredentialId(db, repo.id, 'repo-id')
+
+    await handler.handle({
+      askpassType: 'https',
+      argv: ['', '', "Username for 'https://github.com'", '', 'https://github.com'],
+      cwd: repo.fullPath,
+    })
+    const result = await handler.handle({
+      askpassType: 'https',
+      argv: ['', '', "Password for 'https://github.com'", '', 'https://github.com'],
+      cwd: repo.fullPath,
+    })
+
+    expect(result).toBe('repo-token')
+  })
+
+  it('keeps askpass cache separate per repo cwd', async () => {
+    const repoOneCredential = createGitHubPatCredential('repo-one-token', 'repo-one-id')
+    const repoTwoCredential = createGitHubPatCredential('repo-two-token', 'repo-two-id')
+    settingsService.updateSettings({ gitCredentials: [repoOneCredential, repoTwoCredential] })
+    const repoOne = createRepo(db, {
+      repoUrl: 'https://github.com/acme/one.git',
+      localPath: 'one',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+    })
+    const repoTwo = createRepo(db, {
+      repoUrl: 'https://github.com/acme/two.git',
+      localPath: 'two',
+      defaultBranch: 'main',
+      cloneStatus: 'ready',
+      clonedAt: Date.now(),
+    })
+    setRepoGitCredentialId(db, repoOne.id, 'repo-one-id')
+    setRepoGitCredentialId(db, repoTwo.id, 'repo-two-id')
+
+    await handler.handle({
+      askpassType: 'https',
+      argv: ['', '', "Username for 'https://github.com'", '', 'https://github.com'],
+      cwd: repoOne.fullPath,
+    })
+    await handler.handle({
+      askpassType: 'https',
+      argv: ['', '', "Username for 'https://github.com'", '', 'https://github.com'],
+      cwd: repoTwo.fullPath,
+    })
+
+    const repoOnePassword = await handler.handle({
+      askpassType: 'https',
+      argv: ['', '', "Password for 'https://github.com'", '', 'https://github.com'],
+      cwd: repoOne.fullPath,
+    })
+    const repoTwoPassword = await handler.handle({
+      askpassType: 'https',
+      argv: ['', '', "Password for 'https://github.com'", '', 'https://github.com'],
+      cwd: repoTwo.fullPath,
+    })
+
+    expect(repoOnePassword).toBe('repo-one-token')
+    expect(repoTwoPassword).toBe('repo-two-token')
   })
 })

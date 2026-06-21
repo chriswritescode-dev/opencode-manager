@@ -52,10 +52,9 @@ describe('ocm-gh-env plugin', () => {
     await hooks['shell.env']({ cwd: '/repo' }, output)
 
     expect(output.env).toEqual({ GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' })
-    expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:5003/api/internal/git-credentials/gh-env',
-      { headers: { Authorization: 'Bearer secret-token' } },
-    )
+    const [url, options] = fetchMock.mock.calls[0]!
+    expect(url.toString()).toBe('http://localhost:5003/api/internal/git-credentials/gh-env?cwd=%2Frepo')
+    expect(options).toEqual({ headers: { Authorization: 'Bearer secret-token' } })
   })
 
   it('does not fetch when the internal env vars are missing', async () => {
@@ -101,5 +100,20 @@ describe('ocm-gh-env plugin', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(out2.env).toEqual({ GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' })
+  })
+
+  it('caches results per cwd', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const factory = await loadPlugin(configHome)
+    const hooks = await factory()
+    await hooks['shell.env']({ cwd: '/repo-a' }, { env: {} })
+    await hooks['shell.env']({ cwd: '/repo-b' }, { env: {} })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
