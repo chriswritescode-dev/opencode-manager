@@ -5,6 +5,7 @@ import { useUserBash } from '@/stores/userBashStore'
 import { useSessionStatusForSession } from '@/stores/sessionStatusStore'
 import { usePermissions, useQuestions } from '@/contexts/EventContext'
 import { detectFileReferences } from '@/lib/fileReferences'
+import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
 import { ExternalLink, Loader2 } from 'lucide-react'
 import { CopyButton } from '@/components/ui/copy-button'
 import { getToolSpecificRender } from './FileToolRender'
@@ -15,6 +16,7 @@ interface ToolCallPartProps {
   part: ToolPart
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
   simpleChatMode?: boolean
 }
 
@@ -26,7 +28,7 @@ function getTaskSessionId(part: ToolPart): string | undefined {
   return sessionId
 }
 
-function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
+function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string, lineNumber?: number) => void }) {
   const jsonString = JSON.stringify(json, null, 2)
   const references = detectFileReferences(jsonString)
 
@@ -47,7 +49,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
         key={`ref-${index}`}
         onClick={(e) => {
           e.stopPropagation()
-          onFileClick?.(ref.filePath)
+          onFileClick?.(ref.filePath, ref.lineNumber)
         }}
         className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
         title={`Click to open ${ref.filePath}`}
@@ -66,7 +68,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
   return <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">{parts}</pre>
 }
 
-export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
+export function ToolCallPart({ part, onFileClick, onChildSessionClick, onHtmlArtifactOpen }: ToolCallPartProps) {
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const taskSessionId = part.tool === 'task' ? getTaskSessionId(part) : undefined
@@ -219,7 +221,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     return null
   }
 
-  const toolSpecificRender = getToolSpecificRender(part, onFileClick)
+  const toolSpecificRender = getToolSpecificRender(part, onFileClick, onHtmlArtifactOpen)
   if (toolSpecificRender) {
     return toolSpecificRender
   }

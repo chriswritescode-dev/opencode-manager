@@ -52,6 +52,10 @@ import { SessionTodoDisplay } from "@/components/message/SessionTodoDisplay";
 import { useDialogParam } from "@/hooks/useDialogParam";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { SessionMoreButton } from "@/components/navigation/SessionMoreButton";
+import { HtmlArtifactPanel } from "@/components/html-preview/HtmlArtifactPanel";
+import { DevServerPreviewButton } from "@/components/dev-server/DevServerPreviewButton";
+import type { HtmlArtifact, OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
+import { createHtmlArtifact, isHtmlPath, normalizeWorkspaceFilePath } from '@/lib/htmlArtifacts'
 
 const compareMessageIds = (id1: string, id2: string): number => {
   const num1 = parseInt(id1, 10)
@@ -84,6 +88,8 @@ export function SessionDetail() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [hasPromptContent, setHasPromptContent] = useState(false);
   const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
+  const [htmlArtifact, setHtmlArtifact] = useState<HtmlArtifact | null>(null);
+  const [htmlArtifactFullscreen, setHtmlArtifactFullscreen] = useState(false);
 
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
@@ -200,6 +206,28 @@ export function SessionDetail() {
   
   const handleRestoreQuestion = useCallback(() => {
     setMinimizedQuestion(null)
+  }, [])
+
+  const handleHtmlArtifactOpen = useCallback((input: OpenHtmlArtifactInput) => {
+    try {
+      const normalizedPath = input.source === 'file' && input.path
+        ? normalizeWorkspaceFilePath(input.path, repo?.fullPath)
+        : input.path
+      const artifact = createHtmlArtifact({ ...input, path: normalizedPath })
+      setHtmlArtifact(artifact)
+      setHtmlArtifactFullscreen(isMobile)
+    } catch {
+      showToast.error('Failed to create artifact')
+    }
+  }, [isMobile, repo?.fullPath])
+
+  const handleHtmlArtifactClose = useCallback(() => {
+    setHtmlArtifact(null)
+    setHtmlArtifactFullscreen(false)
+  }, [])
+
+  const handleHtmlArtifactFullscreenToggle = useCallback(() => {
+    setHtmlArtifactFullscreen(v => !v)
   }, [])
 
   useEffect(() => {
@@ -336,22 +364,21 @@ export function SessionDetail() {
     },
   });
 
-  
-
   const handleFileClick = useCallback((filePath: string) => {
-    let pathToOpen = filePath
-    
-    if (filePath.startsWith('/') && repo?.fullPath) {
-      const workspaceReposPath = repo.fullPath.substring(0, repo.fullPath.lastIndexOf('/'))
-      
-      if (filePath.startsWith(workspaceReposPath + '/')) {
-        pathToOpen = filePath.substring(workspaceReposPath.length + 1)
-      }
+    const pathToOpen = normalizeWorkspaceFilePath(filePath, repo?.fullPath)
+
+    if (isHtmlPath(pathToOpen)) {
+      handleHtmlArtifactOpen({
+        source: 'file',
+        path: pathToOpen,
+        title: pathToOpen.split('/').pop() || 'HTML artifact',
+      })
+      return
     }
-    
+
     setSelectedFilePath(pathToOpen)
     setFileBrowserOpen(true)
-  }, [repo?.fullPath, setFileBrowserOpen]);
+  }, [repo?.fullPath, handleHtmlArtifactOpen, setFileBrowserOpen]);
 
   const handleSessionTitleUpdate = useCallback((newTitle: string) => {
     if (sessionId) {
@@ -399,10 +426,6 @@ export function SessionDetail() {
   const handleClearPrompt = useCallback(() => {
     promptInputRef.current?.clearPrompt()
   }, []);
-
-  
-
-  
 
   if (!sessionId) {
     return <Navigate to="/" replace />;
@@ -461,6 +484,7 @@ export function SessionDetail() {
             />
           </div>
           <Header.Actions className="gap-2 sm:gap-4">
+            <DevServerPreviewButton repoId={repoId} onOpen={handleHtmlArtifactOpen} />
             <div className="flex items-center gap-1">
               <PendingActionsGroup />
             </div>
@@ -480,29 +504,31 @@ export function SessionDetail() {
         </div>
       </div>
 
-      <div className="relative flex-1 overflow-hidden flex flex-col">
-        <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
-          {repoLoading || sessionLoading || messagesLoading ? (
-            <MessageSkeleton />
-          ) : opcodeUrl && repoDirectory ? (
-            <MessageThread 
-              opcodeUrl={opcodeUrl} 
-              sessionID={sessionId} 
-              directory={repoDirectory}
-              messages={messages}
-              onFileClick={handleFileClick}
-              onChildSessionClick={handleChildSessionClick}
-              onUndoMessage={handleUndoMessage}
-              model={modelString || undefined}
-            />
-          ) : null}
-        </div>
-        {opcodeUrl && repoDirectory && !isEditingMessage && (
-          <div
-            ref={promptOverlayRef}
-            className="absolute left-0 right-0 flex justify-center"
-            style={{ bottom: inputBottomOffset }}
-          >
+      <div className="relative flex-1 overflow-hidden flex flex-row">
+        <div className="relative flex-1 min-w-0 overflow-hidden flex flex-col">
+          <div key={sessionId} ref={messageContainerRef} className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]" style={{ paddingBottom: promptOverlayHeight + inputBottomOffset + PROMPT_OVERLAY_CLEARANCE_PX }}>
+            {repoLoading || sessionLoading || messagesLoading ? (
+              <MessageSkeleton />
+            ) : opcodeUrl && repoDirectory ? (
+              <MessageThread 
+                opcodeUrl={opcodeUrl} 
+                sessionID={sessionId} 
+                directory={repoDirectory}
+                messages={messages}
+                onFileClick={handleFileClick}
+                onChildSessionClick={handleChildSessionClick}
+                onUndoMessage={handleUndoMessage}
+                onHtmlArtifactOpen={handleHtmlArtifactOpen}
+                model={modelString || undefined}
+              />
+            ) : null}
+          </div>
+          {opcodeUrl && repoDirectory && !isEditingMessage && (
+            <div
+              ref={promptOverlayRef}
+              className="absolute left-0 right-0 flex justify-center"
+              style={{ bottom: inputBottomOffset }}
+            >
             <div className="relative w-[94%] md:max-w-4xl">
               <div className="absolute -top-9 right-0 z-50 flex flex-col items-end gap-2">
                 {ttsEnabled && !hasPromptContent && !isSessionActive && latestPlayableAssistant && (
@@ -567,6 +593,16 @@ export function SessionDetail() {
             </div>
           </div>
         )}
+        </div>
+        {htmlArtifact && !htmlArtifactFullscreen && !isMobile && (
+          <HtmlArtifactPanel
+            artifact={htmlArtifact}
+            isFullscreen={false}
+            isMobile={false}
+            onClose={handleHtmlArtifactClose}
+            onToggleFullscreen={handleHtmlArtifactFullscreenToggle}
+          />
+        )}
       </div>
 
       {/* Sessions Dialog */}
@@ -597,6 +633,16 @@ export function SessionDetail() {
         repoId={repoId}
         initialSelectedFile={selectedFilePath}
       />
+
+      {htmlArtifact && (htmlArtifactFullscreen || isMobile) && (
+        <HtmlArtifactPanel
+          artifact={htmlArtifact}
+          isFullscreen={true}
+          isMobile={isMobile}
+          onClose={handleHtmlArtifactClose}
+          onToggleFullscreen={handleHtmlArtifactFullscreenToggle}
+        />
+      )}
 
       <RepoLspDialog
         open={lspDialogOpen}

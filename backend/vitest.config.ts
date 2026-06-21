@@ -2,6 +2,18 @@ import { defineConfig } from 'vitest/config'
 import path from 'path'
 
 export default defineConfig({
+  plugins: [
+    {
+      name: 'markdown-as-text',
+      enforce: 'pre',
+      transform(code: string, id: string) {
+        if (id.endsWith('.md')) {
+          return { code: `export default ${JSON.stringify(code)};`, map: null }
+        }
+        return null
+      },
+    },
+  ],
   test: {
     globals: true,
     environment: 'node',

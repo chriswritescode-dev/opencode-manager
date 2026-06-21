@@ -97,7 +97,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
     }
 
     if (formData.type === 'pat') {
-      if (!formData.token?.trim() && !(credential?.token && !tokenEdited)) {
+      if (!formData.token?.trim()) {
         showToast.error('Token is required for PAT type')
         return
       }

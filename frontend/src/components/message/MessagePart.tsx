@@ -14,6 +14,8 @@ type RetryPartType = components['schemas']['RetryPart']
 
 type Part = components['schemas']['Part']
 
+import type { OpenHtmlArtifactInput } from '@/lib/htmlArtifacts'
+
 interface MessagePartProps {
   part: Part
   role?: string
@@ -21,6 +23,7 @@ interface MessagePartProps {
   partIndex?: number
   onFileClick?: (filePath: string, lineNumber?: number) => void
   onChildSessionClick?: (sessionId: string) => void
+  onHtmlArtifactOpen?: (input: OpenHtmlArtifactInput) => void
   messageTextContent?: string
 }
 
@@ -102,7 +105,7 @@ function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
   )
 }
 
-export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent }: MessagePartProps) {
+export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, onHtmlArtifactOpen, messageTextContent }: MessagePartProps) {
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -118,13 +121,13 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
           return null
         }
       }
-      return <TextPart part={part} />
+      return <TextPart part={part} onHtmlArtifactOpen={onHtmlArtifactOpen} />
     case 'patch':
       if (simpleChatMode) return null
       return <PatchPart part={part} onFileClick={onFileClick} />
     case 'tool':
       if (simpleChatMode && part.tool !== 'task') return null
-      return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} />
+      return <ToolCallPart part={part} onFileClick={onFileClick} onChildSessionClick={onChildSessionClick} onHtmlArtifactOpen={onHtmlArtifactOpen} />
     case 'reasoning':
       if (simpleChatMode || !showReasoning) return null
       return (
