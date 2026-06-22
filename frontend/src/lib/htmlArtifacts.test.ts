@@ -100,9 +100,9 @@ describe('createHtmlArtifact', () => {
   })
 
   it('creates a devserver artifact with previewUrl', () => {
-    const artifact = createHtmlArtifact({ source: 'devserver', previewUrl: '/api/dev-proxy/3/' })
+    const artifact = createHtmlArtifact({ source: 'devserver', previewUrl: 'http://manager.example:3056/' })
     expect(artifact.source).toBe('devserver')
-    expect(artifact.previewUrl).toBe('/api/dev-proxy/3/')
+    expect(artifact.previewUrl).toBe('http://manager.example:3056/')
     expect(artifact.id).toBeTruthy()
     expect(artifact.title).toBe('App preview')
   })

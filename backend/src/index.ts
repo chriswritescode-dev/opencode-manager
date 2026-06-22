@@ -37,9 +37,8 @@ import { createPromptTemplateRoutes } from './routes/prompt-templates'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
-import { createDevProxyRoutes } from './routes/dev-proxy'
 import { createDevServerRoutes } from './routes/dev-server'
-import { createDevProxyUpgradeHandler } from './services/dev-server/upgrade-handler'
+import { startPreviewServer } from './services/dev-server/preview-server'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -346,7 +345,6 @@ protectedApi.route('/notifications', createNotificationRoutes(notificationServic
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 protectedApi.route('/dev-server', createDevServerRoutes(db))
-protectedApi.route('/dev-proxy', createDevProxyRoutes(db))
 
 app.route('/api', protectedApi)
 
@@ -466,12 +464,13 @@ const shutdown = async (signal: string) => {
 process.on('SIGTERM', () => shutdown('SIGTERM'))
 process.on('SIGINT', () => shutdown('SIGINT'))
 
-const server = serve({
+serve({
   fetch: app.fetch,
   port: PORT,
   hostname: HOST,
 })
 
-server.on('upgrade', createDevProxyUpgradeHandler(auth, db))
+startPreviewServer(auth, db)
 
 logger.info(`🚀 OpenCode WebUI API running on http://${HOST}:${PORT}`)
+logger.info(`🔍 Dev preview proxy running on http://${HOST}:${ENV.DEV_PREVIEW.PORT}`)

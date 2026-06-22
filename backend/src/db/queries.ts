@@ -3,7 +3,6 @@ import type { Repo, CreateRepoInput } from '../types/repo'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from '../utils/error-utils'
-import type { DevServerConfig } from '@opencode-manager/shared/types'
 import path from 'path'
 
 interface RepoRow {
@@ -330,19 +329,6 @@ export function updateRepoBranch(db: Database, id: number, branch: string): void
   if (result.changes === 0) {
     throw new Error(`Repository with id ${id} not found`)
   }
-}
-
-const DEV_SERVER_INJECT_BASE_KEY = 'devServerInjectBase'
-
-export function getDevServerConfig(db: Database, repoId: number): DevServerConfig {
-  const injectBase = getRepoSetting(db, repoId, DEV_SERVER_INJECT_BASE_KEY)
-  return {
-    injectBase: injectBase === '1',
-  }
-}
-
-export function setDevServerConfig(db: Database, repoId: number, config: DevServerConfig): void {
-  setRepoSetting(db, repoId, DEV_SERVER_INJECT_BASE_KEY, config.injectBase ? '1' : null)
 }
 
 export function deleteRepo(db: Database, id: number): void {

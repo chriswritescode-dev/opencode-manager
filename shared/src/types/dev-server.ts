@@ -7,9 +7,5 @@ export interface DevServerState {
   status: DevServerStatus
   port: number
   error: string | null
-  previewPath: string | null
-}
-
-export interface DevServerConfig {
-  injectBase: boolean
+  previewUrl: string | null
 }

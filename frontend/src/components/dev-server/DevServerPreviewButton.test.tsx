@@ -9,18 +9,18 @@ vi.mock('@tanstack/react-query', () => ({
 
 vi.mock('@/api/devServer', () => ({
   getDevServerStatus: vi.fn(),
-  getDevPreviewUrl: (repoId: number) => `/api/dev-proxy/${repoId}/`,
 }))
 
 describe('DevServerPreviewButton', () => {
   it('calls onOpen with devserver input when configured port is running', () => {
     const onOpen = vi.fn()
 
-    let capturedOnSuccess: ((state: { status: 'running'; port: number }) => void) | undefined
-    vi.mocked(useMutation).mockImplementation(((options: { onSuccess?: (state: { status: 'running'; port: number }) => void }) => {
+    type RunningState = { status: 'running'; port: number; previewUrl: string }
+    let capturedOnSuccess: ((state: RunningState) => void) | undefined
+    vi.mocked(useMutation).mockImplementation(((options: { onSuccess?: (state: RunningState) => void }) => {
       capturedOnSuccess = options.onSuccess
       return {
-        mutate: () => capturedOnSuccess?.({ status: 'running', port: 5100 }),
+        mutate: () => capturedOnSuccess?.({ status: 'running', port: 5100, previewUrl: 'http://manager.example:3056/' }),
         isPending: false,
       } as unknown as ReturnType<typeof useMutation>
     }) as typeof useMutation)
@@ -35,7 +35,7 @@ describe('DevServerPreviewButton', () => {
     expect(onOpen).toHaveBeenCalledTimes(1)
     expect(onOpen).toHaveBeenCalledWith({
       source: 'devserver',
-      previewUrl: '/api/dev-proxy/3/',
+      previewUrl: 'http://manager.example:3056/',
       title: 'App preview',
     })
   })

@@ -91,6 +91,7 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=5003
 ENV OPENCODE_SERVER_PORT=5551
+ENV DEV_PREVIEW_PORT=3056
 ENV DATABASE_PATH=/app/data/opencode.db
 ENV WORKSPACE_PATH=/workspace
 ENV XDG_CACHE_HOME=/home/node/.cache
@@ -112,7 +113,7 @@ RUN chmod +x /docker-entrypoint.sh
 RUN mkdir -p /workspace /app/data /home/node/.cache /home/node/.opencode && \
     chown -R node:node /workspace /app/data /home/node
 
-EXPOSE 5003 3055
+EXPOSE 5003 3055 3056
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
   CMD curl -f http://localhost:5003/api/health || exit 1

@@ -32,7 +32,7 @@ function createDevServerArtifact(overrides?: Partial<HtmlArtifact>): HtmlArtifac
     id: 'test-3',
     title: 'App Preview',
     source: 'devserver',
-    previewUrl: '/api/dev-proxy/3/',
+    previewUrl: 'http://manager.example:3056/',
     ...overrides,
   }
 }
@@ -219,7 +219,7 @@ describe('HtmlArtifactPanel', () => {
 
     const iframe = screen.getByTitle('App Preview')
     expect(iframe).toBeInTheDocument()
-    expect(iframe).toHaveAttribute('src', '/api/dev-proxy/3/')
+    expect(iframe).toHaveAttribute('src', 'http://manager.example:3056/')
     expect(iframe).toHaveAttribute(
       'sandbox',
       'allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads',

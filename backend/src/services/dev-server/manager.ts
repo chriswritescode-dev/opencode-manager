@@ -8,7 +8,7 @@ export function getDevServerPort(db: Database): number {
   return port ?? DEFAULT_DEV_SERVER_PORT
 }
 
-export async function getDevServerState(db: Database, repoId: number): Promise<DevServerState> {
+export async function getDevServerState(db: Database, repoId: number, previewUrl: string): Promise<DevServerState> {
   const port = getDevServerPort(db)
   const isRunning = await isPortOpen(port)
 
@@ -17,6 +17,6 @@ export async function getDevServerState(db: Database, repoId: number): Promise<D
     status: isRunning ? 'running' : 'stopped',
     port,
     error: isRunning ? null : `No dev server detected on localhost:${port}`,
-    previewPath: isRunning ? `/api/dev-proxy/${repoId}/` : null,
+    previewUrl: isRunning ? previewUrl : null,
   }
 }

@@ -9,12 +9,15 @@ services:
     ports:
       - "5003:5003"
       - "3055:3055"
+      - "3056:3056"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
       - OPENCODE_HOST=127.0.0.1
+      - DEV_PREVIEW_PORT=3056
+      - DEV_PREVIEW_PUBLIC_URL=${DEV_PREVIEW_PUBLIC_URL:-}
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000

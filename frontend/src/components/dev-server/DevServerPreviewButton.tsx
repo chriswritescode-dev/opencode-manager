@@ -1,5 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
-import { getDevServerStatus, getDevPreviewUrl } from '@/api/devServer'
+import { getDevServerStatus } from '@/api/devServer'
 import { Button } from '@/components/ui/button'
 import { showToast } from '@/lib/toast'
 import { Loader2, Play } from 'lucide-react'
@@ -14,14 +14,14 @@ export function DevServerPreviewButton({ repoId, onOpen }: DevServerPreviewButto
   const { mutate, isPending } = useMutation({
     mutationFn: () => getDevServerStatus(repoId),
     onSuccess: (state) => {
-      if (state.status !== 'running') {
+      if (state.status !== 'running' || !state.previewUrl) {
         showToast.error(`No app detected on localhost:${state.port}`)
         return
       }
 
       onOpen({
         source: 'devserver',
-        previewUrl: getDevPreviewUrl(repoId),
+        previewUrl: state.previewUrl,
         title: 'App preview',
       })
     },
