@@ -1,14 +1,20 @@
-import { serve, type ServerType } from '@hono/node-server'
-import { Hono, type Context } from 'hono'
 import type { Database } from 'bun:sqlite'
-import type { IncomingMessage } from 'http'
-import type { Duplex } from 'stream'
-import net from 'net'
 import { ENV } from '@opencode-manager/shared/config/env'
 import type { AuthInstance } from '../../auth'
 import { getDevServerPort } from './manager'
 import { buildUpstreamUrl, filterProxyHeaders, sanitizeUpstreamResponseHeaders } from './proxy-utils'
 import { logger } from '../../utils/logger'
+
+const PreviewResponse = Response
+
+type WebSocketMessage = string | ArrayBuffer | Uint8Array
+
+interface PreviewWebSocketData {
+  upstreamUrl: string
+  protocol: string | null
+  upstream: WebSocket | null
+  pendingMessages: WebSocketMessage[]
+}
 
 function getUnauthorizedHtml(): string {
   return `<!DOCTYPE html>
@@ -32,6 +38,13 @@ function getNotRunningHtml(port: number): string {
 </html>`
 }
 
+function htmlResponse(html: string, status: number): Response {
+  return new PreviewResponse(html, {
+    status,
+    headers: { 'content-type': 'text/html; charset=UTF-8' },
+  })
+}
+
 async function hasValidSession(auth: AuthInstance, headers: Headers): Promise<boolean> {
   try {
     const session = await auth.api.getSession({ headers })
@@ -41,123 +54,129 @@ async function hasValidSession(auth: AuthInstance, headers: Headers): Promise<bo
   }
 }
 
-async function handlePreviewRequest(c: Context, auth: AuthInstance, db: Database): Promise<Response> {
-  if (!(await hasValidSession(auth, c.req.raw.headers))) {
-    return c.html(getUnauthorizedHtml(), 401)
-  }
-
-  const port = getDevServerPort(db)
-  const url = new URL(c.req.url)
+async function handleAuthenticatedPreviewRequest(request: Request, db: Database, port: number): Promise<Response> {
+  const url = new URL(request.url)
   const upstreamUrl = buildUpstreamUrl(port, url.pathname, url.search)
 
-  const headers = filterProxyHeaders(c.req.raw.headers)
+  const headers = filterProxyHeaders(request.headers)
   let body: RequestInit['body'] = undefined
-  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-    body = c.req.raw.body
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    body = request.body
   }
 
   let upstreamResponse: Response
   try {
     upstreamResponse = await fetch(upstreamUrl, {
-      method: c.req.method,
+      method: request.method,
       headers,
       body,
       redirect: 'manual',
       duplex: 'half',
     } as RequestInit)
   } catch {
-    return c.html(getNotRunningHtml(port), 503)
+    return htmlResponse(getNotRunningHtml(port), 503)
   }
 
-  return new Response(upstreamResponse.body, {
+  return new PreviewResponse(upstreamResponse.body, {
     status: upstreamResponse.status,
     statusText: upstreamResponse.statusText,
     headers: sanitizeUpstreamResponseHeaders(upstreamResponse.headers),
   })
 }
 
-export function buildPreviewUpgradeRequest(rawHead: string, port: number): string {
-  const lines = rawHead.split('\r\n')
-  if (lines.length === 0 || (lines.length === 1 && lines[0] === '')) return rawHead
-
-  const result: string[] = [lines[0]!]
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i]!
-    const colonIdx = line.indexOf(':')
-    if (colonIdx !== -1 && line.slice(0, colonIdx).trim().toLowerCase() === 'host') continue
-    result.push(line)
-  }
-  result.push(`Host: 127.0.0.1:${port}`)
-  return result.join('\r\n')
+export function buildUpstreamWebSocketUrl(port: number, path: string, search: string): string {
+  return `ws://127.0.0.1:${port}${path}${search}`
 }
 
-function nodeHeadersToWebHeaders(reqHeaders: IncomingMessage['headers']): Headers {
-  const headers = new Headers()
-  for (const [key, value] of Object.entries(reqHeaders)) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      for (const v of value) headers.append(key, v)
-    } else {
-      headers.set(key, value)
-    }
-  }
-  return headers
+export function selectWebSocketProtocol(protocolHeader: string | null): string | null {
+  if (!protocolHeader) return null
+  return protocolHeader
+    .split(',')
+    .map(protocol => protocol.trim())
+    .find(Boolean) ?? null
 }
 
-function rawHeadFromRequest(req: IncomingMessage): string {
-  const lines: string[] = [`${req.method} ${req.url} HTTP/1.1`]
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (value === undefined) continue
-    if (Array.isArray(value)) {
-      for (const v of value) lines.push(`${key}: ${v}`)
-    } else {
-      lines.push(`${key}: ${value}`)
-    }
+function createPendingWebSocketData(upstreamUrl: string, protocol: string | null): PreviewWebSocketData {
+  return {
+    upstreamUrl,
+    protocol,
+    upstream: null,
+    pendingMessages: [],
   }
-  return lines.join('\r\n')
 }
 
-function createPreviewUpgradeHandler(auth: AuthInstance, db: Database) {
-  return async (req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> => {
-    try {
-      if (!(await hasValidSession(auth, nodeHeadersToWebHeaders(req.headers)))) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
-        socket.destroy()
-        return
+function sendToUpstream(data: PreviewWebSocketData, message: WebSocketMessage): void {
+  if (data.upstream?.readyState === WebSocket.OPEN) {
+    data.upstream.send(message)
+    return
+  }
+  data.pendingMessages.push(message)
+}
+
+function flushPendingMessages(data: PreviewWebSocketData): void {
+  if (!data.upstream || data.upstream.readyState !== WebSocket.OPEN) return
+  for (const message of data.pendingMessages) {
+    data.upstream.send(message)
+  }
+  data.pendingMessages = []
+}
+
+function createUpstreamWebSocket(ws: Bun.ServerWebSocket<PreviewWebSocketData>): WebSocket {
+  const data = ws.data
+  const upstream = data.protocol
+    ? new WebSocket(data.upstreamUrl, data.protocol)
+    : new WebSocket(data.upstreamUrl)
+
+  upstream.addEventListener('open', () => flushPendingMessages(data))
+  upstream.addEventListener('message', event => ws.send(event.data))
+  upstream.addEventListener('close', event => ws.close(event.code, event.reason))
+  upstream.addEventListener('error', event => {
+    logger.warn('Dev preview upstream websocket error', event)
+    ws.close()
+  })
+  return upstream
+}
+
+function isPreviewWebSocketRequest(url: URL): boolean {
+  return url.searchParams.has('token')
+    || url.pathname.includes('webpack-hmr')
+    || url.pathname === '/ws'
+    || url.pathname.endsWith('/ws')
+    || url.pathname.includes('/sockjs-node')
+}
+
+export function startPreviewServer(auth: AuthInstance, db: Database): Bun.Server<PreviewWebSocketData> {
+  return Bun.serve<PreviewWebSocketData>({
+    port: ENV.DEV_PREVIEW.PORT,
+    hostname: ENV.SERVER.HOST,
+    async fetch(request, server) {
+      if (!(await hasValidSession(auth, request.headers))) {
+        return htmlResponse(getUnauthorizedHtml(), 401)
       }
 
       const port = getDevServerPort(db)
-      const upstreamRequest = buildPreviewUpgradeRequest(rawHeadFromRequest(req), port)
-      const upstream = net.connect(port, '127.0.0.1')
+      const url = new URL(request.url)
+      if (isPreviewWebSocketRequest(url)) {
+        const protocol = selectWebSocketProtocol(request.headers.get('sec-websocket-protocol'))
+        const upgraded = server.upgrade(request, {
+          data: createPendingWebSocketData(buildUpstreamWebSocketUrl(port, url.pathname, url.search), protocol),
+          headers: protocol ? { 'Sec-WebSocket-Protocol': protocol } : undefined,
+        })
+        if (upgraded) return undefined
+      }
 
-      upstream.on('connect', () => {
-        upstream.write(`${upstreamRequest}\r\n\r\n`)
-        if (head.length > 0) upstream.write(head)
-        socket.pipe(upstream)
-        upstream.pipe(socket)
-      })
-
-      upstream.on('error', () => socket.destroy())
-      socket.on('error', () => upstream.destroy())
-      socket.on('close', () => upstream.destroy())
-      upstream.on('close', () => socket.destroy())
-    } catch (error) {
-      logger.error('Dev preview upgrade handler error:', error)
-      socket.destroy()
-    }
-  }
-}
-
-export function startPreviewServer(auth: AuthInstance, db: Database): ServerType {
-  const app = new Hono()
-  app.all('/*', (c) => handlePreviewRequest(c, auth, db))
-
-  const server = serve({
-    fetch: app.fetch,
-    port: ENV.DEV_PREVIEW.PORT,
-    hostname: ENV.SERVER.HOST,
+      return handleAuthenticatedPreviewRequest(request, db, port)
+    },
+    websocket: {
+      open(ws) {
+        ws.data.upstream = createUpstreamWebSocket(ws)
+      },
+      message(ws, message) {
+        sendToUpstream(ws.data, message)
+      },
+      close(ws) {
+        ws.data.upstream?.close()
+      },
+    },
   })
-
-  server.on('upgrade', createPreviewUpgradeHandler(auth, db))
-  return server
 }
