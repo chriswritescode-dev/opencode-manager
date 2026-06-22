@@ -56,8 +56,12 @@ describe('DevServer Management Routes', () => {
       const body = await res.json() as Record<string, unknown>
       expect(body.status).toBe('running')
       expect(body.port).toBe(5100)
-      expect(body.previewUrl).toBe('http://manager.example:3056/')
-      expect(getDevServerState).toHaveBeenCalledWith(mockDb, 1, 'http://manager.example:3056/')
+      expect(body.previewUrl).toEqual(expect.stringMatching(/^http:\/\/manager\.example:3056\/\?ocm_preview_token=.+/))
+      expect(getDevServerState).toHaveBeenCalledWith(
+        mockDb,
+        1,
+        expect.stringMatching(/^http:\/\/manager\.example:3056\/\?ocm_preview_token=.+/)
+      )
     })
   })
 })

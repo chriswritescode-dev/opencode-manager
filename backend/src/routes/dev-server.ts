@@ -3,6 +3,7 @@ import type { Database } from 'bun:sqlite'
 import { getRepoById } from '../db/queries'
 import { getDevServerState } from '../services/dev-server/manager'
 import { resolveDevPreviewUrl } from '../services/dev-server/proxy-utils'
+import { appendPreviewAccessToken, createPreviewAccessToken } from '../services/dev-server/preview-server'
 
 export function createDevServerRoutes(db: Database): Hono {
   const app = new Hono()
@@ -18,7 +19,10 @@ export function createDevServerRoutes(db: Database): Hono {
       return c.json({ error: 'Repository not found' }, 404)
     }
 
-    const previewUrl = resolveDevPreviewUrl(c.req.header('host'), c.req.header('x-forwarded-proto'))
+    const previewUrl = appendPreviewAccessToken(
+      resolveDevPreviewUrl(c.req.header('host'), c.req.header('x-forwarded-proto')),
+      createPreviewAccessToken()
+    )
     const state = await getDevServerState(db, repo.id, previewUrl)
 
     return c.json(state)
