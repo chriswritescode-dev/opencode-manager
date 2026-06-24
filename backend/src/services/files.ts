@@ -61,6 +61,33 @@ export async function getRawFileContent(userPath: string): Promise<Buffer> {
   }
 }
 
+export interface FilePreviewStat {
+  isDirectory: boolean
+  name: string
+  size: number
+  mimeType: string
+  lastModified: Date
+}
+
+export async function getFilePreviewStat(userPath: string): Promise<FilePreviewStat> {
+  const validatedPath = validatePath(userPath)
+
+  const exists = await fileExists(validatedPath)
+  if (!exists) {
+    throw { message: 'File not found or cannot be read', statusCode: 404 }
+  }
+
+  const stats = await getFileStats(validatedPath)
+
+  return {
+    isDirectory: stats.isDirectory,
+    name: path.basename(validatedPath),
+    size: stats.size,
+    mimeType: getMimeType(validatedPath),
+    lastModified: stats.lastModified,
+  }
+}
+
 export async function getFile(userPath: string): Promise<FileInfo> {
   const validatedPath = validatePath(userPath)
   logger.info(`Getting file for path: ${userPath} -> ${validatedPath}`)
@@ -253,6 +280,7 @@ function getMimeType(filePath: string): AllowedMimeType {
   const mimeTypes: Record<string, AllowedMimeType> = {
     '.txt': 'text/plain',
     '.html': 'text/html',
+    '.htm': 'text/html',
     '.css': 'text/css',
     '.js': 'text/javascript',
     '.ts': 'text/typescript',
