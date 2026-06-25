@@ -3,7 +3,7 @@ import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
 import { getToken, setToken, deleteToken, KeychainError } from '../src/keychain.js'
 import { ManagerApi } from '../src/manager-api.js'
-import { mirrorUp, mirrorDown, prepareMirror } from '../src/mirror.js'
+import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress } from '../src/mirror.js'
 import { createProgressReporter } from '../src/progress.js'
 import { getBranchName } from '../src/local-repo.js'
@@ -23,8 +23,8 @@ Usage:
   ocm status                Show current manager URL, repo, and whether token is set
   ocm list                  List ready repos from the manager
   ocm use <repoId|name>     Attach to a specific repo and remember it as last
-  ocm push [--force] [--create] [--yes]   Mirror $PWD to the matching Manager repo (or create one)
-  ocm pull [--force]                      Mirror the matching Manager repo over $PWD
+  ocm push [--force] [--create] [--yes] [--full]   Mirror $PWD to the matching Manager repo (fast patch sync by default)
+  ocm pull [--force] [--full]                      Mirror the matching Manager repo over $PWD (fast patch sync by default)
   ocm --version             Show the installed ocm version
   ocm --help                Show this help
 `
@@ -283,20 +283,19 @@ export async function cmdPush(args: string[]): Promise<void> {
   let force = false
   let create = false
   let yes = false
+  let full = false
 
   for (const arg of args) {
     if (arg === '--force') force = true
     else if (arg === '--create') create = true
     else if (arg === '--yes') yes = true
+    else if (arg === '--full') full = true
   }
 
   const state = requireState()
   const token = requireToken(state)
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
-
-  const progress = createProgressReporter('push')
-  const onProgress = (p: MirrorProgress) => progress.tick(p.bytesSent)
 
   const remotes: RemoteRepoSummary[] = repos.map((r) => ({
     repoId: r.repoId,
@@ -329,6 +328,8 @@ export async function cmdPush(args: string[]): Promise<void> {
       die('stdin is not a TTY; pass --yes to confirm creation')
     }
 
+    const progress = createProgressReporter('push')
+    const onProgress = (p: MirrorProgress) => progress.tick(p.bytesSent)
     const result = await mirrorUp(plan, {
       api,
       force,
@@ -338,6 +339,18 @@ export async function cmdPush(args: string[]): Promise<void> {
     progress.done()
     info(`pushed ${plan.repoRoot} -> ${result.created ? 'created' : 'updated'} (repoId=${result.repoId}, branch=${result.branch})`)
   } else if (plan.matched.length === 1) {
+    if (!full) {
+      try {
+        const result = await mirrorUpFast(plan, { api, force })
+        info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} via bundle (repoId=${result.repoId}, branch=${result.branch})`)
+        return
+      } catch (error) {
+        if (error instanceof MirrorAbort) throw error
+        process.stderr.write(`ocm: patch push failed; falling back to full mirror: ${error instanceof Error ? error.message : String(error)}\n`)
+      }
+    }
+    const progress = createProgressReporter('push')
+    const onProgress = (p: MirrorProgress) => progress.tick(p.bytesSent)
     const result = await mirrorUp(plan, { api, force, onProgress })
     progress.done()
     info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} (repoId=${result.repoId}, branch=${result.branch})`)
@@ -349,9 +362,11 @@ export async function cmdPush(args: string[]): Promise<void> {
 
 async function cmdPull(args: string[]): Promise<void> {
   let force = false
+  let full = false
 
   for (const arg of args) {
     if (arg === '--force') force = true
+    else if (arg === '--full') full = true
   }
 
   const state = requireState()
@@ -377,6 +392,16 @@ async function cmdPull(args: string[]): Promise<void> {
     die(`multiple Manager repos match origin ${plan.localOrigin}: ${names}; disambiguate with \`ocm pull <repoId>\``)
   }
 
+  if (!full) {
+    try {
+      await mirrorDownFast(plan.matched[0]!.repoId, plan.repoRoot, api, { force })
+      info(`pulled ${plan.matched[0]!.name} -> ${plan.repoRoot} via bundle`)
+      return
+    } catch (error) {
+      if (error instanceof MirrorAbort && !error.message.includes('falling back')) throw error
+      process.stderr.write(`ocm: patch pull failed; falling back to full mirror: ${error instanceof Error ? error.message : String(error)}\n`)
+    }
+  }
   const progress = createProgressReporter('pull')
   try {
     await mirrorDown(plan.matched[0]!.repoId, plan.repoRoot, api, { force, onProgress: (bytes) => progress.tick(bytes) })
