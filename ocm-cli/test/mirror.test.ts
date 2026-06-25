@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownPatch, mirrorUp, mirrorUpPatch } from '../src/mirror'
 
 describe('prepareMirror', () => {
   let tmpDir: string
@@ -537,5 +537,63 @@ describe('mirrorUp chunked upload', () => {
     const combined = Buffer.concat(ctx.partsReceived)
     expect(combined[0]).toBe(0x1f)
     expect(combined[1]).toBe(0x8b)
+  })
+})
+
+describe('mirror patch helpers', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-diff-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('pushes a local working tree patch through the manager API', async () => {
+    const repoRoot = join(tmpDir, 'repo-local-diff')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'before\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'after\n')
+
+    const api = {
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/remote', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    await mirrorUpPatch({
+      repoRoot,
+      localOrigin: 'https://github.com/test/repo.git',
+      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+    }, { api: api as any, force: false })
+
+    expect(api.mirrorPatch).toHaveBeenCalledTimes(1)
+    const body = api.mirrorPatch.mock.calls[0]![1]
+    expect(body.patch).toContain('diff --git a/tracked.txt b/tracked.txt')
+    expect(body.patch).toContain('-before')
+    expect(body.patch).toContain('+after')
+  })
+
+  it('applies a manager patch during pull patch mode', async () => {
+    const repoRoot = join(tmpDir, 'repo-remote-diff')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'before\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+    const head = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+    const patch = 'diff --git a/tracked.txt b/tracked.txt\nindex 6e58d95..7c6cae9 100644\n--- a/tracked.txt\n+++ b/tracked.txt\n@@ -1 +1 @@\n-before\n+after\n'
+    const api = { mirrorPatchSnapshot: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head, patch }) }
+
+    await mirrorDownPatch(1, repoRoot, api as any, { force: false })
+
+    expect(readFileSync(join(repoRoot, 'tracked.txt'), 'utf-8')).toBe('after\n')
   })
 })

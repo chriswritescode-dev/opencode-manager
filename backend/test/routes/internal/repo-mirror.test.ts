@@ -238,6 +238,133 @@ describe('internal-repo-mirror routes', () => {
     })
   })
 
+  describe('patch sync flow', () => {
+    it('imports a git bundle into an existing manager repo', async () => {
+      const sourceDir = join(getTmpRoot(), 'bundle-source')
+      mkdirSync(sourceDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: sourceDir, stdio: 'ignore' })
+      writeFileSync(join(sourceDir, 'tracked.txt'), 'from bundle\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'source'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['checkout', '-b', 'feature'], { cwd: sourceDir, stdio: 'ignore' })
+      writeFileSync(join(sourceDir, 'feature.txt'), 'feature branch\n')
+      spawnSync('git', ['add', 'feature.txt'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'feature'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['checkout', 'main'], { cwd: sourceDir, stdio: 'ignore' })
+      const bundlePath = join(getTmpRoot(), 'source.bundle')
+      spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
+
+      const targetDir = join(getTmpRoot(), 'bundle-target')
+      mkdirSync(targetDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: targetDir, stdio: 'ignore' })
+      writeFileSync(join(targetDir, 'old.txt'), 'old\n')
+      spawnSync('git', ['add', 'old.txt'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'target'], { cwd: targetDir, stdio: 'ignore' })
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
+        return null
+      })
+
+      const res = await app.request('/api/internal/repos/1/mirror/bundle', {
+        method: 'POST',
+        body: readFileSync(bundlePath),
+        headers: { 'content-type': 'application/octet-stream', 'x-ocm-branch': 'main' },
+      })
+
+      expect(res.status).toBe(200)
+      expect(readFileSync(join(targetDir, 'tracked.txt'), 'utf-8')).toBe('from bundle\n')
+      const featureRef = spawnSync('git', ['rev-parse', '--verify', 'refs/heads/feature'], { cwd: targetDir, encoding: 'utf-8' })
+      expect(featureRef.status).toBe(0)
+    })
+
+    it('returns a git bundle for pull fast path', async () => {
+      const repoDir = join(getTmpRoot(), 'bundle-download')
+      mkdirSync(repoDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir, stdio: 'ignore' })
+      writeFileSync(join(repoDir, 'tracked.txt'), 'bundle payload\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'bundle'], { cwd: repoDir, stdio: 'ignore' })
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+
+      const res = await app.request('/api/internal/repos/1/mirror/bundle')
+      const body = Buffer.from(await res.arrayBuffer())
+
+      expect(res.status).toBe(200)
+      expect(body.length).toBeGreaterThan(0)
+      const verifyPath = join(getTmpRoot(), 'download.bundle')
+      writeFileSync(verifyPath, body)
+      const verify = spawnSync('git', ['bundle', 'verify', verifyPath], { cwd: repoDir, encoding: 'utf-8' })
+      expect(verify.status).toBe(0)
+    })
+
+    it('applies a patch to an existing manager repo', async () => {
+      const repoDir = join(getTmpRoot(), 'patch-repo')
+      mkdirSync(repoDir, { recursive: true })
+      spawnSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir, stdio: 'ignore' })
+      writeFileSync(join(repoDir, 'tracked.txt'), 'before\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoDir, stdio: 'ignore' })
+      const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf-8' }).stdout.trim()
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return head
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
+        return null
+      })
+
+      const patch = 'diff --git a/tracked.txt b/tracked.txt\nindex 6e58d95..7c6cae9 100644\n--- a/tracked.txt\n+++ b/tracked.txt\n@@ -1 +1 @@\n-before\n+after\n'
+      const res = await app.request('/api/internal/repos/1/mirror/patch', {
+        method: 'POST',
+        body: JSON.stringify({ baseHead: head, patch }),
+        headers: { 'content-type': 'application/json' },
+      })
+
+      expect(res.status).toBe(200)
+      expect(readFileSync(join(repoDir, 'tracked.txt'), 'utf-8')).toBe('after\n')
+      expect(mockUpdateLastPulled).toHaveBeenCalledWith(expect.anything(), 1)
+    })
+
+    it('returns a patch snapshot for pull fast path', async () => {
+      const repoDir = join(getTmpRoot(), 'snapshot-repo')
+      mkdirSync(repoDir, { recursive: true })
+      spawnSync('git', ['init'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoDir, stdio: 'ignore' })
+      writeFileSync(join(repoDir, 'tracked.txt'), 'before\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: repoDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoDir, stdio: 'ignore' })
+      writeFileSync(join(repoDir, 'tracked.txt'), 'after\n')
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: repoDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return 'abc'
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
+        if (args[0] === 'rev-parse' && args[1] === '--git-path') return '.git/index'
+        return null
+      })
+
+      const res = await app.request('/api/internal/repos/1/mirror/patch')
+      const json = await res.json() as { patch: string; head: string; branch: string }
+
+      expect(res.status).toBe(200)
+      expect(json.head).toBe('abc')
+      expect(json.branch).toBe('main')
+      expect(json.patch).toContain('diff --git a/tracked.txt b/tracked.txt')
+    })
+  })
+
   describe('chunked upload flow (begin/parts/commit)', () => {
     it('creates a repo and populates from chunked tarball', async () => {
       const targetPath = join(getTmpRoot(), 'test-repo')
