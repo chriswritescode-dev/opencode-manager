@@ -84,7 +84,7 @@ export class GitService {
     return this.getFileDiff(repoId, filePath, database, { includeStaged })
   }
 
-  async getLog(repoId: number, database: Database, limit: number = 10): Promise<GitCommit[]> {
+  async getLog(repoId: number, database: Database, limit: number = 10, branch?: string): Promise<GitCommit[]> {
     try {
       const repo = getRepoById(database, repoId)
       if (!repo) {
@@ -97,7 +97,7 @@ export class GitService {
         '-C',
         repoPath,
         'log',
-        `--all`,
+        branch?.trim() || 'HEAD',
         `-n`,
         String(limit),
         '--format=%H|%an|%ae|%at|%s'

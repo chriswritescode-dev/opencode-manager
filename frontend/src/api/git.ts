@@ -35,9 +35,9 @@ export async function fetchGitDiff(repoId: number, path: string): Promise<{ diff
   return { diff: data }
 }
 
-export async function fetchGitLog(repoId: number, limit?: number): Promise<{ commits: GitCommit[] }> {
+export async function fetchGitLog(repoId: number, limit?: number, branch?: string): Promise<{ commits: GitCommit[] }> {
   return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/git/log`, {
-    params: { limit },
+    params: { limit, branch },
   })
 }
 
@@ -130,10 +130,10 @@ export function useCommitFileDiff(repoId: number | undefined, commitHash: string
   })
 }
 
-export function useGitLog(repoId: number | undefined, limit?: number) {
+export function useGitLog(repoId: number | undefined, limit?: number, branch?: string) {
   return useQuery({
-    queryKey: ['gitLog', repoId, limit],
-    queryFn: () => repoId ? fetchGitLog(repoId, limit) : Promise.reject(new Error('No repo ID')),
+    queryKey: ['gitLog', repoId, limit, branch],
+    queryFn: () => repoId ? fetchGitLog(repoId, limit, branch) : Promise.reject(new Error('No repo ID')),
     enabled: !!repoId,
   })
 }

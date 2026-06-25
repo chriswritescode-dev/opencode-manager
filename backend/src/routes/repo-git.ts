@@ -407,7 +407,8 @@ export function createRepoGitRoutes(database: Database, gitAuthService: GitAuthS
       }
 
       const limit = parseInt(c.req.query('limit') || '10', 10)
-      const commits = await git.getLog(id, database, limit)
+      const branch = c.req.query('branch') || undefined
+      const commits = await git.getLog(id, database, limit, branch)
 
       return c.json({ commits })
     } catch (error: unknown) {
