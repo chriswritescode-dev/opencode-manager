@@ -5,6 +5,7 @@ import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
 import { prepareMirror, MirrorAbort, mirrorDown, mirrorDownPatch, mirrorUp, mirrorUpPatch } from '../src/mirror'
+import { getBranchName } from '../src/local-repo'
 
 describe('prepareMirror', () => {
   let tmpDir: string
@@ -64,6 +65,33 @@ describe('prepareMirror', () => {
     expect(plan.matched).toHaveLength(1)
     expect(plan.matched[0]!.repoId).toBe(1)
     expect(plan.localOrigin).toContain('me/repo')
+  })
+})
+
+describe('local repo branch detection', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'local-repo-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('treats detached HEAD as no branch', () => {
+    const repoRoot = join(tmpDir, 'detached')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'content\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+    const head = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+    spawnSync('git', ['checkout', head], { cwd: repoRoot, stdio: 'ignore' })
+
+    expect(getBranchName(repoRoot)).toBeNull()
   })
 })
 

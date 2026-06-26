@@ -1,8 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { OpenCodeModelsEditor } from './OpenCodeModelsEditor'
 import type { ConfigProvider, ConfigModel } from './OpenCodeModelsEditor'
+import { settingsApi } from '../../api/settings'
+
+vi.mock('../../api/settings', () => ({
+  settingsApi: {
+    discoverOpenCodeModels: vi.fn(),
+  },
+}))
 
 const mockProviders: Record<string, ConfigProvider> = {
   openai: {
@@ -348,6 +355,106 @@ describe('OpenCodeModelDialog', () => {
           })
         )
       })
+    })
+  })
+})
+
+describe('OpenCodeModelDialog — model discovery', () => {
+  const discoveryProps = {
+    open: true,
+    onOpenChange: vi.fn(),
+    onSubmit: vi.fn(),
+    availableProviders: [],
+    selectedProviderId: '',
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(settingsApi.discoverOpenCodeModels).mockReset()
+  })
+
+  afterEach(() => {
+    vi.mocked(settingsApi.discoverOpenCodeModels).mockReset()
+  })
+
+  it('shows a Discover button when a new API provider has a base URL', async () => {
+    const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+    render(<OpenCodeModelDialog {...discoveryProps} />)
+
+    const baseUrlInput = screen.getByPlaceholderText('e.g., https://api.openai.com/v1')
+    fireEvent.change(baseUrlInput, { target: { value: 'http://localhost:1234' } })
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /discover|refresh/i })).toBeInTheDocument()
+    })
+  })
+
+  it('discovers models and shows the count when Discover is clicked', async () => {
+    vi.mocked(settingsApi.discoverOpenCodeModels).mockResolvedValue({
+      models: ['gpt-4o', 'gpt-3.5-turbo'],
+      cached: false,
+    })
+    const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+    render(<OpenCodeModelDialog {...discoveryProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText('e.g., https://api.openai.com/v1'), {
+      target: { value: 'http://localhost:1234' },
+    })
+
+    const discoverButton = await screen.findByRole('button', { name: /discover|refresh/i })
+    fireEvent.click(discoverButton)
+
+    await waitFor(() => {
+      expect(screen.getByText(/2 models found/i)).toBeInTheDocument()
+    })
+    expect(settingsApi.discoverOpenCodeModels).toHaveBeenCalledWith('http://localhost:1234', undefined, true)
+  })
+
+  it('auto-populates config key and display name when selecting a discovered model', async () => {
+    vi.mocked(settingsApi.discoverOpenCodeModels).mockResolvedValue({
+      models: ['gpt-4o'],
+      cached: false,
+    })
+    const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+    render(<OpenCodeModelDialog {...discoveryProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText('e.g., https://api.openai.com/v1'), {
+      target: { value: 'http://localhost:1234' },
+    })
+
+    const discoverButton = await screen.findByRole('button', { name: /discover|refresh/i })
+    fireEvent.click(discoverButton)
+
+    await waitFor(() => {
+      expect(screen.getByText(/1 model found/i)).toBeInTheDocument()
+    })
+
+    const providerModelInput = screen.getByPlaceholderText('e.g., MiniMax-M2.7')
+    fireEvent.focus(providerModelInput)
+
+    const option = await screen.findByRole('button', { name: 'gpt-4o' })
+    fireEvent.click(option)
+
+    const modelIdInput = document.querySelector('input[name="modelId"]') as HTMLInputElement
+    const displayNameInput = document.querySelector('input[name="displayName"]') as HTMLInputElement
+    expect(modelIdInput).toHaveValue('gpt-4o')
+    expect(displayNameInput).toHaveValue('Gpt 4o')
+  })
+
+  it('shows an error message when discovery fails', async () => {
+    vi.mocked(settingsApi.discoverOpenCodeModels).mockRejectedValue(new Error('network error'))
+    const { OpenCodeModelDialog } = await import('./OpenCodeModelDialog')
+    render(<OpenCodeModelDialog {...discoveryProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText('e.g., https://api.openai.com/v1'), {
+      target: { value: 'http://localhost:1234' },
+    })
+
+    const discoverButton = await screen.findByRole('button', { name: /discover|refresh/i })
+    fireEvent.click(discoverButton)
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to discover models/i)).toBeInTheDocument()
     })
   })
 })

@@ -102,6 +102,7 @@ async function importBundle(fullPath: string, bundlePath: string, branch: string
     const firstSpace = trimmed.indexOf(' ')
     if (firstSpace === -1) continue
     const name = trimmed.slice(0, firstSpace)
+    if (name === 'HEAD') continue
     const sha = trimmed.slice(firstSpace + 1)
     await gitRaw(fullPath, ['update-ref', `refs/heads/${name}`, sha])
   }

@@ -45,7 +45,8 @@ function normalizeUrl(url: string): string {
 }
 
 export function getBranchName(dir: string): string | null {
-  return git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  const branch = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
+  return branch && branch !== 'HEAD' ? branch : null
 }
 
 export function getWorkingTreeDiff(dir: string): string {
