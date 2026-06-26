@@ -284,6 +284,47 @@ describe('internal-repo-mirror routes', () => {
       expect(featureRef.status).toBe(0)
     })
 
+    it('imports a bundle whose ocm-sync refs include a symbolic HEAD without failing', async () => {
+      const sourceDir = join(getTmpRoot(), 'bundle-source-head')
+      mkdirSync(sourceDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: sourceDir, stdio: 'ignore' })
+      writeFileSync(join(sourceDir, 'tracked.txt'), 'from bundle\n')
+      spawnSync('git', ['add', 'tracked.txt'], { cwd: sourceDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'source'], { cwd: sourceDir, stdio: 'ignore' })
+      const headSha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf-8' }).stdout.trim()
+      spawnSync('git', ['checkout', headSha], { cwd: sourceDir, stdio: 'ignore' })
+      const bundlePath = join(getTmpRoot(), 'source-head.bundle')
+      spawnSync('git', ['bundle', 'create', bundlePath, '--all'], { cwd: sourceDir, stdio: 'ignore' })
+
+      const targetDir = join(getTmpRoot(), 'bundle-target-head')
+      mkdirSync(targetDir, { recursive: true })
+      spawnSync('git', ['init', '-b', 'main'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['config', 'user.name', 'Test'], { cwd: targetDir, stdio: 'ignore' })
+      writeFileSync(join(targetDir, 'old.txt'), 'old\n')
+      spawnSync('git', ['add', 'old.txt'], { cwd: targetDir, stdio: 'ignore' })
+      spawnSync('git', ['commit', '-m', 'target'], { cwd: targetDir, stdio: 'ignore' })
+
+      mockGetRepoById.mockReturnValue({ id: 1, fullPath: targetDir })
+      mockSafeGitOut.mockImplementation(async (_repoPath: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return 'main'
+        if (args[0] === 'rev-parse' && args[1] === 'HEAD') return headSha
+        return null
+      })
+
+      const res = await app.request('/api/internal/repos/1/mirror/bundle', {
+        method: 'POST',
+        body: readFileSync(bundlePath),
+        headers: { 'content-type': 'application/octet-stream' },
+      })
+
+      expect(res.status).toBe(200)
+      const headRef = spawnSync('git', ['rev-parse', '--verify', 'refs/heads/HEAD'], { cwd: targetDir, encoding: 'utf-8' })
+      expect(headRef.status).not.toBe(0)
+    })
+
     it('returns a git bundle for pull fast path', async () => {
       const repoDir = join(getTmpRoot(), 'bundle-download')
       mkdirSync(repoDir, { recursive: true })

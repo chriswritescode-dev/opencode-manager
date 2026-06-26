@@ -132,6 +132,19 @@ export const settingsApi = {
     }
   },
 
+  discoverOpenCodeModels: async (
+    baseUrl: string,
+    apiKey?: string,
+    forceRefresh = false,
+  ): Promise<{ models: string[]; cached: boolean }> => {
+    const params: Record<string, string> = { baseUrl }
+    if (apiKey) params.apiKey = apiKey
+    if (forceRefresh) params.refresh = 'true'
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-discover-models`, {
+      params,
+    })
+  },
+
   restartOpenCodeServer: async (): Promise<{ success: boolean; message: string; details?: string }> => {
     return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-restart`, {
       method: 'POST',

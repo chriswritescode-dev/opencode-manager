@@ -1,7 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -9,6 +9,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Combobox } from '@/components/ui/combobox'
+import { Label } from '@/components/ui/label'
+import { RefreshCw, Loader2 } from 'lucide-react'
+import { settingsApi } from '@/api/settings'
 import type { ModelConfig, ProviderConfig } from '@/api/types/settings'
 
 type ConfigModel = Partial<ModelConfig> & {
@@ -71,6 +75,18 @@ function parseOptionalNumber(value: string): number | undefined {
   if (!value.trim()) return undefined
   const parsed = Number(value)
   return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function sanitizeModelId(modelId: string): string {
+  return modelId.replace(/[^a-zA-Z0-9._-]/g, '-')
+}
+
+function prettifyModelName(modelId: string): string {
+  return modelId
+    .replace(/[-_/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
 function jsonObjectField(label: string) {
@@ -248,14 +264,83 @@ export function OpenCodeModelDialog({
   const { isValid } = form.formState
   const createNewProvider = form.watch('createNewProvider')
   const newProviderType = form.watch('newProviderType')
+  const watchedProviderId = form.watch('providerId')
+  const watchedNewProviderBaseUrl = form.watch('newProviderBaseUrl')
   const resetKeyRef = useRef<string | null>(null)
   const resetKey = editingModel
     ? `edit-${editingModel.providerId}-${editingModel.modelId}`
     : `create-${selectedProviderId || availableProviders[0] || ''}`
 
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([])
+  const [isLoadingModels, setIsLoadingModels] = useState(false)
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null)
+  const [discoveryApiKey, setDiscoveryApiKey] = useState('')
+
+  const discoveryBaseUrl = useMemo(() => {
+    if (createNewProvider) {
+      return watchedNewProviderBaseUrl?.trim() || ''
+    }
+    const provider = existingProviders?.[watchedProviderId]
+    const options = provider?.options as { baseURL?: string } | undefined
+    return (options?.baseURL || provider?.api || '').trim()
+  }, [createNewProvider, watchedNewProviderBaseUrl, watchedProviderId, existingProviders])
+
+  const discoverModels = useCallback(async (forceRefresh = false) => {
+    if (!discoveryBaseUrl) {
+      setDiscoveredModels([])
+      return
+    }
+    try {
+      new URL(discoveryBaseUrl)
+    } catch {
+      setDiscoveredModels([])
+      return
+    }
+    setIsLoadingModels(true)
+    setDiscoveryError(null)
+    try {
+      const response = await settingsApi.discoverOpenCodeModels(discoveryBaseUrl, discoveryApiKey || undefined, forceRefresh)
+      setDiscoveredModels(response.models)
+    } catch {
+      setDiscoveredModels([])
+      setDiscoveryError('Failed to discover models. Check the endpoint URL and API key.')
+    } finally {
+      setIsLoadingModels(false)
+    }
+  }, [discoveryBaseUrl, discoveryApiKey])
+
+  useEffect(() => {
+    if (!open) return
+    if (!discoveryBaseUrl) {
+      setDiscoveredModels([])
+      setDiscoveryError(null)
+      return
+    }
+    if (createNewProvider && newProviderType !== 'api') return
+    const timer = setTimeout(() => {
+      void discoverModels()
+    }, 600)
+    return () => clearTimeout(timer)
+  }, [open, discoveryBaseUrl, createNewProvider, newProviderType, discoverModels])
+
+  const handleDiscoveredModelSelect = useCallback((modelId: string) => {
+    const currentModelId = form.getValues('modelId')
+    const sanitized = sanitizeModelId(modelId)
+    if (!currentModelId && sanitized) {
+      form.setValue('modelId', sanitized, { shouldValidate: true, shouldDirty: true })
+    }
+    const currentDisplayName = form.getValues('displayName')
+    if (!currentDisplayName) {
+      form.setValue('displayName', prettifyModelName(modelId), { shouldValidate: true, shouldDirty: true })
+    }
+  }, [form])
+
   useEffect(() => {
     if (!open) {
       resetKeyRef.current = null
+      setDiscoveredModels([])
+      setDiscoveryError(null)
+      setDiscoveryApiKey('')
       return
     }
 
@@ -409,6 +494,22 @@ export function OpenCodeModelDialog({
                     )} />
                   )}
 
+                  {newProviderType === 'api' && (
+                    <div className="space-y-2">
+                      <Label htmlFor="discovery-api-key">API Key (for discovery)</Label>
+                      <Input
+                        id="discovery-api-key"
+                        type="password"
+                        value={discoveryApiKey}
+                        onChange={(e) => setDiscoveryApiKey(e.target.value)}
+                        placeholder="Optional - used to fetch the model list"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Used only to discover available models. Configure provider auth separately via env vars or headers.
+                      </p>
+                    </div>
+                  )}
+
                   {newProviderType === 'npm' && (
                     <FormField control={form.control} name="newProviderNpm" render={({ field }) => (
                       <FormItem>
@@ -451,8 +552,40 @@ export function OpenCodeModelDialog({
 
                 <FormField control={form.control} name="backingModelId" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Provider Model ID</FormLabel>
-                    <FormControl><Input {...field} placeholder="e.g., MiniMax-M2.7" /></FormControl>
+                    <div className="flex items-center justify-between">
+                      <FormLabel>Provider Model ID</FormLabel>
+                      {discoveryBaseUrl && (
+                        <button
+                          type="button"
+                          onClick={() => discoverModels(true)}
+                          disabled={isLoadingModels}
+                          className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 disabled:opacity-50"
+                        >
+                          {isLoadingModels ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                          {discoveredModels.length > 0 ? 'Refresh' : 'Discover'}
+                        </button>
+                      )}
+                    </div>
+                    <FormControl>
+                      <Combobox
+                        value={field.value}
+                        onChange={(value) => {
+                          field.onChange(value)
+                          if (discoveredModels.includes(value)) {
+                            handleDiscoveredModelSelect(value)
+                          }
+                        }}
+                        options={discoveredModels.map((m) => ({ value: m, label: m }))}
+                        placeholder="e.g., MiniMax-M2.7"
+                        disabled={isLoadingModels}
+                        allowCustomValue={true}
+                      />
+                    </FormControl>
+                    {discoveryError && <p className="text-xs text-destructive">{discoveryError}</p>}
+                    {!discoveryError && isLoadingModels && <p className="text-xs text-muted-foreground">Discovering models...</p>}
+                    {!discoveryError && !isLoadingModels && discoveredModels.length > 0 && (
+                      <p className="text-xs text-muted-foreground">{discoveredModels.length} model{discoveredModels.length === 1 ? '' : 's'} found</p>
+                    )}
                     <FormMessage />
                   </FormItem>
                 )} />
