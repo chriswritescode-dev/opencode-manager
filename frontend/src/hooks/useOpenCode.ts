@@ -535,7 +535,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
           return [...old, { info: response.info, parts: response.parts }];
         },
       );
-
     },
   });
 };
