@@ -6,6 +6,7 @@ export interface SendError {
   message: string
   detail?: string
   failedPrompt?: string
+  kind?: 'network' | 'session'
 }
 
 interface SendErrorStore {
@@ -14,8 +15,9 @@ interface SendErrorStore {
   setError: (err: SendError) => void
   setQueuedPrompt: (sessionID: string, prompt: string) => void
   clearQueuedPrompt: (sessionID: string) => void
-  failQueuedPrompt: (err: Omit<SendError, 'failedPrompt'>) => void
+  failQueuedPrompt: (err: Omit<SendError, 'failedPrompt' | 'kind'>) => void
   clearError: (sessionID: string) => void
+  clearNetworkError: (sessionID: string) => void
   getError: (sessionID: string) => SendError | null
 }
 
@@ -39,7 +41,7 @@ export const useSendErrorStore = create<SendErrorStore>((set, get) => ({
       return { queuedPrompts }
     })
   },
-  failQueuedPrompt: (err: Omit<SendError, 'failedPrompt'>) => {
+  failQueuedPrompt: (err: Omit<SendError, 'failedPrompt' | 'kind'>) => {
     set((state) => {
       const failedPrompt = state.queuedPrompts[err.sessionID]
       if (!failedPrompt) return state
@@ -48,7 +50,7 @@ export const useSendErrorStore = create<SendErrorStore>((set, get) => ({
       return {
         errors: {
           ...state.errors,
-          [err.sessionID]: { ...err, failedPrompt },
+          [err.sessionID]: { ...err, failedPrompt, kind: 'session' },
         },
         queuedPrompts,
       }
@@ -60,6 +62,10 @@ export const useSendErrorStore = create<SendErrorStore>((set, get) => ({
       delete newErrors[sessionID]
       return { errors: newErrors }
     })
+  },
+  clearNetworkError: (sessionID: string) => {
+    if (get().errors[sessionID]?.kind === 'session') return
+    get().clearError(sessionID)
   },
   getError: (sessionID: string) => {
     return get().errors[sessionID] || null

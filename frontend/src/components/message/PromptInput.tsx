@@ -239,11 +239,20 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const restoredFailedPromptRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!failedPrompt || restoredFailedPromptRef.current === failedPrompt) return
-    restoredFailedPromptRef.current = failedPrompt
-    if (promptRef.current) return
-    setPrompt(failedPrompt)
-    textareaRef.current?.focus()
+    if (failedPrompt) {
+      if (restoredFailedPromptRef.current === failedPrompt) return
+      restoredFailedPromptRef.current = failedPrompt
+      if (promptRef.current) return
+      setPrompt(failedPrompt)
+      textareaRef.current?.focus()
+      return
+    }
+    if (restoredFailedPromptRef.current !== null) {
+      if (promptRef.current === restoredFailedPromptRef.current) {
+        setPrompt('')
+      }
+      restoredFailedPromptRef.current = null
+    }
   }, [failedPrompt])
   
   const mentionItems = useMemo((): MentionItem[] => {

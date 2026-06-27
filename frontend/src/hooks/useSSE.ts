@@ -156,6 +156,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         
         const { info } = event.properties
         const sessionID = info.sessionID
+        useSendErrorStore.getState().clearNetworkError(sessionID)
         if (info.role === 'user') {
           useSendErrorStore.getState().clearQueuedPrompt(sessionID)
         }
@@ -231,6 +232,7 @@ export const useSSE = (opcodeUrl: string | null | undefined, directory?: string 
         const { sessionID } = event.properties
         
         setSessionStatus(sessionID, { type: 'idle' })
+        useSendErrorStore.getState().clearNetworkError(sessionID)
         
         batcherRef.current?.flush({ sessionID, directory: cacheDirectory })
         
