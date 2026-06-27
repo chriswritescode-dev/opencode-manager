@@ -60,7 +60,11 @@ export function registerServiceWorker(): void {
         });
       });
 
+      let lastUpdateCheck = 0;
       const checkForUpdate = () => {
+        const now = Date.now();
+        if (now - lastUpdateCheck < UPDATE_CHECK_INTERVAL_MS) return;
+        lastUpdateCheck = now;
         registration.update().catch(() => {});
       };
 

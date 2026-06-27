@@ -5,7 +5,12 @@ import type { Plugin } from "vite";
 
 const SW_FILENAME = "sw.js";
 const PRECACHE_DIR_PREFIXES = ["assets/"];
-const PRECACHE_ROOT_FILES = ["index.html", "manifest.json", "favicon.svg"];
+const PRECACHE_ROOT_FILES = [
+  "index.html",
+  "manifest.json",
+  "favicon.svg",
+  "icons/icon-192x192.png",
+];
 
 async function collectFiles(dir: string, base = dir): Promise<string[]> {
   const entries = await readdir(dir, { withFileTypes: true });

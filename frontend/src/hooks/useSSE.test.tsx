@@ -396,7 +396,124 @@ describe('useSSE', () => {
       title: 'Error',
       message: 'Queued send failed',
       failedPrompt: 'queued message',
+      kind: 'session',
     })
+
+    unmount()
+  })
+
+  it('retracts a network send error when the server confirms session activity', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    useSendErrorStore.getState().setError({
+      sessionID: 'session-1',
+      title: 'Connection Failed',
+      message: 'Could not connect to the server.',
+      failedPrompt: 'in-flight prompt',
+      kind: 'network',
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'message.updated',
+        properties: {
+          info: { id: 'assistant-1', role: 'assistant', sessionID: 'session-1', time: { created: 1 } },
+        },
+      })
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+
+    unmount()
+  })
+
+  it('retracts a network send error when the session goes idle', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    useSendErrorStore.getState().setError({
+      sessionID: 'session-1',
+      title: 'Request Timeout',
+      message: 'The request took too long.',
+      kind: 'network',
+    })
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.idle',
+        properties: { sessionID: 'session-1' },
+      })
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+
+    unmount()
+  })
+
+  it('preserves a server-reported session error when the session later goes idle', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
+
+    const { result, unmount } = renderHook(
+      () => useSSE('http://localhost:5551', '/repo', 'session-1'),
+      { wrapper },
+    )
+
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1))
+    act(() => {
+      MockEventSource.instances[0].emit('connected', { clientId: 'client-1' })
+    })
+    await waitFor(() => expect(result.current.isConnected).toBe(true))
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.error',
+        properties: {
+          sessionID: 'session-1',
+          error: { name: 'UnknownError', data: { message: 'Queued send failed' } },
+        },
+      })
+    })
+
+    act(() => {
+      MockEventSource.instances[0].emit('message', {
+        type: 'session.idle',
+        properties: { sessionID: 'session-1' },
+      })
+    })
+
+    expect(useSendErrorStore.getState().getError('session-1')).not.toBeNull()
 
     unmount()
   })

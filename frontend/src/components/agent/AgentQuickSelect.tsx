@@ -17,7 +17,6 @@ interface AgentQuickSelectProps {
   currentAgent: string
   onAgentChange: (agent: string) => void
   isBashMode?: boolean
-  disabled?: boolean
 }
 
 interface AgentInfo {
@@ -55,7 +54,6 @@ export function AgentQuickSelect({
   currentAgent,
   onAgentChange,
   isBashMode = false,
-  disabled = false,
 }: AgentQuickSelectProps) {
   const { data: agents = [] } = useAgents(opcodeUrl, directory)
 
@@ -79,7 +77,6 @@ export function AgentQuickSelect({
   const buttonContent = (
     <button
       data-toggle-mode
-      disabled={disabled}
       style={styleVars as React.CSSProperties}
       className="px-2 md:px-3.5 py-1 h-[36px] rounded-lg text-sm font-medium border min-w-[56px] max-w-[80px] md:max-w-[100px] flex-shrink-0 flex items-center justify-center transition-all duration-200 active:scale-95 hover:scale-105 shadow-md text-[var(--agent-color-light)] dark:text-[var(--agent-color-dark)] bg-[var(--agent-bg-light)] dark:bg-[var(--agent-bg-dark)] border-[var(--agent-border-light)] dark:border-[var(--agent-border-dark)] hover:bg-[var(--agent-bg-hover-light)] dark:hover:bg-[var(--agent-bg-hover-dark)] hover:border-[var(--agent-border-hover-light)] dark:hover:border-[var(--agent-border-hover-dark)] shadow-[var(--agent-shadow-light)] dark:shadow-[var(--agent-shadow-dark)] hover:shadow-[var(--agent-shadow-hover-light)] dark:hover:shadow-[var(--agent-shadow-hover-dark)]"
     >
@@ -89,7 +86,7 @@ export function AgentQuickSelect({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild disabled={disabled}>
+      <DropdownMenuTrigger asChild>
         {buttonContent}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64">

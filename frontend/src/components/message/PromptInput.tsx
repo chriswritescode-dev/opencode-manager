@@ -65,7 +65,6 @@ interface PromptInputProps {
   opcodeUrl: string
   directory?: string
   sessionID: string
-  disabled?: boolean
   showScrollButton?: boolean
   isSessionActive?: boolean
   isStreamingResponse?: boolean
@@ -81,7 +80,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   opcodeUrl,
   directory,
   sessionID,
-  disabled,
   showScrollButton,
   isSessionActive = false,
   isStreamingResponse = false,
@@ -241,11 +239,20 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const restoredFailedPromptRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!failedPrompt || restoredFailedPromptRef.current === failedPrompt) return
-    restoredFailedPromptRef.current = failedPrompt
-    if (promptRef.current) return
-    setPrompt(failedPrompt)
-    textareaRef.current?.focus()
+    if (failedPrompt) {
+      if (restoredFailedPromptRef.current === failedPrompt) return
+      restoredFailedPromptRef.current = failedPrompt
+      if (promptRef.current) return
+      setPrompt(failedPrompt)
+      textareaRef.current?.focus()
+      return
+    }
+    if (restoredFailedPromptRef.current !== null) {
+      if (promptRef.current === restoredFailedPromptRef.current) {
+        setPrompt('')
+      }
+      restoredFailedPromptRef.current = null
+    }
   }, [failedPrompt])
   
   const mentionItems = useMemo((): MentionItem[] => {
@@ -275,7 +282,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   const addUserBashCommand = useUserBash((s) => s.addUserBashCommand)
 
   const handleSubmit = () => {
-    if (disabled) return
     if (!prompt.trim() && imageAttachments.length === 0) return
 
     pendingVoiceAutoSubmitRef.current = false
@@ -572,7 +578,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }
 
   const handleVoicePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if ((event.pointerType === 'mouse' && event.button !== 0) || disabled || isProcessing || !isRecording) {
+    if ((event.pointerType === 'mouse' && event.button !== 0) || isProcessing || !isRecording) {
       return
     }
 
@@ -1196,7 +1202,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
         <button
           type="button"
           onClick={handleVoiceClick}
-          disabled={disabled || isProcessing}
+          disabled={isProcessing}
           className={buttonClassName}
           title={voiceButtonTitle}
         >
@@ -1245,7 +1251,6 @@ return (
       {showStopButton && (
         <button
           onClick={handleStop}
-          disabled={disabled}
           className="border  fixed bottom-19 right-0 md:hidden z-50 p-3 rounded-xl transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 shadow-lg shadow-red-500/30"
           title="Stop"
         >
@@ -1267,7 +1272,6 @@ return (
             ? "Enter bash command..."
             : "Send a message..."
         }
-        disabled={disabled}
         className={`w-full bg-muted/50 pl-2 md:pl-3 pr-3 py-2 text-[16px] text-foreground placeholder-muted-foreground focus:outline-none focus:bg-muted/70 resize-none min-h-[40px] max-h-[120px] disabled:opacity-50 disabled:cursor-not-allowed md:text-sm rounded-lg [field-sizing:content] ${
           isBashMode
             ? 'border-purple-500/50 bg-purple-500/5 focus:bg-purple-500/10'
@@ -1324,7 +1328,6 @@ return (
                 currentAgent={currentMode}
                 onAgentChange={handleAgentChange}
                 isBashMode={isBashMode}
-                disabled={disabled}
               />
               {isSessionActive ? (
               <div className="px-2.5 py-1.5 md:px-3 md:py-2 rounded-lg text-xs md:text-sm font-medium text-muted-foreground max-w-[120px] md:max-w-[180px]">
@@ -1363,7 +1366,6 @@ return (
 {showStopButton && (
             <button
               onClick={handleStop}
-              disabled={disabled}
               className="hidden md:block p-1.5 px-5 md:p-2 md:px-6 rounded-lg transition-all duration-200 active:scale-95 hover:scale-105 bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/40 ring-1 ring-red-500/20 hover:ring-red-500/30"
               title="Stop"
             >
@@ -1394,7 +1396,7 @@ return (
             <button
               data-submit-prompt
               onClick={hasPendingPermissionForSession ? () => setShowDialog(true) : handleSubmit}
-              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || disabled || (isPromptSubmitPending && !isStreamingResponse))}
+              disabled={hasPendingPermissionForSession ? false : ((!prompt.trim() && imageAttachments.length === 0) || (isPromptSubmitPending && !isStreamingResponse))}
               className={`px-4 md:px-5 py-1.5 md:py-2 rounded-lg text-sm font-medium transition-colors dark:border flex-shrink-0 min-w-[52px] ${
                 hasPendingPermissionForSession
                   ? 'bg-orange-500 hover:bg-orange-600 border-orange-400 text-primary-foreground ring-orange-500/20'
