@@ -1,16 +1,24 @@
-import { spawnSync } from 'child_process'
+import { spawnSync, type SpawnSyncReturns } from 'child_process'
 import { copyFileSync, existsSync, rmSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
+function spawnGit(
+  cwd: string,
+  args: string[],
+  opts: { input?: string; env?: NodeJS.ProcessEnv } = {},
+): SpawnSyncReturns<string> {
+  return spawnSync('git', args, { cwd, input: opts.input, encoding: 'utf-8', env: opts.env ?? process.env })
+}
+
 function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.env): string | null {
-  const res = spawnSync('git', args, { cwd, encoding: 'utf-8', env })
+  const res = spawnGit(cwd, args, { env })
   if (res.status !== 0) return null
   return (res.stdout ?? '').trim()
 }
 
 function gitRaw(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.env): string | null {
-  const res = spawnSync('git', args, { cwd, encoding: 'utf-8', env })
+  const res = spawnGit(cwd, args, { env })
   if (res.status !== 0) return null
   return res.stdout ?? ''
 }
@@ -21,7 +29,7 @@ export function runGit(
   input?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const res = spawnSync('git', args, { cwd, input, encoding: 'utf-8', env })
+  const res = spawnGit(cwd, args, { input, env })
   if (res.status !== 0) {
     const stderr = (res.stderr ?? '').trim()
     throw new Error(`git ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`)

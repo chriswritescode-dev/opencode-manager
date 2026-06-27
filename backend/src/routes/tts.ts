@@ -10,10 +10,7 @@ import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   normalizeToBaseUrl,
   discoverModelsCached,
-  ensureDiscoveryCacheDir,
-  getCachedDiscovery,
-  cacheDiscovery,
-  generateDiscoveryCacheKey,
+  discoverCached,
 } from '../utils/discovery-cache'
 
 const TTS_CACHE_DIR = join(getWorkspacePath(), 'cache', 'tts')
@@ -396,35 +393,25 @@ export function createTTSRoutes(db: Database) {
         return c.json({ error: 'TTS not configured' }, 400)
       }
       
-      const cacheKey = generateDiscoveryCacheKey(ttsConfig.endpoint, ttsConfig.apiKey, 'voices')
-      
-      // Check cache first (unless force refresh)
-      if (!forceRefresh) {
-        const cachedVoices = await getCachedDiscovery<string[]>(cacheKey)
-        if (cachedVoices) {
-          logger.info(`Voices cache hit for user ${userId}`)
-          return c.json({ voices: cachedVoices, cached: true })
-        }
+      const { value: voices, cached } = await discoverCached({
+        baseUrl: ttsConfig.endpoint,
+        apiKey: ttsConfig.apiKey,
+        type: 'voices',
+        forceRefresh,
+        fetcher: () => fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey),
+      })
+
+      if (!cached) {
+        await settingsService.updateSettings({
+          tts: {
+            ...ttsConfig,
+            availableVoices: voices,
+            lastVoicesFetch: Date.now(),
+          },
+        }, userId)
       }
-      
-      // Fetch from API
-      await ensureDiscoveryCacheDir()
-      logger.info(`Fetching TTS voices for user ${userId}`)
-      
-      const voices = await fetchAvailableVoices(ttsConfig.endpoint, ttsConfig.apiKey)
-      await cacheDiscovery(cacheKey, voices)
-      
-      // Update user preferences with available voices
-      await settingsService.updateSettings({
-        tts: {
-          ...ttsConfig,
-          availableVoices: voices,
-          lastVoicesFetch: Date.now()
-        }
-      }, userId)
-      
-      logger.info(`Fetched ${voices.length} TTS voices`)
-      return c.json({ voices, cached: false })
+
+      return c.json({ voices, cached })
     } catch (error) {
       logger.error('Failed to fetch TTS voices:', error)
       return c.json({ error: 'Failed to fetch voices' }, 500)
