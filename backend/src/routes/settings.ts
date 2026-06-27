@@ -25,11 +25,7 @@ import {
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
 import {
-  fetchAvailableModels,
-  generateDiscoveryCacheKey,
-  getCachedDiscovery,
-  cacheDiscovery,
-  ensureDiscoveryCacheDir,
+  discoverModelsCached,
 } from '../utils/discovery-cache'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
@@ -1904,22 +1900,17 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       }
 
       const trimmedBaseUrl = baseUrl.trim()
-      const cacheKey = generateDiscoveryCacheKey(trimmedBaseUrl, apiKey, 'opencode-models')
 
-      if (!forceRefresh) {
-        const cachedModels = await getCachedDiscovery<string[]>(cacheKey)
-        if (cachedModels) {
-          return c.json({ models: cachedModels, cached: true })
-        }
-      }
+      const { models, cached } = await discoverModelsCached({
+        baseUrl: trimmedBaseUrl,
+        apiKey,
+        type: 'opencode-models',
+        filterPattern: /.*/,
+        defaultModels: [],
+        forceRefresh,
+      })
 
-      await ensureDiscoveryCacheDir()
-      logger.info(`Discovering OpenCode models from ${trimmedBaseUrl}`)
-
-      const models = await fetchAvailableModels(trimmedBaseUrl, apiKey, /.*/, [])
-      await cacheDiscovery(cacheKey, models)
-
-      return c.json({ models, cached: false })
+      return c.json({ models, cached })
     } catch (error) {
       logger.error('Failed to discover OpenCode models:', error)
       return c.json({ error: 'Failed to discover models' }, 500)

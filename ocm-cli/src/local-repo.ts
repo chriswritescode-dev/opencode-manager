@@ -15,6 +15,20 @@ function gitRaw(cwd: string, args: string[], env: NodeJS.ProcessEnv = process.en
   return res.stdout ?? ''
 }
 
+export function runGit(
+  cwd: string,
+  args: string[],
+  input?: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const res = spawnSync('git', args, { cwd, input, encoding: 'utf-8', env })
+  if (res.status !== 0) {
+    const stderr = (res.stderr ?? '').trim()
+    throw new Error(`git ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`)
+  }
+  return res.stdout ?? ''
+}
+
 export function getRepoRoot(cwd: string): string | null {
   return git(cwd, ['rev-parse', '--show-toplevel'])
 }
@@ -49,7 +63,7 @@ export function getBranchName(dir: string): string | null {
   return branch && branch !== 'HEAD' ? branch : null
 }
 
-export function getWorkingTreeDiff(dir: string): string {
+function getWorkingTreeDiff(dir: string): string {
   return gitRaw(dir, ['diff', '--binary', 'HEAD', '--']) ?? ''
 }
 

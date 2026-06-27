@@ -1,10 +1,11 @@
 import { spawnSync, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { createWriteStream, existsSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { Readable } from 'stream'
+import { pipeline } from 'stream/promises'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-import { getRepoRoot, getOriginUrl, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, urlsEqual } from './local-repo.js'
+import { getRepoRoot, getOriginUrl, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, urlsEqual, runGit } from './local-repo.js'
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
 
@@ -325,15 +326,6 @@ function applyPatch(repoRoot: string, patch: string): void {
   }
 }
 
-function runGit(repoRoot: string, args: string[], input?: string): string {
-  const res = spawnSync('git', args, { cwd: repoRoot, input, encoding: 'utf-8' })
-  if (res.status !== 0) {
-    const stderr = (res.stderr ?? '').trim()
-    throw new Error(`git ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`)
-  }
-  return res.stdout ?? ''
-}
-
 async function createLocalBundle(repoRoot: string): Promise<string> {
   const bundlePath = join(tmpdir(), `ocm-bundle-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
   runGit(repoRoot, ['bundle', 'create', bundlePath, '--all'])
@@ -343,6 +335,7 @@ async function createLocalBundle(repoRoot: string): Promise<string> {
 function importLocalBundle(repoRoot: string, bundlePath: string, branch: string | null): void {
   runGit(repoRoot, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
   const refs = runGit(repoRoot, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
+  const updates: string[] = []
   for (const line of refs.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -351,7 +344,10 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
     const name = trimmed.slice(0, firstSpace)
     if (name === 'HEAD') continue
     const sha = trimmed.slice(firstSpace + 1)
-    runGit(repoRoot, ['update-ref', `refs/heads/${name}`, sha])
+    updates.push(`update refs/heads/${name} ${sha}\n`)
+  }
+  if (updates.length > 0) {
+    runGit(repoRoot, ['update-ref', '--stdin'], updates.join(''))
   }
 
   if (branch) {
@@ -360,20 +356,24 @@ function importLocalBundle(repoRoot: string, bundlePath: string, branch: string 
     if (head) runGit(repoRoot, ['reset', '--hard', head])
   }
 
-  const syncRefs = runGit(repoRoot, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync'])
-  for (const ref of syncRefs.split('\n').map((line) => line.trim()).filter(Boolean)) {
-    runGit(repoRoot, ['update-ref', '-d', ref])
+  try {
+    const syncRefsOut = runGit(repoRoot, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync'])
+    const deletes = syncRefsOut.split('\n').map((l) => l.trim()).filter(Boolean).map((ref) => `delete ${ref}\n`)
+    if (deletes.length > 0) {
+      runGit(repoRoot, ['update-ref', '--stdin'], deletes.join(''))
+    }
+  } catch {
+    // cleanup of ocm-sync refs is best-effort
   }
 }
 
 async function writeBundleStream(repoId: number, api: ManagerApi): Promise<string> {
   const bundlePath = join(tmpdir(), `ocm-bundle-down-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
   const stream = await api.mirrorDownloadBundle(repoId)
-  const chunks: Buffer[] = []
-  for await (const chunk of Readable.fromWeb(stream as unknown as Parameters<typeof Readable.fromWeb>[0]) as AsyncIterable<Buffer>) {
-    chunks.push(Buffer.from(chunk))
-  }
-  await fsp.writeFile(bundlePath, Buffer.concat(chunks))
+  await pipeline(
+    Readable.fromWeb(stream as unknown as Parameters<typeof Readable.fromWeb>[0]),
+    createWriteStream(bundlePath),
+  )
   return bundlePath
 }
 
@@ -413,20 +413,4 @@ export async function mirrorDownFast(
   }
 }
 
-export async function mirrorDownPatch(
-  repoId: number,
-  repoRoot: string,
-  api: ManagerApi,
-  opts: { force: boolean } = { force: false },
-): Promise<void> {
-  if (!opts.force && getDirtyPaths(repoRoot).size > 0) {
-    throw new MirrorAbort('working tree has uncommitted changes; rerun with --force')
-  }
 
-  const snapshot = await api.mirrorPatchSnapshot(repoId)
-  const localHead = getHeadSha(repoRoot)
-  if (snapshot.head && localHead && snapshot.head !== localHead) {
-    throw new MirrorAbort('local HEAD differs from Manager HEAD; falling back to full mirror')
-  }
-  applyPatch(repoRoot, snapshot.patch)
-}

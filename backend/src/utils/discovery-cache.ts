@@ -103,3 +103,27 @@ export async function fetchAvailableModels(
 
   return defaultModels
 }
+
+export async function discoverModelsCached(opts: {
+  baseUrl: string
+  apiKey: string
+  type: string
+  filterPattern: RegExp
+  defaultModels: string[]
+  forceRefresh: boolean
+}): Promise<{ models: string[]; cached: boolean }> {
+  const cacheKey = generateDiscoveryCacheKey(opts.baseUrl, opts.apiKey, opts.type)
+
+  if (!opts.forceRefresh) {
+    const cached = await getCachedDiscovery<string[]>(cacheKey)
+    if (cached) return { models: cached, cached: true }
+  }
+
+  await ensureDiscoveryCacheDir()
+  logger.info(`Discovering ${opts.type} models from ${opts.baseUrl}`)
+
+  const models = await fetchAvailableModels(opts.baseUrl, opts.apiKey, opts.filterPattern, opts.defaultModels)
+  await cacheDiscovery(cacheKey, models)
+
+  return { models, cached: false }
+}

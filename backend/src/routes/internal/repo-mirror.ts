@@ -19,6 +19,7 @@ import {
   readUploadMeta,
   deleteUploadSession,
   getPartPath,
+  getStagingRoot,
   extractPartsToStaging,
   atomicSwapIntoPlace,
   carryOverIgnoredFiles,
@@ -96,6 +97,7 @@ async function applyMirrorPatch(fullPath: string, patch: string): Promise<void> 
 async function importBundle(fullPath: string, bundlePath: string, branch: string | null): Promise<void> {
   await gitRaw(fullPath, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
   const refs = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
+  const updates: string[] = []
   for (const line of refs.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed) continue
@@ -104,7 +106,10 @@ async function importBundle(fullPath: string, bundlePath: string, branch: string
     const name = trimmed.slice(0, firstSpace)
     if (name === 'HEAD') continue
     const sha = trimmed.slice(firstSpace + 1)
-    await gitRaw(fullPath, ['update-ref', `refs/heads/${name}`, sha])
+    updates.push(`update refs/heads/${name} ${sha}\n`)
+  }
+  if (updates.length > 0) {
+    await gitRaw(fullPath, ['update-ref', '--stdin'], process.env, updates.join(''))
   }
 
   if (branch) {
@@ -113,17 +118,15 @@ async function importBundle(fullPath: string, bundlePath: string, branch: string
     if (head) await gitRaw(fullPath, ['reset', '--hard', head])
   }
 
-  await gitRaw(fullPath, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync'])
-    .then(async (out) => {
-      for (const ref of out.split('\n').map((line) => line.trim()).filter(Boolean)) {
-        await gitRaw(fullPath, ['update-ref', '-d', ref])
-      }
-    })
-    .catch(() => {})
+  const syncRefsOut = await gitRaw(fullPath, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync']).catch(() => '')
+  const deletes = syncRefsOut.split('\n').map((l) => l.trim()).filter(Boolean).map((ref) => `delete ${ref}\n`)
+  if (deletes.length > 0) {
+    await gitRaw(fullPath, ['update-ref', '--stdin'], process.env, deletes.join('')).catch(() => {})
+  }
 }
 
 async function createBundle(fullPath: string): Promise<string> {
-  const stagingRoot = join(getReposPath(), '.ocm-staging')
+  const stagingRoot = getStagingRoot()
   mkdirSync(stagingRoot, { recursive: true })
   const bundleDir = mkdtempSync(join(stagingRoot, 'bundle-'))
   const bundlePath = join(bundleDir, 'repo.bundle')
@@ -338,7 +341,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     const rawBody = c.req.raw.body
     if (!rawBody) return c.json({ error: 'no body provided' }, 400)
 
-    const stagingRoot = join(getReposPath(), '.ocm-staging')
+    const stagingRoot = getStagingRoot()
     mkdirSync(stagingRoot, { recursive: true })
     const bundleDir = mkdtempSync(join(stagingRoot, 'bundle-upload-'))
     const bundlePath = join(bundleDir, 'repo.bundle')
@@ -460,7 +463,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     try {
       const ignored = await gitOut(fullPath, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])
       if (ignored.trim()) {
-        const excludeParent = join(getReposPath(), '.ocm-staging')
+        const excludeParent = getStagingRoot()
         mkdirSync(excludeParent, { recursive: true })
         ignoreFile = mkdtempSync(join(excludeParent, 'exclude-'))
         writeFileSync(join(ignoreFile, '.gitignore'), ignored)
