@@ -155,11 +155,11 @@ export class ManagerApi {
     const query = opts.force === true ? '?force=1' : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
-    const ab = bundle.buffer.slice(bundle.byteOffset, bundle.byteOffset + bundle.byteLength)
+    const body = new Uint8Array(bundle.buffer, bundle.byteOffset, bundle.byteLength)
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
       method: 'POST',
       headers,
-      body: ab as ArrayBuffer,
+      body: body as BodyInit,
     })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror bundle upload')

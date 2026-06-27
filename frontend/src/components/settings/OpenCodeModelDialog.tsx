@@ -418,6 +418,11 @@ export function OpenCodeModelDialog({
     return availableProviders.map((p: string) => ({ value: p, label: existingProviders?.[p]?.name || p }))
   }, [availableProviders, existingProviders])
 
+  const discoveredModelOptions = useMemo(
+    () => discoveredModels.map((m) => ({ value: m, label: m })),
+    [discoveredModels],
+  )
+
   const isEditing = !!editingModel
 
   if (!open) return null
@@ -575,7 +580,7 @@ export function OpenCodeModelDialog({
                             handleDiscoveredModelSelect(value)
                           }
                         }}
-                        options={discoveredModels.map((m) => ({ value: m, label: m }))}
+                        options={discoveredModelOptions}
                         placeholder="e.g., MiniMax-M2.7"
                         disabled={isLoadingModels}
                         allowCustomValue={true}
