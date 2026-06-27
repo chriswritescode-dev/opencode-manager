@@ -230,7 +230,7 @@ export function SourceControlPanel({
             />
           )}
           {activeTab === 'commits' && currentView === 'default' && (
-            <CommitsTab repoId={repoId} onSelectCommit={handleSelectCommit} />
+            <CommitsTab repoId={repoId} branch={displayBranch} onSelectCommit={handleSelectCommit} />
           )}
           {activeTab === 'branches' && currentView === 'default' && (
             <BranchesTab repoId={repoId} currentBranch={displayBranch} />

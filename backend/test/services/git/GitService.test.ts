@@ -436,6 +436,16 @@ describe('GitService', () => {
       const result = await service.getLog(1, database, 10)
 
       expect(getRepoByIdMock).toHaveBeenCalledWith(database, 1)
+      expect(executeCommandMock).toHaveBeenNthCalledWith(1, [
+        'git',
+        '-C',
+        '/path/to/repo',
+        'log',
+        'HEAD',
+        '-n',
+        '10',
+        '--format=%H|%an|%ae|%at|%s'
+      ], { env: {} })
       expect(result).toHaveLength(2)
       expect(result[0]).toEqual({
         hash: 'abc123',
@@ -466,6 +476,50 @@ describe('GitService', () => {
       const result = await service.getLog(1, database, 10)
 
       expect(result).toEqual([])
+    })
+
+    it('uses the requested branch when provided', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValueOnce('').mockResolvedValueOnce('')
+
+      await service.getLog(1, database, 10, 'feature/test')
+
+      expect(executeCommandMock).toHaveBeenNthCalledWith(1, [
+        'git',
+        '-C',
+        '/path/to/repo',
+        'log',
+        'feature/test',
+        '-n',
+        '10',
+        '--format=%H|%an|%ae|%at|%s'
+      ], { env: {} })
+    })
+
+    it('falls back to HEAD for blank branch values', async () => {
+      const mockRepo = {
+        id: 1,
+        fullPath: '/path/to/repo',
+      }
+      getRepoByIdMock.mockReturnValue(mockRepo as any)
+      executeCommandMock.mockResolvedValueOnce('').mockResolvedValueOnce('')
+
+      await service.getLog(1, database, 10, '   ')
+
+      expect(executeCommandMock).toHaveBeenNthCalledWith(1, [
+        'git',
+        '-C',
+        '/path/to/repo',
+        'log',
+        'HEAD',
+        '-n',
+        '10',
+        '--format=%H|%an|%ae|%at|%s'
+      ], { env: {} })
     })
   })
 
