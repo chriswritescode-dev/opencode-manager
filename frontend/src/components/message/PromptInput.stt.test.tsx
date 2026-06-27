@@ -139,7 +139,6 @@ describe('PromptInput STT Gesture Tests', () => {
     directory: '/test',
     sessionID: 'test-session',
     repoId: 1,
-    disabled: false,
     showScrollButton: false,
     isSessionActive: false,
     isStreamingResponse: false,
