@@ -366,6 +366,43 @@ describe('PromptInput STT Gesture Tests', () => {
       })
     })
 
+    it('clears the restored prompt when the send error resolves', async () => {
+      const queryClient = createTestQueryClient()
+      mocks.useSendErrorStore.mockImplementation((selector) => selector({
+        errors: {
+          'test-session': {
+            sessionID: 'test-session',
+            title: 'Connection Failed',
+            message: 'Could not connect.',
+            failedPrompt: 'recovered prompt',
+            kind: 'network',
+          },
+        },
+      }))
+
+      const { rerender } = render(
+        <QueryClientProvider client={queryClient}>
+          <PromptInput {...defaultProps} />
+        </QueryClientProvider>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('recovered prompt')
+      })
+
+      mocks.useSendErrorStore.mockImplementation((selector) => selector({ errors: {} }))
+
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <PromptInput {...defaultProps} />
+        </QueryClientProvider>,
+      )
+
+      await waitFor(() => {
+        expect(screen.getByPlaceholderText('Send a message...')).toHaveValue('')
+      })
+    })
+
     it('keeps stop available while active with prompt content', async () => {
       render(
         <QueryClientProvider client={createTestQueryClient()}>

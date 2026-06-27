@@ -506,6 +506,7 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         message: parsed.message,
         detail: error instanceof FetchError ? error.detail : undefined,
         failedPrompt: failedPrompt || undefined,
+        kind: 'network',
       });
     },
     onSuccess: async (data, variables) => {

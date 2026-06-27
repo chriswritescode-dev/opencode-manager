@@ -38,6 +38,7 @@ describe('useSendErrorStore', () => {
       title: 'Error',
       message: 'Failed',
       failedPrompt: 'queued message',
+      kind: 'session',
     })
     expect(useSendErrorStore.getState().queuedPrompts['session-1']).toBeUndefined()
   })
@@ -50,5 +51,18 @@ describe('useSendErrorStore', () => {
     })
 
     expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+  })
+
+  it('clearNetworkError retracts a network error', () => {
+    useSendErrorStore.getState().setError({ sessionID: 'session-1', title: 'Error', message: 'msg', kind: 'network' })
+    useSendErrorStore.getState().clearNetworkError('session-1')
+    expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+  })
+
+  it('clearNetworkError preserves a server-reported session error', () => {
+    useSendErrorStore.getState().setQueuedPrompt('session-1', 'queued message')
+    useSendErrorStore.getState().failQueuedPrompt({ sessionID: 'session-1', title: 'Error', message: 'Failed' })
+    useSendErrorStore.getState().clearNetworkError('session-1')
+    expect(useSendErrorStore.getState().getError('session-1')).not.toBeNull()
   })
 })
