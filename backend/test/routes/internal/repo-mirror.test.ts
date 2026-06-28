@@ -238,6 +238,70 @@ describe('internal-repo-mirror routes', () => {
     })
   })
 
+  describe('GET /:repoId/mirror/head', () => {
+    it('returns head, branch and dirty state for the manager repo', async () => {
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockSafeGitOut.mockImplementation((_path: string, args: string[]) => {
+        if (args[0] === 'rev-parse' && args[1] === '--abbrev-ref') return Promise.resolve('feature\n')
+        if (args[0] === 'rev-parse') return Promise.resolve('abc123\n')
+        if (args[0] === 'status') return Promise.resolve(' M file.txt\n')
+        return Promise.resolve(null)
+      })
+
+      const res = await app.request('/api/internal/repos/7/mirror/head')
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { head: string; branch: string; dirty: boolean }
+      expect(json.head).toBe('abc123')
+      expect(json.branch).toBe('feature')
+      expect(json.dirty).toBe(true)
+    })
+
+    it('reports a clean repo as not dirty', async () => {
+      mockGetRepoById.mockReturnValue({ id: 8, fullPath: join(getTmpRoot(), 'repo8') })
+      mockSafeGitOut.mockImplementation((_path: string, args: string[]) => {
+        if (args[0] === 'status') return Promise.resolve('')
+        return Promise.resolve('abc123\n')
+      })
+
+      const res = await app.request('/api/internal/repos/8/mirror/head')
+      const json = (await res.json()) as { dirty: boolean }
+      expect(json.dirty).toBe(false)
+    })
+
+    it('returns 404 for a non-existent repo', async () => {
+      mockGetRepoById.mockReturnValue(null)
+      const res = await app.request('/api/internal/repos/99999/mirror/head')
+      expect(res.status).toBe(404)
+    })
+  })
+
+  describe('GET /:repoId/mirror/contains/:sha', () => {
+    it('returns contained=true when local sha is an ancestor of server HEAD', async () => {
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockSafeGitOut.mockResolvedValue('')
+
+      const res = await app.request('/api/internal/repos/7/mirror/contains/abc1234')
+      expect(res.status).toBe(200)
+      const json = (await res.json()) as { contained: boolean }
+      expect(json.contained).toBe(true)
+    })
+
+    it('returns contained=false when ancestry check fails (sha not in server history)', async () => {
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      mockSafeGitOut.mockResolvedValue(null)
+
+      const res = await app.request('/api/internal/repos/7/mirror/contains/abc1234')
+      const json = (await res.json()) as { contained: boolean }
+      expect(json.contained).toBe(false)
+    })
+
+    it('rejects a malformed sha with 400', async () => {
+      mockGetRepoById.mockReturnValue({ id: 7, fullPath: join(getTmpRoot(), 'repo7') })
+      const res = await app.request('/api/internal/repos/7/mirror/contains/not-a-sha')
+      expect(res.status).toBe(400)
+    })
+  })
+
   describe('patch sync flow', () => {
     it('imports a git bundle into an existing manager repo', async () => {
       const sourceDir = join(getTmpRoot(), 'bundle-source')

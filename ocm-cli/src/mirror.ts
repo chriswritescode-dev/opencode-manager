@@ -5,7 +5,7 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, runGit } from './local-repo.js'
+import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, runGit, hasCommit, isAncestor, countCommitsAhead } from './local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
@@ -67,6 +67,56 @@ export async function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): 
   const matched = remotes.filter((r) => r.projectId && r.projectId === localProjectId)
 
   return { repoRoot, localProjectId, matched }
+}
+
+export interface PushDivergence {
+  serverHead: string | null
+  serverBranch: string | null
+  serverDirty: boolean
+  diverged: boolean
+  lostCommits: number
+}
+
+export async function checkPushDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PushDivergence> {
+  const info = await api.mirrorHead(repoId)
+  const { head: serverHead, branch: serverBranch, dirty: serverDirty } = info
+  const localHead = getHeadSha(repoRoot)
+
+  if (!serverHead || serverHead === localHead) {
+    return { serverHead, serverBranch, serverDirty, diverged: false, lostCommits: 0 }
+  }
+  if (!hasCommit(repoRoot, serverHead)) {
+    return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits: -1 }
+  }
+  if (localHead && isAncestor(repoRoot, serverHead, localHead)) {
+    return { serverHead, serverBranch, serverDirty, diverged: false, lostCommits: 0 }
+  }
+  const lostCommits = localHead ? countCommitsAhead(repoRoot, localHead, serverHead) : -1
+  return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits }
+}
+
+export interface PullDivergence {
+  diverged: boolean
+  lostCommits: number
+  serverHead: string | null
+}
+
+export async function checkPullDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PullDivergence> {
+  const localHead = getHeadSha(repoRoot)
+  if (!localHead) return { diverged: false, lostCommits: 0, serverHead: null }
+
+  const { contained } = await api.mirrorContains(repoId, localHead)
+  if (contained) return { diverged: false, lostCommits: 0, serverHead: null }
+
+  let serverHead: string | null = null
+  let lostCommits = -1
+  try {
+    serverHead = (await api.mirrorHead(repoId)).head
+    if (serverHead) lostCommits = countCommitsAhead(repoRoot, serverHead, localHead)
+  } catch {
+    // best-effort: count is informational only
+  }
+  return { diverged: true, lostCommits, serverHead }
 }
 
 export interface MirrorProgress {
@@ -385,8 +435,7 @@ export async function mirrorUpFast(
   const repoId = plan.matched[0]!.repoId
   const bundlePath = await createLocalBundle(plan.repoRoot)
   try {
-    const bundle = await fsp.readFile(bundlePath)
-    await opts.api.mirrorUploadBundle(repoId, bundle, { branch: getBranchName(plan.repoRoot), force: opts.force })
+    await opts.api.mirrorUploadBundle(repoId, bundlePath, { branch: getBranchName(plan.repoRoot), force: opts.force })
     const patchResult = await mirrorUpPatch(plan, opts)
     return { repoId: patchResult.repoId, branch: patchResult.branch, head: patchResult.head, created: false }
   } finally {

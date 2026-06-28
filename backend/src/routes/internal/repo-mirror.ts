@@ -372,6 +372,37 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     }
   })
 
+  app.get('/:repoId/mirror/head', async (c) => {
+    const repoIdRaw = c.req.param('repoId')
+    const repoId = Number(repoIdRaw)
+    if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
+    const repo = getRepoById(db, repoId)
+    if (!repo) return c.json({ error: 'repo not found' }, 404)
+
+    const branchName = await safeGitOut(repo.fullPath, ['rev-parse', '--abbrev-ref', 'HEAD'])
+    const head = await safeGitOut(repo.fullPath, ['rev-parse', 'HEAD'])
+    const status = await safeGitOut(repo.fullPath, ['status', '--porcelain', '--untracked-files=all'])
+    return c.json({
+      repoId: repo.id,
+      branch: branchName?.trim() || null,
+      head: head?.trim() || null,
+      dirty: (status?.trim().length ?? 0) > 0,
+    })
+  })
+
+  app.get('/:repoId/mirror/contains/:sha', async (c) => {
+    const repoIdRaw = c.req.param('repoId')
+    const repoId = Number(repoIdRaw)
+    if (!Number.isFinite(repoId)) return c.json({ error: 'invalid repoId' }, 400)
+    const sha = c.req.param('sha')
+    if (!/^[0-9a-f]{7,64}$/i.test(sha)) return c.json({ error: 'invalid sha' }, 400)
+    const repo = getRepoById(db, repoId)
+    if (!repo) return c.json({ error: 'repo not found' }, 404)
+
+    const ancestry = await safeGitOut(repo.fullPath, ['merge-base', '--is-ancestor', sha, 'HEAD'])
+    return c.json({ repoId: repo.id, contained: ancestry !== null })
+  })
+
   app.get('/:repoId/mirror/patch', async (c) => {
     const repoIdRaw = c.req.param('repoId')
     const repoId = Number(repoIdRaw)

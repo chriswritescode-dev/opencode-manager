@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, checkPushDivergence, checkPullDivergence } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 
@@ -569,6 +569,166 @@ describe('mirrorUp chunked upload', () => {
     const combined = Buffer.concat(ctx.partsReceived)
     expect(combined[0]).toBe(0x1f)
     expect(combined[1]).toBe(0x8b)
+  })
+})
+
+describe('checkPushDivergence', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-divergence-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commit(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `add ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  const apiWith = (head: string | null, dirty = false) => ({
+    mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head, dirty }),
+  }) as any
+
+  it('reports no divergence when server head equals local head', async () => {
+    const repoRoot = initRepo('equal')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(head), 1)
+    expect(result.diverged).toBe(false)
+    expect(result.lostCommits).toBe(0)
+  })
+
+  it('reports no divergence (fast-forward) when server head is an ancestor of local head', async () => {
+    const repoRoot = initRepo('ff')
+    const first = commit(repoRoot, 'a.txt', 'a')
+    commit(repoRoot, 'b.txt', 'b')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(first), 1)
+    expect(result.diverged).toBe(false)
+    expect(result.lostCommits).toBe(0)
+  })
+
+  it('reports divergence with unknown count when server head is not present locally', async () => {
+    const repoRoot = initRepo('unknown')
+    commit(repoRoot, 'a.txt', 'a')
+
+    const result = await checkPushDivergence(repoRoot, apiWith('0000000000000000000000000000000000000000'), 1)
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(-1)
+  })
+
+  it('reports divergence with a count when server head exists but is not an ancestor', async () => {
+    const repoRoot = initRepo('diverged')
+    const base = commit(repoRoot, 'a.txt', 'a')
+    spawnSync('git', ['checkout', '-b', 'server', base], { cwd: repoRoot, stdio: 'ignore' })
+    const serverHead = commit(repoRoot, 'server.txt', 'server-work')
+    spawnSync('git', ['checkout', '-'], { cwd: repoRoot, stdio: 'ignore' })
+    commit(repoRoot, 'local.txt', 'local-work')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(serverHead), 1)
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(1)
+  })
+
+  it('surfaces server dirty state even when histories match', async () => {
+    const repoRoot = initRepo('dirty')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(head, true), 1)
+    expect(result.diverged).toBe(false)
+    expect(result.serverDirty).toBe(true)
+  })
+})
+
+describe('checkPullDivergence', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'pull-divergence-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commit(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `add ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  it('reports no divergence when the server contains the local head (fast-forward pull)', async () => {
+    const repoRoot = initRepo('behind')
+    commit(repoRoot, 'a.txt', 'a')
+
+    const api = { mirrorContains: vi.fn().mockResolvedValue({ contained: true }) } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(false)
+    expect(api.mirrorContains).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports divergence with a count when the server lacks local commits', async () => {
+    const repoRoot = initRepo('ahead')
+    const base = commit(repoRoot, 'a.txt', 'a')
+    commit(repoRoot, 'b.txt', 'b')
+
+    const api = {
+      mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
+      mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: base, dirty: false }),
+    } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(1)
+  })
+
+  it('reports divergence with unknown count when the server head is not present locally', async () => {
+    const repoRoot = initRepo('unknown')
+    commit(repoRoot, 'a.txt', 'a')
+
+    const api = {
+      mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
+      mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: '0000000000000000000000000000000000000000', dirty: false }),
+    } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(-1)
+  })
+
+  it('reports no divergence for an empty local repo with no commits', async () => {
+    const repoRoot = initRepo('empty')
+
+    const api = { mirrorContains: vi.fn() } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(false)
+    expect(api.mirrorContains).not.toHaveBeenCalled()
   })
 })
 

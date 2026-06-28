@@ -70,6 +70,20 @@ export function getHeadSha(dir: string): string | null {
   return git(dir, ['rev-parse', 'HEAD'])
 }
 
+export function hasCommit(dir: string, sha: string): boolean {
+  return git(dir, ['cat-file', '-e', `${sha}^{commit}`]) !== null
+}
+
+export function isAncestor(dir: string, ancestor: string, descendant: string): boolean {
+  return spawnGit(dir, ['merge-base', '--is-ancestor', ancestor, descendant]).status === 0
+}
+
+export function countCommitsAhead(dir: string, from: string, to: string): number {
+  const out = git(dir, ['rev-list', '--count', `${from}..${to}`])
+  const n = out ? Number(out) : NaN
+  return Number.isInteger(n) ? n : -1
+}
+
 export function getMirrorPatch(dir: string): string {
   const untracked = gitRaw(dir, ['ls-files', '--others', '--exclude-standard', '-z'])
     ?.split('\0')

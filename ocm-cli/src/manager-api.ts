@@ -1,3 +1,6 @@
+import { createReadStream } from 'fs'
+import { Readable } from 'stream'
+
 export interface MirrorBeginOpts {
   force?: boolean
   create?: { name: string; originUrl: string | null; branch: string | null }
@@ -32,6 +35,13 @@ export interface MirrorPatchSnapshot {
   branch: string | null
   head: string | null
   patch: string
+}
+
+export interface MirrorHead {
+  repoId: number
+  branch: string | null
+  head: string | null
+  dirty: boolean
 }
 
 export interface MirrorBundleResult {
@@ -151,19 +161,38 @@ export class ManagerApi {
     return (await res.json()) as MirrorPatchResult
   }
 
-  async mirrorUploadBundle(repoId: number, bundle: Buffer, opts: { branch: string | null; force?: boolean }): Promise<MirrorBundleResult> {
+  async mirrorUploadBundle(repoId: number, bundlePath: string, opts: { branch: string | null; force?: boolean }): Promise<MirrorBundleResult> {
     const query = opts.force === true ? '?force=1' : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
-    const body = new Uint8Array(bundle.buffer, bundle.byteOffset, bundle.byteLength)
+    const body = Readable.toWeb(createReadStream(bundlePath)) as ReadableStream<Uint8Array>
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
       method: 'POST',
       headers,
       body: body as BodyInit,
-    })
+      duplex: 'half',
+    } as RequestInit & { duplex: 'half' })
 
     if (!res.ok) throw await formatErrorResponse(res, 'mirror bundle upload')
     return (await res.json()) as MirrorBundleResult
+  }
+
+  async mirrorHead(repoId: number): Promise<MirrorHead> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/head`, {
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'mirror head')
+    return (await res.json()) as MirrorHead
+  }
+
+  async mirrorContains(repoId: number, sha: string): Promise<{ contained: boolean }> {
+    const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/contains/${sha}`, {
+      headers: this.headers(),
+    })
+
+    if (!res.ok) throw await formatErrorResponse(res, 'mirror contains')
+    return (await res.json()) as { repoId: number; contained: boolean }
   }
 
   async mirrorDownloadBundle(repoId: number): Promise<ReadableStream<Uint8Array>> {

@@ -2,9 +2,9 @@ import { spawn, spawnSync } from 'child_process'
 import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
 import { getToken, setToken, deleteToken, KeychainError } from '../src/keychain.js'
-import { ManagerApi } from '../src/manager-api.js'
-import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort } from '../src/mirror.js'
-import type { RemoteRepoSummary, MirrorProgress } from '../src/mirror.js'
+import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
+import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence } from '../src/mirror.js'
+import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
 import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
@@ -13,7 +13,7 @@ import packageJson from '../package.json' with { type: 'json' }
 
 const VERSION = packageJson.version
 
-const USAGE = `ocm - OpenCode Manager workspace launcher
+const USAGE = `ocm v${VERSION} - OpenCode Manager workspace launcher
 
 Usage:
   ocm                       Attach to the Manager repo matching $PWD's git origin,
@@ -61,9 +61,51 @@ function promptYesNo(question: string): boolean {
 
 function confirmFullFallback(): void {
   if (!process.stdin.isTTY) return
-  if (!promptYesNo('Fall back to a full mirror?')) {
+  if (!promptYesNo('Fall back to a full mirror? This replaces the entire server working tree (no merge, no conflict resolution).')) {
     die('aborted')
   }
+}
+
+function confirmOverwrite(headline: string, reasons: string[], question: string, note?: string): boolean {
+  process.stderr.write(`ocm: warning: ${headline}\n`)
+  for (const reason of reasons) process.stderr.write(`  - ${reason}\n`)
+  if (note) process.stderr.write(`  ${note}\n`)
+  if (!process.stdin.isTTY) {
+    die('refusing to discard work; re-run with --force to override')
+  }
+  if (!promptYesNo(question)) {
+    die('aborted')
+  }
+  return true
+}
+
+function guardDivergentPush(repoName: string, div: PushDivergence): boolean {
+  const reasons: string[] = []
+  if (div.diverged) {
+    reasons.push(div.lostCommits >= 0
+      ? `the server is ${div.lostCommits} commit(s) ahead of your local branch`
+      : 'the server has commit(s) not present in your local branch')
+  }
+  if (div.serverDirty) reasons.push('the server has uncommitted changes')
+
+  return confirmOverwrite(
+    `pushing to ${repoName} will discard server-side work:`,
+    reasons,
+    'Overwrite server-side work and push anyway?',
+    'This work is likely from OpenCode agent sessions on the manager.',
+  )
+}
+
+function guardDivergentPull(repoName: string, div: PullDivergence): boolean {
+  const reasons = [div.lostCommits >= 0
+    ? `your local branch is ${div.lostCommits} commit(s) ahead of ${repoName}`
+    : `your local branch has commit(s) not present on ${repoName}`]
+
+  return confirmOverwrite(
+    `pulling ${repoName} will discard local commits:`,
+    reasons,
+    'Discard local commits and pull anyway?',
+  )
 }
 
 function requireState(): OcmState {
@@ -233,6 +275,7 @@ async function cmdUse(args: string[]): Promise<void> {
 }
 
 async function cmdDefault(): Promise<void> {
+  info(`ocm v${VERSION}`)
   const state = requireState()
   const token = requireToken(state)
 
@@ -354,6 +397,16 @@ export async function cmdPush(args: string[]): Promise<void> {
     progress.done()
     info(`pushed ${plan.repoRoot} -> ${result.created ? 'created' : 'updated'} (repoId=${result.repoId}, branch=${result.branch})`)
   } else if (plan.matched.length === 1) {
+    if (!force) {
+      try {
+        const divergence = await checkPushDivergence(plan.repoRoot, api, plan.matched[0]!.repoId)
+        if (divergence.diverged || divergence.serverDirty) {
+          force = guardDivergentPush(plan.matched[0]!.name, divergence)
+        }
+      } catch (error) {
+        if (!(error instanceof ManagerApiError && error.status === 404)) throw error
+      }
+    }
     if (!full) {
       try {
         const result = await mirrorUpFast(plan, { api, force })
@@ -406,6 +459,17 @@ async function cmdPull(args: string[]): Promise<void> {
   if (plan.matched.length > 1) {
     const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
     die(`multiple Manager repos match project ${plan.localProjectId}: ${names}; disambiguate with \`ocm pull <repoId>\``)
+  }
+
+  if (!force) {
+    try {
+      const divergence = await checkPullDivergence(plan.repoRoot, api, plan.matched[0]!.repoId)
+      if (divergence.diverged) {
+        force = guardDivergentPull(plan.matched[0]!.name, divergence)
+      }
+    } catch (error) {
+      if (!(error instanceof ManagerApiError && error.status === 404)) throw error
+    }
   }
 
   if (!full) {
