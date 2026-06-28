@@ -16,11 +16,11 @@ export function normalizeToBaseUrl(endpoint: string): string {
     .replace(/\/$/, '')
 }
 
-export async function ensureDiscoveryCacheDir(): Promise<void> {
+async function ensureDiscoveryCacheDir(): Promise<void> {
   await mkdir(DISCOVERY_CACHE_DIR, { recursive: true })
 }
 
-export async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null> {
+async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null> {
   try {
     const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
     const fileStat = await stat(filePath)
@@ -37,7 +37,7 @@ export async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null>
   }
 }
 
-export async function cacheDiscovery<T>(cacheKey: string, data: T): Promise<void> {
+async function cacheDiscovery<T>(cacheKey: string, data: T): Promise<void> {
   try {
     await ensureDiscoveryCacheDir()
     const filePath = join(DISCOVERY_CACHE_DIR, `${cacheKey}.json`)
@@ -47,13 +47,13 @@ export async function cacheDiscovery<T>(cacheKey: string, data: T): Promise<void
   }
 }
 
-export function generateDiscoveryCacheKey(baseUrl: string, apiKey: string, type: string): string {
+function generateDiscoveryCacheKey(baseUrl: string, apiKey: string, type: string): string {
   const hash = createHash('sha256')
   hash.update(`${baseUrl}|${apiKey}|${type}`)
   return hash.digest('hex')
 }
 
-export async function fetchAvailableModels(
+async function fetchAvailableModels(
   baseUrl: string,
   apiKey: string,
   filterPattern: RegExp,
@@ -102,4 +102,45 @@ export async function fetchAvailableModels(
   }
 
   return defaultModels
+}
+
+export async function discoverCached<T>(opts: {
+  baseUrl: string
+  apiKey: string
+  type: string
+  forceRefresh: boolean
+  fetcher: () => Promise<T>
+}): Promise<{ value: T; cached: boolean }> {
+  const cacheKey = generateDiscoveryCacheKey(opts.baseUrl, opts.apiKey, opts.type)
+
+  if (!opts.forceRefresh) {
+    const cached = await getCachedDiscovery<T>(cacheKey)
+    if (cached) return { value: cached, cached: true }
+  }
+
+  await ensureDiscoveryCacheDir()
+  logger.info(`Discovering ${opts.type} from ${opts.baseUrl}`)
+
+  const value = await opts.fetcher()
+  await cacheDiscovery(cacheKey, value)
+
+  return { value, cached: false }
+}
+
+export async function discoverModelsCached(opts: {
+  baseUrl: string
+  apiKey: string
+  type: string
+  filterPattern: RegExp
+  defaultModels: string[]
+  forceRefresh: boolean
+}): Promise<{ models: string[]; cached: boolean }> {
+  const { value, cached } = await discoverCached({
+    baseUrl: opts.baseUrl,
+    apiKey: opts.apiKey,
+    type: opts.type,
+    forceRefresh: opts.forceRefresh,
+    fetcher: () => fetchAvailableModels(opts.baseUrl, opts.apiKey, opts.filterPattern, opts.defaultModels),
+  })
+  return { models: value, cached }
 }

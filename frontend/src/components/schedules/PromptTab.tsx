@@ -64,7 +64,7 @@ export function PromptTemplateCard({ template, selected = false, onApply, onEdit
       ) : (
         <div className={cardClassName}>{content}</div>
       )}
-      <div className={`absolute top-2 flex gap-1 transition-opacity ${selected || onApply ? 'right-10' : 'right-2'} ${selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+      <div className={`absolute top-2 flex gap-1 transition-opacity ${selected || onApply ? 'right-10' : 'right-2'} ${selected ? 'opacity-100' : 'max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100'}`}>
         <Button
           type="button"
           variant="ghost"

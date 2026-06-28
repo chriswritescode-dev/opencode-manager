@@ -12,12 +12,9 @@ const LAST = {
   branch: 'main',
 }
 
-function gitInit(dir: string, originUrl?: string): void {
+function gitInit(dir: string): void {
   mkdirSync(dir, { recursive: true })
   spawnSync('git', ['init'], { cwd: dir, stdio: 'ignore' })
-  if (originUrl) {
-    spawnSync('git', ['remote', 'add', 'origin', originUrl], { cwd: dir, stdio: 'ignore' })
-  }
 }
 
 describe('resolveTarget', () => {
@@ -31,21 +28,22 @@ describe('resolveTarget', () => {
     rmSync(tmp, { recursive: true, force: true })
   })
 
-  const repo = (id: number, originUrl: string, name = `repo-${id}`): TargetRepo => ({
+  const repo = (id: number, projectId: string, name = `repo-${id}`): TargetRepo => ({
     repoId: id,
     name,
     branch: 'main',
     directory: `/manager/${name}`,
-    originUrl,
+    projectId,
   })
 
-  it('returns cwd-match when $PWD origin matches exactly one Manager repo', () => {
+  it('returns cwd-match when local project id matches exactly one Manager repo', () => {
     const dir = join(tmp, 'work')
-    gitInit(dir, 'https://github.com/me/repo.git')
+    gitInit(dir)
 
     const result = resolveTarget({
       cwd: dir,
-      repos: [repo(1, 'https://github.com/me/repo.git', 'my-repo'), repo(2, 'https://github.com/other/repo.git')],
+      localProjectId: 'project-a',
+      repos: [repo(1, 'project-a', 'my-repo'), repo(2, 'project-b')],
       last: LAST,
     })
 
@@ -56,32 +54,32 @@ describe('resolveTarget', () => {
     }
   })
 
-  it('returns cwd-ambiguous when multiple Manager repos match', () => {
+  it('returns cwd-ambiguous when multiple Manager repos share the project id', () => {
     const dir = join(tmp, 'work')
-    gitInit(dir, 'https://github.com/me/repo.git')
+    gitInit(dir)
 
     const result = resolveTarget({
       cwd: dir,
-      repos: [
-        repo(1, 'https://github.com/me/repo.git', 'a'),
-        repo(2, 'https://github.com/me/repo.git', 'b'),
-      ],
+      localProjectId: 'project-a',
+      repos: [repo(1, 'project-a', 'a'), repo(2, 'project-a', 'b')],
       last: LAST,
     })
 
     expect(result.kind).toBe('cwd-ambiguous')
     if (result.kind === 'cwd-ambiguous') {
       expect(result.matches).toHaveLength(2)
+      expect(result.localProjectId).toBe('project-a')
     }
   })
 
-  it('returns local(no-match) when in a git repo with no origin match (even if last is set)', () => {
+  it('returns local(no-match) in a git repo when no project id matches (even if last is set)', () => {
     const dir = join(tmp, 'work')
-    gitInit(dir, 'https://github.com/me/repo.git')
+    gitInit(dir)
 
     const result = resolveTarget({
       cwd: dir,
-      repos: [repo(1, 'https://github.com/other/repo.git')],
+      localProjectId: 'project-a',
+      repos: [repo(1, 'project-b')],
       last: LAST,
     })
 
@@ -92,13 +90,31 @@ describe('resolveTarget', () => {
     }
   })
 
+  it('returns local(no-match) in a git repo when the local project id cannot be resolved', () => {
+    const dir = join(tmp, 'work')
+    gitInit(dir)
+
+    const result = resolveTarget({
+      cwd: dir,
+      localProjectId: null,
+      repos: [repo(1, 'project-a')],
+      last: LAST,
+    })
+
+    expect(result.kind).toBe('local')
+    if (result.kind === 'local') {
+      expect(result.reason).toBe('no-match')
+    }
+  })
+
   it('returns last when not in a git repo and last is set', () => {
     const dir = join(tmp, 'not-git')
     mkdirSync(dir)
 
     const result = resolveTarget({
       cwd: dir,
-      repos: [repo(1, 'https://github.com/me/repo.git')],
+      localProjectId: null,
+      repos: [repo(1, 'project-a')],
       last: LAST,
     })
 
@@ -114,7 +130,8 @@ describe('resolveTarget', () => {
 
     const result = resolveTarget({
       cwd: dir,
-      repos: [repo(1, 'https://github.com/me/repo.git')],
+      localProjectId: null,
+      repos: [repo(1, 'project-a')],
     })
 
     expect(result.kind).toBe('local')
@@ -122,17 +139,5 @@ describe('resolveTarget', () => {
       expect(result.reason).toBe('no-target')
       expect(result.repoRoot).toBeNull()
     }
-  })
-
-  it('normalises .git suffix when matching origin', () => {
-    const dir = join(tmp, 'work')
-    gitInit(dir, 'https://github.com/me/repo')
-
-    const result = resolveTarget({
-      cwd: dir,
-      repos: [repo(1, 'https://github.com/me/repo.git', 'my-repo')],
-    })
-
-    expect(result.kind).toBe('cwd-match')
   })
 })

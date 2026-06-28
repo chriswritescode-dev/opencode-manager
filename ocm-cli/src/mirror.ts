@@ -1,10 +1,12 @@
 import { spawnSync, spawn } from 'child_process'
-import { existsSync } from 'fs'
+import { createWriteStream, existsSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { Readable } from 'stream'
+import { pipeline } from 'stream/promises'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-import { getRepoRoot, getOriginUrl, getDirtyPaths, urlsEqual } from './local-repo.js'
+import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, runGit, hasCommit, isAncestor, countCommitsAhead } from './local-repo.js'
+import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
 
@@ -45,26 +47,76 @@ export class MirrorAbort extends Error {
 export interface RemoteRepoSummary {
   repoId: number
   name: string
-  originUrl: string | null
+  projectId: string | null
   branch: string | null
 }
 
 export interface MirrorPlan {
   repoRoot: string
-  localOrigin: string
+  localProjectId: string
   matched: RemoteRepoSummary[]
 }
 
-export function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): MirrorPlan {
+export async function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): Promise<MirrorPlan> {
   const repoRoot = getRepoRoot(cwd)
   if (!repoRoot) throw new MirrorAbort('not in a git repository')
 
-  const localOrigin = getOriginUrl(repoRoot)
-  if (!localOrigin) throw new MirrorAbort('no origin URL found')
+  const localProjectId = await resolveOpenCodeProjectId(repoRoot)
+  if (!localProjectId) throw new MirrorAbort('could not resolve an OpenCode project id for this repository')
 
-  const matched = remotes.filter((r) => urlsEqual(localOrigin, r.originUrl))
+  const matched = remotes.filter((r) => r.projectId && r.projectId === localProjectId)
 
-  return { repoRoot, localOrigin, matched }
+  return { repoRoot, localProjectId, matched }
+}
+
+export interface PushDivergence {
+  serverHead: string | null
+  serverBranch: string | null
+  serverDirty: boolean
+  diverged: boolean
+  lostCommits: number
+}
+
+export async function checkPushDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PushDivergence> {
+  const info = await api.mirrorHead(repoId)
+  const { head: serverHead, branch: serverBranch, dirty: serverDirty } = info
+  const localHead = getHeadSha(repoRoot)
+
+  if (!serverHead || serverHead === localHead) {
+    return { serverHead, serverBranch, serverDirty, diverged: false, lostCommits: 0 }
+  }
+  if (!hasCommit(repoRoot, serverHead)) {
+    return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits: -1 }
+  }
+  if (localHead && isAncestor(repoRoot, serverHead, localHead)) {
+    return { serverHead, serverBranch, serverDirty, diverged: false, lostCommits: 0 }
+  }
+  const lostCommits = localHead ? countCommitsAhead(repoRoot, localHead, serverHead) : -1
+  return { serverHead, serverBranch, serverDirty, diverged: true, lostCommits }
+}
+
+export interface PullDivergence {
+  diverged: boolean
+  lostCommits: number
+  serverHead: string | null
+}
+
+export async function checkPullDivergence(repoRoot: string, api: ManagerApi, repoId: number): Promise<PullDivergence> {
+  const localHead = getHeadSha(repoRoot)
+  if (!localHead) return { diverged: false, lostCommits: 0, serverHead: null }
+
+  const { contained } = await api.mirrorContains(repoId, localHead)
+  if (contained) return { diverged: false, lostCommits: 0, serverHead: null }
+
+  let serverHead: string | null = null
+  let lostCommits = -1
+  try {
+    serverHead = (await api.mirrorHead(repoId)).head
+    if (serverHead) lostCommits = countCommitsAhead(repoRoot, serverHead, localHead)
+  } catch {
+    // best-effort: count is informational only
+  }
+  return { diverged: true, lostCommits, serverHead }
 }
 
 export interface MirrorProgress {
@@ -302,3 +354,113 @@ export async function mirrorDown(
     throw error
   }
 }
+
+export async function mirrorUpPatch(
+  plan: MirrorPlan,
+  opts: Pick<MirrorUpOpts, 'api' | 'force'>,
+): Promise<{ repoId: number; fullPath: string; branch: string | null; head: string | null; created: false; applied: true }> {
+  const repoId = plan.matched[0]!.repoId
+  const patch = getMirrorPatch(plan.repoRoot)
+  return opts.api.mirrorPatch(repoId, { baseHead: getHeadSha(plan.repoRoot), patch, force: opts.force })
+}
+
+function applyPatch(repoRoot: string, patch: string): void {
+  if (!patch) return
+  const child = spawnSync('git', ['apply', '--binary', '--whitespace=nowarn', '-'], {
+    cwd: repoRoot,
+    input: patch,
+    encoding: 'utf-8',
+  })
+  if (child.status !== 0) {
+    const stderr = (child.stderr ?? '').trim()
+    throw new Error(`git apply failed${stderr ? `: ${stderr}` : ''}`)
+  }
+}
+
+async function createLocalBundle(repoRoot: string): Promise<string> {
+  const bundlePath = join(tmpdir(), `ocm-bundle-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
+  runGit(repoRoot, ['bundle', 'create', bundlePath, '--all'])
+  return bundlePath
+}
+
+function importLocalBundle(repoRoot: string, bundlePath: string, branch: string | null): void {
+  runGit(repoRoot, ['fetch', bundlePath, '+refs/heads/*:refs/remotes/ocm-sync/*', '+refs/tags/*:refs/tags/*'])
+  const refs = runGit(repoRoot, ['for-each-ref', '--format=%(refname:strip=3) %(objectname)', 'refs/remotes/ocm-sync'])
+  const updates: string[] = []
+  for (const line of refs.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const firstSpace = trimmed.indexOf(' ')
+    if (firstSpace === -1) continue
+    const name = trimmed.slice(0, firstSpace)
+    if (name === 'HEAD') continue
+    const sha = trimmed.slice(firstSpace + 1)
+    updates.push(`update refs/heads/${name} ${sha}\n`)
+  }
+  if (updates.length > 0) {
+    runGit(repoRoot, ['update-ref', '--stdin'], updates.join(''))
+  }
+
+  if (branch) {
+    runGit(repoRoot, ['checkout', branch])
+    const head = runGit(repoRoot, ['rev-parse', `refs/remotes/ocm-sync/${branch}`]).trim()
+    if (head) runGit(repoRoot, ['reset', '--hard', head])
+  }
+
+  try {
+    const syncRefsOut = runGit(repoRoot, ['for-each-ref', '--format=%(refname)', 'refs/remotes/ocm-sync'])
+    const deletes = syncRefsOut.split('\n').map((l) => l.trim()).filter(Boolean).map((ref) => `delete ${ref}\n`)
+    if (deletes.length > 0) {
+      runGit(repoRoot, ['update-ref', '--stdin'], deletes.join(''))
+    }
+  } catch {
+    // cleanup of ocm-sync refs is best-effort
+  }
+}
+
+async function writeBundleStream(repoId: number, api: ManagerApi): Promise<string> {
+  const bundlePath = join(tmpdir(), `ocm-bundle-down-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
+  const stream = await api.mirrorDownloadBundle(repoId)
+  await pipeline(
+    Readable.fromWeb(stream as unknown as Parameters<typeof Readable.fromWeb>[0]),
+    createWriteStream(bundlePath),
+  )
+  return bundlePath
+}
+
+export async function mirrorUpFast(
+  plan: MirrorPlan,
+  opts: Pick<MirrorUpOpts, 'api' | 'force'>,
+): Promise<{ repoId: number; branch: string | null; head: string | null; created: false }> {
+  const repoId = plan.matched[0]!.repoId
+  const bundlePath = await createLocalBundle(plan.repoRoot)
+  try {
+    await opts.api.mirrorUploadBundle(repoId, bundlePath, { branch: getBranchName(plan.repoRoot), force: opts.force })
+    const patchResult = await mirrorUpPatch(plan, opts)
+    return { repoId: patchResult.repoId, branch: patchResult.branch, head: patchResult.head, created: false }
+  } finally {
+    await fsp.rm(bundlePath, { force: true }).catch(() => {})
+  }
+}
+
+export async function mirrorDownFast(
+  repoId: number,
+  repoRoot: string,
+  api: ManagerApi,
+  opts: { force: boolean } = { force: false },
+): Promise<void> {
+  if (!opts.force && getDirtyPaths(repoRoot).size > 0) {
+    throw new MirrorAbort('working tree has uncommitted changes; rerun with --force')
+  }
+
+  const snapshot = await api.mirrorPatchSnapshot(repoId)
+  const bundlePath = await writeBundleStream(repoId, api)
+  try {
+    importLocalBundle(repoRoot, bundlePath, snapshot.branch)
+    applyPatch(repoRoot, snapshot.patch)
+  } finally {
+    await fsp.rm(bundlePath, { force: true }).catch(() => {})
+  }
+}
+
+

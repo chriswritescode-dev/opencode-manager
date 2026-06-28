@@ -1,6 +1,6 @@
 {
   "name": "@opencode-manager/ocm-cli",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "description": "OpenCode Manager CLI: attach a local OpenCode TUI to a Manager-hosted repo.",
   "license": "MIT",
   "repository": {
@@ -26,14 +26,20 @@
     "build": "bun scripts/build.ts",
     "postinstall": "node scripts/postinstall.mjs || true",
     "typecheck": "tsc --noEmit",
+    "lint": "eslint . --ext .ts",
+    "lint:fix": "eslint . --ext .ts --fix",
     "test": "bun scripts/build.ts && vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "bun scripts/build.ts"
   },
   "dependencies": {},
   "devDependencies": {
+    "@eslint/js": "^9.36.0",
+    "@opencode-manager/shared": "workspace:*",
     "@types/node": "^22.0.0",
+    "eslint": "^9.39.1",
     "typescript": "^5.5.0",
+    "typescript-eslint": "^8.45.0",
     "vitest": "^3.1.0"
   }
 }

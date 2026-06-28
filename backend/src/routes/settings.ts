@@ -24,6 +24,9 @@ import {
   type SkillScope,
 } from '@opencode-manager/shared'
 import { logger } from '../utils/logger'
+import {
+  discoverModelsCached,
+} from '../utils/discovery-cache'
 import { opencodeServerManager, ConfigReloadError } from '../services/opencode-single-server'
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
@@ -1873,6 +1876,44 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     } catch (error) {
       logger.error('Failed to rotate manager token:', error)
       return c.json({ error: 'Failed to rotate manager token' }, 500)
+    }
+  })
+
+  app.get('/opencode-discover-models', async (c) => {
+    try {
+      const baseUrl = c.req.query('baseUrl')
+      const apiKey = c.req.query('apiKey') || ''
+      const forceRefresh = c.req.query('refresh') === 'true'
+
+      if (!baseUrl || !baseUrl.trim()) {
+        return c.json({ error: 'baseUrl is required' }, 400)
+      }
+
+      let parsedUrl: URL
+      try {
+        parsedUrl = new URL(baseUrl.trim())
+      } catch {
+        return c.json({ error: 'Invalid baseUrl' }, 400)
+      }
+      if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+        return c.json({ error: 'baseUrl must be an http or https URL' }, 400)
+      }
+
+      const trimmedBaseUrl = baseUrl.trim()
+
+      const { models, cached } = await discoverModelsCached({
+        baseUrl: trimmedBaseUrl,
+        apiKey,
+        type: 'opencode-models',
+        filterPattern: /.*/,
+        defaultModels: [],
+        forceRefresh,
+      })
+
+      return c.json({ models, cached })
+    } catch (error) {
+      logger.error('Failed to discover OpenCode models:', error)
+      return c.json({ error: 'Failed to discover models' }, 500)
     }
   })
 

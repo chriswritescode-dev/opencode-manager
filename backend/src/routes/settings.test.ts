@@ -371,3 +371,82 @@ describe('settings routes — OpenCode directory file upload', () => {
     ])
   })
 })
+
+describe('settings routes — opencode model discovery', () => {
+  let db: Database
+  let app: Hono
+  let originalFetch: typeof globalThis.fetch
+  let fetchMock: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    db = createTestDb()
+    app = createTestApp(db)
+    originalFetch = globalThis.fetch
+    fetchMock = vi.fn()
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    db.close()
+  })
+
+  it('returns 400 when baseUrl is missing', async () => {
+    const res = await app.request('/settings/opencode-discover-models')
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 when baseUrl is invalid', async () => {
+    const res = await app.request('/settings/opencode-discover-models?baseUrl=not-a-url')
+    expect(res.status).toBe(400)
+  })
+
+  it('returns 400 when baseUrl is not http/https', async () => {
+    const res = await app.request('/settings/opencode-discover-models?baseUrl=ftp://example.com')
+    expect(res.status).toBe(400)
+  })
+
+  it('discovers models from the endpoint', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ id: 'gpt-4o' }, { id: 'gpt-3.5-turbo' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    const res = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:1234&refresh=true')
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { models: string[]; cached: boolean }
+    expect(data.models).toEqual(['gpt-4o', 'gpt-3.5-turbo'])
+    expect(data.cached).toBe(false)
+  })
+
+  it('returns cached models on subsequent requests without re-fetching', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: [{ id: 'llama-3' }] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+
+    const firstRes = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:5678&refresh=true')
+    const firstData = (await firstRes.json()) as { models: string[]; cached: boolean }
+    expect(firstData.models).toEqual(['llama-3'])
+    expect(firstData.cached).toBe(false)
+
+    const secondRes = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:5678')
+    const secondData = (await secondRes.json()) as { models: string[]; cached: boolean }
+    expect(secondData.models).toEqual(['llama-3'])
+    expect(secondData.cached).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns empty models when endpoint is unreachable', async () => {
+    fetchMock.mockRejectedValue(new Error('connection refused'))
+
+    const res = await app.request('/settings/opencode-discover-models?baseUrl=http://localhost:9999&refresh=true')
+    expect(res.status).toBe(200)
+    const data = (await res.json()) as { models: string[] }
+    expect(data.models).toEqual([])
+  })
+})

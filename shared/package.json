@@ -15,7 +15,8 @@
     "./config/env": "./src/config/env.ts",
     "./config/client": "./src/config/client.ts",
     "./utils": "./src/utils/index.ts",
-    "./notifications": "./src/notifications/index.ts"
+    "./notifications": "./src/notifications/index.ts",
+    "./project-id": "./src/project-id-resolver.ts"
   },
   "dependencies": {
     "jsonc-parser": "^3.3.1",

@@ -4,7 +4,12 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, checkPushDivergence, checkPullDivergence } from '../src/mirror'
+import { getBranchName } from '../src/local-repo'
+import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
+
+const ME_REPO_ID = gitRemoteProjectId('https://github.com/me/repo.git')!
+const OTHER_REPO_ID = gitRemoteProjectId('https://github.com/other/repo.git')!
 
 describe('prepareMirror', () => {
   let tmpDir: string
@@ -17,53 +22,80 @@ describe('prepareMirror', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('rejects when not in a git repo', () => {
+  it('rejects when not in a git repo', async () => {
     const nonGitDir = join(tmpDir, 'non-git')
     mkdirSync(nonGitDir)
 
-    expect(() => prepareMirror(nonGitDir, [])).toThrow(MirrorAbort)
-    expect(() => prepareMirror(nonGitDir, [])).toThrow('not in a git repository')
+    await expect(prepareMirror(nonGitDir, [])).rejects.toThrow(MirrorAbort)
+    await expect(prepareMirror(nonGitDir, [])).rejects.toThrow('not in a git repository')
   })
 
-  it('rejects when no origin URL found', () => {
+  it('rejects when no project id can be resolved', async () => {
     const gitDir = join(tmpDir, 'git-no-origin')
     mkdirSync(gitDir)
     spawnSync('git', ['init'], { cwd: gitDir, stdio: 'ignore' })
 
-    expect(() => prepareMirror(gitDir, [])).toThrow(MirrorAbort)
-    expect(() => prepareMirror(gitDir, [])).toThrow('no origin URL found')
+    await expect(prepareMirror(gitDir, [])).rejects.toThrow(MirrorAbort)
+    await expect(prepareMirror(gitDir, [])).rejects.toThrow('could not resolve an OpenCode project id')
   })
 
-  it('returns empty matched array when no remote matches', () => {
+  it('returns empty matched array when no remote matches', async () => {
     const gitDir = join(tmpDir, 'git-mismatch')
     mkdirSync(gitDir)
     spawnSync('git', ['init'], { cwd: gitDir, stdio: 'ignore' })
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/other/repo.git'], { cwd: gitDir, stdio: 'ignore' })
 
     const remotes = [
-      { repoId: 1, name: 'my-repo', originUrl: 'https://github.com/me/repo.git', branch: 'main' },
+      { repoId: 1, name: 'my-repo', projectId: ME_REPO_ID, branch: 'main' },
     ]
 
-    const plan = prepareMirror(gitDir, remotes)
+    const plan = await prepareMirror(gitDir, remotes)
     expect(plan.matched).toHaveLength(0)
-    expect(plan.localOrigin).toContain('other/repo')
+    expect(plan.localProjectId).toBe(OTHER_REPO_ID)
   })
 
-  it('returns matching repos when origin matches', () => {
+  it('returns matching repos when the project id matches', async () => {
     const gitDir = join(tmpDir, 'git-match')
     mkdirSync(gitDir)
     spawnSync('git', ['init'], { cwd: gitDir, stdio: 'ignore' })
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/me/repo.git'], { cwd: gitDir, stdio: 'ignore' })
 
     const remotes = [
-      { repoId: 1, name: 'my-repo', originUrl: 'https://github.com/me/repo.git', branch: 'main' },
-      { repoId: 2, name: 'other-repo', originUrl: 'https://github.com/other/repo.git', branch: 'main' },
+      { repoId: 1, name: 'my-repo', projectId: ME_REPO_ID, branch: 'main' },
+      { repoId: 2, name: 'other-repo', projectId: OTHER_REPO_ID, branch: 'main' },
     ]
 
-    const plan = prepareMirror(gitDir, remotes)
+    const plan = await prepareMirror(gitDir, remotes)
     expect(plan.matched).toHaveLength(1)
     expect(plan.matched[0]!.repoId).toBe(1)
-    expect(plan.localOrigin).toContain('me/repo')
+    expect(plan.localProjectId).toBe(ME_REPO_ID)
+  })
+})
+
+describe('local repo branch detection', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'local-repo-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('treats detached HEAD as no branch', () => {
+    const repoRoot = join(tmpDir, 'detached')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'content\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+    const head = execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+    spawnSync('git', ['checkout', head], { cwd: repoRoot, stdio: 'ignore' })
+
+    expect(getBranchName(repoRoot)).toBeNull()
   })
 })
 
@@ -91,7 +123,7 @@ describe('cmdPush', () => {
       stderrOutput += typeof msg === 'string' ? msg : new TextDecoder().decode(msg)
       return true
     })
-    vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+    vi.spyOn(process, 'exit').mockImplementation((_code?: string | number | null) => {
       throw new Error(stderrOutput.trim())
     })
 
@@ -133,7 +165,7 @@ describe('mirrorDown', () => {
   function createGzipTarball(dir: string): Buffer {
     const tarFile = join(tmpDir, 'test.tar.gz')
     execSync(`tar -czf "${tarFile}" -C "${dir}" .`)
-    return require('fs').readFileSync(tarFile)
+    return readFileSync(tarFile)
   }
 
   const streamOf = (buf: Buffer): ReadableStream<Uint8Array> =>
@@ -420,8 +452,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi()
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -443,8 +475,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi({ chunkSize: 128 * 1024 })
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -462,8 +494,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi({ partFailures: { 0: 2 }, chunkSize: 64 * 1024 })
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -484,8 +516,8 @@ describe('mirrorUp chunked upload', () => {
 
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await expect(mirrorUp(plan, { api: ctx.api as any, force: false })).rejects.toThrow('boom')
@@ -502,8 +534,8 @@ describe('mirrorUp chunked upload', () => {
     const onProgress = vi.fn()
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false, onProgress })
@@ -526,8 +558,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi()
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -539,3 +571,204 @@ describe('mirrorUp chunked upload', () => {
     expect(combined[1]).toBe(0x8b)
   })
 })
+
+describe('checkPushDivergence', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-divergence-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commit(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `add ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  const apiWith = (head: string | null, dirty = false) => ({
+    mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head, dirty }),
+  }) as any
+
+  it('reports no divergence when server head equals local head', async () => {
+    const repoRoot = initRepo('equal')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(head), 1)
+    expect(result.diverged).toBe(false)
+    expect(result.lostCommits).toBe(0)
+  })
+
+  it('reports no divergence (fast-forward) when server head is an ancestor of local head', async () => {
+    const repoRoot = initRepo('ff')
+    const first = commit(repoRoot, 'a.txt', 'a')
+    commit(repoRoot, 'b.txt', 'b')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(first), 1)
+    expect(result.diverged).toBe(false)
+    expect(result.lostCommits).toBe(0)
+  })
+
+  it('reports divergence with unknown count when server head is not present locally', async () => {
+    const repoRoot = initRepo('unknown')
+    commit(repoRoot, 'a.txt', 'a')
+
+    const result = await checkPushDivergence(repoRoot, apiWith('0000000000000000000000000000000000000000'), 1)
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(-1)
+  })
+
+  it('reports divergence with a count when server head exists but is not an ancestor', async () => {
+    const repoRoot = initRepo('diverged')
+    const base = commit(repoRoot, 'a.txt', 'a')
+    spawnSync('git', ['checkout', '-b', 'server', base], { cwd: repoRoot, stdio: 'ignore' })
+    const serverHead = commit(repoRoot, 'server.txt', 'server-work')
+    spawnSync('git', ['checkout', '-'], { cwd: repoRoot, stdio: 'ignore' })
+    commit(repoRoot, 'local.txt', 'local-work')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(serverHead), 1)
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(1)
+  })
+
+  it('surfaces server dirty state even when histories match', async () => {
+    const repoRoot = initRepo('dirty')
+    const head = commit(repoRoot, 'a.txt', 'a')
+
+    const result = await checkPushDivergence(repoRoot, apiWith(head, true), 1)
+    expect(result.diverged).toBe(false)
+    expect(result.serverDirty).toBe(true)
+  })
+})
+
+describe('checkPullDivergence', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'pull-divergence-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  function initRepo(name: string): string {
+    const repoRoot = join(tmpDir, name)
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    return repoRoot
+  }
+
+  function commit(repoRoot: string, file: string, content: string): string {
+    writeFileSync(join(repoRoot, file), content)
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', `add ${file}`], { cwd: repoRoot, stdio: 'ignore' })
+    return execSync('git rev-parse HEAD', { cwd: repoRoot, encoding: 'utf-8' }).trim()
+  }
+
+  it('reports no divergence when the server contains the local head (fast-forward pull)', async () => {
+    const repoRoot = initRepo('behind')
+    commit(repoRoot, 'a.txt', 'a')
+
+    const api = { mirrorContains: vi.fn().mockResolvedValue({ contained: true }) } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(false)
+    expect(api.mirrorContains).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports divergence with a count when the server lacks local commits', async () => {
+    const repoRoot = initRepo('ahead')
+    const base = commit(repoRoot, 'a.txt', 'a')
+    commit(repoRoot, 'b.txt', 'b')
+
+    const api = {
+      mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
+      mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: base, dirty: false }),
+    } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(1)
+  })
+
+  it('reports divergence with unknown count when the server head is not present locally', async () => {
+    const repoRoot = initRepo('unknown')
+    commit(repoRoot, 'a.txt', 'a')
+
+    const api = {
+      mirrorContains: vi.fn().mockResolvedValue({ contained: false }),
+      mirrorHead: vi.fn().mockResolvedValue({ repoId: 1, branch: 'main', head: '0000000000000000000000000000000000000000', dirty: false }),
+    } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(true)
+    expect(result.lostCommits).toBe(-1)
+  })
+
+  it('reports no divergence for an empty local repo with no commits', async () => {
+    const repoRoot = initRepo('empty')
+
+    const api = { mirrorContains: vi.fn() } as any
+    const result = await checkPullDivergence(repoRoot, api, 1)
+
+    expect(result.diverged).toBe(false)
+    expect(api.mirrorContains).not.toHaveBeenCalled()
+  })
+})
+
+describe('mirror patch helpers', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-diff-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('pushes a local working tree patch through the manager API', async () => {
+    const repoRoot = join(tmpDir, 'repo-local-diff')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'before\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'after\n')
+
+    const api = {
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/remote', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    await mirrorUpPatch({
+      repoRoot,
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
+    }, { api: api as any, force: false })
+
+    expect(api.mirrorPatch).toHaveBeenCalledTimes(1)
+    const body = api.mirrorPatch.mock.calls[0]![1]
+    expect(body.patch).toContain('diff --git a/tracked.txt b/tracked.txt')
+    expect(body.patch).toContain('-before')
+    expect(body.patch).toContain('+after')
+  })
+})
+

@@ -96,8 +96,8 @@ ocm logout                Forget saved token (Keychain) and state
 ocm status                Show current manager URL, repo, and whether token is set
 ocm list                  List ready repos from the manager
 ocm use <repoId|name>     Attach to a specific repo and remember it as last
-ocm push [--force] [--create] [--yes]   Mirror $PWD to the matching Manager repo
-ocm pull [--force]                      Mirror the matching Manager repo over $PWD
+ocm push [--force] [--create] [--yes] [--full]   Mirror $PWD to the matching Manager repo (fast bundle/patch sync by default)
+ocm pull [--force] [--full]                      Mirror the matching Manager repo over $PWD (fast bundle/patch sync by default)
 ocm --help                Show this help
 ```
 
@@ -125,7 +125,9 @@ The child takes over the terminal (`stdio: inherit`); closing the TUI exits `ocm
 
 ### Mirror commands
 
-`ocm push` tarballs `$PWD` (skipping `node_modules`, `dist`, `.next`, `.venv`, `__pycache__`, `.turbo`, and anything matched by `.gitignore`) and streams it to the Manager. `ocm pull` does the reverse.
+`ocm push` uses a fast git bundle + working-tree patch by default to sync `$PWD` to the matching Manager repo. Pass `--full` to use the legacy tarball mirror (skipping `node_modules`, `dist`, `.next`, `.venv`, `__pycache__`, `.turbo`, and anything matched by `.gitignore`). If the fast path fails, `ocm` prompts before reverting to the tarball mirror (and proceeds automatically when there is no TTY to prompt).
+
+`ocm pull` uses a fast git bundle + working-tree patch by default to sync the matching Manager repo over `$PWD`. Pass `--full` to use the legacy tarball mirror. If the fast path fails, `ocm` prompts before reverting to the tarball mirror (and proceeds automatically when there is no TTY to prompt).
 
 - `--force` skips the dirty-working-tree check on `pull` and the safety bail on `push`.
 - `--create` (on `push`) creates a new Manager repo when no `origin` match is found.

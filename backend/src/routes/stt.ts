@@ -4,11 +4,7 @@ import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
 import {
   normalizeToBaseUrl,
-  ensureDiscoveryCacheDir,
-  getCachedDiscovery,
-  cacheDiscovery,
-  generateDiscoveryCacheKey,
-  fetchAvailableModels,
+  discoverModelsCached,
 } from '../utils/discovery-cache'
 import { type STTConfig } from '@opencode-manager/shared'
 
@@ -142,37 +138,26 @@ export function createSTTRoutes(db: Database) {
         return c.json({ error: 'STT not configured' }, 400)
       }
 
-      const cacheKey = generateDiscoveryCacheKey(sttConfig.endpoint, sttConfig.apiKey, 'models')
+      const { models, cached } = await discoverModelsCached({
+        baseUrl: sttConfig.endpoint,
+        apiKey: sttConfig.apiKey,
+        type: 'models',
+        filterPattern: /whisper|transcri/,
+        defaultModels: ['whisper-1'],
+        forceRefresh,
+      })
 
-      if (!forceRefresh) {
-        const cachedModels = await getCachedDiscovery<string[]>(cacheKey)
-        if (cachedModels) {
-          logger.info(`STT models cache hit for user ${userId}`)
-          return c.json({ models: cachedModels, cached: true })
-        }
+      if (!cached) {
+        await settingsService.updateSettings({
+          stt: {
+            ...sttConfig,
+            availableModels: models,
+            lastModelsFetch: Date.now(),
+          } as STTConfig,
+        }, userId)
       }
 
-      await ensureDiscoveryCacheDir()
-      logger.info(`Fetching STT models for user ${userId}`)
-
-      const models = await fetchAvailableModels(
-        sttConfig.endpoint,
-        sttConfig.apiKey,
-        /whisper|transcri/,
-        ['whisper-1'],
-      )
-      await cacheDiscovery(cacheKey, models)
-
-      await settingsService.updateSettings({
-        stt: {
-          ...sttConfig,
-          availableModels: models,
-          lastModelsFetch: Date.now()
-        } as STTConfig
-      }, userId)
-
-      logger.info(`Fetched ${models.length} STT models`)
-      return c.json({ models, cached: false })
+      return c.json({ models, cached })
     } catch (error) {
       logger.error('Failed to fetch STT models:', error)
       return c.json({ error: 'Failed to fetch models' }, 500)
