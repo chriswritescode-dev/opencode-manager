@@ -296,7 +296,7 @@ async function cmdDefault(): Promise<void> {
   switch (result.kind) {
     case 'cwd-match': {
       const repo = result.repo
-      info(`attaching to ${repo.name} (matched $PWD origin)`)
+      info(`attaching to ${repo.name}`)
       writeState({
         ...state,
         lastRepoId: repo.repoId,
@@ -307,9 +307,12 @@ async function cmdDefault(): Promise<void> {
       attach(state.managerUrl, token, toManagerRepo(repo))
       return
     }
-    case 'last':
-      attach(state.managerUrl, token, toManagerRepo(result.repo))
+    case 'last': {
+      const repo = result.repo
+      info(`attaching to ${repo.name} (last used)`)
+      attach(state.managerUrl, token, toManagerRepo(repo))
       return
+    }
     case 'cwd-ambiguous': {
       const names = result.matches.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
       die(`multiple Manager repos match project ${result.localProjectId}: ${names}; disambiguate with \`ocm use <repoId>\``)
