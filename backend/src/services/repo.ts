@@ -6,7 +6,7 @@ import { createRepo, getRepoByLocalPath, getRepoBySourcePath, getRepoById, updat
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
-import { getReposPath } from '@opencode-manager/shared/config/env'
+import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
 import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
@@ -1170,6 +1170,7 @@ export async function getSiblingRepos(
     const knownDirectories = new Set(repoSiblings.map((repo) => canonical(repo.fullPath)))
     const targetDirectory = canonical(target.fullPath)
     const reposRoot = canonical(getReposPath())
+    const scheduleWorktreeRoot = canonical(getScheduleWorktreesPath())
 
     const candidates = workspaces.filter((workspace) => {
       if (workspace.projectID !== targetProjectId) return false
@@ -1178,6 +1179,7 @@ export async function getSiblingRepos(
       const workspaceDirectory = canonical(workspace.directory)
       if (workspaceDirectory === targetDirectory) return false
       if (workspaceDirectory === reposRoot) return false
+      if (workspaceDirectory.startsWith(`${scheduleWorktreeRoot}${path.sep}`)) return false
       if (knownDirectories.has(workspaceDirectory)) return false
 
       return true

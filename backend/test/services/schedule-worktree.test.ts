@@ -9,11 +9,13 @@ import { rm } from 'fs/promises'
 // predictable and isolated per test run.  Preserve all other exports (ENV etc.)
 // so that modules imported indirectly (repo.ts, sse-aggregator.ts) still work.
 let tmpRoot: string
+let scheduleWorktreesRoot: string
 vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...(actual as object),
     getReposPath: () => tmpRoot,
+    getScheduleWorktreesPath: () => scheduleWorktreesRoot,
     getWorkspacePath: vi.fn(() => '/tmp/fake-workspace'),
   }
 })
@@ -73,6 +75,7 @@ describe('ScheduleWorktreeManager', () => {
   beforeAll(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), 'schedule-worktree-test-'))
     tmpRoot = tmpDir
+    scheduleWorktreesRoot = path.join(tmpDir, 'schedule-worktrees')
     originRepoPath = path.join(tmpDir, 'origin.git')
     baseRepoPath = path.join(tmpDir, 'base')
     nonGitDir = path.join(tmpDir, 'non-git-dir')
@@ -128,7 +131,7 @@ describe('ScheduleWorktreeManager', () => {
   it('prepare creates a worktree with the correct branch name and returns context', async () => {
     const manager = await createManager()
     const repo = testRepo()
-    const job = { id: 10, isolationMode: 'worktree' as const, branch: null }
+    const job = { id: 10, branch: null }
     const runId = 1
 
     const ctx = await manager.prepare(repo, job, runId)
@@ -150,19 +153,10 @@ describe('ScheduleWorktreeManager', () => {
     await removeWorktree(baseRepoPath, ctx!.worktreePath)
   })
 
-  it('prepare returns null for isolationMode inline', async () => {
-    const manager = await createManager()
-    const repo = testRepo()
-    const job = { id: 11, isolationMode: 'inline' as const, branch: null }
-
-    const ctx = await manager.prepare(repo, job, 1)
-    expect(ctx).toBeNull()
-  })
-
   it('prepare returns null for a non-git directory', async () => {
     const manager = await createManager()
     const repo = testRepo({ fullPath: nonGitDir })
-    const job = { id: 12, isolationMode: 'worktree' as const, branch: null }
+    const job = { id: 12, branch: null }
 
     const ctx = await manager.prepare(repo, job, 1)
     expect(ctx).toBeNull()
@@ -171,7 +165,7 @@ describe('ScheduleWorktreeManager', () => {
   it('prepare returns null for the assistant repo', async () => {
     const manager = await createManager()
     const repo = testRepo({ id: 0 })
-    const job = { id: 13, isolationMode: 'worktree' as const, branch: null }
+    const job = { id: 13, branch: null }
 
     const ctx = await manager.prepare(repo, job, 1)
     expect(ctx).toBeNull()
@@ -180,7 +174,7 @@ describe('ScheduleWorktreeManager', () => {
   it('finalize returns null commit when no changes exist and removes the worktree', async () => {
     const manager = await createManager()
     const repo = testRepo()
-    const job = { id: 10, isolationMode: 'worktree' as const, branch: null, name: 'No-change job' }
+    const job = { id: 10, branch: null, name: 'No-change job' }
     const runId = 100
 
     // Prepare a worktree first
@@ -204,7 +198,7 @@ describe('ScheduleWorktreeManager', () => {
   it('finalize commits changes and returns the commit hash, then removes the worktree', async () => {
     const manager = await createManager()
     const repo = testRepo()
-    const job = { id: 10, isolationMode: 'worktree' as const, branch: null, name: 'Change job' }
+    const job = { id: 10, branch: null, name: 'Change job' }
     const runId = 200
 
     // Prepare a worktree
@@ -254,7 +248,7 @@ describe('ScheduleWorktreeManager', () => {
   it('prepare respects the branch override', async () => {
     const manager = await createManager()
     const repo = testRepo()
-    const job = { id: 20, isolationMode: 'worktree' as const, branch: 'dev' }
+    const job = { id: 20, branch: 'dev' }
     const runId = 1
 
     const ctx = await manager.prepare(repo, job, runId)

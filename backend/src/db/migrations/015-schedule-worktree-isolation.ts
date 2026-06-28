@@ -17,9 +17,6 @@ const migration: Migration = {
     if (!jobColumnNames.has('branch')) {
       db.run('ALTER TABLE schedule_jobs ADD COLUMN branch TEXT')
     }
-    if (!jobColumnNames.has('isolation_mode')) {
-      db.run("ALTER TABLE schedule_jobs ADD COLUMN isolation_mode TEXT NOT NULL DEFAULT 'worktree'")
-    }
 
     const runColumns = db.prepare('PRAGMA table_info(schedule_runs)').all() as ColumnInfo[]
     const runColumnNames = new Set(runColumns.map((c) => c.name))
@@ -36,12 +33,11 @@ const migration: Migration = {
   },
 
   down(db) {
-    // Rebuild schedule_jobs without branch, isolation_mode
+    // Rebuild schedule_jobs without branch
     const jobColumns = db.prepare('PRAGMA table_info(schedule_jobs)').all() as ColumnInfo[]
     const hasBranch = jobColumns.some((c) => c.name === 'branch')
-    const hasIsolationMode = jobColumns.some((c) => c.name === 'isolation_mode')
 
-    if (hasBranch || hasIsolationMode) {
+    if (hasBranch) {
       db.run(`
         CREATE TABLE schedule_jobs_old (
           id INTEGER PRIMARY KEY AUTOINCREMENT,

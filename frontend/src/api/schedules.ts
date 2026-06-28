@@ -118,3 +118,15 @@ export async function cancelRepoScheduleRun(repoId: number, jobId: number, runId
     method: 'POST',
   })
 }
+
+export async function clearRepoScheduleRuns(repoId: number, jobId: number): Promise<{ cleared: number }> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${repoId}/schedules/${jobId}/runs`, {
+    method: 'DELETE',
+  })
+}
+
+export async function deleteRepoScheduleRun(repoId: number, jobId: number, runId: number): Promise<void> {
+  return fetchWrapperVoid(`${API_BASE_URL}/api/repos/${repoId}/schedules/${jobId}/runs/${runId}`, {
+    method: 'DELETE',
+  })
+}

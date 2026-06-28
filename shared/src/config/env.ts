@@ -70,6 +70,7 @@ export const ENV = {
   WORKSPACE: {
     get BASE_PATH() { return resolveWorkspacePath() },
     REPOS_DIR: DEFAULTS.WORKSPACE.REPOS_DIR,
+    SCHEDULE_WORKTREES_DIR: DEFAULTS.WORKSPACE.SCHEDULE_WORKTREES_DIR,
     CONFIG_DIR: DEFAULTS.WORKSPACE.CONFIG_DIR,
     AUTH_FILE: DEFAULTS.WORKSPACE.AUTH_FILE,
   },
@@ -119,6 +120,7 @@ export const ENV = {
 
 export const getWorkspacePath = () => ENV.WORKSPACE.BASE_PATH
 export const getReposPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.REPOS_DIR)
+export const getScheduleWorktreesPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.SCHEDULE_WORKTREES_DIR)
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
 export const getOpenCodeConfigFilePath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'opencode.json')
 export const getAgentsMdPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR, 'AGENTS.md')

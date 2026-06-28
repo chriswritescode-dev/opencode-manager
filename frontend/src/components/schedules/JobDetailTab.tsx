@@ -134,13 +134,9 @@ export function JobDetailTab({
                   <p className="text-muted-foreground">Updated</p>
                   <p className="font-medium">{formatTimestamp(selectedJob.updatedAt)}</p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground">Isolation</p>
-                  <p className="font-medium capitalize">{selectedJob.isolationMode}</p>
-                </div>
                 {selectedJob.branch && (
                   <div>
-                    <p className="text-muted-foreground">Branch</p>
+                    <p className="text-muted-foreground">Base branch</p>
                     <p className="font-medium font-mono">{selectedJob.branch}</p>
                   </div>
                 )}

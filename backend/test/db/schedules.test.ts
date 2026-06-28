@@ -21,7 +21,6 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
     model: 'openai/gpt-5-mini',
     skill_metadata: JSON.stringify({ skillSlugs: ['planning'], notes: 'Optional notes' }),
     branch: null,
-    isolation_mode: 'worktree',
     created_at: Date.UTC(2026, 2, 8, 12, 0, 0),
     updated_at: Date.UTC(2026, 2, 9, 12, 0, 0),
     last_run_at: Date.UTC(2026, 2, 9, 11, 0, 0),
@@ -113,7 +112,6 @@ describe('schedule database queries', () => {
       model: 'openai/gpt-5-mini',
       skillMetadata: { skillSlugs: ['planning'], notes: 'Optional notes' },
       branch: null,
-      isolationMode: 'worktree',
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
     })
 
@@ -131,7 +129,6 @@ describe('schedule database queries', () => {
       'openai/gpt-5-mini',
       JSON.stringify({ skillSlugs: ['planning'], notes: 'Optional notes' }),
       null,
-      'worktree',
       expect.any(Number),
       expect.any(Number),
       null,
@@ -169,7 +166,6 @@ describe('schedule database queries', () => {
       model: null,
       skillMetadata: null,
       branch: null,
-      isolationMode: 'worktree',
       nextRunAt: null,
     })
 
@@ -186,7 +182,6 @@ describe('schedule database queries', () => {
       null,
       null,
       null,
-      'worktree',
       expect.any(Number),
       null,
       42,
@@ -409,7 +404,7 @@ describe('schedule database queries', () => {
 
     expect(mockDb.prepare).toHaveBeenCalledWith('SELECT * FROM schedule_jobs WHERE repo_id = ? AND id = ?')
     expect(stmt.get).toHaveBeenCalledWith(42, 7)
-    expect(job).toMatchObject({ id: 7, repoId: 42, name: 'Weekly engineering summary', branch: null, isolationMode: 'worktree' })
+    expect(job).toMatchObject({ id: 7, repoId: 42, name: 'Weekly engineering summary', branch: null })
   })
 
   it('returns null when schedule job is not found', () => {
@@ -602,5 +597,54 @@ describe('schedule database queries', () => {
 
     expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS log_text'))
     expect(mockDb.prepare).toHaveBeenCalledWith(expect.stringContaining('NULL AS response_text'))
+  })
+
+  it('listScheduleRunArtifactsByJob maps run branch/worktree rows', () => {
+    const stmt = {
+      all: vi.fn().mockReturnValue([
+        { id: 3, status: 'completed', run_branch: 'schedule/7/run-3', worktree_path: null },
+        { id: 2, status: 'running', run_branch: 'schedule/7/run-2', worktree_path: '/wt/2' },
+      ]),
+    }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const artifacts = schedulesDb.listScheduleRunArtifactsByJob(mockDb, 42, 7)
+
+    expect(stmt.all).toHaveBeenCalledWith(42, 7)
+    expect(artifacts).toEqual([
+      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null },
+      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2' },
+    ])
+  })
+
+  it('deleteScheduleRunById deletes a single run row', () => {
+    const stmt = { run: vi.fn().mockReturnValue({ changes: 1 }) }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const deleted = schedulesDb.deleteScheduleRunById(mockDb, 42, 7, 5)
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    expect(stmt.run).toHaveBeenCalledWith(42, 7, 5)
+    expect(deleted).toBe(true)
+  })
+
+  it('deleteScheduleRunsByIds deletes only the given ids', () => {
+    const stmt = { run: vi.fn().mockReturnValue({ changes: 2 }) }
+    mockDb.prepare.mockReturnValue(stmt)
+
+    const cleared = schedulesDb.deleteScheduleRunsByIds(mockDb, 42, 7, [3, 1])
+
+    expect(mockDb.prepare).toHaveBeenCalledWith('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id IN (?, ?)')
+    expect(stmt.run).toHaveBeenCalledWith(42, 7, 3, 1)
+    expect(cleared).toBe(2)
+  })
+
+  it('deleteScheduleRunsByIds is a no-op for an empty id list', () => {
+    mockDb.prepare.mockClear()
+
+    const cleared = schedulesDb.deleteScheduleRunsByIds(mockDb, 42, 7, [])
+
+    expect(cleared).toBe(0)
+    expect(mockDb.prepare).not.toHaveBeenCalled()
   })
 })

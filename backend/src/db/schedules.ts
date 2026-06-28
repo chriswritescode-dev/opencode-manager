@@ -3,7 +3,6 @@ import {
   ScheduleJobSchema,
   ScheduleRunSchema,
   ScheduleSkillMetadataSchema,
-  type ScheduleIsolationMode,
   type ScheduleJob,
   type ScheduleMode,
   type ScheduleRun,
@@ -28,7 +27,6 @@ interface ScheduleJobRow {
   model: string | null
   skill_metadata: string | null
   branch: string | null
-  isolation_mode: string | null
   created_at: number
   updated_at: number
   last_run_at: number | null
@@ -84,7 +82,6 @@ function rowToScheduleJob(row: ScheduleJobRow): ScheduleJob {
     model: row.model,
     skillMetadata: parseSkillMetadata(row.skill_metadata),
     branch: row.branch,
-    isolationMode: (row.isolation_mode as ScheduleIsolationMode) ?? 'worktree',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastRunAt: row.last_run_at,
@@ -150,10 +147,10 @@ export function createScheduleJob(db: Database, repoId: number, input: ScheduleJ
   const stmt = db.prepare(`
     INSERT INTO schedule_jobs (
       repo_id, name, description, enabled, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
-      branch, isolation_mode,
+      branch,
       created_at, updated_at, last_run_at, next_run_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
@@ -170,7 +167,6 @@ export function createScheduleJob(db: Database, repoId: number, input: ScheduleJ
     input.model ?? null,
     serializeSkillMetadata(input.skillMetadata),
     input.branch,
-    input.isolationMode,
     now,
     now,
     null,
@@ -195,7 +191,7 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
   const stmt = db.prepare(`
     UPDATE schedule_jobs
     SET name = ?, description = ?, enabled = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
-        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, branch = ?, isolation_mode = ?, updated_at = ?, next_run_at = ?
+        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, branch = ?, updated_at = ?, next_run_at = ?
     WHERE repo_id = ? AND id = ?
   `)
 
@@ -212,7 +208,6 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
     input.model,
     serializeSkillMetadata(input.skillMetadata),
     input.branch,
-    input.isolationMode,
     now,
     input.nextRunAt,
     repoId,
@@ -227,6 +222,41 @@ export function deleteScheduleJob(db: Database, repoId: number, jobId: number): 
   const stmt = db.prepare('DELETE FROM schedule_jobs WHERE repo_id = ? AND id = ?')
   const result = stmt.run(repoId, jobId)
   return result.changes > 0
+}
+
+export interface ScheduleRunArtifact {
+  id: number
+  status: ScheduleRunStatus
+  runBranch: string | null
+  worktreePath: string | null
+}
+
+export function listScheduleRunArtifactsByJob(db: Database, repoId: number, jobId: number): ScheduleRunArtifact[] {
+  const rows = db
+    .prepare('SELECT id, status, run_branch, worktree_path FROM schedule_runs WHERE repo_id = ? AND job_id = ? ORDER BY id DESC')
+    .all(repoId, jobId) as { id: number; status: string; run_branch: string | null; worktree_path: string | null }[]
+  return rows.map((row) => ({
+    id: row.id,
+    status: row.status as ScheduleRunStatus,
+    runBranch: row.run_branch,
+    worktreePath: row.worktree_path,
+  }))
+}
+
+export function deleteScheduleRunById(db: Database, repoId: number, jobId: number, runId: number): boolean {
+  const result = db
+    .prepare('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
+    .run(repoId, jobId, runId)
+  return result.changes > 0
+}
+
+export function deleteScheduleRunsByIds(db: Database, repoId: number, jobId: number, runIds: number[]): number {
+  if (runIds.length === 0) return 0
+  const placeholders = runIds.map(() => '?').join(', ')
+  const result = db
+    .prepare(`DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id IN (${placeholders})`)
+    .run(repoId, jobId, ...runIds)
+  return result.changes
 }
 
 export function cleanupOrphanedSchedules(db: Database): { orphanedJobs: number; orphanedRuns: number } {

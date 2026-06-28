@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import migration007 from '../../src/db/migrations/007-schedules'
 import migration008 from '../../src/db/migrations/008-schedule-cron-support'
-import migration014 from '../../src/db/migrations/014-schedule-worktree-isolation'
+import migration015 from '../../src/db/migrations/015-schedule-worktree-isolation'
 
 describe('schedule migrations', () => {
   it('creates schedule jobs with nullable interval minutes in v7', () => {
@@ -87,8 +87,8 @@ describe('schedule migrations', () => {
   })
 })
 
-describe('migration 014 - schedule worktree isolation', () => {
-  it('adds branch and isolation_mode columns to schedule_jobs', () => {
+describe('migration 015 - schedule worktree isolation', () => {
+  it('adds branch column to schedule_jobs and worktree columns to schedule_runs', () => {
     const db = {
       prepare: vi.fn().mockImplementation((query: string) => {
         if (query.includes('PRAGMA table_info(schedule_jobs)')) {
@@ -112,10 +112,9 @@ describe('migration 014 - schedule worktree isolation', () => {
       run: vi.fn(),
     }
 
-    migration014.up(db as never)
+    migration015.up(db as never)
 
     expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_jobs ADD COLUMN branch TEXT')
-    expect(db.run).toHaveBeenCalledWith("ALTER TABLE schedule_jobs ADD COLUMN isolation_mode TEXT NOT NULL DEFAULT 'worktree'")
     expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs ADD COLUMN run_branch TEXT')
     expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs ADD COLUMN commit_hash TEXT')
     expect(db.run).toHaveBeenCalledWith('ALTER TABLE schedule_runs ADD COLUMN worktree_path TEXT')
@@ -129,7 +128,6 @@ describe('migration 014 - schedule worktree isolation', () => {
             all: vi.fn().mockReturnValue([
               { name: 'id', notnull: 1, dflt_value: null },
               { name: 'branch', notnull: 0, dflt_value: null },
-              { name: 'isolation_mode', notnull: 1, dflt_value: "'worktree'" },
             ]),
           }
         }
@@ -148,7 +146,7 @@ describe('migration 014 - schedule worktree isolation', () => {
       run: vi.fn(),
     }
 
-    migration014.up(db as never)
+    migration015.up(db as never)
 
     expect(db.run).not.toHaveBeenCalledWith(expect.stringContaining('ALTER TABLE'))
   })

@@ -26,6 +26,7 @@ export const DEFAULTS = {
   WORKSPACE: {
     BASE_PATH: './workspace',
     REPOS_DIR: 'repos',
+    SCHEDULE_WORKTREES_DIR: 'schedule-worktrees',
     CONFIG_DIR: '.config/opencode',
     AUTH_FILE: '.opencode/state/opencode/auth.json',
   },

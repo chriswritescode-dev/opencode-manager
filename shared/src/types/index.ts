@@ -110,7 +110,6 @@ export type {
 } from '../schemas/settings'
 
 export type {
-  ScheduleIsolationMode,
   ScheduleMode,
   ScheduleRunTriggerSource,
   ScheduleRunStatus,

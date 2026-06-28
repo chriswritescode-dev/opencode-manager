@@ -14,10 +14,13 @@ import {
   createScheduleJob,
   createScheduleRun,
   deleteScheduleJob,
+  deleteScheduleRunById,
+  deleteScheduleRunsByIds,
   getScheduleJobById,
   getRunningScheduleRunByJob,
   getScheduleRunById,
   listAllScheduleJobsWithRepos,
+  listScheduleRunArtifactsByJob,
   listAllScheduleRuns,
   listEnabledScheduleJobs,
   listScheduleJobIdsByRepo,
@@ -503,6 +506,45 @@ export class ScheduleService {
       throw new ScheduleServiceError('Run not found', 404)
     }
     return run
+  }
+
+  /**
+   * Clears a job's run history: deletes every finished run's row plus its git
+   * run branch and any leftover worktree. A run currently in progress is left
+   * untouched (its row and live worktree are skipped).
+   */
+  async clearRunHistory(repoId: number, jobId: number): Promise<{ cleared: number }> {
+    const repo = this.assertRepo(repoId)
+    this.assertJob(repoId, jobId)
+
+    const removable = listScheduleRunArtifactsByJob(this.db, repoId, jobId).filter((run) => run.status !== 'running')
+    if (removable.length === 0) {
+      return { cleared: 0 }
+    }
+
+    await this.worktreeManager.pruneRunArtifacts(repo, removable)
+    const cleared = deleteScheduleRunsByIds(this.db, repoId, jobId, removable.map((run) => run.id))
+    return { cleared }
+  }
+
+  /**
+   * Deletes a single finished run plus its git run branch and any leftover
+   * worktree. A run in progress must be cancelled first.
+   */
+  async deleteRun(repoId: number, jobId: number, runId: number): Promise<void> {
+    const repo = this.assertRepo(repoId)
+    this.assertJob(repoId, jobId)
+    const run = this.getRun(repoId, jobId, runId)
+
+    if (run.status === 'running') {
+      throw new ScheduleServiceError('Cannot delete a run while it is in progress. Cancel it first.', 409)
+    }
+
+    await this.worktreeManager.pruneRunArtifacts(repo, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }])
+    const deleted = deleteScheduleRunById(this.db, repoId, jobId, runId)
+    if (!deleted) {
+      throw new ScheduleServiceError('Run not found', 404)
+    }
   }
 
   async runJob(repoId: number, jobId: number, triggerSource: ScheduleRunTriggerSource): Promise<ScheduleRun> {
