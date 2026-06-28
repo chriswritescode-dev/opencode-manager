@@ -947,13 +947,7 @@ export async function deleteRepoFiles(database: Database, repoId: number): Promi
     const { name: repoName } = normalizeRepoUrl(repo.repoUrl)
     const baseRepoPath = path.resolve(getReposPath(), repoName)
 
-    try {
-      await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', fullPath])
-    } catch {
-      // Worktree removal failed, continue with directory removal
-    } finally {
-      await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune']).catch(() => {})
-    }
+    await removeWorktree(baseRepoPath, fullPath)
   }
 
   await executeCommand(['rm', '-rf', repo.localPath], getReposPath())
@@ -1008,12 +1002,27 @@ function normalizeRepoUrl(url: string, preserveSSH: boolean = false): { url: str
   }
 }
 
-async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>, baseBranch?: string): Promise<void> {
+export async function resolveDefaultBranch(repoPath: string, env: Record<string, string>): Promise<string> {
+  return executeCommand(['git', '-C', repoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'], { env, silent: true })
+    .then((ref) => ref.trim().replace('origin/', ''))
+    .catch(() => 'main')
+}
+
+export async function removeWorktree(baseRepoPath: string, worktreePath: string, env?: Record<string, string>): Promise<void> {
+  try {
+    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'remove', '--force', worktreePath], env ? { env } : undefined)
+  } catch {
+    // fall through to prune + rm
+  } finally {
+    await executeCommand(['git', '-C', baseRepoPath, 'worktree', 'prune'], env ? { env } : undefined).catch(() => {})
+  }
+  await executeCommand(['rm', '-rf', worktreePath]).catch(() => {})
+}
+
+export async function createWorktreeSafely(baseRepoPath: string, worktreePath: string, branch: string, env: Record<string, string>, baseBranch?: string): Promise<void> {
   const currentBranch = await safeGetCurrentBranch(baseRepoPath, env)
   if (currentBranch === branch) {
-    const defaultBranch = await executeCommand(['git', '-C', baseRepoPath, 'rev-parse', '--abbrev-ref', 'origin/HEAD'], { env })
-      .then(ref => ref.trim().replace('origin/', ''))
-      .catch(() => 'main')
+    const defaultBranch = await resolveDefaultBranch(baseRepoPath, env)
 
     await executeCommand(['git', '-C', baseRepoPath, 'checkout', defaultBranch], { env })
       .catch(() => executeCommand(['git', '-C', baseRepoPath, 'checkout', 'main'], { env }))

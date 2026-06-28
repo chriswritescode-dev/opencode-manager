@@ -1,6 +1,7 @@
 import { Cron } from 'croner'
 import type {
   CreateScheduleJobRequest,
+  ScheduleIsolationMode,
   ScheduleJob,
   ScheduleMode,
   ScheduleSkillMetadata,
@@ -21,6 +22,8 @@ export interface ScheduleJobPersistenceInput {
   prompt: string
   model: string | null
   skillMetadata: ScheduleSkillMetadata | null | undefined
+  branch: string | null
+  isolationMode: ScheduleIsolationMode
   nextRunAt: number | null
 }
 
@@ -95,6 +98,8 @@ export function buildCreateSchedulePersistenceInput(input: CreateScheduleJobRequ
     prompt: input.prompt.trim(),
     model: input.model?.trim() || null,
     skillMetadata: input.skillMetadata,
+    branch: input.branch?.trim() || null,
+    isolationMode: input.isolationMode ?? 'worktree' as const,
   }
 
   const scheduleConfig = input.scheduleMode === 'cron'
@@ -151,6 +156,8 @@ export function buildUpdatedSchedulePersistenceInput(
     prompt: input.prompt?.trim() || existing.prompt,
     model: input.model === undefined ? existing.model : (input.model?.trim() || null),
     skillMetadata: input.skillMetadata !== undefined ? input.skillMetadata : existing.skillMetadata,
+    branch: input.branch === undefined ? existing.branch : (input.branch?.trim() || null),
+    isolationMode: input.isolationMode ?? existing.isolationMode,
     nextRunAt,
   }
 }

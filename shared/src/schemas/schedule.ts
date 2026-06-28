@@ -9,6 +9,9 @@ export type ScheduleRunStatus = z.infer<typeof ScheduleRunStatusSchema>
 export const ScheduleModeSchema = z.enum(['interval', 'cron'])
 export type ScheduleMode = z.infer<typeof ScheduleModeSchema>
 
+export const ScheduleIsolationModeSchema = z.enum(['worktree', 'inline'])
+export type ScheduleIsolationMode = z.infer<typeof ScheduleIsolationModeSchema>
+
 export const ScheduleSkillMetadataSchema = z.object({
   skillSlugs: z.array(z.string().min(1).max(100)).default([]),
   notes: z.string().max(2000).optional(),
@@ -29,6 +32,8 @@ export const ScheduleJobSchema = z.object({
   prompt: z.string(),
   model: z.string().nullable(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable(),
+  branch: z.string().nullable(),
+  isolationMode: ScheduleIsolationModeSchema,
   createdAt: z.number(),
   updatedAt: z.number(),
   lastRunAt: z.number().nullable(),
@@ -50,6 +55,9 @@ export const ScheduleRunSchema = z.object({
   logText: z.string().nullable(),
   responseText: z.string().nullable(),
   errorText: z.string().nullable(),
+  runBranch: z.string().nullable(),
+  commitHash: z.string().nullable(),
+  worktreePath: z.string().nullable(),
 })
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>
 
@@ -61,6 +69,8 @@ const ScheduleJobBaseRequestSchema = z.object({
   prompt: z.string().min(1).max(20000),
   model: z.string().min(1).max(200).optional(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
+  branch: z.string().min(1).max(200).nullable().optional(),
+  isolationMode: ScheduleIsolationModeSchema.optional(),
 })
 
 export const CreateScheduleJobRequestSchema = z.discriminatedUnion('scheduleMode', [
@@ -88,6 +98,8 @@ export const UpdateScheduleJobRequestSchema = z.object({
   prompt: z.string().min(1).max(20000).optional(),
   model: z.string().min(1).max(200).nullable().optional(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
+  branch: z.string().min(1).max(200).nullable().optional(),
+  isolationMode: ScheduleIsolationModeSchema.optional(),
 })
 export type UpdateScheduleJobRequest = z.infer<typeof UpdateScheduleJobRequestSchema>
 

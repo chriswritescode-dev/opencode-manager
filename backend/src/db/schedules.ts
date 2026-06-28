@@ -3,6 +3,7 @@ import {
   ScheduleJobSchema,
   ScheduleRunSchema,
   ScheduleSkillMetadataSchema,
+  type ScheduleIsolationMode,
   type ScheduleJob,
   type ScheduleMode,
   type ScheduleRun,
@@ -26,6 +27,8 @@ interface ScheduleJobRow {
   prompt: string
   model: string | null
   skill_metadata: string | null
+  branch: string | null
+  isolation_mode: string | null
   created_at: number
   updated_at: number
   last_run_at: number | null
@@ -46,6 +49,9 @@ interface ScheduleRunRow {
   log_text: string | null
   response_text: string | null
   error_text: string | null
+  run_branch: string | null
+  commit_hash: string | null
+  worktree_path: string | null
 }
 
 function parseSkillMetadata(raw: string | null) {
@@ -77,6 +83,8 @@ function rowToScheduleJob(row: ScheduleJobRow): ScheduleJob {
     prompt: row.prompt,
     model: row.model,
     skillMetadata: parseSkillMetadata(row.skill_metadata),
+    branch: row.branch,
+    isolationMode: (row.isolation_mode as ScheduleIsolationMode) ?? 'worktree',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastRunAt: row.last_run_at,
@@ -99,6 +107,9 @@ function rowToScheduleRun(row: ScheduleRunRow): ScheduleRun {
     logText: row.log_text,
     responseText: row.response_text,
     errorText: row.error_text,
+    runBranch: row.run_branch,
+    commitHash: row.commit_hash,
+    worktreePath: row.worktree_path,
   })
 }
 
@@ -139,9 +150,10 @@ export function createScheduleJob(db: Database, repoId: number, input: ScheduleJ
   const stmt = db.prepare(`
     INSERT INTO schedule_jobs (
       repo_id, name, description, enabled, schedule_mode, interval_minutes, cron_expression, timezone, agent_slug, prompt, model, skill_metadata,
+      branch, isolation_mode,
       created_at, updated_at, last_run_at, next_run_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
 
   const result = stmt.run(
@@ -157,6 +169,8 @@ export function createScheduleJob(db: Database, repoId: number, input: ScheduleJ
     input.prompt,
     input.model ?? null,
     serializeSkillMetadata(input.skillMetadata),
+    input.branch,
+    input.isolationMode,
     now,
     now,
     null,
@@ -180,7 +194,8 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
 
   const stmt = db.prepare(`
     UPDATE schedule_jobs
-    SET name = ?, description = ?, enabled = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?, agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, updated_at = ?, next_run_at = ?
+    SET name = ?, description = ?, enabled = ?, schedule_mode = ?, interval_minutes = ?, cron_expression = ?, timezone = ?,
+        agent_slug = ?, prompt = ?, model = ?, skill_metadata = ?, branch = ?, isolation_mode = ?, updated_at = ?, next_run_at = ?
     WHERE repo_id = ? AND id = ?
   `)
 
@@ -196,6 +211,8 @@ export function updateScheduleJob(db: Database, repoId: number, jobId: number, i
     input.prompt,
     input.model,
     serializeSkillMetadata(input.skillMetadata),
+    input.branch,
+    input.isolationMode,
     now,
     input.nextRunAt,
     repoId,
@@ -341,6 +358,36 @@ export function updateScheduleRunMetadata(
   return getScheduleRunById(db, repoId, jobId, runId)
 }
 
+export function updateScheduleRunWorktree(
+  db: Database,
+  repoId: number,
+  jobId: number,
+  runId: number,
+  input: { worktreePath?: string | null; runBranch?: string | null; commitHash?: string | null },
+): ScheduleRun | null {
+  const existing = getScheduleRunById(db, repoId, jobId, runId)
+  if (!existing) {
+    return null
+  }
+
+  const stmt = db.prepare(`
+    UPDATE schedule_runs
+    SET worktree_path = ?, run_branch = ?, commit_hash = ?
+    WHERE repo_id = ? AND job_id = ? AND id = ?
+  `)
+
+  stmt.run(
+    input.worktreePath === undefined ? existing.worktreePath : input.worktreePath,
+    input.runBranch === undefined ? existing.runBranch : input.runBranch,
+    input.commitHash === undefined ? existing.commitHash : input.commitHash,
+    repoId,
+    jobId,
+    runId,
+  )
+
+  return getScheduleRunById(db, repoId, jobId, runId)
+}
+
 export function getScheduleRunById(db: Database, repoId: number, jobId: number, runId: number): ScheduleRun | null {
   const stmt = db.prepare('SELECT * FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')
   const row = stmt.get(repoId, jobId, runId) as ScheduleRunRow | undefined
@@ -384,7 +431,10 @@ export function listScheduleRunsByJob(db: Database, repoId: number, jobId: numbe
       session_title,
       NULL AS log_text,
       NULL AS response_text,
-      error_text
+      error_text,
+      run_branch,
+      commit_hash,
+      worktree_path
     FROM schedule_runs
     WHERE repo_id = ? AND job_id = ?
     ORDER BY started_at DESC
@@ -508,6 +558,7 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
       sr.started_at, sr.finished_at, sr.created_at,
       sr.session_id, sr.session_title,
       NULL AS log_text, NULL AS response_text, sr.error_text,
+      sr.run_branch, sr.commit_hash, sr.worktree_path,
       sj.name AS job_name, r.local_path AS repo_path, r.name AS repo_name,
       r.repo_url AS repo_url, r.source_path AS repo_source_path
     FROM schedule_runs sr

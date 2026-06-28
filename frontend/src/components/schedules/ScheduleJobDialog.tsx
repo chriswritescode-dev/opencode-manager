@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@opencode-manager/shared/types'
+import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob, ScheduleIsolationMode } from '@opencode-manager/shared/types'
 import { getProvidersWithModels } from '@/api/providers'
 import { createOpenCodeClient } from '@/api/opencode'
 import { settingsApi } from '@/api/settings'
@@ -60,6 +60,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [skillNotes, setSkillNotes] = useState('')
   const initialSkillSlugsRef = useRef<string[] | undefined>(undefined)
   const initialSkillNotesRef = useRef<string | undefined>(undefined)
+  const [isolationMode, setIsolationMode] = useState<ScheduleIsolationMode>('worktree')
+  const [branch, setBranch] = useState('')
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
@@ -193,6 +195,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setSkillNotes(initialSkillNotes)
     initialSkillSlugsRef.current = initialSkillSlugs
     initialSkillNotesRef.current = initialSkillNotes
+    setIsolationMode(job?.isolationMode ?? 'worktree')
+    setBranch(job?.branch ?? '')
   }, [job, open, templates])
 
   const applyPromptTemplate = (template: PromptTemplate) => {
@@ -224,6 +228,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       agentSlug: agentSlug.trim() || undefined,
       model: model.trim() || undefined,
       prompt: prompt.trim(),
+      isolationMode,
+      branch: isolationMode === 'inline' ? null : (branch.trim() || null),
       ...(shouldIncludeSkillMetadata ? {
         skillMetadata: skillSlugs.length > 0 || skillNotes.trim()
           ? {
@@ -293,6 +299,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             modelOptions={modelOptions}
             enabled={enabled}
             onEnabledChange={setEnabled}
+            isolationMode={isolationMode}
+            onIsolationModeChange={setIsolationMode}
+            branch={branch}
+            onBranchChange={setBranch}
             showRepoSelector={showRepoSelector}
             isEditing={!!job}
             repoId={selectedRepoId}

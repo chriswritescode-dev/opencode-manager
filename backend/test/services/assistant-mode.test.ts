@@ -11,6 +11,7 @@ import { SettingsService } from '../../src/services/settings'
 import { createOpenCodeClient } from '../../src/services/opencode/client'
 import { getRepoById } from '../../src/db/queries'
 import { ENV } from '@opencode-manager/shared/config/env'
+import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 
 describe('buildSchedulesSkill', () => {
   it('uses ENV.SERVER.PORT in the internal base URL', () => {
@@ -580,7 +581,8 @@ describe('assistant-mode end-to-end', () => {
 
     const token = (await readFile(path.join(ws.assistantDir, '.opencode/internal-token'), 'utf8')).trim()
 
-    const scheduleService = new ScheduleService(db, createOpenCodeClient())
+    const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
+    const scheduleService = new ScheduleService(db, createOpenCodeClient(), stubWorktreeManager)
     const notificationService = new NotificationService(db)
     const settingsService = new SettingsService(db)
     const app = new Hono()

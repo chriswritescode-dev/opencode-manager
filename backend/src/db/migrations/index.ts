@@ -13,6 +13,7 @@ import migration011 from './011-repo-last-accessed'
 import migration012 from './012-opencode-model-state'
 import migration013 from './013-app-secrets'
 import migration014 from './014-repos-add-name'
+import migration015 from './015-schedule-worktree-isolation'
 
 export const allMigrations: Migration[] = [
   migration001,
@@ -29,4 +30,5 @@ export const allMigrations: Migration[] = [
   migration012,
   migration013,
   migration014,
+  migration015,
 ]

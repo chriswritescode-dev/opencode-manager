@@ -101,7 +101,21 @@ export function RunHistoryCards({
                   <p className="mt-2 truncate text-sm font-medium leading-tight">
                     {run.sessionTitle ?? 'No session recorded'}
                   </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{new Date(run.startedAt).toLocaleString()}</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>{new Date(run.startedAt).toLocaleString()}</span>
+                    {run.runBranch && (
+                      <>
+                        <span aria-hidden="true">•</span>
+                        <span className="font-mono">{run.runBranch}{run.commitHash ? ` @ ${run.commitHash.slice(0, 7)}` : ''}</span>
+                      </>
+                    )}
+                    {run.runBranch && !run.commitHash && run.status !== 'running' && (
+                      <>
+                        <span aria-hidden="true">•</span>
+                        <span className="italic">No changes committed</span>
+                      </>
+                    )}
+                  </div>
                   {run.errorText && (
                     <p className="mt-0.5 truncate text-xs text-red-400/80">{run.errorText}</p>
                   )}

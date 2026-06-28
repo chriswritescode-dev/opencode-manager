@@ -3,6 +3,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { TabsContent } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import type { ScheduleIsolationMode } from '@opencode-manager/shared/types'
 import { Info } from 'lucide-react'
 
 type GeneralTabProps = {
@@ -18,6 +20,10 @@ type GeneralTabProps = {
   modelOptions: ComboboxOption[]
   enabled: boolean
   onEnabledChange: (value: boolean) => void
+  isolationMode: ScheduleIsolationMode
+  onIsolationModeChange: (value: ScheduleIsolationMode) => void
+  branch: string
+  onBranchChange: (value: string) => void
   showRepoSelector?: boolean
   isEditing: boolean
   repoId?: number
@@ -50,6 +56,10 @@ export function GeneralTab({
   modelOptions,
   enabled,
   onEnabledChange,
+  isolationMode,
+  onIsolationModeChange,
+  branch,
+  onBranchChange,
   showRepoSelector,
   isEditing,
   repoId,
@@ -129,6 +139,38 @@ export function GeneralTab({
               <InfoHint text="Auto-run this job on its schedule while still allowing manual runs from the dashboard." />
             </div>
             <Switch checked={enabled} onCheckedChange={onEnabledChange} />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-medium">Isolation</p>
+              <InfoHint text="Run in an isolated worktree off the base branch, or inline in the main working directory." />
+            </div>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+              <div className="w-full sm:w-48">
+                <Select value={isolationMode} onValueChange={onIsolationModeChange}>
+                  <SelectTrigger id="isolation-mode">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="worktree">Worktree</SelectItem>
+                    <SelectItem value="inline">Inline</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1 space-y-2">
+                <Label htmlFor="schedule-branch" className={isolationMode === 'inline' ? 'text-muted-foreground' : ''}>Branch (optional)</Label>
+                <Input
+                  id="schedule-branch"
+                  value={branch}
+                  onChange={(event) => onBranchChange(event.target.value)}
+                  placeholder={isolationMode === 'inline' ? 'N/A — runs in the working directory' : 'Defaults to default branch'}
+                  disabled={isolationMode === 'inline'}
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
