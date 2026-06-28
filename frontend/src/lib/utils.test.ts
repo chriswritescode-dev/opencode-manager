@@ -100,8 +100,8 @@ describe('getRepoDisplayName', () => {
     expect(getRepoDisplayName({ sourcePath: '/home/user/projects/my-repo' })).toBe('my-repo')
   })
 
-  it('falls back to localPath', () => {
-    expect(getRepoDisplayName({ localPath: '/some/path' })).toBe('/some/path')
+  it('falls back to the localPath basename', () => {
+    expect(getRepoDisplayName({ localPath: '/some/path' })).toBe('path')
   })
 
   it('falls back to Repository when all are empty', () => {

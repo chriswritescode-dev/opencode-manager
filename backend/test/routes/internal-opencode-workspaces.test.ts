@@ -24,9 +24,13 @@ vi.mock('bun:sqlite', () => ({
 }))
 
 const mockListRepos = vi.fn()
-vi.mock('../../src/db/queries', () => ({
-  listRepos: (...args: unknown[]) => mockListRepos(...args),
-}))
+vi.mock('../../src/db/queries', async () => {
+  const { getRepoDisplayName } = await vi.importActual<typeof import('@opencode-manager/shared/utils')>('@opencode-manager/shared/utils')
+  return {
+    listRepos: (...args: unknown[]) => mockListRepos(...args),
+    getRepoName: (repo: Parameters<typeof getRepoDisplayName>[0]) => getRepoDisplayName(repo),
+  }
+})
 
 vi.mock('../../src/db/migration-runner', () => ({
   migrate: vi.fn(),

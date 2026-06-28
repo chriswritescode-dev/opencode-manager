@@ -1,7 +1,7 @@
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { getReposPath } from '@opencode-manager/shared/config/env'
-import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH } from '@opencode-manager/shared/utils'
+import { ASSISTANT_REPO_ID, ASSISTANT_REPO_PATH, getRepoDisplayName } from '@opencode-manager/shared/utils'
 import { getErrorMessage } from '../utils/error-utils'
 import path from 'path'
 
@@ -288,10 +288,7 @@ export function listRepos(db: Database, repoOrder?: number[]): Repo[] {
 }
 
 export function getRepoName(repo: Repo): string {
-  if (repo.name && repo.name.trim()) return repo.name.trim()
-  return repo.repoUrl
-    ? repo.repoUrl.split('/').slice(-1)[0]?.replace('.git', '') || repo.localPath
-    : repo.sourcePath ? path.basename(repo.sourcePath) : repo.localPath
+  return getRepoDisplayName(repo)
 }
 
 export function updateRepoStatus(db: Database, id: number, cloneStatus: Repo['cloneStatus']): void {

@@ -65,8 +65,10 @@ export function RepoRowActions({
     mutationFn: (name: string | null) => renameRepo(repo.id, name),
     onSuccess: (updated) => {
       invalidateRepoListCaches(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['repo', repo.id] })
       queryClient.setQueryData(['repo', repo.id], updated)
+      queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+      queryClient.invalidateQueries({ queryKey: ['repo-schedules', repo.id] })
       showToast.success('Repository renamed')
     },
     onError: (error: unknown) => {
