@@ -122,6 +122,14 @@ export async function updateRepoGitCredential(id: number, credentialId?: string)
   })
 }
 
+export async function renameRepo(id: number, name: string | null): Promise<Repo> {
+  return fetchWrapper(`${API_BASE_URL}/api/repos/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name ?? '' }),
+  })
+}
+
 export class GitAuthError extends Error {
   code: string
   constructor(message: string, code: string) {

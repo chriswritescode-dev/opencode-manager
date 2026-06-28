@@ -118,7 +118,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       .filter((repo) => repo.cloneStatus === 'ready')
       .map((repo) => ({
         value: repo.id.toString(),
-        label: getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath),
+        label: getRepoDisplayName(repo),
         description: repo.localPath,
       }))
     return [assistantOption, ...repoEntries]

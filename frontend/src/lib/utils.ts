@@ -2,6 +2,8 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { CSSProperties } from "react"
 
+export { getRepoDisplayName } from '@opencode-manager/shared/utils'
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
@@ -13,20 +15,6 @@ export const GPU_ACCELERATED_STYLE: CSSProperties = {
 }
 
 export const MODAL_TRANSITION_MS = 300
-
-function getPathBaseName(filePath: string): string {
-  return filePath.split(/[\\/]/).pop() || filePath
-}
-
-export function getRepoDisplayName(repoUrl?: string | null, localPath?: string | null, sourcePath?: string | null): string {
-  if (repoUrl) {
-    return repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
-  }
-  if (sourcePath) {
-    return getPathBaseName(sourcePath) || localPath || 'Repository'
-  }
-  return localPath || "Repository"
-}
 
 export function sanitizeForTTS(text: string): string {
   if (!text) return ''

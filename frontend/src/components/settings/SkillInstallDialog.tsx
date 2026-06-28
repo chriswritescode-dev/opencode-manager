@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { getRepoDisplayName } from '@/lib/utils'
 import { settingsApi } from '@/api/settings'
 import { listRepos } from '@/api/repos'
 import { FetchError } from '@/api/fetchWrapper'
@@ -194,7 +195,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
                   <SelectContent>
                     {repos.map((repo) => (
                       <SelectItem key={repo.id} value={repo.id.toString()}>
-                        {repo.localPath}
+                        {getRepoDisplayName(repo)}
                       </SelectItem>
                     ))}
                   </SelectContent>

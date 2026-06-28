@@ -16,19 +16,23 @@ vi.mock('@opencode-manager/shared/config/env', async (importOriginal) => {
   }
 })
 
-vi.mock('../../src/db/queries', () => ({
-  getRepoById: vi.fn(),
-  listRepos: vi.fn(() => []),
-  getRepoByUrlAndBranch: vi.fn(),
-  getRepoByLocalPath: vi.fn(),
-  getRepoBySourcePath: vi.fn(),
-  createRepo: vi.fn(),
-  updateRepoStatus: vi.fn(),
-  updateRepoConfigName: vi.fn(),
-  updateLastPulled: vi.fn(),
-  updateRepoBranch: vi.fn(),
-  deleteRepo: vi.fn(),
-}))
+vi.mock('../../src/db/queries', async () => {
+  const { getRepoDisplayName } = await vi.importActual<typeof import('@opencode-manager/shared/utils')>('@opencode-manager/shared/utils')
+  return {
+    getRepoById: vi.fn(),
+    listRepos: vi.fn(() => []),
+    getRepoByUrlAndBranch: vi.fn(),
+    getRepoByLocalPath: vi.fn(),
+    getRepoBySourcePath: vi.fn(),
+    createRepo: vi.fn(),
+    updateRepoStatus: vi.fn(),
+    updateRepoConfigName: vi.fn(),
+    updateLastPulled: vi.fn(),
+    updateRepoBranch: vi.fn(),
+    deleteRepo: vi.fn(),
+    getRepoName: (repo: Parameters<typeof getRepoDisplayName>[0]) => getRepoDisplayName(repo),
+  }
+})
 
 function createMockClient(skills: Array<{ name: string; description: string; location: string; content: string }>): OpenCodeClient {
   return {
@@ -332,7 +336,7 @@ describe('SkillService', () => {
         description: 'Helps project work',
         scope: 'project',
         repoId: repo.id,
-        repoName: 'Project Zero',
+        repoName: 'project-zero',
       }))
     }
   })

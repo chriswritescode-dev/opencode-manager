@@ -79,6 +79,23 @@ export function getRepoNameFromUrl(url: string): string {
   return parts[parts.length - 1] || ''
 }
 
+function getPathBaseName(filePath: string): string {
+  return filePath.split(/[\\/]/).pop() || filePath
+}
+
+export function getRepoDisplayName(repo: {
+  name?: string | null
+  repoUrl?: string | null
+  localPath?: string | null
+  sourcePath?: string | null
+}): string {
+  if (repo.name && repo.name.trim()) return repo.name.trim()
+  const fromLocalPath = repo.localPath ? getPathBaseName(repo.localPath) : ''
+  if (repo.repoUrl) return getRepoNameFromUrl(repo.repoUrl) || fromLocalPath || 'Repository'
+  if (repo.sourcePath) return getPathBaseName(repo.sourcePath) || fromLocalPath || 'Repository'
+  return fromLocalPath || 'Repository'
+}
+
 export function normalizeRepoUrlForCompare(url: string): string {
   let normalized = trimTrailingChar(url.trim().replace(/\.git$/, ''), '/')
   const shorthandMatch = normalized.match(/^([^/]+)\/([^/]+)$/)

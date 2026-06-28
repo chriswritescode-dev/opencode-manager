@@ -421,7 +421,7 @@ export function SessionDetail() {
 
   const workspaceDisplayName = isAssistantSession || !repo
     ? 'Assistant'
-    : getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
+    : getRepoDisplayName(repo);
   const tabFromUrl = new URLSearchParams(location.search).get('repoTab') ?? undefined;
   const sessionBackPath = getSessionListPath(repoId, isAssistantSession, tabFromUrl);
 

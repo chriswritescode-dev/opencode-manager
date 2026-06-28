@@ -21,7 +21,7 @@ export function scheduleTargetFromRepo(repo: Repo): ScheduleTarget {
   return {
     repoId: repo.id,
     kind: 'repo',
-    name: getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath),
+    name: getRepoDisplayName(repo),
     subtitle: repo.localPath,
     fullPath: repo.fullPath,
     backHref: `/repos/${repo.id}`,

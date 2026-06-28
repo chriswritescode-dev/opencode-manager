@@ -4,10 +4,11 @@ import { Database } from 'bun:sqlite'
 import { migrate } from '../db/migration-runner'
 import { allMigrations } from '../db/migrations'
 import { createRepoRoutes } from './repos'
-import { createRepo } from '../db/queries'
+import { createRepo, getRepoById } from '../db/queries'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeClient } from '../services/opencode/client'
+import type { Repo } from '@opencode-manager/shared/types'
 import { getReposPath } from '@opencode-manager/shared/config/env'
 import path from 'path'
 
@@ -330,5 +331,75 @@ describe('POST /api/repos/:id/workspaces', () => {
     expect(captured?.directory?.endsWith('/repos/repo-a')).toBe(true)
     expect(JSON.parse(captured?.body ?? '{}')).toEqual({ type: 'worktree', branch: null })
     expect(await res.json()).toMatchObject({ id: 'wrk_test', type: 'worktree' })
+  })
+})
+
+describe('PATCH /api/repos/:id', () => {
+  let db: Database
+  let app: Hono
+
+  beforeEach(() => {
+    db = createTestDb()
+    app = createTestApp(db)
+  })
+
+  afterEach(() => {
+    db.close()
+  })
+
+  it('sets a custom name on a ready repo', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const res = await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: 'My Fork' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(200)
+    const data = await res.json() as Repo
+    expect(data.name).toBe('My Fork')
+
+    const stored = getRepoById(db, 1)
+    expect(stored?.name).toBe('My Fork')
+  })
+
+  it('clears a custom name (reverts to derived)', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+    await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: 'My Fork' }), headers: { 'Content-Type': 'application/json' } })
+
+    const res = await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: '' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(200)
+    const data = await res.json() as Repo
+    expect(data.name).toBeUndefined()
+
+    const stored = getRepoById(db, 1)
+    expect(stored?.name).toBeUndefined()
+  })
+
+  it('trims whitespace from the name', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const res = await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: '  Spaced  ' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(200)
+    const data = await res.json() as Repo
+    expect(data.name).toBe('Spaced')
+  })
+
+  it('returns 404 for non-existent repo', async () => {
+    const res = await app.request('/repos/999999', { method: 'PATCH', body: JSON.stringify({ name: 'Test' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(404)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('Repo not found')
+  })
+
+  it('returns 400 for assistant repo', async () => {
+    const res = await app.request('/repos/0', { method: 'PATCH', body: JSON.stringify({ name: 'Test' }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(400)
+    const data = await res.json() as { error: string }
+    expect(data.error).toBe('Assistant repository cannot be renamed')
+  })
+
+  it('returns 400 for name exceeding 100 characters', async () => {
+    createRepo(db, { localPath: 'repo-a', defaultBranch: 'main', cloneStatus: 'ready', clonedAt: Date.now(), isLocal: true })
+
+    const longName = 'a'.repeat(101)
+    const res = await app.request('/repos/1', { method: 'PATCH', body: JSON.stringify({ name: longName }), headers: { 'Content-Type': 'application/json' } })
+    expect(res.status).toBe(400)
   })
 })

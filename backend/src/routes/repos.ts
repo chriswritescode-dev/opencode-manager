@@ -2,8 +2,8 @@ import { Hono } from 'hono'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from 'bun:sqlite'
 import type { Repo } from '@opencode-manager/shared/types'
-import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema } from '@opencode-manager/shared/schemas'
-import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName, getRepoGitCredentialId, setRepoGitCredentialId } from '../db/queries'
+import { DiscoverReposRequestSchema, AssistantModeInitRequestSchema, UpdateRepoRequestSchema } from '@opencode-manager/shared/schemas'
+import { listRepos, getRepoById, updateLastAccessed, updateRepoConfigName, getRepoGitCredentialId, setRepoGitCredentialId, updateRepoName } from '../db/queries'
 import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
@@ -245,6 +245,32 @@ app.get('/', async (c) => {
       return c.json(withRepoSettings(database, repo))
     } catch (error: unknown) {
       logger.error('Failed to update repo git credential:', error)
+      return c.json({ error: getErrorMessage(error) }, 500)
+    }
+  })
+
+  app.patch('/:id', async (c) => {
+    try {
+      const id = parseInt(c.req.param('id'))
+      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
+      if (id === ASSISTANT_REPO_ID) {
+        return c.json({ error: 'Assistant repository cannot be renamed' }, 400)
+      }
+      const repo = getRepoById(database, id)
+      if (!repo) {
+        return c.json({ error: 'Repo not found' }, 404)
+      }
+      const body = await c.req.json()
+      const parsed = UpdateRepoRequestSchema.safeParse(body)
+      if (!parsed.success) {
+        return c.json({ error: 'Invalid request', details: parsed.error.flatten() }, 400)
+      }
+      const trimmed = parsed.data.name?.trim()
+      updateRepoName(database, id, trimmed && trimmed.length > 0 ? trimmed : null)
+      const updated = getRepoById(database, id)
+      return c.json(withRepoSettings(database, updated ?? repo))
+    } catch (error: unknown) {
+      logger.error('Failed to rename repo:', error)
       return c.json({ error: getErrorMessage(error) }, 500)
     }
   })

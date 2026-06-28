@@ -50,7 +50,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
     if (!searchQuery.trim()) return sorted
     const query = searchQuery.toLowerCase()
     return sorted.filter((repo) =>
-      getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath).toLowerCase().includes(query)
+      getRepoDisplayName(repo).toLowerCase().includes(query)
     )
   }, [regularRepos, searchQuery])
 
@@ -161,7 +161,7 @@ export function RepoQuickSwitchSheet({ isOpen, onClose }: RepoQuickSwitchSheetPr
                     </div>
                   </div>
                   <div className="flex-1 min-w-0 font-medium text-sm text-foreground truncate">
-                    {getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)}
+                    {getRepoDisplayName(repo)}
                   </div>
                   {isActive && <Check className="h-4 w-4 text-primary flex-shrink-0" />}
                 </button>

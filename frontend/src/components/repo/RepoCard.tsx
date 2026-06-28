@@ -8,6 +8,7 @@ import { RepoRowActions } from "./RepoRowActions"
 interface RepoCardProps {
   repo: {
     id: number;
+    name?: string | null;
     repoUrl?: string | null;
     localPath?: string;
     sourcePath?: string;
@@ -47,7 +48,7 @@ export function RepoCard({
   const navigate = useNavigate();
   const [actionsOpen, setActionsOpen] = useState(false);
 
-  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath);
+  const repoName = getRepoDisplayName(repo);
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch;
   const isReady = repo.cloneStatus === "ready";
   const isCloning = repo.cloneStatus === "cloning";

@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
-import { getRepoById } from '../../db/queries'
+import { getRepoById, getRepoName } from '../../db/queries'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
 import { safeGitOut } from './repo-sync-helpers'
@@ -25,7 +25,7 @@ export function createInternalRepoSyncRoutes(db: Database) {
       ])
       return c.json({
         repoId,
-        repoName: repo.repoUrl?.split('/').slice(-1)[0]?.replace('.git', '') ?? null,
+        repoName: getRepoName(repo),
         directory: repoPath,
         originUrl: originUrl?.trim() || null,
         head: head?.trim() || null,
