@@ -41,15 +41,11 @@ export function RenameRepoDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent
-        hideCloseButton
-        mobileFullscreen
-        className="gap-0 p-4 sm:p-6"
-      >
+      <DialogContent hideCloseButton className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-sm text-muted-foreground font-normal">Rename repository</DialogTitle>
+          <DialogTitle>Rename repository</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="min-w-0">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="relative">
             <input
               ref={inputRef}
@@ -57,7 +53,7 @@ export function RenameRepoDialog({
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               placeholder={derivedName}
-              className="text-base font-semibold bg-background border border-border rounded px-3 py-2.5 pr-10 outline-none w-full focus:border-primary focus:ring-2 focus:ring-primary/20"
+              className="text-base font-semibold bg-background border border-border rounded-md px-3 py-2.5 pr-10 outline-none w-full focus:border-primary focus:ring-2 focus:ring-primary/20"
               autoFocus
             />
             {editName && (
@@ -74,7 +70,7 @@ export function RenameRepoDialog({
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex items-center gap-2">
             <Button
               type="button"
               variant="outline"
