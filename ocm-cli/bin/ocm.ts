@@ -6,7 +6,8 @@ import { ManagerApi } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress } from '../src/mirror.js'
 import { createProgressReporter } from '../src/progress.js'
-import { getBranchName } from '../src/local-repo.js'
+import { getBranchName, getOriginUrl } from '../src/local-repo.js'
+import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveTarget } from '../src/resolve-target.js'
 import packageJson from '../package.json' with { type: 'json' }
 
@@ -35,7 +36,7 @@ interface ManagerRepo {
   branch: string | null
   cloneStatus: string
   directory: string
-  originUrl?: string | null
+  projectId?: string | null
   extra: { repoId: number; localPath: string; fullPath: string }
 }
 
@@ -46,6 +47,23 @@ function die(msg: string, code = 1): never {
 
 function info(msg: string): void {
   process.stdout.write(`${msg}\n`)
+}
+
+function promptYesNo(question: string): boolean {
+  process.stderr.write(`${question} [y/N] `)
+  const res = spawnSync('bash', ['-c', 'read LINE && printf "%s" "$LINE"'], {
+    stdio: ['inherit', 'pipe', 'inherit'],
+    encoding: 'utf-8',
+  })
+  const answer = (res.stdout ?? '').trim().toLowerCase()
+  return answer === 'y' || answer === 'yes'
+}
+
+function confirmFullFallback(): void {
+  if (!process.stdin.isTTY) return
+  if (!promptYesNo('Fall back to a full mirror?')) {
+    die('aborted')
+  }
 }
 
 function requireState(): OcmState {
@@ -228,7 +246,8 @@ async function cmdDefault(): Promise<void> {
     : undefined
 
   const repos = await fetchRepos(state.managerUrl, token)
-  const result = resolveTarget({ cwd: process.cwd(), repos, last })
+  const localProjectId = await resolveOpenCodeProjectId(process.cwd())
+  const result = resolveTarget({ cwd: process.cwd(), repos, localProjectId, last })
 
   switch (result.kind) {
     case 'cwd-match': {
@@ -249,7 +268,8 @@ async function cmdDefault(): Promise<void> {
       return
     case 'cwd-ambiguous': {
       const names = result.matches.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
-      die(`multiple Manager repos match origin ${result.localOrigin}: ${names}; disambiguate with \`ocm use <repoId>\``)
+      die(`multiple Manager repos match project ${result.localProjectId}: ${names}; disambiguate with \`ocm use <repoId>\``)
+      break
     }
     case 'local':
       runLocalOpencode(result.reason)
@@ -300,28 +320,23 @@ export async function cmdPush(args: string[]): Promise<void> {
   const remotes: RemoteRepoSummary[] = repos.map((r) => ({
     repoId: r.repoId,
     name: r.name,
-    originUrl: r.originUrl ?? null,
+    projectId: r.projectId ?? null,
     branch: r.branch,
   }))
 
-  const plan = prepareMirror(process.cwd(), remotes)
+  const plan = await prepareMirror(process.cwd(), remotes)
 
   if (plan.matched.length === 0) {
     if (!create) {
-      die(`no matching Manager repo for origin ${plan.localOrigin}. Re-run with --create to create one.`)
+      die(`no matching Manager repo for project ${plan.localProjectId}. Re-run with --create to create one.`)
     }
 
     const name = basename(plan.repoRoot)
     const branch = getBranchName(plan.repoRoot)
+    const originUrl = getOriginUrl(plan.repoRoot)
 
     if (process.stdin.isTTY && !yes) {
-      process.stderr.write(`Create Manager repo "${name}" by uploading ${plan.repoRoot} (origin: ${plan.localOrigin})? [y/N] `)
-      const res = spawnSync('bash', ['-c', 'read LINE && printf "%s" "$LINE"'], {
-        stdio: ['inherit', 'pipe', 'inherit'],
-        encoding: 'utf-8',
-      })
-      const answer = (res.stdout ?? '').trim().toLowerCase()
-      if (answer !== 'y' && answer !== 'yes') {
+      if (!promptYesNo(`Create Manager repo "${name}" by uploading ${plan.repoRoot} (project: ${plan.localProjectId})?`)) {
         die('aborted')
       }
     } else if (!process.stdin.isTTY && !yes) {
@@ -333,7 +348,7 @@ export async function cmdPush(args: string[]): Promise<void> {
     const result = await mirrorUp(plan, {
       api,
       force,
-      create: { name, originUrl: plan.localOrigin, branch },
+      create: { name, originUrl, branch },
       onProgress,
     })
     progress.done()
@@ -346,7 +361,8 @@ export async function cmdPush(args: string[]): Promise<void> {
         return
       } catch (error) {
         if (error instanceof MirrorAbort) throw error
-        process.stderr.write(`ocm: patch push failed; falling back to full mirror: ${error instanceof Error ? error.message : String(error)}\n`)
+        process.stderr.write(`ocm: patch push failed: ${error instanceof Error ? error.message : String(error)}\n`)
+        confirmFullFallback()
       }
     }
     const progress = createProgressReporter('push')
@@ -356,7 +372,7 @@ export async function cmdPush(args: string[]): Promise<void> {
     info(`pushed ${plan.repoRoot} -> ${plan.matched[0]!.name} (repoId=${result.repoId}, branch=${result.branch})`)
   } else {
     const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
-    die(`multiple Manager repos match origin ${plan.localOrigin}: ${names}; disambiguate with \`ocm push <repoId>\``)
+    die(`multiple Manager repos match project ${plan.localProjectId}: ${names}; disambiguate with \`ocm push <repoId>\``)
   }
 }
 
@@ -377,19 +393,19 @@ async function cmdPull(args: string[]): Promise<void> {
   const remotes: RemoteRepoSummary[] = repos.map((r) => ({
     repoId: r.repoId,
     name: r.name,
-    originUrl: r.originUrl ?? null,
+    projectId: r.projectId ?? null,
     branch: r.branch,
   }))
 
-  const plan = prepareMirror(process.cwd(), remotes)
+  const plan = await prepareMirror(process.cwd(), remotes)
 
   if (plan.matched.length === 0) {
-    die(`no matching Manager repo for origin ${plan.localOrigin}.`)
+    die(`no matching Manager repo for project ${plan.localProjectId}.`)
   }
 
   if (plan.matched.length > 1) {
     const names = plan.matched.map((r) => `${r.name} (id=${r.repoId})`).join(', ')
-    die(`multiple Manager repos match origin ${plan.localOrigin}: ${names}; disambiguate with \`ocm pull <repoId>\``)
+    die(`multiple Manager repos match project ${plan.localProjectId}: ${names}; disambiguate with \`ocm pull <repoId>\``)
   }
 
   if (!full) {
@@ -399,7 +415,8 @@ async function cmdPull(args: string[]): Promise<void> {
       return
     } catch (error) {
       if (error instanceof MirrorAbort && !error.message.includes('falling back')) throw error
-      process.stderr.write(`ocm: patch pull failed; falling back to full mirror: ${error instanceof Error ? error.message : String(error)}\n`)
+      process.stderr.write(`ocm: patch pull failed: ${error instanceof Error ? error.message : String(error)}\n`)
+      confirmFullFallback()
     }
   }
   const progress = createProgressReporter('pull')

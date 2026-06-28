@@ -125,9 +125,9 @@ The child takes over the terminal (`stdio: inherit`); closing the TUI exits `ocm
 
 ### Mirror commands
 
-`ocm push` uses a fast git bundle + working-tree patch by default to sync `$PWD` to the matching Manager repo. Pass `--full` to fall back to the legacy tarball mirror (skipping `node_modules`, `dist`, `.next`, `.venv`, `__pycache__`, `.turbo`, and anything matched by `.gitignore`). The tarball fallback is also used automatically when the fast path fails.
+`ocm push` uses a fast git bundle + working-tree patch by default to sync `$PWD` to the matching Manager repo. Pass `--full` to use the legacy tarball mirror (skipping `node_modules`, `dist`, `.next`, `.venv`, `__pycache__`, `.turbo`, and anything matched by `.gitignore`). If the fast path fails, `ocm` prompts before reverting to the tarball mirror (and proceeds automatically when there is no TTY to prompt).
 
-`ocm pull` uses a fast git bundle + working-tree patch by default to sync the matching Manager repo over `$PWD`. Pass `--full` to fall back to the legacy tarball mirror (also used automatically when the fast path fails).
+`ocm pull` uses a fast git bundle + working-tree patch by default to sync the matching Manager repo over `$PWD`. Pass `--full` to use the legacy tarball mirror. If the fast path fails, `ocm` prompts before reverting to the tarball mirror (and proceeds automatically when there is no TTY to prompt).
 
 - `--force` skips the dirty-working-tree check on `pull` and the safety bail on `push`.
 - `--create` (on `push`) creates a new Manager repo when no `origin` match is found.

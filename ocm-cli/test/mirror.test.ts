@@ -6,6 +6,10 @@ import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
 import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
+import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
+
+const ME_REPO_ID = gitRemoteProjectId('https://github.com/me/repo.git')!
+const OTHER_REPO_ID = gitRemoteProjectId('https://github.com/other/repo.git')!
 
 describe('prepareMirror', () => {
   let tmpDir: string
@@ -18,53 +22,53 @@ describe('prepareMirror', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('rejects when not in a git repo', () => {
+  it('rejects when not in a git repo', async () => {
     const nonGitDir = join(tmpDir, 'non-git')
     mkdirSync(nonGitDir)
 
-    expect(() => prepareMirror(nonGitDir, [])).toThrow(MirrorAbort)
-    expect(() => prepareMirror(nonGitDir, [])).toThrow('not in a git repository')
+    await expect(prepareMirror(nonGitDir, [])).rejects.toThrow(MirrorAbort)
+    await expect(prepareMirror(nonGitDir, [])).rejects.toThrow('not in a git repository')
   })
 
-  it('rejects when no origin URL found', () => {
+  it('rejects when no project id can be resolved', async () => {
     const gitDir = join(tmpDir, 'git-no-origin')
     mkdirSync(gitDir)
     spawnSync('git', ['init'], { cwd: gitDir, stdio: 'ignore' })
 
-    expect(() => prepareMirror(gitDir, [])).toThrow(MirrorAbort)
-    expect(() => prepareMirror(gitDir, [])).toThrow('no origin URL found')
+    await expect(prepareMirror(gitDir, [])).rejects.toThrow(MirrorAbort)
+    await expect(prepareMirror(gitDir, [])).rejects.toThrow('could not resolve an OpenCode project id')
   })
 
-  it('returns empty matched array when no remote matches', () => {
+  it('returns empty matched array when no remote matches', async () => {
     const gitDir = join(tmpDir, 'git-mismatch')
     mkdirSync(gitDir)
     spawnSync('git', ['init'], { cwd: gitDir, stdio: 'ignore' })
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/other/repo.git'], { cwd: gitDir, stdio: 'ignore' })
 
     const remotes = [
-      { repoId: 1, name: 'my-repo', originUrl: 'https://github.com/me/repo.git', branch: 'main' },
+      { repoId: 1, name: 'my-repo', projectId: ME_REPO_ID, branch: 'main' },
     ]
 
-    const plan = prepareMirror(gitDir, remotes)
+    const plan = await prepareMirror(gitDir, remotes)
     expect(plan.matched).toHaveLength(0)
-    expect(plan.localOrigin).toContain('other/repo')
+    expect(plan.localProjectId).toBe(OTHER_REPO_ID)
   })
 
-  it('returns matching repos when origin matches', () => {
+  it('returns matching repos when the project id matches', async () => {
     const gitDir = join(tmpDir, 'git-match')
     mkdirSync(gitDir)
     spawnSync('git', ['init'], { cwd: gitDir, stdio: 'ignore' })
     spawnSync('git', ['remote', 'add', 'origin', 'https://github.com/me/repo.git'], { cwd: gitDir, stdio: 'ignore' })
 
     const remotes = [
-      { repoId: 1, name: 'my-repo', originUrl: 'https://github.com/me/repo.git', branch: 'main' },
-      { repoId: 2, name: 'other-repo', originUrl: 'https://github.com/other/repo.git', branch: 'main' },
+      { repoId: 1, name: 'my-repo', projectId: ME_REPO_ID, branch: 'main' },
+      { repoId: 2, name: 'other-repo', projectId: OTHER_REPO_ID, branch: 'main' },
     ]
 
-    const plan = prepareMirror(gitDir, remotes)
+    const plan = await prepareMirror(gitDir, remotes)
     expect(plan.matched).toHaveLength(1)
     expect(plan.matched[0]!.repoId).toBe(1)
-    expect(plan.localOrigin).toContain('me/repo')
+    expect(plan.localProjectId).toBe(ME_REPO_ID)
   })
 })
 
@@ -119,7 +123,7 @@ describe('cmdPush', () => {
       stderrOutput += typeof msg === 'string' ? msg : new TextDecoder().decode(msg)
       return true
     })
-    vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+    vi.spyOn(process, 'exit').mockImplementation((_code?: string | number | null) => {
       throw new Error(stderrOutput.trim())
     })
 
@@ -161,7 +165,7 @@ describe('mirrorDown', () => {
   function createGzipTarball(dir: string): Buffer {
     const tarFile = join(tmpDir, 'test.tar.gz')
     execSync(`tar -czf "${tarFile}" -C "${dir}" .`)
-    return require('fs').readFileSync(tarFile)
+    return readFileSync(tarFile)
   }
 
   const streamOf = (buf: Buffer): ReadableStream<Uint8Array> =>
@@ -448,8 +452,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi()
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -471,8 +475,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi({ chunkSize: 128 * 1024 })
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -490,8 +494,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi({ partFailures: { 0: 2 }, chunkSize: 64 * 1024 })
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -512,8 +516,8 @@ describe('mirrorUp chunked upload', () => {
 
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await expect(mirrorUp(plan, { api: ctx.api as any, force: false })).rejects.toThrow('boom')
@@ -530,8 +534,8 @@ describe('mirrorUp chunked upload', () => {
     const onProgress = vi.fn()
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false, onProgress })
@@ -554,8 +558,8 @@ describe('mirrorUp chunked upload', () => {
     const ctx = makeMockApi()
     const plan = {
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }
 
     await mirrorUp(plan, { api: ctx.api as any, force: false })
@@ -596,8 +600,8 @@ describe('mirror patch helpers', () => {
 
     await mirrorUpPatch({
       repoRoot,
-      localOrigin: 'https://github.com/test/repo.git',
-      matched: [{ repoId: 1, name: 'test-repo', originUrl: 'https://github.com/test/repo.git', branch: 'main' }],
+      localProjectId: 'test-project',
+      matched: [{ repoId: 1, name: 'test-repo', projectId: 'test-project', branch: 'main' }],
     }, { api: api as any, force: false })
 
     expect(api.mirrorPatch).toHaveBeenCalledTimes(1)

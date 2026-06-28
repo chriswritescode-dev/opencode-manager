@@ -162,7 +162,7 @@ describe('createProgressReporter', () => {
 
   describe('finished guard', () => {
     it('tick is a no-op after done()', () => {
-      let fakeTime = 100_000
+      const fakeTime = 100_000
       const now = () => fakeTime
       const { sink, writes } = createSink(true)
       const reporter = createProgressReporter('Test', sink, now)

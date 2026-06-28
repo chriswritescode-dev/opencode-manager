@@ -57,15 +57,6 @@ export function getDirtyPaths(dir: string): Set<string> {
   return paths
 }
 
-function normalizeUrl(url: string): string {
-  return url
-    .trim()
-    .replace(/\.git$/, '')
-    .replace(/^git@([^:]+):/, 'ssh://git@$1/')
-    .replace(/\/+$/, '')
-    .toLowerCase()
-}
-
 export function getBranchName(dir: string): string | null {
   const branch = git(dir, ['rev-parse', '--abbrev-ref', 'HEAD'])
   return branch && branch !== 'HEAD' ? branch : null
@@ -99,9 +90,4 @@ export function getMirrorPatch(dir: string): string {
   } finally {
     rmSync(tempIndex, { force: true })
   }
-}
-
-export function urlsEqual(a: string | null | undefined, b: string | null | undefined): boolean {
-  if (!a || !b) return false
-  return normalizeUrl(a) === normalizeUrl(b)
 }

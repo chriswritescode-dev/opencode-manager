@@ -39,23 +39,26 @@ ocm pull [--force] [--full]
 ocm logout
 ```
 
-Running `ocm` with no command tries to match the current git repo's `origin`
-against ready Manager repos. If one repo matches, it attaches OpenCode to that
-Manager repo. If no repo matches, it falls back to the last selected repo, then
-to local `opencode`.
+Running `ocm` with no command computes the current git repo's OpenCode project
+id (the same identity OpenCode uses: normalized origin remote hash, else the
+cached id, else the root commit) and matches it against ready Manager repos. If
+one repo matches, it attaches OpenCode to that Manager repo. If no repo matches,
+it falls back to the last selected repo, then to local `opencode`.
 
 `ocm use <repoId|name>` selects a Manager repo, remembers it as the last repo,
 and attaches OpenCode to it.
 
 `ocm push` syncs the current git repo to the matching Manager repo using a fast
-git bundle + working-tree patch by default. Pass `--full` to fall back to the
-legacy tarball mirror (also used automatically when the fast path fails). Use
-`--create` to create a Manager repo when no origin match exists, and `--yes` to
+git bundle + working-tree patch by default. Pass `--full` to use the legacy
+tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
+tarball mirror (and proceeds automatically when there is no TTY to prompt). Use
+`--create` to create a Manager repo when no project match exists, and `--yes` to
 confirm creation in non-interactive shells.
 
 `ocm pull` syncs the matching Manager repo over the current working tree using a
-fast git bundle + working-tree patch by default. Pass `--full` to fall back to
-the legacy tarball mirror (also used automatically when the fast path fails). It
+fast git bundle + working-tree patch by default. Pass `--full` to use the legacy
+tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
+tarball mirror (and proceeds automatically when there is no TTY to prompt). It
 refuses to overwrite uncommitted local changes unless `--force` is passed.
 
 ## OpenCode plugin

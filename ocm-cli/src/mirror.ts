@@ -5,7 +5,8 @@ import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
-import { getRepoRoot, getOriginUrl, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, urlsEqual, runGit } from './local-repo.js'
+import { getRepoRoot, getDirtyPaths, getHeadSha, getBranchName, getMirrorPatch, runGit } from './local-repo.js'
+import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import type { ManagerApi } from './manager-api.js'
 import { ManagerApiError } from './manager-api.js'
 
@@ -46,26 +47,26 @@ export class MirrorAbort extends Error {
 export interface RemoteRepoSummary {
   repoId: number
   name: string
-  originUrl: string | null
+  projectId: string | null
   branch: string | null
 }
 
 export interface MirrorPlan {
   repoRoot: string
-  localOrigin: string
+  localProjectId: string
   matched: RemoteRepoSummary[]
 }
 
-export function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): MirrorPlan {
+export async function prepareMirror(cwd: string, remotes: RemoteRepoSummary[]): Promise<MirrorPlan> {
   const repoRoot = getRepoRoot(cwd)
   if (!repoRoot) throw new MirrorAbort('not in a git repository')
 
-  const localOrigin = getOriginUrl(repoRoot)
-  if (!localOrigin) throw new MirrorAbort('no origin URL found')
+  const localProjectId = await resolveOpenCodeProjectId(repoRoot)
+  if (!localProjectId) throw new MirrorAbort('could not resolve an OpenCode project id for this repository')
 
-  const matched = remotes.filter((r) => urlsEqual(localOrigin, r.originUrl))
+  const matched = remotes.filter((r) => r.projectId && r.projectId === localProjectId)
 
-  return { repoRoot, localOrigin, matched }
+  return { repoRoot, localProjectId, matched }
 }
 
 export interface MirrorProgress {

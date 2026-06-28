@@ -138,6 +138,7 @@ describe('internal-opencode-workspaces routes', () => {
     expect(workspace).toHaveProperty('branch')
     expect(workspace).toHaveProperty('cloneStatus')
     expect(workspace).toHaveProperty('directory')
+    expect(workspace).toHaveProperty('projectId')
     expect(workspace).toHaveProperty('extra')
     expect(workspace.extra).toHaveProperty('repoId')
     expect(workspace.extra).toHaveProperty('localPath')
