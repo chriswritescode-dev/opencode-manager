@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useDeleteSession, useSessionsAcrossDirectories } from './useOpenCode'
+import { useDeleteSession, useMessages, useSessionsAcrossDirectories } from './useOpenCode'
+import { useSendErrorStore } from '../stores/sendErrorStore'
 
 vi.mock('../lib/toast', () => ({
   showToast: {
@@ -262,5 +263,78 @@ describe('useSessionsAcrossDirectories', () => {
       'http://localhost/api/opencode/api/session?limit=25&order=desc&search=deploy&directory=%2Frepo',
       expect.objectContaining({ credentials: 'include' }),
     )
+  })
+})
+
+describe('useMessages send error reconciliation', () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    vi.stubGlobal('fetch', fetchMock)
+    useSendErrorStore.setState({ errors: {}, queuedPrompts: {} })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('clears a stale network send error when fetched messages contain the prompt', async () => {
+    useSendErrorStore.getState().setError({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Load failed',
+      failedPrompt: 'sent while backgrounded',
+      kind: 'network',
+    })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([
+      {
+        info: { id: 'user-1', role: 'user', sessionID: 'session-1', time: { created: 1 } },
+        parts: [{ id: 'part-1', type: 'text', text: 'sent while backgrounded', messageID: 'user-1', sessionID: 'session-1' }],
+      },
+    ]), { headers: { 'Content-Type': 'application/json' } }))
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useMessages('/api/opencode', 'session-1', '/repo'), { wrapper })
+
+    await waitFor(() => {
+      expect(useSendErrorStore.getState().getError('session-1')).toBeNull()
+    })
+  })
+
+  it('keeps a network send error when fetched messages do not contain the prompt', async () => {
+    useSendErrorStore.getState().setError({
+      sessionID: 'session-1',
+      title: 'Error',
+      message: 'Load failed',
+      failedPrompt: 'missing prompt',
+      kind: 'network',
+    })
+
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify([
+      {
+        info: { id: 'user-1', role: 'user', sessionID: 'session-1', time: { created: 1 } },
+        parts: [{ id: 'part-1', type: 'text', text: 'different prompt', messageID: 'user-1', sessionID: 'session-1' }],
+      },
+    ]), { headers: { 'Content-Type': 'application/json' } }))
+
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    )
+
+    renderHook(() => useMessages('/api/opencode', 'session-1', '/repo'), { wrapper })
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    })
+    expect(useSendErrorStore.getState().getError('session-1')).toEqual(expect.objectContaining({
+      failedPrompt: 'missing prompt',
+    }))
   })
 })
