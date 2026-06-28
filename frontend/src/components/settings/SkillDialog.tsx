@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { getRepoDisplayName } from '@/lib/utils'
 import type { SkillFileInfo, CreateSkillRequest, UpdateSkillRequest, SkillScope } from '@opencode-manager/shared'
 import type { Repo } from '@/api/types'
 import { listRepos } from '@/api/repos'
@@ -205,7 +206,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
                       <SelectContent>
                         {repos.map((repo) => (
                           <SelectItem key={repo.id} value={repo.id.toString()}>
-                            {repo.localPath}
+                            {getRepoDisplayName(repo)}
                           </SelectItem>
                         ))}
                       </SelectContent>

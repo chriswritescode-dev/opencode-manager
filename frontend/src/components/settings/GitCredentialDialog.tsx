@@ -9,6 +9,7 @@ import { Alert } from '@/components/ui/alert'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MultiSelect, type MultiSelectOption } from '@/components/ui/multi-select'
 import { showToast } from '@/lib/toast'
+import { getRepoDisplayName } from '@/lib/utils'
 import type { GitCredential } from '@/api/types/settings'
 import type { Repo } from '@/api/types'
 
@@ -83,7 +84,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
 
   const repoOptions: MultiSelectOption[] = repos.map((repo) => ({
     value: String(repo.id),
-    label: repo.repoUrl?.split('/').pop()?.replace('.git', '') || repo.localPath,
+    label: getRepoDisplayName(repo),
     description: repo.repoUrl || repo.fullPath,
   }))
 

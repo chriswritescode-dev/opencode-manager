@@ -14,7 +14,7 @@ import {
 } from "@opencode-manager/shared/notifications";
 import { SettingsService } from "./settings";
 import { sseAggregator, type SSEEvent } from "./sse-aggregator";
-import { getRepoByLocalPath, getRepoBySourcePath } from "../db/queries";
+import { getRepoByLocalPath, getRepoBySourcePath, getRepoName } from "../db/queries";
 import { getReposPath } from "@opencode-manager/shared/config/env";
 import path from "path";
 
@@ -271,7 +271,7 @@ export class NotificationService {
 
       if (repo) {
         repoId = repo.id;
-        repoName = path.basename(repo.localPath);
+        repoName = getRepoName(repo);
         notificationUrl = sessionId
           ? `/repos/${repo.id}/sessions/${sessionId}`
           : `/repos/${repo.id}`;

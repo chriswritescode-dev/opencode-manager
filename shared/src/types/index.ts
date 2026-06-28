@@ -17,6 +17,7 @@ import {
   CreateRepoRequestSchema,
   DiscoverReposRequestSchema,
   DiscoverReposResponseSchema,
+  UpdateRepoRequestSchema,
   RepoStatusSchema,
   AssistantModeStatusSchema,
   AssistantModeInitRequestSchema,
@@ -65,6 +66,7 @@ export type CreateRepoRequest = z.infer<typeof CreateRepoRequestSchema>
 export type DiscoverReposRequest = z.infer<typeof DiscoverReposRequestSchema>
 export type DiscoverReposResponse = z.infer<typeof DiscoverReposResponseSchema>
 export type RepoStatus = z.infer<typeof RepoStatusSchema>
+export type UpdateRepoRequest = z.infer<typeof UpdateRepoRequestSchema>
 export type AssistantModeStatus = z.infer<typeof AssistantModeStatusSchema>
 export type AssistantModeInitRequest = z.infer<typeof AssistantModeInitRequestSchema>
 

@@ -5,7 +5,7 @@ import type { Database } from 'bun:sqlite'
 import type { SkillFileInfo, SkillScope, CreateSkillRequest, UpdateSkillRequest, InstallSkillUploadRequest, InstallSkillFromGithubRequest, InstallSkillResponse } from '@opencode-manager/shared'
 import { SKILL_NAME_REGEX, SkillFrontmatterSchema } from '@opencode-manager/shared'
 import { getWorkspacePath, FILE_LIMITS } from '@opencode-manager/shared/config/env'
-import { getRepoById, listRepos } from '../db/queries'
+import { getRepoById, getRepoName, listRepos } from '../db/queries'
 import type { Repo } from '@opencode-manager/shared/types'
 import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, deletePath, listDirectory, normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
 import type { OpenCodeClient } from './opencode/client'
@@ -161,7 +161,7 @@ async function installSkillFiles(
         scope: input.scope,
         location: skillPath,
         repoId: input.scope === 'project' ? input.repoId : undefined,
-        repoName: repo?.localPath,
+        repoName: repo ? getRepoName(repo) : undefined,
       },
       overwritten: Boolean(existingTarget),
       sourceType: input.sourceType,
@@ -434,7 +434,7 @@ function toSkillFileInfo(
     scope: classification.scope,
     location: skill.location,
     repoId: classification.repo?.id,
-    repoName: classification.repo?.localPath,
+    repoName: classification.repo ? getRepoName(classification.repo) : undefined,
   }
 }
 
@@ -468,7 +468,7 @@ async function scanSkillRoot(root: string, scope: SkillScope, repo?: Repo): Prom
             scope,
             location: skillPath,
             repoId: scope === 'project' ? repo?.id : undefined,
-            repoName: scope === 'project' ? repo?.localPath : undefined,
+            repoName: scope === 'project' && repo ? getRepoName(repo) : undefined,
           }
         } catch (error) {
           logger.warn(`Failed to read skill at ${skillPath}:`, error)
@@ -597,7 +597,7 @@ export async function createSkill(
     scope,
     location: skillPath,
     repoId: scope === 'project' ? repoId : undefined,
-    repoName: repo?.localPath,
+    repoName: repo ? getRepoName(repo) : undefined,
   }
 }
 

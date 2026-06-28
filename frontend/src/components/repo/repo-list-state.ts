@@ -82,7 +82,7 @@ export function filterReposBySearch(repos: RepoViewModel[], searchQuery: string)
 
   const query = searchQuery.toLowerCase()
   return repos.filter((repo) => {
-    const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
+    const repoName = getRepoDisplayName(repo)
     const searchTarget = repo.repoUrl || repo.sourcePath || repo.localPath || ""
     return (
       repoName.toLowerCase().includes(query) ||
@@ -118,8 +118,8 @@ export function sortRepos(repos: RepoViewModel[], mode: RepoSortMode, manualOrde
       return [...repos].sort((a, b) => b.activityTimestamp - a.activityTimestamp)
     case 'name':
       return [...repos].sort((a, b) => {
-        const nameA = getRepoDisplayName(a.repoUrl, a.localPath, a.sourcePath).toLowerCase()
-        const nameB = getRepoDisplayName(b.repoUrl, b.localPath, b.sourcePath).toLowerCase()
+        const nameA = getRepoDisplayName(a).toLowerCase()
+        const nameB = getRepoDisplayName(b).toLowerCase()
         return nameA.localeCompare(nameB)
       })
     case 'manual': {

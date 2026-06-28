@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, GitBranch, GitBranchPlus, Download, Trash2, MoreVertical } from 'lucide-react'
+import { Loader2, GitBranch, GitBranchPlus, Download, Trash2, MoreVertical, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -10,14 +10,18 @@ import {
 import { SourceControlPanel } from '@/components/source-control/SourceControlPanel'
 import { DownloadDialog } from '@/components/ui/download-dialog'
 import { CreateWorktreeDialog } from '@/components/repo/CreateWorktreeDialog'
+import { RenameRepoDialog } from '@/components/repo/RenameRepoDialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { downloadRepo } from '@/api/repos'
+import { useQueryClient, useMutation } from '@tanstack/react-query'
+import { downloadRepo, renameRepo } from '@/api/repos'
 import { showToast } from '@/lib/toast'
 import { getRepoDisplayName } from '@/lib/utils'
+import { invalidateRepoListCaches } from '@/lib/queryInvalidation'
 
 interface RepoRowActionsProps {
   repo: {
     id: number
+    name?: string | null
     repoUrl?: string | null
     localPath?: string
     sourcePath?: string
@@ -50,13 +54,33 @@ export function RepoRowActions({
   const [showDownloadDialog, setShowDownloadDialog] = useState(false)
   const [showSourceControl, setShowSourceControl] = useState(false)
   const [showWorktreeDialog, setShowWorktreeDialog] = useState(false)
+  const [showRenameDialog, setShowRenameDialog] = useState(false)
 
-  const repoName = getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath)
+  const repoName = getRepoDisplayName(repo)
   const branchToDisplay = gitStatus?.branch || repo.currentBranch || repo.branch
   const isReady = repo.cloneStatus === 'ready'
 
+  const queryClient = useQueryClient()
+  const renameMutation = useMutation({
+    mutationFn: (name: string | null) => renameRepo(repo.id, name),
+    onSuccess: (updated) => {
+      invalidateRepoListCaches(queryClient)
+      queryClient.invalidateQueries({ queryKey: ['repo', repo.id] })
+      queryClient.setQueryData(['repo', repo.id], updated)
+      showToast.success('Repository renamed')
+    },
+    onError: (error: unknown) => {
+      showToast.error(error instanceof Error ? error.message : 'Rename failed')
+    },
+  })
+
   const handleSourceControlOpen = (open: boolean) => {
     setShowSourceControl(open)
+    onActionsOpenChange?.(open)
+  }
+
+  const handleRenameOpen = (open: boolean) => {
+    setShowRenameDialog(open)
     onActionsOpenChange?.(open)
   }
 
@@ -111,6 +135,10 @@ export function RepoRowActions({
               <GitBranch className="w-4 h-4 mr-2" />
               Source Control
             </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleRenameOpen(true)}>
+              <Pencil className="w-4 h-4 mr-2" />
+              Rename
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => handleDownloadDialogOpen(true)}
               disabled={!isReady}
@@ -155,6 +183,13 @@ export function RepoRowActions({
           itemName={repoName}
           targetPath={repo.fullPath}
         />
+        <RenameRepoDialog
+          isOpen={showRenameDialog}
+          currentName={repo.name ?? ''}
+          derivedName={repoName}
+          onClose={() => handleRenameOpen(false)}
+          onSave={(name) => renameMutation.mutate(name)}
+        />
       </>
     )
   }
@@ -163,6 +198,22 @@ export function RepoRowActions({
     <>
       <TooltipProvider delayDuration={200}>
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                aria-label="Rename Repository"
+                size="sm"
+                variant="ghost"
+                onClick={() => handleRenameOpen(true)}
+                className="h-8 w-8 p-0"
+                title="Rename Repository"
+              >
+                <Pencil className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Rename Repository</TooltipContent>
+          </Tooltip>
+
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
@@ -260,6 +311,13 @@ export function RepoRowActions({
         repoId={repo.id}
         repoUrl={repo.repoUrl}
         defaultBaseBranch={branchToDisplay}
+      />
+      <RenameRepoDialog
+        isOpen={showRenameDialog}
+        currentName={repo.name ?? ''}
+        derivedName={repoName}
+        onClose={() => handleRenameOpen(false)}
+        onSave={(name) => renameMutation.mutate(name)}
       />
     </>
   )

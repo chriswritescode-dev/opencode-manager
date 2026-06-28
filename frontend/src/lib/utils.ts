@@ -18,14 +18,20 @@ function getPathBaseName(filePath: string): string {
   return filePath.split(/[\\/]/).pop() || filePath
 }
 
-export function getRepoDisplayName(repoUrl?: string | null, localPath?: string | null, sourcePath?: string | null): string {
-  if (repoUrl) {
-    return repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
+export function getRepoDisplayName(repo: {
+  name?: string | null
+  repoUrl?: string | null
+  localPath?: string | null
+  sourcePath?: string | null
+}): string {
+  if (repo.name && repo.name.trim()) return repo.name.trim()
+  if (repo.repoUrl) {
+    return repo.repoUrl.split("/").pop()?.replace(".git", "") || "Repository"
   }
-  if (sourcePath) {
-    return getPathBaseName(sourcePath) || localPath || 'Repository'
+  if (repo.sourcePath) {
+    return getPathBaseName(repo.sourcePath) || repo.localPath || 'Repository'
   }
-  return localPath || "Repository"
+  return repo.localPath || "Repository"
 }
 
 export function sanitizeForTTS(text: string): string {

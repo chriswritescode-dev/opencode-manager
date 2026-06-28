@@ -7,6 +7,7 @@ import path from 'path'
 
 interface RepoRow {
   id: number
+  name?: string
   repo_url?: string
   local_path: string
   source_path?: string
@@ -28,6 +29,7 @@ function rowToRepo(row: RepoRow): Repo {
 
   return {
     id: row.id,
+    name: row.name ?? undefined,
     repoUrl: row.repo_url,
     localPath: row.local_path,
     fullPath,
@@ -285,7 +287,8 @@ export function listRepos(db: Database, repoOrder?: number[]): Repo[] {
   return [...orderedRepos, ...remainingRepos]
 }
 
-function getRepoName(repo: Repo): string {
+export function getRepoName(repo: Repo): string {
+  if (repo.name && repo.name.trim()) return repo.name.trim()
   return repo.repoUrl
     ? repo.repoUrl.split('/').slice(-1)[0]?.replace('.git', '') || repo.localPath
     : repo.sourcePath ? path.basename(repo.sourcePath) : repo.localPath
@@ -326,6 +329,14 @@ export function updateLastAccessed(db: Database, id: number): void {
 export function updateRepoBranch(db: Database, id: number, branch: string): void {
   const stmt = db.prepare('UPDATE repos SET branch = ? WHERE id = ?')
   const result = stmt.run(branch, id)
+  if (result.changes === 0) {
+    throw new Error(`Repository with id ${id} not found`)
+  }
+}
+
+export function updateRepoName(db: Database, id: number, name: string | null): void {
+  const stmt = db.prepare('UPDATE repos SET name = ? WHERE id = ?')
+  const result = stmt.run(name, id)
   if (result.changes === 0) {
     throw new Error(`Repository with id ${id} not found`)
   }

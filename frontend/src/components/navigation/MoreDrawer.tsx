@@ -63,7 +63,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const currentBranch = repo?.currentBranch || repo?.branch
   const repoDisplayName = isAssistantRoute || isAssistantSession
     ? 'Assistant'
-    : repo ? getRepoDisplayName(repo.repoUrl, repo.localPath, repo.sourcePath) : null
+    : repo ? getRepoDisplayName(repo) : null
 
   const handleSettingsClick = () => {
     updateParams((p) => {

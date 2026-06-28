@@ -4,6 +4,7 @@ export const RepoStatusSchema = z.enum(['cloning', 'ready', 'error'])
 
 export const RepoSchema = z.object({
   id: z.number(),
+  name: z.string().optional(),
   repoUrl: z.string().url().optional(),
   localPath: z.string(),
   fullPath: z.string(),
@@ -43,6 +44,10 @@ export const CreateRepoRequestSchema = z.object({
 export const DiscoverReposRequestSchema = z.object({
   rootPath: z.string().trim().min(1),
   maxDepth: z.number().int().min(0).max(8).optional(),
+})
+
+export const UpdateRepoRequestSchema = z.object({
+  name: z.string().trim().max(100).nullable(),
 })
 
 export const DiscoverReposResponseSchema = z.object({

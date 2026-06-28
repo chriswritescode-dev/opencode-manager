@@ -403,6 +403,7 @@ export interface ScheduleJobWithRepo extends ScheduleJob {
 interface ScheduleJobWithRepoRow extends ScheduleJobRow {
   repo_url: string | null
   repo_path: string | null
+  repo_name: string | null
 }
 
 function repoNameFromPath(repoPath: string): string {
@@ -410,24 +411,25 @@ function repoNameFromPath(repoPath: string): string {
   return repoPath.split(/[\\/]/).pop() ?? repoPath
 }
 
-function resolveRepoDisplay(repoId: number, repoPath: string | null): { repoName: string; repoPath: string } {
+function resolveRepoDisplay(repoId: number, repoPath: string | null, repoName: string | null): { repoName: string; repoPath: string } {
   if (repoId === ASSISTANT_REPO_ID) {
     return { repoName: ASSISTANT_REPO_NAME, repoPath: ASSISTANT_REPO_PATH }
   }
-  return { repoName: repoNameFromPath(repoPath ?? ''), repoPath: repoPath ?? '' }
+  const displayName = repoName?.trim() || repoNameFromPath(repoPath ?? '')
+  return { repoName: displayName, repoPath: repoPath ?? '' }
 }
 
 function rowToScheduleJobWithRepo(row: ScheduleJobWithRepoRow): ScheduleJobWithRepo {
   return {
     ...rowToScheduleJob(row),
-    ...resolveRepoDisplay(row.repo_id, row.repo_path),
+    ...resolveRepoDisplay(row.repo_id, row.repo_path, row.repo_name),
     repoUrl: row.repo_url ?? '',
   }
 }
 
 export function listAllScheduleJobsWithRepos(db: Database): ScheduleJobWithRepo[] {
   const stmt = db.prepare(`
-    SELECT sj.*, r.repo_url, r.local_path as repo_path
+    SELECT sj.*, r.repo_url, r.local_path as repo_path, r.name as repo_name
     FROM schedule_jobs sj
     LEFT JOIN repos r ON sj.repo_id = r.id
     ORDER BY COALESCE(r.local_path, ''), sj.name
@@ -445,13 +447,14 @@ export interface ScheduleRunWithContext extends ScheduleRun {
 interface ScheduleRunWithContextRow extends ScheduleRunRow {
   job_name: string
   repo_path: string | null
+  repo_name: string | null
 }
 
 function rowToScheduleRunWithContext(row: ScheduleRunWithContextRow): ScheduleRunWithContext {
   return {
     ...rowToScheduleRun(row),
     jobName: row.job_name,
-    ...resolveRepoDisplay(row.repo_id, row.repo_path),
+    ...resolveRepoDisplay(row.repo_id, row.repo_path, row.repo_name),
   }
 }
 
@@ -494,7 +497,7 @@ export function listAllScheduleRuns(db: Database, options: ListAllRunsOptions = 
       sr.started_at, sr.finished_at, sr.created_at,
       sr.session_id, sr.session_title,
       NULL AS log_text, NULL AS response_text, sr.error_text,
-      sj.name AS job_name, r.local_path AS repo_path
+      sj.name AS job_name, r.local_path AS repo_path, r.name AS repo_name
     FROM schedule_runs sr
     JOIN schedule_jobs sj ON sr.job_id = sj.id
     LEFT JOIN repos r ON sr.repo_id = r.id

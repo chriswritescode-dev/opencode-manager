@@ -1,5 +1,6 @@
 export interface Repo {
   id: number
+  name?: string
   repoUrl?: string
   localPath: string
   fullPath: string
