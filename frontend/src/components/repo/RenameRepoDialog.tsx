@@ -1,4 +1,4 @@
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { X, Check } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
@@ -46,8 +46,10 @@ export function RenameRepoDialog({
         mobileFullscreen
         className="gap-0 p-4 sm:p-6"
       >
+        <DialogHeader>
+          <DialogTitle className="text-sm text-muted-foreground font-normal">Rename repository</DialogTitle>
+        </DialogHeader>
         <form onSubmit={handleSubmit} className="min-w-0">
-          <p className="text-sm text-muted-foreground mb-2">Rename repository</p>
           <div className="relative">
             <input
               ref={inputRef}
