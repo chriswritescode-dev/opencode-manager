@@ -11,11 +11,19 @@ function git(cwd: string, args: string[]): Promise<string | null> {
   })
 }
 
+function trimSlashes(value: string, leading: boolean, trailing: boolean): string {
+  let start = 0
+  let end = value.length
+  if (leading) while (start < end && value[start] === '/') start++
+  if (trailing) while (end > start && value[end - 1] === '/') end--
+  return value.slice(start, end)
+}
+
 function gitRemoteParts(host: string, name: string): string | undefined {
-  const pathname = name
-    .replace(/^\/+/, '')
-    .replace(/\.git\/?$/, '')
-    .replace(/\/+$/, '')
+  let pathname = trimSlashes(name, true, false)
+  if (pathname.endsWith('.git')) pathname = pathname.slice(0, -4)
+  else if (pathname.endsWith('.git/')) pathname = pathname.slice(0, -5)
+  pathname = trimSlashes(pathname, false, true)
   if (!host || !pathname) return undefined
   return `${host.toLowerCase()}/${pathname}`
 }
