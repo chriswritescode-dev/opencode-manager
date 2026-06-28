@@ -288,6 +288,7 @@ async function cmdDefault(): Promise<void> {
       }
     : undefined
 
+  info('connecting...')
   const repos = await fetchRepos(state.managerUrl, token)
   const localProjectId = await resolveOpenCodeProjectId(process.cwd())
   const result = resolveTarget({ cwd: process.cwd(), repos, localProjectId, last })
