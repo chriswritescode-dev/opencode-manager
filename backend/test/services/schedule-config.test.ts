@@ -33,6 +33,7 @@ describe('schedule-config', () => {
       prompt: 'Review the repository and summarize risks.',
       model: 'openai/gpt-5',
       skillMetadata: undefined,
+      branch: null,
       nextRunAt: currentDate + 60 * 60_000,
     })
   })
@@ -70,6 +71,7 @@ describe('schedule-config', () => {
       prompt: 'Old prompt',
       model: null,
       skillMetadata: null,
+      branch: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -99,6 +101,7 @@ describe('schedule-config', () => {
       prompt: 'Old prompt',
       model: 'openai/gpt-5-mini',
       skillMetadata: null,
+      branch: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
       lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -116,6 +119,93 @@ describe('schedule-config', () => {
     expect(result.model).toBeNull()
   })
 
+  it('preserves existing branch when omitted from update', () => {
+    const existing: ScheduleJob = {
+      id: 11,
+      repoId: 42,
+      name: 'Branch job',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Prompt',
+      model: null,
+      skillMetadata: null,
+      branch: 'feature/foo',
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: null,
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    }
+
+    const result = buildUpdatedSchedulePersistenceInput(existing, {
+      prompt: 'Updated prompt',
+    })
+
+    expect(result.branch).toBe('feature/foo')
+  })
+
+  it('overrides branch when provided in update', () => {
+    const existing: ScheduleJob = {
+      id: 12,
+      repoId: 42,
+      name: 'Branch job',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Prompt',
+      model: null,
+      skillMetadata: null,
+      branch: null,
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: null,
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    }
+
+    const result = buildUpdatedSchedulePersistenceInput(existing, {
+      branch: '  main  ',
+    })
+
+    expect(result.branch).toBe('main')
+  })
+
+  it('clears branch to null when explicitly set to null in update', () => {
+    const existing: ScheduleJob = {
+      id: 13,
+      repoId: 42,
+      name: 'Branch job',
+      description: null,
+      enabled: true,
+      scheduleMode: 'interval',
+      intervalMinutes: 60,
+      cronExpression: null,
+      timezone: null,
+      agentSlug: null,
+      prompt: 'Prompt',
+      model: null,
+      skillMetadata: null,
+      branch: 'feature/foo',
+      nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
+      lastRunAt: null,
+      createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
+      updatedAt: Date.UTC(2026, 2, 9, 12, 0, 0),
+    }
+
+    const result = buildUpdatedSchedulePersistenceInput(existing, {
+      branch: null,
+    })
+
+    expect(result.branch).toBeNull()
+  })
+
   it('recomputes the next run when a disabled schedule is re-enabled', () => {
     const existing: ScheduleJob = {
       id: 8,
@@ -131,6 +221,7 @@ describe('schedule-config', () => {
       prompt: 'Run a report',
       model: null,
       skillMetadata: null,
+      branch: null,
       nextRunAt: null,
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),
@@ -172,6 +263,7 @@ describe('schedule-config', () => {
       prompt: 'Prompt',
       model: null,
       skillMetadata: null,
+      branch: null,
       nextRunAt: null,
       lastRunAt: null,
       createdAt: Date.UTC(2026, 2, 8, 12, 0, 0),

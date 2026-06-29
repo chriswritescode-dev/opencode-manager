@@ -10,6 +10,7 @@ import { allMigrations } from '../../src/db/migrations'
 import { getOrCreateInternalToken } from '../../src/services/internal-token'
 import { migrate } from '../../src/db/migration-runner'
 import type { UserPreferences } from '@opencode-manager/shared/types'
+import type { ScheduleWorktreeManager } from '../../src/services/schedule-worktree'
 
 describe('internal/settings routes', () => {
   let db: Database
@@ -23,7 +24,8 @@ describe('internal/settings routes', () => {
     db = new Database(':memory:')
     migrate(db, allMigrations)
     const openCodeClient = createOpenCodeClient()
-    scheduleService = new ScheduleService(db, openCodeClient)
+    const stubWorktreeManager = { prepare: () => Promise.resolve(null), finalize: () => Promise.resolve({ commitHash: null }) } as unknown as ScheduleWorktreeManager
+    scheduleService = new ScheduleService(db, openCodeClient, stubWorktreeManager)
     notificationService = new NotificationService(db)
     settingsService = new SettingsService(db)
     app = new Hono()

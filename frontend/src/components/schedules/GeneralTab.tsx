@@ -18,6 +18,10 @@ type GeneralTabProps = {
   modelOptions: ComboboxOption[]
   enabled: boolean
   onEnabledChange: (value: boolean) => void
+  branch: string
+  onBranchChange: (value: string) => void
+  branchOptions: ComboboxOption[]
+  branchesLoading: boolean
   showRepoSelector?: boolean
   isEditing: boolean
   repoId?: number
@@ -50,6 +54,10 @@ export function GeneralTab({
   modelOptions,
   enabled,
   onEnabledChange,
+  branch,
+  onBranchChange,
+  branchOptions,
+  branchesLoading,
   showRepoSelector,
   isEditing,
   repoId,
@@ -129,6 +137,24 @@ export function GeneralTab({
               <InfoHint text="Auto-run this job on its schedule while still allowing manual runs from the dashboard." />
             </div>
             <Switch checked={enabled} onCheckedChange={onEnabledChange} />
+          </div>
+        </div>
+
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="schedule-branch">Base branch</Label>
+              <InfoHint text="Scheduled runs execute in an isolated worktree branched off this base branch. Leave empty to use the repository's default branch." />
+            </div>
+            <Combobox
+              value={branch}
+              onChange={onBranchChange}
+              options={branchOptions}
+              placeholder={branchesLoading ? 'Loading branches…' : 'Defaults to default branch'}
+              disabled={branchesLoading}
+              allowCustomValue={false}
+              showClear
+            />
           </div>
         </div>
       </div>

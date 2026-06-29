@@ -1,10 +1,12 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
 import {
   useCancelRepoScheduleRun,
+  useClearRepoScheduleRuns,
   useCreateRepoSchedule,
   useDeleteRepoSchedule,
+  useDeleteRepoScheduleRun,
   useRepoSchedule,
   useRepoScheduleRun,
   useRepoScheduleRuns,
@@ -61,6 +63,15 @@ export function Schedules() {
   const deleteMutation = useDeleteRepoSchedule()
   const runMutation = useRunRepoSchedule()
   const cancelRunMutation = useCancelRepoScheduleRun()
+  const clearRunsMutation = useClearRepoScheduleRuns()
+  const deleteRunMutation = useDeleteRepoScheduleRun()
+
+  const [clearRunsOpen, setClearRunsOpen] = useState(false)
+  const [runToDelete, setRunToDelete] = useState<number | null>(null)
+
+  const clearableRuns = useMemo(() => (runs ?? []).filter((run) => run.status !== 'running'), [runs])
+  const clearableWorktrees = useMemo(() => clearableRuns.filter((run) => run.worktreePath).length, [clearableRuns])
+  const clearableBranches = useMemo(() => clearableRuns.filter((run) => run.runBranch).length, [clearableRuns])
 
   useEffect(() => {
     if (scheduleTab === 'prompts') {
@@ -215,6 +226,26 @@ export function Schedules() {
     })
   }
 
+  const handleClearHistory = () => {
+    if (jobId === null) {
+      return
+    }
+
+    clearRunsMutation.mutate({ repoId: repoId!, jobId }, {
+      onSuccess: () => setClearRunsOpen(false),
+    })
+  }
+
+  const handleConfirmDeleteRun = () => {
+    if (jobId === null || runToDelete === null) {
+      return
+    }
+
+    deleteRunMutation.mutate({ repoId: repoId!, jobId, runId: runToDelete }, {
+      onSuccess: () => setRunToDelete(null),
+    })
+  }
+
   const handleSelectJob = (id: number) => {
     selectJobAndView(id)
   }
@@ -292,6 +323,10 @@ export function Schedules() {
                 selectedRunLoading={selectedRunLoading}
                 onCancelRun={handleCancelRun}
                 cancelRunPending={cancelRunMutation.isPending}
+                onClearHistory={() => setClearRunsOpen(true)}
+                clearHistoryPending={clearRunsMutation.isPending}
+                onDeleteRun={(id) => setRunToDelete(id)}
+                deleteRunPending={deleteRunMutation.isPending}
               />
             )}
           </>
@@ -313,6 +348,7 @@ export function Schedules() {
           if (!open) closeDialog()
         }}
         job={editingJob}
+        repoId={repoId}
         isSaving={createMutation.isPending || updateMutation.isPending}
         onSubmit={dialog === 'edit' ? handleUpdate : handleCreate}
       />
@@ -325,6 +361,42 @@ export function Schedules() {
         title="Delete Schedule"
         description="This removes the job definition and all recorded run history for it."
         isDeleting={deleteMutation.isPending}
+      />
+
+      <DeleteDialog
+        open={clearRunsOpen}
+        onOpenChange={(open) => !open && setClearRunsOpen(false)}
+        onConfirm={handleClearHistory}
+        onCancel={() => setClearRunsOpen(false)}
+        title="Clear run history"
+        description={
+          <>
+            <p className="mb-2">This permanently deletes all <strong>{clearableRuns.length}</strong> finished run{clearableRuns.length === 1 ? '' : 's'} for this schedule.</p>
+            {clearableBranches > 0 && (
+              <p className="mb-1">Git artifacts that will be pruned:</p>
+            )}
+            <ul className="list-disc pl-5 space-y-0.5 text-sm text-muted-foreground">
+              {clearableWorktrees > 0 && (
+                <li><strong>{clearableWorktrees}</strong> worktree{clearableWorktrees === 1 ? '' : 's'}</li>
+              )}
+              {clearableBranches > 0 && (
+                <li><strong>{clearableBranches}</strong> run branch{clearableBranches === 1 ? '' : 'es'}</li>
+              )}
+            </ul>
+            <p className="mt-2">A run in progress is kept. This cannot be undone.</p>
+          </>
+        }
+        isDeleting={clearRunsMutation.isPending}
+      />
+
+      <DeleteDialog
+        open={runToDelete !== null}
+        onOpenChange={(open) => !open && setRunToDelete(null)}
+        onConfirm={handleConfirmDeleteRun}
+        onCancel={() => setRunToDelete(null)}
+        title="Delete run"
+        description="This permanently deletes this run along with its git run branch and worktree. This cannot be undone."
+        isDeleting={deleteRunMutation.isPending}
       />
     </div>
   )

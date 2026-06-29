@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   useDeleteRepoSchedule: vi.fn(),
   useRunRepoSchedule: vi.fn(),
   useCancelRepoScheduleRun: vi.fn(),
+  useClearRepoScheduleRuns: vi.fn(),
+  useDeleteRepoScheduleRun: vi.fn(),
   useRepoActivity: vi.fn(),
   useScheduleUrlState: vi.fn(),
 }))
@@ -39,6 +41,8 @@ vi.mock('@/hooks/useSchedules', () => ({
   useDeleteRepoSchedule: mocks.useDeleteRepoSchedule,
   useRunRepoSchedule: mocks.useRunRepoSchedule,
   useCancelRepoScheduleRun: mocks.useCancelRepoScheduleRun,
+  useClearRepoScheduleRuns: mocks.useClearRepoScheduleRuns,
+  useDeleteRepoScheduleRun: mocks.useDeleteRepoScheduleRun,
 }))
 
 vi.mock('@/hooks/useRepoActivity', () => ({
@@ -129,6 +133,8 @@ describe('Schedules', () => {
     mocks.useDeleteRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useRunRepoSchedule.mockReturnValue({ mutate: vi.fn(), isPending: false })
     mocks.useCancelRepoScheduleRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useClearRepoScheduleRuns.mockReturnValue({ mutate: vi.fn(), isPending: false })
+    mocks.useDeleteRepoScheduleRun.mockReturnValue({ mutate: vi.fn(), isPending: false })
   })
 
   describe('assistant schedule target (repoId=0)', () => {

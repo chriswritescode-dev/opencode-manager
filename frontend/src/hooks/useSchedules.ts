@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, UpdateScheduleJobRequest } from '@opencode-manager/shared/types'
 import {
   cancelRepoScheduleRun,
+  clearRepoScheduleRuns,
   createRepoSchedule,
   deleteRepoSchedule,
+  deleteRepoScheduleRun,
   getRepoSchedule,
   getRepoScheduleRun,
   listAllScheduleRuns,
@@ -183,6 +185,42 @@ export function useCancelRepoScheduleRun() {
     },
     onError: (error) => {
       showToast.error(`Failed to cancel schedule run: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useClearRepoScheduleRuns() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ repoId, jobId }: { repoId: number; jobId: number }) => {
+      return clearRepoScheduleRuns(repoId, jobId)
+    },
+    onSuccess: (result, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['repo-schedule-runs', variables.repoId, variables.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+      showToast.success(result.cleared > 0 ? `Cleared ${result.cleared} run${result.cleared === 1 ? '' : 's'}` : 'No runs to clear')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to clear run history: ${error instanceof Error ? error.message : String(error)}`)
+    },
+  })
+}
+
+export function useDeleteRepoScheduleRun() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ repoId, jobId, runId }: { repoId: number; jobId: number; runId: number }) => {
+      return deleteRepoScheduleRun(repoId, jobId, runId)
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['repo-schedule-runs', variables.repoId, variables.jobId] })
+      queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
+      showToast.success('Run deleted')
+    },
+    onError: (error: unknown) => {
+      showToast.error(`Failed to delete run: ${error instanceof Error ? error.message : String(error)}`)
     },
   })
 }

@@ -4,7 +4,7 @@ import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@ope
 import { getProvidersWithModels } from '@/api/providers'
 import { createOpenCodeClient } from '@/api/opencode'
 import { settingsApi } from '@/api/settings'
-import { listRepos } from '@/api/repos'
+import { listRepos, listBranches } from '@/api/repos'
 import type { Repo } from '@/api/types'
 import { OPENCODE_API_ENDPOINT } from '@/config'
 import { Button } from '@/components/ui/button'
@@ -60,6 +60,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [skillNotes, setSkillNotes] = useState('')
   const initialSkillSlugsRef = useRef<string[] | undefined>(undefined)
   const initialSkillNotesRef = useRef<string | undefined>(undefined)
+  const [branch, setBranch] = useState('')
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
@@ -107,6 +108,29 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     enabled: open && !!showRepoSelector,
     staleTime: 5 * 60 * 1000,
   })
+
+  const effectiveRepoId = selectedRepoId ?? job?.repoId
+  const branchesEnabled = open && effectiveRepoId !== undefined && effectiveRepoId !== ASSISTANT_REPO_ID
+
+  const { data: branchData, isLoading: branchesLoading } = useQuery({
+    queryKey: ['branches', effectiveRepoId],
+    queryFn: () => listBranches(effectiveRepoId!),
+    enabled: branchesEnabled,
+    staleTime: 60 * 1000,
+  })
+
+  const branchOptions = useMemo<ComboboxOption[]>(() => {
+    const names = new Set<string>()
+    for (const gitBranch of branchData?.branches ?? []) {
+      const name = gitBranch.name.replace(/^remotes\/[^/]+\//, '')
+      if (name && name !== 'HEAD') {
+        names.add(name)
+      }
+    }
+    return Array.from(names)
+      .sort((a, b) => a.localeCompare(b))
+      .map((name) => ({ value: name, label: name }))
+  }, [branchData])
 
   const repoOptions = useMemo<ComboboxOption[]>(() => {
     const assistantOption: ComboboxOption = {
@@ -193,6 +217,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setSkillNotes(initialSkillNotes)
     initialSkillSlugsRef.current = initialSkillSlugs
     initialSkillNotesRef.current = initialSkillNotes
+    setBranch(job?.branch ?? '')
   }, [job, open, templates])
 
   const applyPromptTemplate = (template: PromptTemplate) => {
@@ -224,6 +249,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       agentSlug: agentSlug.trim() || undefined,
       model: model.trim() || undefined,
       prompt: prompt.trim(),
+      branch: branch.trim() || null,
       ...(shouldIncludeSkillMetadata ? {
         skillMetadata: skillSlugs.length > 0 || skillNotes.trim()
           ? {
@@ -293,6 +319,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             modelOptions={modelOptions}
             enabled={enabled}
             onEnabledChange={setEnabled}
+            branch={branch}
+            onBranchChange={setBranch}
+            branchOptions={branchOptions}
+            branchesLoading={branchesEnabled && branchesLoading}
             showRepoSelector={showRepoSelector}
             isEditing={!!job}
             repoId={selectedRepoId}

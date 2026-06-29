@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { History, Loader2, XCircle, CheckCircle2, Ban, ChevronDown } from 'lucide-react'
+import { History, Loader2, XCircle, CheckCircle2, Ban, ChevronDown, Trash2 } from 'lucide-react'
 import type { ScheduleRun } from '@opencode-manager/shared/types'
 import { getRunTone } from '@/components/schedules/schedule-utils'
 import { RunDetailPanel } from '@/components/schedules/RunDetailPanel'
@@ -12,6 +12,8 @@ interface RunHistoryCardsProps {
   onSelectRun: (id: number) => void
   onCancelRun: () => void
   cancelRunPending: boolean
+  onDeleteRun?: (runId: number) => void
+  deleteRunPending?: boolean
 }
 
 export function RunHistoryCards({
@@ -20,6 +22,8 @@ export function RunHistoryCards({
   onSelectRun,
   onCancelRun,
   cancelRunPending,
+  onDeleteRun,
+  deleteRunPending,
 }: RunHistoryCardsProps) {
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
   const [expandedRunRepoId, setExpandedRunRepoId] = useState<number | null>(null)
@@ -85,10 +89,11 @@ export function RunHistoryCards({
                 isExpanded ? 'border-border/70' : 'border-border/70'
               } ${index === 0 ? 'mt-0' : 'mt-2'}`}
             >
+              <div className="flex items-stretch">
               <button
                 type="button"
                 onClick={() => handleCardClick(run.id, run.repoId, run.jobId)}
-                className="w-full px-3 py-2 text-left flex items-center justify-between gap-2"
+                className="min-w-0 flex-1 px-3 py-2 text-left flex items-center justify-between gap-2"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
@@ -101,13 +106,40 @@ export function RunHistoryCards({
                   <p className="mt-2 truncate text-sm font-medium leading-tight">
                     {run.sessionTitle ?? 'No session recorded'}
                   </p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{new Date(run.startedAt).toLocaleString()}</p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>{new Date(run.startedAt).toLocaleString()}</span>
+                    {run.runBranch && (
+                      <>
+                        <span aria-hidden="true">•</span>
+                        <span className="font-mono">{run.runBranch}{run.commitHash ? ` @ ${run.commitHash.slice(0, 7)}` : ''}</span>
+                      </>
+                    )}
+                    {run.runBranch && !run.commitHash && run.status !== 'running' && (
+                      <>
+                        <span aria-hidden="true">•</span>
+                        <span className="italic">No changes committed</span>
+                      </>
+                    )}
+                  </div>
                   {run.errorText && (
                     <p className="mt-0.5 truncate text-xs text-red-400/80">{run.errorText}</p>
                   )}
                 </div>
                 <ChevronDown className={`h-6 w-6 flex-shrink-0 text-muted-foreground transition-transform duration-200 self-start ${isExpanded ? 'rotate-180' : ''}`} />
               </button>
+              {onDeleteRun && run.status !== 'running' && (
+                <button
+                  type="button"
+                  onClick={() => onDeleteRun(run.id)}
+                  disabled={deleteRunPending}
+                  title="Delete run"
+                  aria-label="Delete run"
+                  className="flex items-center px-2.5 text-muted-foreground transition-colors hover:text-red-400 disabled:opacity-50"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
+              </div>
               {isExpanded && (
                 <div className="border-t border-border/60 flex flex-col" style={{ maxHeight: 'calc(100vh - 200px)' }}>
                   <div className="flex flex-col min-h-0 flex-1 overflow-hidden">
