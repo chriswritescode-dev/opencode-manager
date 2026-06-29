@@ -14,6 +14,7 @@ import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
+import { reconcileConfirmedPrompt } from "../lib/sendErrorReconcile";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -155,34 +156,6 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     refetchInterval: opts?.fallbackPoll ? 5000 : undefined,
   });
 };
-
-const getUserMessageText = (message: MessageWithParts) => {
-  if (message.info.role !== 'user') return ''
-  return message.parts
-    .map((part) => part.type === 'text' ? part.text || '' : '')
-    .join('')
-    .trim()
-}
-
-const hasUserMessageText = (messages: MessageWithParts[], prompt: string) => {
-  const expected = prompt.trim()
-  if (!expected) return false
-  return messages.some((message) => getUserMessageText(message) === expected)
-}
-
-const reconcileConfirmedPrompt = (sessionID: string, messages: MessageWithParts[]) => {
-  const sendErrorStore = useSendErrorStore.getState()
-  const sendError = sendErrorStore.getError(sessionID)
-  const queuedPrompt = sendErrorStore.queuedPrompts[sessionID]
-
-  if (sendError?.kind === 'network' && sendError.failedPrompt && hasUserMessageText(messages, sendError.failedPrompt)) {
-    sendErrorStore.clearNetworkError(sessionID)
-  }
-
-  if (queuedPrompt && hasUserMessageText(messages, queuedPrompt)) {
-    sendErrorStore.clearQueuedPrompt(sessionID)
-  }
-}
 
 export const useCreateSession = (
   opcodeUrl: string | null | undefined,
