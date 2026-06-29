@@ -14,6 +14,7 @@ import { showToast } from "../lib/toast";
 import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
+import { reconcileConfirmedPrompt } from "../lib/sendErrorReconcile";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -143,6 +144,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     queryKey: messagesQueryKey(opcodeUrl, sessionID, directory),
     queryFn: async () => {
       const response = await client!.listMessages(sessionID!)
+      reconcileConfirmedPrompt(sessionID!, response as MessageWithParts[])
       return response as MessageWithParts[]
     },
     enabled: !!client && !!sessionID,
