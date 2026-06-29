@@ -69,6 +69,10 @@ export function Schedules() {
   const [clearRunsOpen, setClearRunsOpen] = useState(false)
   const [runToDelete, setRunToDelete] = useState<number | null>(null)
 
+  const clearableRuns = useMemo(() => (runs ?? []).filter((run) => run.status !== 'running'), [runs])
+  const clearableWorktrees = useMemo(() => clearableRuns.filter((run) => run.worktreePath).length, [clearableRuns])
+  const clearableBranches = useMemo(() => clearableRuns.filter((run) => run.runBranch).length, [clearableRuns])
+
   useEffect(() => {
     if (scheduleTab === 'prompts') {
       setScheduleTab('jobs')
@@ -364,7 +368,23 @@ export function Schedules() {
         onConfirm={handleClearHistory}
         onCancel={() => setClearRunsOpen(false)}
         title="Clear run history"
-        description="This permanently deletes all finished runs for this schedule along with their git run branches and worktrees. A run in progress is kept. This cannot be undone."
+        description={
+          <>
+            <p className="mb-2">This permanently deletes all <strong>{clearableRuns.length}</strong> finished run{clearableRuns.length === 1 ? '' : 's'} for this schedule.</p>
+            {clearableBranches > 0 && (
+              <p className="mb-1">Git artifacts that will be pruned:</p>
+            )}
+            <ul className="list-disc pl-5 space-y-0.5 text-sm text-muted-foreground">
+              {clearableWorktrees > 0 && (
+                <li><strong>{clearableWorktrees}</strong> worktree{clearableWorktrees === 1 ? '' : 's'}</li>
+              )}
+              {clearableBranches > 0 && (
+                <li><strong>{clearableBranches}</strong> run branch{clearableBranches === 1 ? '' : 'es'}</li>
+              )}
+            </ul>
+            <p className="mt-2">A run in progress is kept. This cannot be undone.</p>
+          </>
+        }
         isDeleting={clearRunsMutation.isPending}
       />
 
