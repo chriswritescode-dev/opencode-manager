@@ -111,6 +111,7 @@ export type {
 
 export type {
   ScheduleMode,
+  SchedulePermissionConfig,
   ScheduleRunTriggerSource,
   ScheduleRunStatus,
   ScheduleSkillMetadata,

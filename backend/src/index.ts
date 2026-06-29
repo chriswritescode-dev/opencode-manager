@@ -291,7 +291,7 @@ try {
 
 const settingsServiceForSchedules = new SettingsService(db)
 const credentialProvider = new CredentialProvider(db)
-const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db)
+const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db, openCodeClient)
 const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 

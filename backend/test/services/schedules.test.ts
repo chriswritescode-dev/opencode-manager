@@ -154,6 +154,7 @@ const job: ScheduleJob = {
   prompt: 'Review the repository and summarize the current state.',
   model: null,
   skillMetadata: null,
+  permissionConfig: null,
   branch: null,
   nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
   lastRunAt: Date.UTC(2026, 2, 9, 12, 0, 0),
@@ -178,6 +179,7 @@ const baseRun: ScheduleRun = {
   runBranch: null,
   commitHash: null,
   worktreePath: null,
+  workspaceId: null,
 }
 
 describe('ScheduleService', () => {
@@ -1412,6 +1414,7 @@ describe('ScheduleRunner', () => {
       prompt: 'Test',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
       branch: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
@@ -1447,6 +1450,7 @@ describe('ScheduleRunner', () => {
       prompt: 'Test',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
       branch: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
@@ -1480,6 +1484,7 @@ describe('ScheduleRunner', () => {
       prompt: 'Test',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
       branch: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
@@ -1512,6 +1517,7 @@ describe('ScheduleRunner', () => {
       prompt: 'Test',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
       branch: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
@@ -1544,6 +1550,7 @@ describe('ScheduleRunner', () => {
       prompt: 'Test',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
       branch: null,
       nextRunAt: Date.now(),
       lastRunAt: null,
@@ -1581,17 +1588,17 @@ describe('ScheduleService run history cleanup', () => {
 
   it('clearRunHistory prunes finished runs and skips a running run', async () => {
     mocks.listScheduleRunArtifactsByJob.mockReturnValue([
-      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null },
-      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2' },
-      { id: 1, status: 'failed', runBranch: null, worktreePath: null },
+      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null, workspaceId: null },
+      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2', workspaceId: null },
+      { id: 1, status: 'failed', runBranch: null, worktreePath: null, workspaceId: null },
     ])
     mocks.deleteScheduleRunsByIds.mockReturnValue(2)
 
     const result = await makeService().clearRunHistory(42, 7)
 
     expect(mocks.stubWorktreeManager.pruneRunArtifacts).toHaveBeenCalledWith(repo, [
-      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null },
-      { id: 1, status: 'failed', runBranch: null, worktreePath: null },
+      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null, workspaceId: null },
+      { id: 1, status: 'failed', runBranch: null, worktreePath: null, workspaceId: null },
     ])
     expect(mocks.deleteScheduleRunsByIds).toHaveBeenCalledWith({}, 42, 7, [3, 1])
     expect(result).toEqual({ cleared: 2 })
@@ -1616,7 +1623,7 @@ describe('ScheduleService run history cleanup', () => {
     await makeService().deleteRun(42, 7, 5)
 
     expect(mocks.stubWorktreeManager.pruneRunArtifacts).toHaveBeenCalledWith(repo, [
-      { runBranch: 'schedule/7/run-5', worktreePath: '/wt/5' },
+      { runBranch: 'schedule/7/run-5', worktreePath: '/wt/5', workspaceId: null },
     ])
     expect(mocks.deleteScheduleRunById).toHaveBeenCalledWith({}, 42, 7, 5)
   })

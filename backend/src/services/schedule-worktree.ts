@@ -7,6 +7,7 @@ import type { Repo } from '../types/repo'
 import type { GitAuthService } from './git-auth'
 import type { SettingsService } from './settings'
 import type { CredentialProvider } from './credential-provider'
+import type { OpenCodeClient } from './opencode/client'
 import { resolveGitIdentity, createGitIdentityEnv, isSSHUrl } from '../utils/git-auth'
 import { executeCommand } from '../utils/process'
 import { resolveDefaultBranch, createWorktreeSafely, removeWorktree } from './repo'
@@ -16,6 +17,8 @@ export interface ScheduleWorktreeContext {
   directory: string
   worktreePath: string
   runBranch: string
+  workspaceId: string | null
+  autoBranch: string | null
 }
 
 /**
@@ -29,12 +32,19 @@ export function buildRepoEnvForRepo(repo: { id?: number; fullPath: string }): Re
   }
 }
 
+interface OpenCodeWorkspace {
+  id: string
+  directory: string
+  branch: string | null
+}
+
 export class ScheduleWorktreeManager {
   constructor(
     private readonly gitAuthService: GitAuthService,
     private readonly settingsService: SettingsService,
     private readonly credentialProvider: CredentialProvider,
     private readonly db: Database,
+    private readonly openCodeClient: OpenCodeClient,
   ) {}
 
   async prepare(
@@ -68,17 +78,53 @@ export class ScheduleWorktreeManager {
       }
 
       const runBranch = `schedule/${job.id}/run-${runId}`
+
+      // Attempt OpenCode workspace API; fall back to raw git worktree on failure
+      let createdWorkspace: OpenCodeWorkspace | null = null
+      try {
+        createdWorkspace = await this.openCodeClient.postJson<OpenCodeWorkspace>(
+          '/experimental/workspace',
+          { type: 'worktree', branch: null },
+          { directory: repo.fullPath },
+        )
+
+        // Re-point the workspace to our run branch and base
+        await executeCommand(['git', '-C', createdWorkspace.directory, 'checkout', '-B', runBranch, baseRef], { env })
+
+        if (!existsSync(createdWorkspace.directory)) {
+          throw new Error(`OpenCode workspace directory was not created at: ${createdWorkspace.directory}`)
+        }
+
+        return {
+          directory: createdWorkspace.directory,
+          worktreePath: createdWorkspace.directory,
+          runBranch,
+          workspaceId: createdWorkspace.id,
+          autoBranch: createdWorkspace.branch ?? null,
+        }
+      } catch (apiError) {
+        logger.warn(`OpenCode workspace API failed, falling back to raw git worktree: ${apiError}`)
+        // Best-effort cleanup of created workspace if checkout/setup failed after API success
+        if (createdWorkspace) {
+          this.openCodeClient.forward({
+            method: 'DELETE',
+            path: `/experimental/workspace/${encodeURIComponent(createdWorkspace.id)}`,
+            directory: repo.fullPath,
+          }).catch(() => {})
+        }
+        // Fall through to raw git path
+      }
+
+      // Fallback: raw git worktree
       const worktreePath = path.join(getScheduleWorktreesPath(), `job-${job.id}-run-${runId}`)
-
       mkdirSync(path.dirname(worktreePath), { recursive: true })
-
       await createWorktreeSafely(repo.fullPath, worktreePath, runBranch, env, baseRef)
 
       if (!existsSync(worktreePath)) {
         throw new Error(`Worktree directory was not created at: ${worktreePath}`)
       }
 
-      return { directory: worktreePath, worktreePath, runBranch }
+      return { directory: worktreePath, worktreePath, runBranch, workspaceId: null, autoBranch: null }
     } finally {
       if (sshSetup) {
         await this.gitAuthService.cleanupSSHKey()
@@ -89,7 +135,7 @@ export class ScheduleWorktreeManager {
   async finalize(
     repo: Repo,
     job: { id: number; name: string; prompt: string },
-    run: { id: number; worktreePath: string | null; runBranch: string | null; triggerSource: string },
+    run: { id: number; worktreePath: string | null; runBranch: string | null; triggerSource: string; workspaceId?: string | null },
   ): Promise<{ commitHash: string | null }> {
     if (!run.worktreePath) {
       return { commitHash: null }
@@ -97,7 +143,7 @@ export class ScheduleWorktreeManager {
 
     let sshSetup = false
     let env: Record<string, string> | undefined
-    let noChanges = false
+    let commitHash: string | null = null
 
     try {
       if (repo.repoUrl && isSSHUrl(repo.repoUrl)) {
@@ -109,33 +155,65 @@ export class ScheduleWorktreeManager {
 
       const status = await executeCommand(['git', '-C', run.worktreePath, 'status', '--porcelain'], { env }).catch(() => '')
 
-      if (!status.trim()) {
-        noChanges = true
-        return { commitHash: null }
+      if (status.trim()) {
+        await executeCommand(['git', '-C', run.worktreePath, 'add', '-A'], { env })
+
+        const title = `Scheduled run: ${job.name} (run #${run.id})`
+        const promptSummary = job.prompt.length > 200 ? `${job.prompt.slice(0, 200)}...` : job.prompt
+        const body = `Trigger: ${run.triggerSource}\nPrompt: ${promptSummary}`
+        await executeCommand(['git', '-C', run.worktreePath, 'commit', '-m', title, '-m', body], { env })
+
+        commitHash = (await executeCommand(['git', '-C', run.worktreePath, 'rev-parse', 'HEAD'], { env })).trim()
       }
 
-      await executeCommand(['git', '-C', run.worktreePath, 'add', '-A'], { env })
-
-      const title = `Scheduled run: ${job.name} (run #${run.id})`
-      const promptSummary = job.prompt.length > 200 ? `${job.prompt.slice(0, 200)}...` : job.prompt
-      const body = `Trigger: ${run.triggerSource}\nPrompt: ${promptSummary}`
-      await executeCommand(['git', '-C', run.worktreePath, 'commit', '-m', title, '-m', body], { env })
-
-      const commitHash = (await executeCommand(['git', '-C', run.worktreePath, 'rev-parse', 'HEAD'], { env })).trim()
+      // Detach HEAD to protect the run branch from accidental pushes
+      await executeCommand(['git', '-C', run.worktreePath, 'checkout', '--detach'], { env }).catch(() => {})
 
       return { commitHash }
     } catch (error) {
       logger.error(`Failed to finalize schedule run ${run.id} in worktree ${run.worktreePath}:`, error)
       throw error
     } finally {
+      // Teardown: delete the worktree/workspace
       try {
-        await removeWorktree(repo.fullPath, run.worktreePath, env)
-        if (noChanges && run.runBranch) {
-          await executeCommand(['git', '-C', repo.fullPath, 'branch', '-D', run.runBranch], env ? { env } : undefined).catch(() => {})
+        if (run.workspaceId) {
+          const response = await this.openCodeClient.forward({
+            method: 'DELETE',
+            path: `/experimental/workspace/${encodeURIComponent(run.workspaceId)}`,
+            directory: repo.fullPath,
+          })
+          if (!response.ok) {
+            logger.warn(`OpenCode workspace DELETE returned ${response.status}, falling back to raw removeWorktree`)
+            await removeWorktree(repo.fullPath, run.worktreePath, env)
+          }
+        } else {
+          await removeWorktree(repo.fullPath, run.worktreePath, env)
         }
       } catch (error) {
         logger.error(`Failed to remove worktree ${run.worktreePath}:`, error)
+        // Best-effort fallback
+        await removeWorktree(repo.fullPath, run.worktreePath, env).catch(() => {})
       }
+
+      // Branch reconciliation: ensure the run branch exists and points at our commit
+      if (run.runBranch) {
+        try {
+          if (commitHash) {
+            // Verify the branch still exists; restore it if OpenCode's delete removed it
+            try {
+              await executeCommand(['git', '-C', repo.fullPath, 'rev-parse', '--verify', `refs/heads/${run.runBranch}`], { env, silent: true })
+            } catch {
+              await executeCommand(['git', '-C', repo.fullPath, 'branch', run.runBranch, commitHash], { env })
+            }
+          } else {
+            // No changes: remove the empty run branch
+            await executeCommand(['git', '-C', repo.fullPath, 'branch', '-D', run.runBranch], env ? { env } : undefined).catch(() => {})
+          }
+        } catch {
+          // Best-effort
+        }
+      }
+
       if (sshSetup) {
         await this.gitAuthService.cleanupSSHKey()
       }
@@ -148,13 +226,34 @@ export class ScheduleWorktreeManager {
    * are local git operations, so no SSH setup is needed; failures are swallowed
    * per artifact so one bad entry does not block the rest.
    */
-  async pruneRunArtifacts(repo: Repo, artifacts: { runBranch: string | null; worktreePath: string | null }[]): Promise<void> {
+  async pruneRunArtifacts(
+    repo: Repo,
+    artifacts: { runBranch: string | null; worktreePath: string | null; workspaceId?: string | null }[],
+  ): Promise<void> {
     if (artifacts.length === 0) return
 
     const env = await this.buildGitEnv(repo, false, true)
 
     for (const artifact of artifacts) {
-      if (artifact.worktreePath) {
+      if (artifact.workspaceId) {
+        try {
+          const response = await this.openCodeClient.forward({
+            method: 'DELETE',
+            path: `/experimental/workspace/${encodeURIComponent(artifact.workspaceId)}`,
+            directory: repo.fullPath,
+          })
+          if (!response.ok) {
+            logger.warn(`pruneRunArtifacts: workspace DELETE returned ${response.status}, falling back to raw remove`)
+            if (artifact.worktreePath) {
+              await removeWorktree(repo.fullPath, artifact.worktreePath, env)
+            }
+          }
+        } catch {
+          if (artifact.worktreePath) {
+            await removeWorktree(repo.fullPath, artifact.worktreePath, env)
+          }
+        }
+      } else if (artifact.worktreePath) {
         await removeWorktree(repo.fullPath, artifact.worktreePath, env)
       }
     }

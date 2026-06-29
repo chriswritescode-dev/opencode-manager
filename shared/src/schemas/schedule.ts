@@ -15,6 +15,45 @@ export const ScheduleSkillMetadataSchema = z.object({
 })
 export type ScheduleSkillMetadata = z.infer<typeof ScheduleSkillMetadataSchema>
 
+export const DEFAULT_DESTRUCTIVE_BASH_PATTERNS = [
+  'rm -rf *', 'rm -fr *', 'rm -r *', 'rm -f *',
+  'git push --force*', 'git push -f *', 'git reset --hard*', 'git clean *',
+  'git checkout -- *', 'git branch -D *',
+  'sudo *', 'chmod -R *', 'chown -R *',
+  'dd *', 'mkfs*', 'truncate *',
+  'shutdown*', 'reboot*', 'halt*',
+  'kill -9 *', 'killall *',
+] as const
+
+export const SchedulePermissionConfigSchema = z.object({
+  allowExternalDirectory: z.boolean().default(false),
+  bashDenyPatterns: z.array(z.string().min(1).max(200)).max(200)
+    .default([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS]),
+})
+export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSchema>
+
+export interface SchedulePermissionRule {
+  permission: string
+  pattern: string
+  action: 'allow' | 'deny' | 'ask'
+}
+
+export function buildSchedulePermissionRuleset(
+  config: SchedulePermissionConfig | null | undefined,
+): SchedulePermissionRule[] {
+  const cfg = SchedulePermissionConfigSchema.parse(config ?? {})
+  const rules: SchedulePermissionRule[] = [
+    { permission: '*', pattern: '*', action: 'allow' },
+  ]
+  if (!cfg.allowExternalDirectory) {
+    rules.push({ permission: 'external_directory', pattern: '*', action: 'deny' })
+  }
+  for (const pattern of cfg.bashDenyPatterns) {
+    rules.push({ permission: 'bash', pattern, action: 'deny' })
+  }
+  return rules
+}
+
 export const ScheduleJobSchema = z.object({
   id: z.number(),
   repoId: z.number(),
@@ -29,6 +68,7 @@ export const ScheduleJobSchema = z.object({
   prompt: z.string(),
   model: z.string().nullable(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable(),
+  permissionConfig: SchedulePermissionConfigSchema.nullable(),
   branch: z.string().nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -54,6 +94,7 @@ export const ScheduleRunSchema = z.object({
   runBranch: z.string().nullable(),
   commitHash: z.string().nullable(),
   worktreePath: z.string().nullable(),
+  workspaceId: z.string().nullable(),
 })
 export type ScheduleRun = z.infer<typeof ScheduleRunSchema>
 
@@ -65,6 +106,7 @@ const ScheduleJobBaseRequestSchema = z.object({
   prompt: z.string().min(1).max(20000),
   model: z.string().min(1).max(200).optional(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
+  permissionConfig: SchedulePermissionConfigSchema.nullable().optional(),
   branch: z.string().min(1).max(200).nullable().optional(),
 })
 
@@ -93,6 +135,7 @@ export const UpdateScheduleJobRequestSchema = z.object({
   prompt: z.string().min(1).max(20000).optional(),
   model: z.string().min(1).max(200).nullable().optional(),
   skillMetadata: ScheduleSkillMetadataSchema.nullable().optional(),
+  permissionConfig: SchedulePermissionConfigSchema.nullable().optional(),
   branch: z.string().min(1).max(200).nullable().optional(),
 })
 export type UpdateScheduleJobRequest = z.infer<typeof UpdateScheduleJobRequestSchema>

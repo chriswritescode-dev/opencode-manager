@@ -11,7 +11,10 @@ export class Database {
   prepare(sql: string) {
     const stmt = this.db.prepare(sql)
     return {
-      run: (...params: unknown[]) => (stmt.run as (...args: unknown[]) => void)(...params),
+      run: (...params: unknown[]) => {
+        const result = (stmt.run as (...args: unknown[]) => { changes: number; lastInsertRowid: number })(...params)
+        return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
+      },
       get: (...params: unknown[]) => (stmt.get as (...args: unknown[]) => unknown)(...params),
       all: (...params: unknown[]) => (stmt.all as (...args: unknown[]) => unknown[])(...params),
     }
@@ -27,7 +30,8 @@ export class Database {
 
   run(sql: string, ...params: unknown[]) {
     const stmt = this.db.prepare(sql)
-    return (stmt.run as (...args: unknown[]) => void)(...params)
+    const result = (stmt.run as (...args: unknown[]) => { changes: number; lastInsertRowid: number })(...params)
+    return { changes: result.changes, lastInsertRowid: result.lastInsertRowid }
   }
 
   transaction<T extends (...args: unknown[]) => void>(fn: T) {
