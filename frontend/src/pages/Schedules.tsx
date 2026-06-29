@@ -348,6 +348,7 @@ export function Schedules() {
           if (!open) closeDialog()
         }}
         job={editingJob}
+        repoId={repoId}
         isSaving={createMutation.isPending || updateMutation.isPending}
         onSubmit={dialog === 'edit' ? handleUpdate : handleCreate}
       />

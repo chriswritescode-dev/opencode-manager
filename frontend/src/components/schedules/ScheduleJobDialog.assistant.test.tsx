@@ -38,6 +38,7 @@ vi.mock('@/api/settings', () => ({
 
 vi.mock('@/api/repos', () => ({
   listRepos: () => Promise.resolve([]),
+  listBranches: () => Promise.resolve({ branches: [], status: { ahead: 0, behind: 0 } }),
 }))
 
 function createWrapper() {

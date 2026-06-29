@@ -245,6 +245,21 @@ describe('ScheduleWorktreeManager', () => {
     expect(result).toEqual({ commitHash: null })
   })
 
+  it('prepare throws a clear error when the base branch does not exist', async () => {
+    const manager = await createManager()
+    const repo = testRepo()
+    // A clearly nonexistent ref (avoids case-insensitive filesystem false matches
+    // that would let a typo like "Main" resolve to "main" locally).
+    const job = { id: 21, branch: 'does-not-exist-branch' }
+
+    await expect(manager.prepare(repo, job, 1)).rejects.toThrow(
+      /Base branch "does-not-exist-branch" was not found/,
+    )
+
+    // No worktree directory should be left behind for the failed run
+    expect(existsSync(path.join(scheduleWorktreesRoot, 'job-21-run-1'))).toBe(false)
+  })
+
   it('prepare respects the branch override', async () => {
     const manager = await createManager()
     const repo = testRepo()

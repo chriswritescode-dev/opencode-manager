@@ -62,14 +62,17 @@ export class ScheduleWorktreeManager {
       await executeCommand(['git', '-C', repo.fullPath, 'fetch', '--prune', 'origin'], { env }).catch(() => {})
 
       const base = job.branch?.trim() || (await resolveDefaultBranch(repo.fullPath, env))
+      const baseRef = await this.resolveBaseRef(repo.fullPath, base, env)
+      if (!baseRef) {
+        throw new Error(`Base branch "${base}" was not found in this repository. Choose an existing branch in the schedule settings.`)
+      }
+
       const runBranch = `schedule/${job.id}/run-${runId}`
       const worktreePath = path.join(getScheduleWorktreesPath(), `job-${job.id}-run-${runId}`)
 
       mkdirSync(path.dirname(worktreePath), { recursive: true })
 
-      await createWorktreeSafely(repo.fullPath, worktreePath, runBranch, env, `origin/${base}`).catch(() =>
-        createWorktreeSafely(repo.fullPath, worktreePath, runBranch, env, base),
-      )
+      await createWorktreeSafely(repo.fullPath, worktreePath, runBranch, env, baseRef)
 
       if (!existsSync(worktreePath)) {
         throw new Error(`Worktree directory was not created at: ${worktreePath}`)
@@ -160,6 +163,24 @@ export class ScheduleWorktreeManager {
     if (branches.length > 0) {
       await executeCommand(['git', '-C', repo.fullPath, 'branch', '-D', ...branches], { env }).catch(() => {})
     }
+  }
+
+  /**
+   * Resolves a user-supplied base branch name to a verified git ref, preferring
+   * the remote-tracking branch for freshness. Returns null when neither the
+   * remote nor local ref exists, allowing the caller to fail with a clear error
+   * instead of a cryptic git "not a valid object name" failure.
+   */
+  private async resolveBaseRef(repoPath: string, base: string, env: Record<string, string>): Promise<string | null> {
+    for (const candidate of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+      try {
+        await executeCommand(['git', '-C', repoPath, 'rev-parse', '--verify', candidate], { env, silent: true })
+        return candidate.startsWith('refs/remotes/') ? `origin/${base}` : base
+      } catch {
+        continue
+      }
+    }
+    return null
   }
 
   private async buildGitEnv(repo: Repo, sshSetup: boolean, silent: boolean): Promise<Record<string, string>> {

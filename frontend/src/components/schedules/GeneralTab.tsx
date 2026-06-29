@@ -20,6 +20,8 @@ type GeneralTabProps = {
   onEnabledChange: (value: boolean) => void
   branch: string
   onBranchChange: (value: string) => void
+  branchOptions: ComboboxOption[]
+  branchesLoading: boolean
   showRepoSelector?: boolean
   isEditing: boolean
   repoId?: number
@@ -54,6 +56,8 @@ export function GeneralTab({
   onEnabledChange,
   branch,
   onBranchChange,
+  branchOptions,
+  branchesLoading,
   showRepoSelector,
   isEditing,
   repoId,
@@ -142,11 +146,14 @@ export function GeneralTab({
               <Label htmlFor="schedule-branch">Base branch</Label>
               <InfoHint text="Scheduled runs execute in an isolated worktree branched off this base branch. Leave empty to use the repository's default branch." />
             </div>
-            <Input
-              id="schedule-branch"
+            <Combobox
               value={branch}
-              onChange={(event) => onBranchChange(event.target.value)}
-              placeholder="Defaults to default branch"
+              onChange={onBranchChange}
+              options={branchOptions}
+              placeholder={branchesLoading ? 'Loading branches…' : 'Defaults to default branch'}
+              disabled={branchesLoading}
+              allowCustomValue={false}
+              showClear
             />
           </div>
         </div>
