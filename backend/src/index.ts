@@ -50,6 +50,7 @@ import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
+import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { getModelStatePath, ModelStateSchema } from './routes/providers'
@@ -320,6 +321,12 @@ sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
 sseAggregator.start()
 
+sseAggregator.setScheduledSessionChecker(
+  (sessionId) => scheduleService.getActiveRunSessionIds().has(sessionId),
+)
+
+const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(openCodeClient, sseAggregator)
+
 void scheduleRunnerInstance.start()
 
 const settingsService = new SettingsService(db)
@@ -336,7 +343,7 @@ const protectedApi = new Hono()
 protectedApi.use('/*', requireAuth)
 
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, openCodeSupervisor))
-protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
+protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor, openCodeRestartCoordinator))
 protectedApi.route('/files', createFileRoutes())
 protectedApi.route('/providers', createProvidersRoutes(db, openCodeClient, openCodeSupervisor))
 protectedApi.route('/oauth', createOAuthRoutes(openCodeClient, openCodeSupervisor))

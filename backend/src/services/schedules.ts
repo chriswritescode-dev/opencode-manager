@@ -375,6 +375,11 @@ export class ScheduleService {
     this.onJobChange = handler
   }
 
+  getActiveRunSessionIds(): Set<string> {
+    const runs = listRunningScheduleRuns(this.db)
+    return new Set(runs.filter(r => r.sessionId).map(r => r.sessionId!))
+  }
+
   listAllEnabledJobs(): ScheduleJob[] {
     return listEnabledScheduleJobs(this.db)
   }

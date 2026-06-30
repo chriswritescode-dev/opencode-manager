@@ -31,6 +31,7 @@ import { opencodeServerManager, ConfigReloadError } from '../services/opencode-s
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import type { OpenCodeRestartCoordinator } from '../services/opencode-restart-coordinator'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -109,6 +110,40 @@ async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise
 
   opencodeServerManager.clearStartupError()
   await opencodeServerManager.restart()
+}
+
+async function restartOpenCodeWithResume(
+  supervisor: OpenCodeSupervisor | undefined,
+  coordinator: OpenCodeRestartCoordinator | undefined,
+): Promise<{ resumedSessionIDs: string[] } | null> {
+  if (!coordinator) {
+    await restartOpenCode(supervisor)
+    return null
+  }
+  const result = await coordinator.runWithResume(async () => {
+    if (supervisor) return (await supervisor.restart('settings_restart')).healthy
+    opencodeServerManager.clearStartupError()
+    await opencodeServerManager.restart()
+    return opencodeServerManager.checkHealth()
+  })
+  return { resumedSessionIDs: result.resumedSessionIDs }
+}
+
+async function reloadOpenCodeConfigWithResume(
+  supervisor: OpenCodeSupervisor | undefined,
+  coordinator: OpenCodeRestartCoordinator | undefined,
+): Promise<{ resumedSessionIDs: string[] } | null> {
+  if (!coordinator) {
+    await reloadOpenCodeConfig(supervisor)
+    return null
+  }
+  const result = await coordinator.runWithResume(async () => {
+    if (supervisor) return (await supervisor.reloadConfig('settings_reload')).healthy
+    opencodeServerManager.clearStartupError()
+    await opencodeServerManager.reloadConfig()
+    return opencodeServerManager.checkHealth()
+  })
+  return { resumedSessionIDs: result.resumedSessionIDs }
 }
 
 async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
@@ -366,7 +401,7 @@ async function extractOpenCodeError(response: Response, defaultError: string): P
     : defaultError
 }
 
-export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
+export function createSettingsRoutes(db: Database, gitAuthService: GitAuthService, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor, openCodeRestartCoordinator?: OpenCodeRestartCoordinator) {
   const app = new Hono()
   const settingsService = new SettingsService(db)
 
@@ -728,8 +763,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      await restartOpenCode(openCodeSupervisor)
-      return c.json({ success: true, message: 'OpenCode server restarted successfully' })
+      const resume = await restartOpenCodeWithResume(openCodeSupervisor, openCodeRestartCoordinator)
+      return c.json({
+        success: true,
+        message: 'OpenCode server restarted successfully',
+        resumedSessions: resume?.resumedSessionIDs ?? [],
+      })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
       const startupError = opencodeServerManager.getLastStartupError()
@@ -818,8 +857,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
   app.post('/opencode-reload', async (c) => {
     try {
       logger.info('OpenCode configuration reload requested')
-      await reloadOpenCodeConfig(openCodeSupervisor)
-      return c.json({ success: true, message: 'OpenCode configuration reloaded successfully' })
+      const resume = await reloadOpenCodeConfigWithResume(openCodeSupervisor, openCodeRestartCoordinator)
+      return c.json({
+        success: true,
+        message: 'OpenCode configuration reloaded successfully',
+        resumedSessions: resume?.resumedSessionIDs ?? [],
+      })
     } catch (error) {
       logger.error('Failed to reload OpenCode config:', error)
       if (error instanceof ConfigReloadError) {
@@ -1877,6 +1920,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.error('Failed to rotate manager token:', error)
       return c.json({ error: 'Failed to rotate manager token' }, 500)
     }
+  })
+
+  app.get('/opencode-active-sessions', (c) => {
+    const sessions = openCodeRestartCoordinator?.captureResumableSessions() ?? []
+    return c.json({ count: sessions.length, sessions })
   })
 
   app.get('/opencode-discover-models', async (c) => {

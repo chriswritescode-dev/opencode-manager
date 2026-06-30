@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -7,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { RestartServerDialog } from './RestartServerDialog'
 
 interface ServerHealthStatusProps {
   onOpenVersionDialog?: () => void
@@ -15,6 +17,8 @@ interface ServerHealthStatusProps {
 export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
+  const [confirmOpen, setConfirmOpen] = useState(false)
+  const [activeCount, setActiveCount] = useState(0)
 
   const restartServerMutation = useMutation({
     mutationFn: async () => settingsApi.restartOpenCodeServer(),
@@ -61,6 +65,35 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
       invalidateConfigCaches(queryClient)
     },
   })
+
+  const performRestart = async () => {
+    showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
+    try {
+      await restartServerMutation.mutateAsync()
+      showToast.success('Server restarted successfully', { id: 'manual-restart' })
+    } catch (error) {
+      const errorMessage = error && typeof error === 'object' && 'response' in error
+        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
+           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
+           || 'Failed to restart OpenCode server')
+        : 'Failed to restart OpenCode server'
+      showToast.error(errorMessage, { id: 'manual-restart' })
+    }
+  }
+
+  const handleRestartClick = async () => {
+    try {
+      const { count } = await settingsApi.getActiveOpenCodeSessions()
+      if (count > 0) {
+        setActiveCount(count)
+        setConfirmOpen(true)
+      } else {
+        await performRestart()
+      }
+    } catch {
+      await performRestart()
+    }
+  }
 
   if (!health) {
     return (
@@ -131,20 +164,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
             <Button
               variant="outline"
               size="sm"
-              onClick={async () => {
-                showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
-                try {
-                  await restartServerMutation.mutateAsync()
-                  showToast.success('Server restarted successfully', { id: 'manual-restart' })
-                } catch (error) {
-                  const errorMessage = error && typeof error === 'object' && 'response' in error
-                    ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
-                       || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-                       || 'Failed to restart OpenCode server')
-                    : 'Failed to restart OpenCode server'
-                  showToast.error(errorMessage, { id: 'manual-restart' })
-                }
-              }}
+              onClick={handleRestartClick}
               disabled={restartServerMutation.isPending}
             >
               {restartServerMutation.isPending ? (
@@ -165,6 +185,17 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
           </div>
         </div>
       </CardContent>
+      <RestartServerDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        activeSessionCount={activeCount}
+        isRestarting={restartServerMutation.isPending}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={async () => {
+          await performRestart()
+          setConfirmOpen(false)
+        }}
+      />
     </Card>
   )
 }

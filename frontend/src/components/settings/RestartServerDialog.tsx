@@ -8,6 +8,7 @@ interface RestartServerDialogProps {
   onConfirm: () => void
   onCancel: () => void
   isRestarting?: boolean
+  activeSessionCount?: number
 }
 
 export function RestartServerDialog({
@@ -16,6 +17,7 @@ export function RestartServerDialog({
   onConfirm,
   onCancel,
   isRestarting = false,
+  activeSessionCount,
 }: RestartServerDialogProps) {
   const isConfirmDisabled = isRestarting
 
@@ -25,7 +27,10 @@ export function RestartServerDialog({
         <DialogHeader>
           <DialogTitle>Restart OpenCode Server?</DialogTitle>
           <DialogDescription>
-            Restart the OpenCode server after your changes are saved to apply them to the running server.
+            {activeSessionCount && activeSessionCount > 0
+              ? `${activeSessionCount} session${activeSessionCount === 1 ? '' : 's'} ${activeSessionCount === 1 ? 'is' : 'are'} currently working. Restarting will interrupt ${activeSessionCount === 1 ? 'it' : 'them'} and send "continue" to resume after the server is healthy.`
+              : 'Restart the OpenCode server after your changes are saved to apply them to the running server.'
+            }
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
