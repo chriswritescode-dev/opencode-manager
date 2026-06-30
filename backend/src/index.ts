@@ -34,6 +34,7 @@ import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './rout
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
+import { createSessionPinRoutes } from './routes/session-pins'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
@@ -355,6 +356,7 @@ protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
+protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 
 app.route('/api', protectedApi)

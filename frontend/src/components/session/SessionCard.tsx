@@ -2,10 +2,12 @@ import { useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SessionStatusIndicator } from "@/components/ui/session-status-indicator";
-import { Trash2, Clock } from "lucide-react";
+import { Trash2, Clock, MoreVertical, Pin, PinOff } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import type { Session } from "@/api/types";
 import { useSwipe } from "@/hooks/useSwipe";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
 
 interface SessionCardProps {
   session: Session;
@@ -13,6 +15,8 @@ interface SessionCardProps {
   isActive: boolean;
   manageMode: boolean;
   workspaceLabel?: string;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
   onSelect: (sessionID: string) => void;
   onToggleSelection: (selected: boolean) => void;
   onDelete: (e: React.MouseEvent<HTMLButtonElement>) => void;
@@ -24,6 +28,8 @@ export const SessionCard = ({
   isActive,
   manageMode,
   workspaceLabel,
+  isPinned,
+  onTogglePin,
   onSelect,
   onToggleSelection,
   onDelete,
@@ -98,6 +104,7 @@ export const SessionCard = ({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
+                    {isPinned && <Pin className="w-3 h-3 text-orange-500 shrink-0" />}
                     <h3 className="text-base font-semibold text-orange-600 dark:text-orange-400 truncate">
                       {session.title || "Untitled Session"}
                     </h3>
@@ -116,23 +123,54 @@ export const SessionCard = ({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col flex-1 min-w-0">
-                <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
-                  {session.title || "Untitled Session"}
-                </h3>
-                <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                  <span className="flex items-center">
-                    <Clock className="w-3 h-3 mr-1" />
-                    {formatDistanceToNow(new Date(session.time.updated), {
-                      addSuffix: true,
-                    })}
-                  </span>
-                  {workspaceLabel ? (
-                    <span className="text-purple-400 truncate max-w-[120px]">{workspaceLabel}</span>
-                  ) : null}
-                  <SessionStatusIndicator sessionID={session.id} size="sm" />
+              <>
+                <div className="flex flex-col flex-1 min-w-0">
+                  <div className="flex items-center gap-1">
+                    {isPinned && <Pin className="w-3 h-3 text-orange-500 shrink-0" />}
+                    <h3 className="text-sm font-semibold text-orange-600 dark:text-orange-400 truncate">
+                      {session.title || "Untitled Session"}
+                    </h3>
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
+                    <span className="flex items-center">
+                      <Clock className="w-3 h-3 mr-1" />
+                      {formatDistanceToNow(new Date(session.time.updated), {
+                        addSuffix: true,
+                      })}
+                    </span>
+                    {workspaceLabel ? (
+                      <span className="text-purple-400 truncate max-w-[120px]">{workspaceLabel}</span>
+                    ) : null}
+                    <SessionStatusIndicator sessionID={session.id} size="sm" />
+                  </div>
                 </div>
-              </div>
+                {onTogglePin && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        aria-label="Session actions"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 w-7 p-0 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      className="z-[200]"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <DropdownMenuItem onClick={() => onTogglePin()}>
+                        {isPinned ? <PinOff className="w-4 h-4 mr-2" /> : <Pin className="w-4 h-4 mr-2" />}
+                        {isPinned ? "Unpin" : "Pin to top"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </>
             )}
             {manageMode && (
               <button

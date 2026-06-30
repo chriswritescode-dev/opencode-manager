@@ -1,6 +1,8 @@
 import { useCallback, useState, useMemo, useEffect } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
+import { useSessionPins, useToggleSessionPin } from '@/hooks/useSessionPins';
+import { partitionSessions } from './session-partition';
 import { DeleteSessionDialog } from "./DeleteSessionDialog";
 import { SessionCard } from "./SessionCard";
 import { Card } from "@/components/ui/card";
@@ -43,6 +45,12 @@ export const SessionList = ({
   const createSession = useCreateSession(opcodeUrl, sessionCreateDirectory, (newSession) => {
     onSelectSession(newSession.id);
   });
+  const { data: sessionPins } = useSessionPins();
+  const togglePin = useToggleSessionPin();
+  const pinnedKeys = useMemo(
+    () => new Set((sessionPins ?? []).map((p) => `${p.directory}:${p.sessionId}`)),
+    [sessionPins],
+  );
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [sessionToDelete, setSessionToDelete] = useState<DeleteSessionTarget | DeleteSessionTarget[] | null>(null);
   const [selectedSessions, setSelectedSessions] = useState<Set<string>>(new Set());
@@ -68,17 +76,16 @@ export const SessionList = ({
     return Array.from(uniqueSessions.values()).sort((a, b) => b.time.updated - a.time.updated);
   }, [sessions, directorySet, getSessionSelectionKey]);
 
-  const todaySessions = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return filteredSessions.filter((session) => new Date(session.time.updated) >= today);
-  }, [filteredSessions]);
+  const { pinned: pinnedSessions, today: todaySessions, older: olderSessions } = useMemo(
+    () => partitionSessions(filteredSessions, pinnedKeys, getSessionSelectionKey),
+    [filteredSessions, pinnedKeys, getSessionSelectionKey],
+  );
 
-  const olderSessions = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    return filteredSessions.filter((session) => new Date(session.time.updated) < today);
-  }, [filteredSessions]);
+  const handleTogglePin = (session: { id: string; directory?: string }) => {
+    const directory = session.directory ?? primaryDirectory ?? '';
+    const key = getSessionSelectionKey(session);
+    togglePin.mutate({ sessionId: session.id, directory, pinned: !pinnedKeys.has(key) });
+  };
 
   const handleSessionsScroll = useCallback((event: React.UIEvent<HTMLDivElement>) => {
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
@@ -260,6 +267,30 @@ export const SessionList = ({
             </div>
           ) : (
             <>
+              {pinnedSessions.length > 0 && (
+                <>
+                  <div className="text-xs font-semibold text-muted-foreground px-1 py-2">Pinned</div>
+                  {pinnedSessions.map((session) => (
+                    <SessionCard
+                      key={getSessionSelectionKey(session)}
+                      session={session}
+                      isSelected={selectedSessions.has(getSessionSelectionKey(session))}
+                      isActive={activeSessionID === session.id}
+                      manageMode={manageMode}
+                      workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
+                      isPinned
+                      onSelect={onSelectSession}
+                      onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
+                      onTogglePin={() => handleTogglePin(session)}
+                      onDelete={(e) => handleDelete(session, e)}
+                    />
+                  ))}
+                  {(todaySessions.length > 0 || olderSessions.length > 0) && (
+                    <div className="my-2 h-px bg-border/80" />
+                  )}
+                </>
+              )}
+
               {todaySessions.length > 0 && (
                 <>
                   <div className="text-xs font-semibold text-muted-foreground px-1 py-2">
@@ -273,8 +304,10 @@ export const SessionList = ({
                       isActive={activeSessionID === session.id}
                       manageMode={manageMode}
                       workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
+                      isPinned={false}
                       onSelect={onSelectSession}
                       onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
+                      onTogglePin={() => handleTogglePin(session)}
                       onDelete={(e) => handleDelete(session, e)}
                     />
                   ))}
@@ -292,8 +325,10 @@ export const SessionList = ({
                   isActive={activeSessionID === session.id}
                   manageMode={manageMode}
                   workspaceLabel={session.directory ? directoryLabels?.[session.directory] : undefined}
+                  isPinned={false}
                   onSelect={onSelectSession}
                   onToggleSelection={(selected) => toggleSessionSelection(session, selected)}
+                  onTogglePin={() => handleTogglePin(session)}
                   onDelete={(e) => handleDelete(session, e)}
                 />
               ))}
