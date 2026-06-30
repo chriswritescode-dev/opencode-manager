@@ -15,12 +15,16 @@ export const ScheduleSkillMetadataSchema = z.object({
 })
 export type ScheduleSkillMetadata = z.infer<typeof ScheduleSkillMetadataSchema>
 
+/**
+ * Bash commands whose blast radius escapes the throwaway worktree: host-level
+ * commands that damage the machine regardless of cwd, plus force-pushes that can
+ * overwrite remote branches. File-mutating commands (`rm -rf`, `git reset --hard`,
+ * etc.) are intentionally omitted — they only affect the disposable worktree, which
+ * is never auto-pushed and is the real safety boundary.
+ */
 export const DEFAULT_DESTRUCTIVE_BASH_PATTERNS = [
-  'rm -rf *', 'rm -fr *', 'rm -r *', 'rm -f *',
-  'git push --force*', 'git push -f *', 'git reset --hard*', 'git clean *',
-  'git checkout -- *', 'git branch -D *',
-  'sudo *', 'chmod -R *', 'chown -R *',
-  'dd *', 'mkfs*', 'truncate *',
+  'git push --force*', 'git push -f *',
+  'sudo *', 'dd *', 'mkfs*',
   'shutdown*', 'reboot*', 'halt*',
   'kill -9 *', 'killall *',
 ] as const
