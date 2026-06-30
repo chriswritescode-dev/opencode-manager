@@ -6,6 +6,8 @@ Listen to AI responses with built-in or external TTS.
 
 OpenCode Manager supports two TTS providers:
 
+![TTS Settings](../images/tts-settings.png)
+
 1. **Built-in Browser** - Uses your browser's Web Speech API
 2. **External API** - OpenAI-compatible TTS endpoints
 

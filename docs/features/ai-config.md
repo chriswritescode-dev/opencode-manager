@@ -44,6 +44,8 @@ You can switch models at any point during a session without losing context. The 
 
 Configure API keys or OAuth for AI providers.
 
+![Providers Settings](../images/ai-config-providers.png)
+
 ### API Key Method
 
 1. Go to **Settings > Providers**

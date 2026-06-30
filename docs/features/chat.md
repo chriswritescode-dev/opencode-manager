@@ -19,6 +19,8 @@ Messages stream in real-time using Server-Sent Events (SSE):
 - No waiting for complete responses
 - Can interrupt generation if needed
 
+![Chat Conversation](../images/chat-conversation.png)
+
 ## Model Selection
 
 Click the **model name** in the chat prompt area to open the quick model switcher. From there you can:
@@ -142,6 +144,8 @@ Access your sessions from the sidebar:
 - Most recent sessions appear first
 - Click a session to resume
 
+![Session List](../images/chat-session-list.png)
+
 ### Searching Sessions
 
 Find sessions by content:
@@ -149,6 +153,16 @@ Find sessions by content:
 1. Click the search icon in the sessions panel
 2. Type your search query
 3. Results show sessions with matching content
+
+### Pinning Sessions
+
+Pin important sessions to the top of your session list:
+
+1. Open the session actions menu (three dots on the session card)
+2. Select **Pin to top**
+3. The session moves to a **Pinned** section above the **Recent** section
+
+Pinned sessions stay at the top regardless of age or activity. Unpin anytime from the same menu. See [Session Pinning](session-pins.md) for details.
 
 ### Deleting Sessions
 

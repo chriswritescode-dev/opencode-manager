@@ -6,6 +6,8 @@ Dictate messages to AI agents using voice input.
 
 OpenCode Manager supports two STT providers:
 
+![STT Settings](../images/stt-settings.png)
+
 1. **Built-in Browser** - Uses your browser's Web Speech API
 2. **External API** - OpenAI-compatible STT endpoints (Whisper)
 

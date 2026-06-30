@@ -40,7 +40,9 @@ Skill names must match the pattern `^[a-z0-9]+(-[a-z0-9]+)*$`:
 
 ## Managing Skills
 
-Skills are managed through the Settings UI under the Skills section, or via the API.
+Skills are managed per-repository through the Skills panel in the sidebar, or via the API.
+
+![Skills Manager](../images/skills-manager.png)
 
 ### API Endpoints
 

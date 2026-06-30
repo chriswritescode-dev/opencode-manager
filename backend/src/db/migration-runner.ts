@@ -24,9 +24,28 @@ function ensureMigrationsTable(db: Database): void {
   `)
 }
 
-function getAppliedVersions(db: Database): Set<number> {
-  const rows = db.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as MigrationRecord[]
-  return new Set(rows.map(r => r.version))
+function getAppliedMigrations(db: Database): Map<number, string> {
+  const rows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as MigrationRecord[]
+  return new Map(rows.map(r => [r.version, r.name]))
+}
+
+/**
+ * Surfaces version-number collisions where a recorded migration's name differs
+ * from the code migration registered under the same version. The runner keys on
+ * version number alone, so a reused version silently skips the real migration
+ * (e.g. an ADD COLUMN), producing later runtime errors that are hard to trace.
+ * This converts that silent skip into a loud, actionable warning.
+ */
+function warnOnVersionNameMismatch(applied: Map<number, string>, migrations: Migration[]): void {
+  for (const migration of migrations) {
+    const recordedName = applied.get(migration.version)
+    if (recordedName !== undefined && recordedName !== migration.name) {
+      logger.warn(
+        `Migration version ${migration.version} is recorded as "${recordedName}" but the code defines "${migration.name}". ` +
+        `This migration was skipped; its schema changes may be missing. Verify the database schema and apply the changes manually if needed.`,
+      )
+    }
+  }
 }
 
 function markApplied(db: Database, migration: Migration): void {
@@ -37,7 +56,8 @@ function markApplied(db: Database, migration: Migration): void {
 export function migrate(db: Database, migrations: Migration[]): void {
   ensureMigrationsTable(db)
 
-  const applied = getAppliedVersions(db)
+  const applied = getAppliedMigrations(db)
+  warnOnVersionNameMismatch(applied, migrations)
   const sorted = [...migrations].sort((a, b) => a.version - b.version)
   const pending = sorted.filter(m => !applied.has(m.version))
 

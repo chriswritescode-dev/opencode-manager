@@ -16,10 +16,12 @@ MCP (Model Context Protocol) allows AI models to interact with external tools an
 
 Local servers run as processes on your machine:
 
-1. Go to **Settings > MCP Servers**
+1. Open a repository and click **MCP** in the sidebar
 2. Click **Add Server**
 3. Select **Local**
 4. Configure:
+
+![MCP Servers List](../images/mcp-servers-list.png)
 
 ```json
 {
