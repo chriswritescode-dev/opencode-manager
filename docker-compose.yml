@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
       args:
         TOOLS_CACHEBUST: ${TOOLS_CACHEBUST:-0}
+    image: ${OCM_IMAGE:-ghcr.io/chriswritescode-dev/opencode-manager:latest}
     container_name: opencode-manager
     ports:
       - "5003:5003"
@@ -20,6 +21,8 @@ services:
       - OPENCODE_HOST=127.0.0.1
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
+      - OCM_IMAGE=${OCM_IMAGE:-ghcr.io/chriswritescode-dev/opencode-manager:latest}
+      - OCM_MANAGER_UPGRADE_ENABLED=${OCM_MANAGER_UPGRADE_ENABLED:-true}
       - PROCESS_START_WAIT_MS=2000
       - PROCESS_VERIFY_WAIT_MS=1000
       - HEALTH_CHECK_INTERVAL_MS=5000
@@ -48,6 +51,7 @@ services:
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
