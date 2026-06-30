@@ -89,4 +89,16 @@ fi
 mkdir -p /app/data /workspace /home/node/.cache /home/node/.opencode
 chown -R node:node /app/data /workspace /home/node
 
+if [ -S /var/run/docker.sock ]; then
+  DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
+  EXISTING_GROUP=$(getent group "$DOCKER_GID" | cut -d: -f1 || true)
+  if [ -n "$EXISTING_GROUP" ]; then
+    DOCKER_GROUP="$EXISTING_GROUP"
+  else
+    DOCKER_GROUP="dockerhost"
+    groupadd -g "$DOCKER_GID" "$DOCKER_GROUP"
+  fi
+  usermod -aG "$DOCKER_GROUP" node
+fi
+
 exec runuser -u node -- "$@"

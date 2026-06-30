@@ -377,6 +377,18 @@ export const settingsApi = {
       params: { kind, relativePath },
     })
   },
+
+  getManagerUpgradeStatus: async (): Promise<ManagerUpgradeStatus> => {
+    return fetchWrapper(`${API_BASE_URL}/api/manager-upgrade/status`)
+  },
+
+  startManagerUpgrade: async (version?: string): Promise<{ job: ManagerUpgradeJob }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/manager-upgrade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(version ? { version } : {}),
+    })
+  },
 }
 
 export interface VersionInfo {
@@ -416,4 +428,26 @@ export async function rotateManagerToken(): Promise<ManagerTokenResponse> {
   return fetchWrapper(`${API_BASE_URL}/api/settings/manager-token/rotate`, {
     method: 'POST',
   })
+}
+
+export type ManagerUpgradeJobStatus = 'pending' | 'pulling' | 'recreating' | 'completed' | 'failed'
+
+export interface ManagerUpgradeJob {
+  id: number
+  status: ManagerUpgradeJobStatus
+  fromVersion: string | null
+  toVersion: string | null
+  targetImage: string | null
+  error: string | null
+  startedAt: number
+  finishedAt: number | null
+}
+
+export interface ManagerUpgradeStatus {
+  supported: boolean
+  inDocker: boolean
+  socketAvailable: boolean
+  enabled: boolean
+  currentVersion: string | null
+  job: ManagerUpgradeJob | null
 }

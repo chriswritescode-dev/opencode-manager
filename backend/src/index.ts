@@ -13,6 +13,7 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
 import { createScheduleRoutes } from './routes/schedules'
+import { createManagerUpgradeRoutes } from './routes/manager-upgrade'
 
 async function getAppVersion(): Promise<string> {
   try {
@@ -50,6 +51,8 @@ import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
+import { ManagerUpgradeService, createDockerRunner } from './services/manager-upgrade'
+import { isRunningInDocker, isDockerSocketAvailable } from './utils/runtime-env'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { getModelStatePath, ModelStateSchema } from './routes/providers'
@@ -324,6 +327,17 @@ void scheduleRunnerInstance.start()
 
 const settingsService = new SettingsService(db)
 
+const managerUpgradeService = new ManagerUpgradeService(db, {
+  runner: createDockerRunner(),
+  getCurrentVersion: () => getAppVersion(),
+  capability: () => ({
+    inDocker: isRunningInDocker(),
+    socket: isDockerSocketAvailable(),
+    enabled: process.env.OCM_MANAGER_UPGRADE_ENABLED !== 'false',
+  }),
+})
+managerUpgradeService.reconcile()
+
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
@@ -347,6 +361,7 @@ protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
+protectedApi.route('/manager-upgrade', createManagerUpgradeRoutes(managerUpgradeService))
 
 app.route('/api', protectedApi)
 

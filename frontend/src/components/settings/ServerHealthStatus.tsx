@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, ArrowUpCircle, RotateCcw, History } from 'lucide-react'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useManagerUpgrade } from '@/hooks/useManagerUpgrade'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
@@ -15,6 +16,7 @@ interface ServerHealthStatusProps {
 export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
+  const { isSupported, startUpgrade, isUpgrading, status } = useManagerUpgrade()
 
   const restartServerMutation = useMutation({
     mutationFn: async () => settingsApi.restartOpenCodeServer(),
@@ -162,6 +164,33 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               <span className="text-xs sm:text-sm">Versions</span>
             </Button>
+            {isSupported && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  showToast.loading('Upgrading Manager — the app will restart…', { id: 'upgrade-manager' })
+                  try {
+                    await startUpgrade()
+                  } catch (error) {
+                    const errorMessage = error && typeof error === 'object' && 'response' in error
+                      ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
+                         || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
+                         || 'Failed to upgrade Manager')
+                      : 'Failed to upgrade Manager'
+                    showToast.error(errorMessage, { id: 'upgrade-manager' })
+                  }
+                }}
+                disabled={isUpgrading || status?.job?.status === 'recreating'}
+              >
+                {isUpgrading || status?.job?.status === 'recreating' ? (
+                  <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                ) : (
+                  <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                )}
+                <span className="text-xs sm:text-sm">Upgrade Manager</span>
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
