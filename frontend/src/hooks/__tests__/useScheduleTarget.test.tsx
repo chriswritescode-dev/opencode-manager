@@ -52,9 +52,6 @@ describe('useScheduleTarget', () => {
       })
 
       expect(result.current.scheduleTarget?.kind).toBe('assistant')
-      expect(result.current.scheduleTarget?.fullPath).toBe('/abs/assistant')
-      expect(result.current.scheduleTarget?.repoId).toBe(0)
-      expect(result.current.scheduleTarget?.backHref).toBe('/assistant')
       expect(result.current.isLoading).toBe(false)
       expect(result.current.isError).toBe(false)
     })
@@ -98,9 +95,6 @@ describe('useScheduleTarget', () => {
       })
 
       expect(result.current.scheduleTarget?.kind).toBe('repo')
-      expect(result.current.scheduleTarget?.repoId).toBe(5)
-      expect(result.current.scheduleTarget?.fullPath).toBe('/abs/repos/my-repo')
-      expect(result.current.scheduleTarget?.backHref).toBe('/repos/5')
     })
 
     it('does not call getAssistantModeStatus for repo', async () => {

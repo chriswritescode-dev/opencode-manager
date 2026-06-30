@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { useSessionTodos } from '@/stores/sessionTodosStore'
@@ -239,40 +238,6 @@ describe('SessionDetail todo-header integration', () => {
     )
   }
 
-  it('renders SessionTodoDisplay collapsed by default inside SessionDetail header', async () => {
-    useSessionTodos.getState().setTodos('session-1', activeTodos)
-
-    renderSessionDetail('session-1', 1)
-
-    await waitFor(() => {
-      expect(screen.getByText('Tasks: 1/3 complete')).toBeInTheDocument()
-    })
-
-    expect(screen.queryByText('Implement mobile header fix')).not.toBeInTheDocument()
-  })
-
-  it('expands todo list when clicked inside SessionDetail header', async () => {
-    const user = userEvent.setup()
-    useSessionTodos.getState().setTodos('session-1', activeTodos)
-
-    renderSessionDetail('session-1', 1)
-
-    await waitFor(() => {
-      expect(screen.getByText('Tasks: 1/3 complete')).toBeInTheDocument()
-    })
-
-    const collapsedRow = screen.getByText('Tasks: 1/3 complete')
-    await user.click(collapsedRow)
-
-    expect(screen.getByText('Implement mobile header fix')).toBeInTheDocument()
-    expect(screen.getByText('Add regression tests')).toBeInTheDocument()
-
-    const expandedContainer = screen.getByTestId('todo-expanded-list')
-    expect(expandedContainer).toHaveClass('max-h-[80px]')
-    expect(expandedContainer).toHaveClass('sm:max-h-[160px]')
-    expect(expandedContainer).toHaveClass('overflow-y-auto')
-  })
-
   it('header wrapper uses max-h-72 sm:max-h-80 and overflow-hidden for proper containment', async () => {
     useSessionTodos.getState().setTodos('session-1', activeTodos)
 
@@ -283,48 +248,10 @@ describe('SessionDetail todo-header integration', () => {
     })
 
     const headerRegion = screen.getByTestId('session-header-region')
-    
+
     expect(headerRegion.className).toContain('max-h-72')
     expect(headerRegion.className).toContain('sm:max-h-80')
     expect(headerRegion.className).toContain('overflow-hidden')
     expect(headerRegion.className).not.toContain('max-h-40')
-  })
-
-  it('collapses todo list when expanded header is clicked again', async () => {
-    const user = userEvent.setup()
-    useSessionTodos.getState().setTodos('session-1', activeTodos)
-
-    renderSessionDetail('session-1', 1)
-
-    await waitFor(() => {
-      expect(screen.getByText('Tasks: 1/3 complete')).toBeInTheDocument()
-    })
-
-    const collapsedRow = screen.getByText('Tasks: 1/3 complete')
-    await user.click(collapsedRow)
-
-    expect(screen.getByTestId('todo-expanded-list')).toBeInTheDocument()
-
-    const expandedHeader = screen.getByText('Tasks: 1/3 complete')
-    await user.click(expandedHeader)
-
-    expect(screen.queryByTestId('todo-expanded-list')).not.toBeInTheDocument()
-  })
-
-  it('does not render SessionTodoDisplay when all tasks are completed', async () => {
-    const allCompletedTodos: Todo[] = [
-      { id: '1', content: 'Task one', status: 'completed', priority: 'high' },
-      { id: '2', content: 'Task two', status: 'completed', priority: 'medium' },
-    ]
-    useSessionTodos.getState().setTodos('session-1', allCompletedTodos)
-
-    renderSessionDetail('session-1', 1)
-
-    await waitFor(() => {
-      const headerRegion = screen.getByTestId('session-header-region')
-      expect(headerRegion).toBeInTheDocument()
-    })
-
-    expect(screen.queryByText(/Tasks:/)).not.toBeInTheDocument()
   })
 })

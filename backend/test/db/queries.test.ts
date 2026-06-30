@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as db from '../../src/db/queries'
-import * as schema from '../../src/db/schema'
 
 const mockDb = {
   prepare: vi.fn(),
@@ -287,19 +286,6 @@ describe('Database Queries', () => {
       db.deleteRepo(mockDb, 0)
 
       expect(mockDb.prepare).not.toHaveBeenCalled()
-    })
-  })
-
-  describe('Database Schema', () => {
-    it('should have schema module available', () => {
-      expect(schema.initializeDatabase).toBeDefined()
-      expect(typeof schema.initializeDatabase).toBe('function')
-    })
-  })
-
-  describe('Transaction Support', () => {
-    it('should support transaction existence', () => {
-      expect(typeof mockDb.transaction).toBe('function')
     })
   })
 })

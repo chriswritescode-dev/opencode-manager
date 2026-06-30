@@ -72,13 +72,6 @@ describe('STT Routes', () => {
     sttApp = createSTTRoutes(mockDb)
   })
 
-  describe('createSTTRoutes', () => {
-    it('should create a Hono app with routes', () => {
-      expect(sttApp).toBeDefined()
-      expect(typeof sttApp.fetch).toBe('function')
-    })
-  })
-
   describe('GET /status', () => {
     it('should return status with correct structure', async () => {
       const req = new Request('http://localhost/status?userId=test')

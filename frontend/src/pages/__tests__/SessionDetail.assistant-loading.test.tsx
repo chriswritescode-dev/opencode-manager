@@ -264,10 +264,10 @@ describe('SessionDetail assistant loading at repoId=0', () => {
     })
   })
 
-  it('renders "Assistant" as workspaceDisplayName for non-assistant sessions without repo', async () => {
+  it('shows the loading state for a non-assistant session whose repo has not loaded', async () => {
     mocks.useSession.mockReturnValue({ data: undefined, isLoading: false })
 
-    return render(
+    render(
       <MemoryRouter initialEntries={['/repos/1/sessions/sess-1']}>
         <QueryClientProvider client={createQueryClient()}>
           <Routes>
@@ -276,5 +276,9 @@ describe('SessionDetail assistant loading at repoId=0', () => {
         </QueryClientProvider>
       </MemoryRouter>
     )
+
+    await waitFor(() => {
+      expect(screen.getByText('Loading repository...')).toBeInTheDocument()
+    })
   })
 })
