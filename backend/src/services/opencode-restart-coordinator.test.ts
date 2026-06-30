@@ -15,7 +15,7 @@ function createFakeActiveSessionsProvider(overrides: Partial<ActiveSessionsProvi
   return {
     getActiveSessions: vi.fn(() => ({})),
     isSubagentSession: vi.fn(() => false),
-    isScheduledSession: vi.fn(() => false),
+    getScheduledSessionIds: vi.fn(() => new Set<string>()),
     ...overrides,
   }
 }
@@ -73,7 +73,7 @@ describe('OpenCodeRestartCoordinator', () => {
       vi.mocked(activeSessions.getActiveSessions).mockReturnValue({
         '/a': ['s1', 'sched1'],
       })
-      vi.mocked(activeSessions.isScheduledSession).mockImplementation((id: string) => id === 'sched1')
+      vi.mocked(activeSessions.getScheduledSessionIds).mockReturnValue(new Set(['sched1']))
 
       const result = coordinator.captureResumableSessions()
 
@@ -85,7 +85,7 @@ describe('OpenCodeRestartCoordinator', () => {
         '/p': ['manual', 'sub', 'sched'],
       })
       vi.mocked(activeSessions.isSubagentSession).mockImplementation((id: string) => id === 'sub')
-      vi.mocked(activeSessions.isScheduledSession).mockImplementation((id: string) => id === 'sched')
+      vi.mocked(activeSessions.getScheduledSessionIds).mockReturnValue(new Set(['sched']))
 
       const result = coordinator.captureResumableSessions()
 
@@ -209,7 +209,7 @@ describe('OpenCodeRestartCoordinator', () => {
       vi.mocked(activeSessions.getActiveSessions).mockReturnValue({
         '/a': ['manual1', 'sched1'],
       })
-      vi.mocked(activeSessions.isScheduledSession).mockImplementation((id: string) => id === 'sched1')
+      vi.mocked(activeSessions.getScheduledSessionIds).mockReturnValue(new Set(['sched1']))
 
       const restart = vi.fn(async () => true)
 

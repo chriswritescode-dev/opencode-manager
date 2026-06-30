@@ -8,7 +8,7 @@ import * as repoService from '../services/repo'
 import * as archiveService from '../services/archive'
 import { SettingsService } from '../services/settings'
 import { writeFileContent } from '../services/file-operations'
-import { opencodeServerManager } from '../services/opencode-single-server'
+import { restartOpenCode } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { logger } from '../utils/logger'
@@ -21,16 +21,6 @@ import type { GitAuthService } from '../services/git-auth'
 import { ScheduleService } from '../services/schedules'
 import { ensureAssistantMode, getAssistantModeStatus, buildAssistantRepo } from '../services/assistant-mode'
 import path from 'path'
-
-async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
-  if (openCodeSupervisor) {
-    await openCodeSupervisor.restart('settings_restart')
-    return
-  }
-
-  opencodeServerManager.clearStartupError()
-  await opencodeServerManager.restart()
-}
 
 function resolveRepo(database: Database, id: number): Repo | null {
   return getRepoById(database, id) ?? (id === ASSISTANT_REPO_ID ? buildAssistantRepo() : null)

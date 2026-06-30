@@ -4,7 +4,7 @@ import type { OpenCodeClient } from './opencode/client'
 export interface ActiveSessionsProvider {
   getActiveSessions(): Record<string, string[]>
   isSubagentSession(sessionId: string): boolean
-  isScheduledSession(sessionId: string): boolean
+  getScheduledSessionIds(): Set<string>
 }
 
 export interface ResumableSession {
@@ -25,11 +25,12 @@ export class OpenCodeRestartCoordinator {
 
   captureResumableSessions(): ResumableSession[] {
     const active = this.activeSessions.getActiveSessions()
+    const scheduled = this.activeSessions.getScheduledSessionIds()
     const sessions: ResumableSession[] = []
 
     for (const [directory, sessionIDs] of Object.entries(active)) {
       for (const sessionID of sessionIDs) {
-        if (!this.activeSessions.isSubagentSession(sessionID) && !this.activeSessions.isScheduledSession(sessionID)) {
+        if (!this.activeSessions.isSubagentSession(sessionID) && !scheduled.has(sessionID)) {
           sessions.push({ sessionID, directory })
         }
       }
@@ -39,41 +40,43 @@ export class OpenCodeRestartCoordinator {
   }
 
   async abortSessions(sessions: ResumableSession[]): Promise<void> {
-    for (const s of sessions) {
-      try {
-        await this.client.forward({
-          method: 'POST',
-          path: `/session/${s.sessionID}/abort`,
-          directory: s.directory,
-        })
-      } catch (error) {
-        logger.warn(`Failed to abort session ${s.sessionID}: ${error}`)
-      }
-    }
+    await Promise.allSettled(
+      sessions.map(async (s) => {
+        try {
+          await this.client.forward({
+            method: 'POST',
+            path: `/session/${s.sessionID}/abort`,
+            directory: s.directory,
+          })
+        } catch (error) {
+          logger.warn(`Failed to abort session ${s.sessionID}: ${error}`)
+        }
+      }),
+    )
   }
 
   async resumeSessions(sessions: ResumableSession[]): Promise<string[]> {
-    const resumed: string[] = []
-
-    for (const s of sessions) {
-      try {
-        const response = await this.client.forward({
-          method: 'POST',
-          path: `/session/${s.sessionID}/prompt_async`,
-          directory: s.directory,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
-        })
-
-        if (response.ok) {
-          resumed.push(s.sessionID)
+    const results = await Promise.allSettled(
+      sessions.map(async (s) => {
+        try {
+          const response = await this.client.forward({
+            method: 'POST',
+            path: `/session/${s.sessionID}/prompt_async`,
+            directory: s.directory,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
+          })
+          return response.ok ? s.sessionID : null
+        } catch (error) {
+          logger.warn(`Failed to resume session ${s.sessionID}: ${error}`)
+          return null
         }
-      } catch (error) {
-        logger.warn(`Failed to resume session ${s.sessionID}: ${error}`)
-      }
-    }
+      }),
+    )
 
-    return resumed
+    return results
+      .map((result) => (result.status === 'fulfilled' ? result.value : null))
+      .filter((sessionID): sessionID is string => sessionID !== null)
   }
 
   async runWithResume(restart: () => Promise<boolean>): Promise<RestartWithResumeResult> {

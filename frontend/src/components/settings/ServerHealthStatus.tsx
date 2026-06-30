@@ -1,13 +1,9 @@
-import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, ArrowUpCircle, RotateCcw, History } from 'lucide-react'
 import { useServerHealth } from '@/hooks/useServerHealth'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { settingsApi } from '@/api/settings'
-import { showToast } from '@/lib/toast'
-import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { RestartServerDialog } from './RestartServerDialog'
 
 interface ServerHealthStatusProps {
@@ -15,85 +11,17 @@ interface ServerHealthStatusProps {
 }
 
 export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
-  const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
-  const [confirmOpen, setConfirmOpen] = useState(false)
-  const [activeCount, setActiveCount] = useState(0)
-
-  const restartServerMutation = useMutation({
-    mutationFn: async () => settingsApi.restartOpenCodeServer(),
-    onSuccess: () => {
-      invalidateConfigCaches(queryClient)
-    },
-  })
-
-  const upgradeOpenCodeMutation = useMutation({
-    mutationFn: async () => settingsApi.upgradeOpenCode(),
-    onSuccess: (data) => {
-      if (data.upgraded && data.newVersion) {
-        queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-          if (!old) return old
-          return { ...old, opencodeVersion: data.newVersion }
-        })
-      }
-      invalidateConfigCaches(queryClient)
-      if (data.upgraded) {
-        showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
-      } else {
-        showToast.success('OpenCode is already up to date', { id: 'upgrade-opencode' })
-      }
-    },
-    onError: (error) => {
-      const defaultMessage = 'Failed to upgrade OpenCode'
-
-      if (error && typeof error === 'object' && 'response' in error) {
-        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
-        const data = response?.data
-
-        if (data?.recovered && data.newVersion) {
-          queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-            if (!old) return old
-            return { ...old, opencodeVersion: data.newVersion }
-          })
-          showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: 'upgrade-opencode' })
-        } else {
-          showToast.error(data?.recoveryMessage || defaultMessage, { id: 'upgrade-opencode' })
-        }
-      } else {
-        showToast.error(defaultMessage, { id: 'upgrade-opencode' })
-      }
-      invalidateConfigCaches(queryClient)
-    },
-  })
-
-  const performRestart = async () => {
-    showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
-    try {
-      await restartServerMutation.mutateAsync()
-      showToast.success('Server restarted successfully', { id: 'manual-restart' })
-    } catch (error) {
-      const errorMessage = error && typeof error === 'object' && 'response' in error
-        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
-           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-           || 'Failed to restart OpenCode server')
-        : 'Failed to restart OpenCode server'
-      showToast.error(errorMessage, { id: 'manual-restart' })
-    }
-  }
-
-  const handleRestartClick = async () => {
-    try {
-      const { count } = await settingsApi.getActiveOpenCodeSessions()
-      if (count > 0) {
-        setActiveCount(count)
-        setConfirmOpen(true)
-      } else {
-        await performRestart()
-      }
-    } catch {
-      await performRestart()
-    }
-  }
+  const {
+    restartServerMutation,
+    upgradeOpenCodeMutation,
+    confirmOpen,
+    setConfirmOpen,
+    activeSessionCount,
+    requestRestart,
+    confirmRestart,
+    performUpgrade,
+  } = useOpenCodeServerActions()
 
   if (!health) {
     return (
@@ -139,19 +67,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
             <Button
               variant="outline"
               size="sm"
-              onClick={async () => {
-                showToast.loading('Upgrading OpenCode...', { id: 'upgrade-opencode' })
-                try {
-                  await upgradeOpenCodeMutation.mutateAsync()
-                } catch (error) {
-                  const errorMessage = error && typeof error === 'object' && 'response' in error
-                    ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
-                       || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-                       || 'Failed to upgrade OpenCode')
-                    : 'Failed to upgrade OpenCode'
-                  showToast.error(errorMessage, { id: 'upgrade-opencode' })
-                }
-              }}
+              onClick={performUpgrade}
               disabled={upgradeOpenCodeMutation.isPending}
             >
               {upgradeOpenCodeMutation.isPending ? (
@@ -164,7 +80,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
             <Button
               variant="outline"
               size="sm"
-              onClick={handleRestartClick}
+              onClick={requestRestart}
               disabled={restartServerMutation.isPending}
             >
               {restartServerMutation.isPending ? (
@@ -188,13 +104,10 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
       <RestartServerDialog
         open={confirmOpen}
         onOpenChange={setConfirmOpen}
-        activeSessionCount={activeCount}
+        activeSessionCount={activeSessionCount}
         isRestarting={restartServerMutation.isPending}
         onCancel={() => setConfirmOpen(false)}
-        onConfirm={async () => {
-          await performRestart()
-          setConfirmOpen(false)
-        }}
+        onConfirm={confirmRestart}
       />
     </Card>
   )
