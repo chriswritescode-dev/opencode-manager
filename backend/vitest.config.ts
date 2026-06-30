@@ -20,6 +20,7 @@ export default defineConfig({
       'src/db/model-state.test.ts',
       'src/routes/providers.test.ts',
       'src/routes/repos.test.ts',
+      'src/routes/session-pins.test.ts',
     ],
     coverage: {
       provider: 'v8',

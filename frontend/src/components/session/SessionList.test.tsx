@@ -3,7 +3,7 @@ import { render, screen, waitFor, within, fireEvent } from '@testing-library/rea
 import userEvent from '@testing-library/user-event'
 import { SessionList } from './SessionList'
 
-const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, lastSessionsHookArgs } = vi.hoisted(() => ({
+const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, fetchNextPageMock, hasNextPageRef, isFetchingNextPageRef, lastSessionsHookArgs, sessionPinsData, togglePinMock } = vi.hoisted(() => ({
   createSessionMock: vi.fn(),
   deleteSessionMock: vi.fn(),
   sessionsData: [] as Array<{ id: string; title: string; directory: string; workspaceID?: string; parentID?: string; time: { updated: number } }>,
@@ -12,6 +12,8 @@ const { createSessionMock, deleteSessionMock, sessionsData, createSessionState, 
   hasNextPageRef: { current: false },
   isFetchingNextPageRef: { current: false },
   lastSessionsHookArgs: { current: undefined as { opcodeUrl: string; directories: string[]; options?: { search?: string; limit?: number } } | undefined },
+  sessionPinsData: [] as Array<{ sessionId: string; directory: string; pinnedAt: number }>,
+  togglePinMock: vi.fn(),
 }))
 
 vi.mock('@/hooks/useOpenCode', () => ({
@@ -34,6 +36,11 @@ vi.mock('@/hooks/useOpenCode', () => ({
   useDeleteSession: () => ({ mutateAsync: deleteSessionMock, isPending: false }),
 }))
 
+vi.mock('@/hooks/useSessionPins', () => ({
+  useSessionPins: () => ({ data: sessionPinsData }),
+  useToggleSessionPin: () => ({ mutate: togglePinMock }),
+}))
+
 describe('SessionList', () => {
   beforeEach(() => {
     sessionsData.splice(0, sessionsData.length,
@@ -49,6 +56,8 @@ describe('SessionList', () => {
     hasNextPageRef.current = false
     isFetchingNextPageRef.current = false
     lastSessionsHookArgs.current = undefined
+    sessionPinsData.splice(0, sessionPinsData.length)
+    togglePinMock.mockReset()
   })
 
   it('selects duplicate session IDs independently by workspace directory', async () => {
@@ -266,5 +275,49 @@ describe('SessionList', () => {
     await waitFor(() => {
       expect(fetchNextPageMock).toHaveBeenCalled()
     })
+  })
+
+  it('renders pinned session under a Pinned heading and excludes it from Today', () => {
+    const pinnedTime = Date.now()
+    sessionPinsData.push({ sessionId: 'ses_a', directory: '/w/a', pinnedAt: pinnedTime })
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_a', title: 'pinned session', directory: '/w/a', time: { updated: pinnedTime } },
+    )
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Pinned')).toBeTruthy()
+    expect(screen.getByText('pinned session')).toBeTruthy()
+    // Pinned sessions are excluded from Today/Older, so Today heading should not appear
+    expect(screen.queryByText('Today')).toBeNull()
+  })
+
+  it('calls togglePinMock with correct args when Pin to top is clicked', async () => {
+    const user = userEvent.setup()
+    sessionsData.splice(0, sessionsData.length,
+      { id: 'ses_x', title: 'test session', directory: '/w/a', time: { updated: Date.now() } },
+    )
+
+    render(
+      <SessionList
+        opcodeUrl="/api/opencode"
+        directories={['/w/a']}
+        onSelectSession={vi.fn()}
+      />,
+    )
+
+    const actionsButton = screen.getByRole('button', { name: 'Session actions' })
+    await user.click(actionsButton)
+
+    const pinItem = screen.getByText('Pin to top')
+    await user.click(pinItem)
+
+    expect(togglePinMock).toHaveBeenCalledWith({ sessionId: 'ses_x', directory: '/w/a', pinned: true })
   })
 })
