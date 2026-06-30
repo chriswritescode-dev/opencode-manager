@@ -50,6 +50,8 @@ import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
+import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
+import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { getModelStatePath, ModelStateSchema } from './routes/providers'
@@ -319,6 +321,13 @@ if (ENV.VAPID.PUBLIC_KEY && ENV.VAPID.PRIVATE_KEY) {
 sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
 sseAggregator.start()
+
+sseAggregator.setScheduledSessionsResolver(
+  () => scheduleService.getActiveRunSessionIds(),
+)
+
+const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(openCodeClient, sseAggregator)
+setOpenCodeRestartCoordinator(openCodeRestartCoordinator)
 
 void scheduleRunnerInstance.start()
 

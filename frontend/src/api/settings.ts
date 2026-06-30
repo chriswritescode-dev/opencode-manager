@@ -152,6 +152,10 @@ export const settingsApi = {
     })
   },
 
+  getActiveOpenCodeSessions: async (): Promise<{ count: number; sessions: { sessionID: string; directory: string }[] }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-active-sessions`)
+  },
+
   reloadOpenCodeConfig: async (): Promise<{ success: boolean; message: string; details?: string }> => {
     try {
       return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-reload`, {

@@ -9,6 +9,7 @@ const {
   mockGetOpenCodeConfigs,
   mockUpdateOpenCodeConfig,
   mockRestartOpenCodeServer,
+  mockGetActiveOpenCodeSessions,
   mockGetOpenCodeImportStatus,
   mockListManagedSkills,
   mockListOpenCodeDirectoryFiles,
@@ -17,6 +18,7 @@ const {
   mockGetOpenCodeConfigs: vi.fn(),
   mockUpdateOpenCodeConfig: vi.fn(),
   mockRestartOpenCodeServer: vi.fn(),
+  mockGetActiveOpenCodeSessions: vi.fn(),
   mockGetOpenCodeImportStatus: vi.fn(),
   mockListManagedSkills: vi.fn(),
   mockListOpenCodeDirectoryFiles: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('@/api/settings', () => ({
     getOpenCodeConfigs: mockGetOpenCodeConfigs,
     updateOpenCodeConfig: mockUpdateOpenCodeConfig,
     restartOpenCodeServer: mockRestartOpenCodeServer,
+    getActiveOpenCodeSessions: mockGetActiveOpenCodeSessions,
     getOpenCodeImportStatus: mockGetOpenCodeImportStatus,
     listManagedSkills: mockListManagedSkills,
     listOpenCodeDirectoryFiles: mockListOpenCodeDirectoryFiles,
@@ -85,6 +88,7 @@ describe('OpenCodeConfigManager', () => {
     })
     mockUpdateOpenCodeConfig.mockResolvedValue(defaultConfig)
     mockRestartOpenCodeServer.mockResolvedValue({ success: true, message: 'ok' })
+    mockGetActiveOpenCodeSessions.mockResolvedValue({ count: 2, sessions: [] })
   })
 
   it('shows uploaded command and agent directory files in settings', async () => {
