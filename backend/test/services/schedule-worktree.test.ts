@@ -72,6 +72,19 @@ describe('ScheduleWorktreeManager', () => {
   }
   const mockDb = {} as any
 
+  // Default mock OpenCodeClient: postJson rejects (triggers fallback), forward
+  // returns an ok response for teardown safety.
+  const mockOpenCodeClient = {
+    postJson: vi.fn().mockRejectedValue(new Error('API unavailable')),
+    forward: vi.fn().mockResolvedValue(new Response(null, { status: 200 })),
+    getJson: vi.fn(),
+    forwardRaw: vi.fn(),
+    setProviderAuth: vi.fn(),
+    deleteProviderAuth: vi.fn(),
+    startMcpAuth: vi.fn(),
+    authenticateMcp: vi.fn(),
+  }
+
   beforeAll(() => {
     tmpDir = mkdtempSync(path.join(tmpdir(), 'schedule-worktree-test-'))
     tmpRoot = tmpDir
@@ -113,6 +126,7 @@ describe('ScheduleWorktreeManager', () => {
       mockSettingsService as any,
       mockCredentialProvider as any,
       mockDb,
+      mockOpenCodeClient as any,
     )
   }
 
@@ -126,9 +140,9 @@ describe('ScheduleWorktreeManager', () => {
     } as any
   }
 
-  // ---- Tests ----
+  // ---- Fallback (raw git) tests ----
 
-  it('prepare creates a worktree with the correct branch name and returns context', async () => {
+  it('prepare creates a worktree with the correct branch name and returns context (raw git fallback)', async () => {
     const manager = await createManager()
     const repo = testRepo()
     const job = { id: 10, branch: null }
@@ -140,6 +154,7 @@ describe('ScheduleWorktreeManager', () => {
     expect(ctx!.directory).toBeDefined()
     expect(ctx!.worktreePath).toBe(ctx!.directory)
     expect(ctx!.runBranch).toBe(`schedule/10/run-1`)
+    expect(ctx!.workspaceId).toBeNull()
     expect(existsSync(ctx!.worktreePath)).toBe(true)
 
     // The checked-out branch in the worktree must match the run branch
@@ -260,7 +275,7 @@ describe('ScheduleWorktreeManager', () => {
     expect(existsSync(path.join(scheduleWorktreesRoot, 'job-21-run-1'))).toBe(false)
   })
 
-  it('prepare respects the branch override', async () => {
+  it('prepare respects the branch override (raw git fallback)', async () => {
     const manager = await createManager()
     const repo = testRepo()
     const job = { id: 20, branch: 'dev' }
@@ -280,6 +295,254 @@ describe('ScheduleWorktreeManager', () => {
       encoding: 'utf-8',
     }).trim()
     expect(wtHead).toBe(devHead)
+
+    // Cleanup
+    const { removeWorktree } = await import('../../src/services/repo')
+    await removeWorktree(baseRepoPath, ctx!.worktreePath)
+  })
+
+  // ---- OpenCode API path tests ----
+
+  /**
+   * Helper: creates a linked git worktree directory (rather than a clone) so
+   * that refs and objects are shared with the base repo.  The worktree is
+   * created with a temp branch that prepare() will later overwrite via
+   * `checkout -B`.
+   */
+  async function createWorktreeWorkspace(dirName: string): Promise<{ directory: string; cleanup: () => Promise<void> }> {
+    const directory = path.join(tmpDir, dirName)
+    const tempBranch = `_temp_${dirName}`
+    // Create a detached worktree on the current HEAD without creating a branch
+    execSync(`git -C "${baseRepoPath}" worktree add --detach "${directory}" origin/main`, { env })
+    execSync(`git -C "${directory}" config user.email test@test.com`, { env })
+    execSync(`git -C "${directory}" config user.name Test`, { env })
+    const cleanup = async () => {
+      const { removeWorktree } = await import('../../src/services/repo')
+      await removeWorktree(baseRepoPath, directory)
+      // Also remove any leftover branch the test might have created
+      execSync(`git -C "${baseRepoPath}" branch -D "${tempBranch}" 2>/dev/null || true`, { env })
+    }
+    return { directory, cleanup }
+  }
+
+  it('prepare calls POST /experimental/workspace and returns workspaceId on success', async () => {
+    const { directory: workspaceDirectory, cleanup } = await createWorktreeWorkspace('oc-workspace')
+
+    const workspaceId = 'ws-test-123'
+    const mockPost = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: workspaceDirectory,
+      branch: null,
+    })
+    mockOpenCodeClient.postJson = mockPost
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 30, branch: null }
+    const runId = 5
+
+    const ctx = await manager.prepare(repo, job, runId)
+
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBe(workspaceId)
+    expect(ctx!.runBranch).toBe('schedule/30/run-5')
+    expect(existsSync(ctx!.worktreePath)).toBe(true)
+    expect(ctx!.worktreePath).toBe(workspaceDirectory)
+
+    // Verify the API was called correctly
+    expect(mockPost).toHaveBeenCalledWith(
+      '/experimental/workspace',
+      { type: 'worktree', branch: null },
+      { directory: repo.fullPath },
+    )
+
+    // Verify the branch was re-pointed
+    const branch = execSync(`git -C "${workspaceDirectory}" rev-parse --abbrev-ref HEAD`, {
+      encoding: 'utf-8',
+    }).trim()
+    expect(branch).toBe('schedule/30/run-5')
+
+    // Cleanup
+    await cleanup()
+  })
+
+  it('prepare falls back to raw git when postJson rejects', async () => {
+    mockOpenCodeClient.postJson = vi.fn().mockRejectedValue(new Error('API unavailable'))
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 40, branch: null }
+    const runId = 10
+
+    const ctx = await manager.prepare(repo, job, runId)
+
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBeNull()
+    expect(ctx!.runBranch).toBe('schedule/40/run-10')
+    expect(existsSync(ctx!.worktreePath)).toBe(true)
+
+    // The worktree path should be under scheduleWorktreesRoot (raw git path)
+    expect(ctx!.worktreePath).toContain(scheduleWorktreesRoot)
+
+    // Cleanup
+    const { removeWorktree } = await import('../../src/services/repo')
+    await removeWorktree(baseRepoPath, ctx!.worktreePath)
+  })
+
+  it('finalize deletes workspace via API when workspaceId is set', async () => {
+    const { directory: workspaceDirectory, cleanup } = await createWorktreeWorkspace('oc-finalize-test')
+
+    const workspaceId = 'ws-finalize-456'
+    mockOpenCodeClient.postJson = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: workspaceDirectory,
+      branch: null,
+    })
+
+    const deleteMock = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+    mockOpenCodeClient.forward = deleteMock
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 50, branch: null, name: 'Finalize API' }
+    const runId = 300
+
+    const ctx = await manager.prepare(repo, job, runId)
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBe(workspaceId)
+
+    // Write a file so there are changes to commit
+    writeFileSync(path.join(workspaceDirectory, 'output.md'), '# API Finalize Test')
+
+    const result = await manager.finalize(
+      repo,
+      { id: 50, name: 'Finalize API', prompt: 'test' },
+      { id: runId, worktreePath: workspaceDirectory, runBranch: ctx!.runBranch, triggerSource: 'manual', workspaceId: ctx!.workspaceId },
+    )
+
+    expect(result.commitHash).toMatch(/^[0-9a-f]{40}$/)
+
+    // Verify DELETE was called with the correct workspaceId
+    expect(deleteMock).toHaveBeenCalledWith({
+      method: 'DELETE',
+      path: `/experimental/workspace/${encodeURIComponent(workspaceId)}`,
+      directory: repo.fullPath,
+    })
+
+    // The commit must still be reachable on the runBranch in the base repo
+    const log = execSync(`git -C "${baseRepoPath}" log "${ctx!.runBranch}" --oneline`, {
+      encoding: 'utf-8',
+    }).trim()
+    expect(log).toBeTruthy()
+
+    // Clean up in case the API mock didn't actually remove the worktree
+    await cleanup()
+  })
+
+  it('finalize falls back to raw removeWorktree when workspace DELETE fails', async () => {
+    const { directory: workspaceDirectory, cleanup } = await createWorktreeWorkspace('oc-delete-fail')
+
+    const workspaceId = 'ws-delete-fail-789'
+    mockOpenCodeClient.postJson = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: workspaceDirectory,
+      branch: null,
+    })
+    // DELETE returns non-ok response → triggers fallback removeWorktree
+    mockOpenCodeClient.forward = vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 }))
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 60, branch: null, name: 'Delete Fail' }
+    const runId = 400
+
+    const ctx = await manager.prepare(repo, job, runId)
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBe(workspaceId)
+
+    writeFileSync(path.join(workspaceDirectory, 'data.txt'), 'test data')
+
+    const result = await manager.finalize(
+      repo,
+      { id: 60, name: 'Delete Fail', prompt: 'test' },
+      { id: runId, worktreePath: workspaceDirectory, runBranch: ctx!.runBranch, triggerSource: 'manual', workspaceId: ctx!.workspaceId },
+    )
+
+    expect(result.commitHash).toMatch(/^[0-9a-f]{40}$/)
+    // Directory should be cleaned up (via fallback removeWorktree)
+    expect(existsSync(workspaceDirectory)).toBe(false)
+
+    // Clean up in case the directory somehow still exists
+    await cleanup()
+  })
+
+  it('finalize restores run branch if OpenCode delete removed it', async () => {
+    const { directory: workspaceDirectory, cleanup } = await createWorktreeWorkspace('oc-branch-restore')
+
+    const workspaceId = 'ws-branch-restore-101'
+    mockOpenCodeClient.postJson = vi.fn().mockResolvedValue({
+      id: workspaceId,
+      directory: workspaceDirectory,
+      branch: null,
+    })
+    mockOpenCodeClient.forward = vi.fn().mockResolvedValue(new Response(null, { status: 200 }))
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 70, branch: null, name: 'Branch Restore' }
+    const runId = 500
+
+    const ctx = await manager.prepare(repo, job, runId)
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBe(workspaceId)
+
+    writeFileSync(path.join(workspaceDirectory, 'important.md'), '# Branch Restore Test')
+
+    // Simulate: API delete removes the branch.  First detach the worktree
+    // HEAD so git allows the deletion (OpenCode's workspace DELETE handles
+    // the worktree-level cleanup first, then the branch goes away).
+    const runBranch = ctx!.runBranch!
+    execSync(`git -C "${workspaceDirectory}" checkout --detach`, { env })
+    execSync(`git -C "${baseRepoPath}" branch -D "${runBranch}"`, { env })
+
+    const result = await manager.finalize(
+      repo,
+      { id: 70, name: 'Branch Restore', prompt: 'test' },
+      { id: runId, worktreePath: workspaceDirectory, runBranch, triggerSource: 'manual', workspaceId: ctx!.workspaceId },
+    )
+
+    expect(result.commitHash).toMatch(/^[0-9a-f]{40}$/)
+
+    // Branch should have been restored by finalize
+    const branchExists = execSync(`git -C "${baseRepoPath}" rev-parse --verify "refs/heads/${runBranch}"`, {
+      encoding: 'utf-8',
+    }).trim()
+    expect(branchExists).toBeTruthy()
+
+    // And the commit hash should match
+    const branchCommit = execSync(`git -C "${baseRepoPath}" rev-parse "${runBranch}"`, {
+      encoding: 'utf-8',
+    }).trim()
+    expect(branchCommit).toBe(result.commitHash)
+
+    await cleanup()
+  })
+
+  it('prepare returns workspaceId null on postJson failure (fallback path)', async () => {
+    mockOpenCodeClient.postJson = vi.fn().mockRejectedValue(new Error('Network error'))
+
+    const manager = await createManager()
+    const repo = testRepo()
+    const job = { id: 80, branch: 'main' }
+    const runId = 15
+
+    const ctx = await manager.prepare(repo, job, runId)
+
+    expect(ctx).not.toBeNull()
+    expect(ctx!.workspaceId).toBeNull()
+    expect(ctx!.runBranch).toBe('schedule/80/run-15')
+    expect(existsSync(ctx!.worktreePath)).toBe(true)
+    expect(ctx!.worktreePath).toContain(scheduleWorktreesRoot)
 
     // Cleanup
     const { removeWorktree } = await import('../../src/services/repo')
