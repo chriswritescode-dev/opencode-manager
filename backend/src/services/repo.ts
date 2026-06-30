@@ -16,6 +16,7 @@ import { getErrorMessage } from '../utils/error-utils'
 import { sseAggregator } from './sse-aggregator'
 import { resolveProjectId, isGitMainCheckout } from './project-id-resolver'
 import { listRepos } from '../db/queries'
+import { listActiveScheduleRunWorkspaces } from '../db/schedules'
 import { SettingsService } from './settings'
 import type { OpenCodeClient } from './opencode/client'
 
@@ -1172,6 +1173,16 @@ export async function getSiblingRepos(
     const reposRoot = canonical(getReposPath())
     const scheduleWorktreeRoot = canonical(getScheduleWorktreesPath())
 
+    // Schedule runs may create their isolated worktree via the OpenCode workspace
+    // API, which places it outside getScheduleWorktreesPath(). Exclude any live
+    // run's workspace/worktree so an in-progress run is never surfaced as a
+    // deletable Sibling during the window it exists.
+    const activeRuns = listActiveScheduleRunWorkspaces(database)
+    const activeRunWorkspaceIds = new Set(activeRuns.map((run) => run.workspaceId).filter((id): id is string => id !== null))
+    const activeRunDirectories = new Set(
+      activeRuns.map((run) => run.worktreePath).filter((p): p is string => p !== null).map((p) => canonical(p)),
+    )
+
     const candidates = workspaces.filter((workspace) => {
       if (workspace.projectID !== targetProjectId) return false
       if (!workspace.directory) return false
@@ -1180,6 +1191,8 @@ export async function getSiblingRepos(
       if (workspaceDirectory === targetDirectory) return false
       if (workspaceDirectory === reposRoot) return false
       if (workspaceDirectory.startsWith(`${scheduleWorktreeRoot}${path.sep}`)) return false
+      if (activeRunWorkspaceIds.has(workspace.id)) return false
+      if (activeRunDirectories.has(workspaceDirectory)) return false
       if (knownDirectories.has(workspaceDirectory)) return false
 
       return true

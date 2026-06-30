@@ -32,26 +32,39 @@ export const SchedulePermissionConfigSchema = z.object({
 })
 export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSchema>
 
-export interface SchedulePermissionRule {
-  permission: string
-  pattern: string
-  action: 'allow' | 'deny' | 'ask'
+export type SchedulePermissionAction = 'allow' | 'deny' | 'ask'
+
+export interface SchedulePermissionRuleset {
+  '*': SchedulePermissionAction
+  external_directory?: SchedulePermissionAction
+  bash?: Record<string, SchedulePermissionAction>
 }
 
+/**
+ * Builds an OpenCode permission config object for an unattended scheduled run.
+ *
+ * OpenCode's config/API permission format is keyed by tool, where each value is
+ * either a shorthand action or a glob-pattern -> action map (see
+ * https://opencode.ai/docs/permissions). A top-level `*` sets the baseline; the
+ * server merges tool entries after it and the last matching rule wins, so the
+ * `bash` deny patterns override the allow-all baseline for matching commands.
+ */
 export function buildSchedulePermissionRuleset(
   config: SchedulePermissionConfig | null | undefined,
-): SchedulePermissionRule[] {
+): SchedulePermissionRuleset {
   const cfg = SchedulePermissionConfigSchema.parse(config ?? {})
-  const rules: SchedulePermissionRule[] = [
-    { permission: '*', pattern: '*', action: 'allow' },
-  ]
+  const ruleset: SchedulePermissionRuleset = { '*': 'allow' }
   if (!cfg.allowExternalDirectory) {
-    rules.push({ permission: 'external_directory', pattern: '*', action: 'deny' })
+    ruleset.external_directory = 'deny'
   }
-  for (const pattern of cfg.bashDenyPatterns) {
-    rules.push({ permission: 'bash', pattern, action: 'deny' })
+  if (cfg.bashDenyPatterns.length > 0) {
+    const bash: Record<string, SchedulePermissionAction> = {}
+    for (const pattern of cfg.bashDenyPatterns) {
+      bash[pattern] = 'deny'
+    }
+    ruleset.bash = bash
   }
-  return rules
+  return ruleset
 }
 
 export const ScheduleJobSchema = z.object({

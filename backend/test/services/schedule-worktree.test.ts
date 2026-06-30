@@ -155,7 +155,6 @@ describe('ScheduleWorktreeManager', () => {
     expect(ctx!.worktreePath).toBe(ctx!.directory)
     expect(ctx!.runBranch).toBe(`schedule/10/run-1`)
     expect(ctx!.workspaceId).toBeNull()
-    expect(ctx!.autoBranch).toBeNull()
     expect(existsSync(ctx!.worktreePath)).toBe(true)
 
     // The checked-out branch in the worktree must match the run branch
@@ -346,7 +345,6 @@ describe('ScheduleWorktreeManager', () => {
 
     expect(ctx).not.toBeNull()
     expect(ctx!.workspaceId).toBe(workspaceId)
-    expect(ctx!.autoBranch).toBeNull()
     expect(ctx!.runBranch).toBe('schedule/30/run-5')
     expect(existsSync(ctx!.worktreePath)).toBe(true)
     expect(ctx!.worktreePath).toBe(workspaceDirectory)
@@ -380,7 +378,6 @@ describe('ScheduleWorktreeManager', () => {
 
     expect(ctx).not.toBeNull()
     expect(ctx!.workspaceId).toBeNull()
-    expect(ctx!.autoBranch).toBeNull()
     expect(ctx!.runBranch).toBe('schedule/40/run-10')
     expect(existsSync(ctx!.worktreePath)).toBe(true)
 

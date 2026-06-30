@@ -276,6 +276,25 @@ export function listScheduleRunArtifactsByJob(db: Database, repoId: number, jobI
   }))
 }
 
+export interface ActiveScheduleRunWorkspace {
+  worktreePath: string | null
+  workspaceId: string | null
+}
+
+/**
+ * Returns the worktree directories and OpenCode workspace IDs of schedule runs
+ * that still hold a live worktree/workspace (both columns are cleared to null
+ * on finalize). Used to keep an in-progress run's isolated worktree out of the
+ * deletable Sibling surface, since worktrees created via the OpenCode workspace
+ * API live outside getScheduleWorktreesPath().
+ */
+export function listActiveScheduleRunWorkspaces(db: Database): ActiveScheduleRunWorkspace[] {
+  const rows = db
+    .prepare('SELECT worktree_path, workspace_id FROM schedule_runs WHERE worktree_path IS NOT NULL OR workspace_id IS NOT NULL')
+    .all() as { worktree_path: string | null; workspace_id: string | null }[]
+  return rows.map((row) => ({ worktreePath: row.worktree_path, workspaceId: row.workspace_id }))
+}
+
 export function deleteScheduleRunById(db: Database, repoId: number, jobId: number, runId: number): boolean {
   const result = db
     .prepare('DELETE FROM schedule_runs WHERE repo_id = ? AND job_id = ? AND id = ?')

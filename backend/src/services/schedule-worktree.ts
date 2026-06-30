@@ -18,7 +18,6 @@ export interface ScheduleWorktreeContext {
   worktreePath: string
   runBranch: string
   workspaceId: string | null
-  autoBranch: string | null
 }
 
 /**
@@ -100,7 +99,6 @@ export class ScheduleWorktreeManager {
           worktreePath: createdWorkspace.directory,
           runBranch,
           workspaceId: createdWorkspace.id,
-          autoBranch: createdWorkspace.branch ?? null,
         }
       } catch (apiError) {
         logger.warn(`OpenCode workspace API failed, falling back to raw git worktree: ${apiError}`)
@@ -124,7 +122,7 @@ export class ScheduleWorktreeManager {
         throw new Error(`Worktree directory was not created at: ${worktreePath}`)
       }
 
-      return { directory: worktreePath, worktreePath, runBranch, workspaceId: null, autoBranch: null }
+      return { directory: worktreePath, worktreePath, runBranch, workspaceId: null }
     } finally {
       if (sshSetup) {
         await this.gitAuthService.cleanupSSHKey()
@@ -176,38 +174,27 @@ export class ScheduleWorktreeManager {
     } finally {
       // Teardown: delete the worktree/workspace
       try {
-        if (run.workspaceId) {
-          const response = await this.openCodeClient.forward({
-            method: 'DELETE',
-            path: `/experimental/workspace/${encodeURIComponent(run.workspaceId)}`,
-            directory: repo.fullPath,
-          })
-          if (!response.ok) {
-            logger.warn(`OpenCode workspace DELETE returned ${response.status}, falling back to raw removeWorktree`)
-            await removeWorktree(repo.fullPath, run.worktreePath, env)
-          }
-        } else {
-          await removeWorktree(repo.fullPath, run.worktreePath, env)
-        }
+        await this.deleteWorkspaceOrFallback(repo, run, env)
       } catch (error) {
         logger.error(`Failed to remove worktree ${run.worktreePath}:`, error)
         // Best-effort fallback
         await removeWorktree(repo.fullPath, run.worktreePath, env).catch(() => {})
       }
 
-      // Branch reconciliation: ensure the run branch exists and points at our commit
+      // Branch reconciliation: ensure the run branch survives teardown
       if (run.runBranch) {
         try {
-          if (commitHash) {
-            // Verify the branch still exists; restore it if OpenCode's delete removed it
+          if (!commitHash) {
+            // No changes: remove the empty run branch
+            await executeCommand(['git', '-C', repo.fullPath, 'branch', '-D', run.runBranch], env ? { env } : undefined).catch(() => {})
+          } else if (run.workspaceId) {
+            // Only the workspace API teardown can remove the run branch; the raw
+            // git fallback leaves it intact, so verify/restore only matters here.
             try {
               await executeCommand(['git', '-C', repo.fullPath, 'rev-parse', '--verify', `refs/heads/${run.runBranch}`], { env, silent: true })
             } catch {
               await executeCommand(['git', '-C', repo.fullPath, 'branch', run.runBranch, commitHash], { env })
             }
-          } else {
-            // No changes: remove the empty run branch
-            await executeCommand(['git', '-C', repo.fullPath, 'branch', '-D', run.runBranch], env ? { env } : undefined).catch(() => {})
           }
         } catch {
           // Best-effort
@@ -234,33 +221,51 @@ export class ScheduleWorktreeManager {
 
     const env = await this.buildGitEnv(repo, false, true)
 
-    for (const artifact of artifacts) {
-      if (artifact.workspaceId) {
+    // Workspace/worktree removals are independent per artifact, so run them
+    // concurrently; failures are swallowed per artifact so one bad entry does
+    // not block the rest.
+    await Promise.all(
+      artifacts.map(async (artifact) => {
         try {
-          const response = await this.openCodeClient.forward({
-            method: 'DELETE',
-            path: `/experimental/workspace/${encodeURIComponent(artifact.workspaceId)}`,
-            directory: repo.fullPath,
-          })
-          if (!response.ok) {
-            logger.warn(`pruneRunArtifacts: workspace DELETE returned ${response.status}, falling back to raw remove`)
-            if (artifact.worktreePath) {
-              await removeWorktree(repo.fullPath, artifact.worktreePath, env)
-            }
-          }
+          await this.deleteWorkspaceOrFallback(repo, artifact, env)
         } catch {
           if (artifact.worktreePath) {
-            await removeWorktree(repo.fullPath, artifact.worktreePath, env)
+            await removeWorktree(repo.fullPath, artifact.worktreePath, env).catch(() => {})
           }
         }
-      } else if (artifact.worktreePath) {
-        await removeWorktree(repo.fullPath, artifact.worktreePath, env)
-      }
-    }
+      }),
+    )
 
     const branches = artifacts.map((a) => a.runBranch).filter((b): b is string => b !== null && b.length > 0)
     if (branches.length > 0) {
       await executeCommand(['git', '-C', repo.fullPath, 'branch', '-D', ...branches], { env }).catch(() => {})
+    }
+  }
+
+  /**
+   * Deletes a run's worktree, preferring the OpenCode workspace API when a
+   * workspaceId is present and falling back to a raw `git worktree remove` when
+   * the API is unavailable or returns a non-ok response.
+   */
+  private async deleteWorkspaceOrFallback(
+    repo: Repo,
+    artifact: { workspaceId?: string | null; worktreePath: string | null },
+    env: Record<string, string> | undefined,
+  ): Promise<void> {
+    if (artifact.workspaceId) {
+      const response = await this.openCodeClient.forward({
+        method: 'DELETE',
+        path: `/experimental/workspace/${encodeURIComponent(artifact.workspaceId)}`,
+        directory: repo.fullPath,
+      })
+      if (!response.ok) {
+        logger.warn(`OpenCode workspace DELETE returned ${response.status}, falling back to raw removeWorktree`)
+        if (artifact.worktreePath) {
+          await removeWorktree(repo.fullPath, artifact.worktreePath, env)
+        }
+      }
+    } else if (artifact.worktreePath) {
+      await removeWorktree(repo.fullPath, artifact.worktreePath, env)
     }
   }
 
