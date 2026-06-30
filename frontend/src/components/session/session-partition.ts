@@ -14,19 +14,23 @@ export function partitionSessions(
 ): PartitionedSessions {
   const startOfDay = new Date(now)
   startOfDay.setHours(0, 0, 0, 0)
+  const startMs = startOfDay.getTime()
   const byUpdatedDesc = (a: Session, b: Session) => b.time.updated - a.time.updated
 
   const pinned: Session[] = []
-  const rest: Session[] = []
+  const today: Session[] = []
+  const older: Session[] = []
   for (const s of sessions) {
     if (pinnedKeys.has(keyFn(s))) {
       pinned.push(s)
+    } else if (s.time.updated >= startMs) {
+      today.push(s)
     } else {
-      rest.push(s)
+      older.push(s)
     }
   }
   pinned.sort(byUpdatedDesc)
-  const today = rest.filter(s => new Date(s.time.updated) >= startOfDay).sort(byUpdatedDesc)
-  const older = rest.filter(s => new Date(s.time.updated) < startOfDay).sort(byUpdatedDesc)
+  today.sort(byUpdatedDesc)
+  older.sort(byUpdatedDesc)
   return { pinned, today, older }
 }

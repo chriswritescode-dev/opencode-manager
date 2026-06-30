@@ -18,7 +18,6 @@ export function ensureSessionPinsTable(db: Database): void {
 }
 
 export function listSessionPins(db: Database): SessionPinRecord[] {
-  ensureSessionPinsTable(db)
   const rows = db
     .prepare('SELECT session_id, directory, pinned_at FROM session_pins ORDER BY pinned_at DESC')
     .all() as { session_id: string; directory: string; pinned_at: number }[]

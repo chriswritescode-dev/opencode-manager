@@ -15,6 +15,10 @@ import { useSendErrorStore } from "../stores/sendErrorStore";
 import { useSessionStatus } from "../stores/sessionStatusStore";
 import { invalidateSessionListCaches, messagesQueryKey } from "../lib/queryInvalidation";
 import { reconcileConfirmedPrompt } from "../lib/sendErrorReconcile";
+import { buildSessionKey } from "../lib/sessionKey";
+import { toggleSessionPin } from "../api/sessionPins";
+import { SESSION_PINS_QUERY_KEY } from "./useSessionPins";
+import type { SessionPin } from "@opencode-manager/shared/schemas";
 
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
@@ -200,7 +204,7 @@ const getDeleteSessionTargetWorkspaceID = (target: DeleteSessionTarget) =>
   typeof target === 'string' ? undefined : target.workspaceID;
 
 const getDeleteSessionTargetKey = (target: DeleteSessionTarget, fallbackDirectory?: string) =>
-  `${getDeleteSessionTargetDirectory(target, fallbackDirectory) ?? ''}:${getDeleteSessionTargetId(target)}`;
+  buildSessionKey(getDeleteSessionTargetDirectory(target, fallbackDirectory), getDeleteSessionTargetId(target));
 
 const isMissingWorkspaceError = (error: unknown) =>
   error instanceof Error && error.message.includes('Workspace not found:');
@@ -279,9 +283,32 @@ export const useDeleteSession = (opcodeUrl: string | null | undefined, directory
     onError: () => {
       showToast.error('Failed to delete sessions');
     },
-    onSettled: () => {
+    onSettled: (_data, _error, variables) => {
       invalidateSessionListCaches(queryClient, opcodeUrl);
+      cleanupSessionPins(queryClient, variables, primaryDirectory);
     },
+  });
+};
+
+const cleanupSessionPins = (
+  queryClient: ReturnType<typeof useQueryClient>,
+  variables: DeleteSessionTarget | DeleteSessionTarget[],
+  primaryDirectory?: string,
+) => {
+  const pins = queryClient.getQueryData<SessionPin[]>(SESSION_PINS_QUERY_KEY) ?? [];
+  if (pins.length === 0) return;
+  const pinnedKeys = new Set(pins.map((p) => buildSessionKey(p.directory, p.sessionId)));
+  const targets = (Array.isArray(variables) ? variables : [variables])
+    .map((target) => ({
+      sessionId: getDeleteSessionTargetId(target),
+      directory: getDeleteSessionTargetDirectory(target, primaryDirectory) ?? '',
+    }))
+    .filter((target) => pinnedKeys.has(buildSessionKey(target.directory, target.sessionId)));
+  if (targets.length === 0) return;
+  void Promise.allSettled(
+    targets.map((target) => toggleSessionPin({ ...target, pinned: false })),
+  ).then(() => {
+    void queryClient.invalidateQueries({ queryKey: SESSION_PINS_QUERY_KEY });
   });
 };
 

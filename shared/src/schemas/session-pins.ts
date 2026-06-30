@@ -12,9 +12,5 @@ export const ToggleSessionPinRequestSchema = z.object({
   pinned: z.boolean(),
 });
 
-export const SessionPinsResponseSchema = z.object({
-  pins: z.array(SessionPinSchema),
-});
-
 export type SessionPin = z.infer<typeof SessionPinSchema>;
 export type ToggleSessionPinRequest = z.infer<typeof ToggleSessionPinRequestSchema>;
