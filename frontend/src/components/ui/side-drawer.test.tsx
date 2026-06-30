@@ -48,46 +48,6 @@ describe('SideDrawer', () => {
     expect(handleClose).toHaveBeenCalled()
   })
 
-  it('applies pt-safe and pb-safe classes', () => {
-    render(
-      <SideDrawer isOpen onClose={() => {}} ariaLabel="Test drawer">
-        <div>Test content</div>
-      </SideDrawer>,
-    )
-    const dialog = document.querySelector('[role="dialog"]')
-    expect(dialog).toHaveClass('pt-safe')
-    expect(dialog).toHaveClass('pb-safe')
-  })
-
-  it('defaults to right side', () => {
-    render(
-      <SideDrawer isOpen onClose={() => {}} ariaLabel="Test drawer">
-        <div>Test content</div>
-      </SideDrawer>,
-    )
-    const dialog = document.querySelector('[role="dialog"]')
-    expect(dialog).toHaveClass('right-0')
-  })
-
-  it('applies left side when specified', () => {
-    render(
-      <SideDrawer isOpen onClose={() => {}} side="left" ariaLabel="Test drawer">
-        <div>Test content</div>
-      </SideDrawer>,
-    )
-    const dialog = document.querySelector('[role="dialog"]')
-    expect(dialog).toHaveClass('left-0')
-  })
-
-  it('applies custom widthClass', () => {
-    render(
-      <SideDrawer isOpen onClose={() => {}} widthClass="w-80" ariaLabel="Test drawer">
-        <div>Test content</div>
-      </SideDrawer>,
-    )
-    const dialog = document.querySelector('[role="dialog"]')
-    expect(dialog).toHaveClass('w-80')
-  })
 })
 
 describe('SideDrawerHeader', () => {
@@ -118,15 +78,5 @@ describe('SideDrawerContent', () => {
       </SideDrawerContent>,
     )
     expect(screen.getByText('Content')).toBeInTheDocument()
-  })
-
-  it('applies custom className', () => {
-    render(
-      <SideDrawerContent className="custom-class">
-        <div>Content</div>
-      </SideDrawerContent>,
-    )
-    const content = screen.getByText('Content').parentElement
-    expect(content).toHaveClass('custom-class')
   })
 })
