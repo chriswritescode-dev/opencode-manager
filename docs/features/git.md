@@ -61,7 +61,7 @@ Access comprehensive git operations via the source control button.
 - Discard changes to revert modifications
 - View diffs inline for any changed file
 
-![Changes Tab](../images/git/git-changes.png)
+![Changes Tab](../images/git/git-changes.png){ .phone }
 
 ### Commits Tab
 
@@ -70,7 +70,7 @@ Access comprehensive git operations via the source control button.
 - See file changes in each commit
 - Track ahead/behind status with remote
 
-![Commits Tab](../images/git/git-commits.png)
+![Commits Tab](../images/git/git-commits.png){ .phone }
 
 ### Branches Tab
 
@@ -79,7 +79,7 @@ Access comprehensive git operations via the source control button.
 - Switch branches (checks out the branch)
 - Delete local branches
 
-![Branches Tab](../images/git/git-branch.png)
+![Branches Tab](../images/git/git-branch.png){ .phone }
 
 ## Diff Viewer
 
@@ -96,7 +96,7 @@ View file changes with a unified diff format:
 - Diffs appear inline or in a modal depending on context
 - Use the expand/collapse toggle for large diffs
 
-![Diff Viewer](../images/git/git-diffview.png)
+![Diff Viewer](../images/git/git-diffview.png){ .phone }
 
 ## Repository Actions
 

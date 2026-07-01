@@ -11,7 +11,7 @@ The UI is optimized for mobile devices:
 - Adaptive components
 - Gesture support
 
-![Mobile Sessions View](../images/mobile-sessions.png)
+![Mobile Sessions View](../images/mobile-sessions.png){ .phone }
 
 ## Installing as PWA
 
