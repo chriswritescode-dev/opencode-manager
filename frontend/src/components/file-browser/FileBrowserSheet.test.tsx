@@ -7,6 +7,15 @@ import { FileBrowser } from './FileBrowser'
 import type { FileBrowserHandle } from './FileBrowser'
 import * as useMobile from '../../hooks/useMobile'
 
+vi.mock('@/components/html-preview/HtmlArtifactPanel', () => ({
+  HtmlArtifactPanel: ({ artifact, onClose }: { artifact: { path?: string } | null; onClose: () => void }) => (
+    <div data-testid="html-artifact-panel">
+      <span>{artifact?.path}</span>
+      <button aria-label="Close preview" onClick={onClose}>Close</button>
+    </div>
+  ),
+}))
+
 function createQueryClient() {
   return new QueryClient({
     defaultOptions: {
@@ -87,6 +96,60 @@ describe('FileBrowserSheet', () => {
 })
 
 describe('FileBrowser navigation', () => {
+  it('opens mobile HTML files with the shared HTML artifact panel', async () => {
+    const mobileSpy = vi.spyOn(useMobile, 'useMobile').mockReturnValue(true)
+    const originalFetch = globalThis.fetch
+    const htmlFile = {
+      name: 'dashboard.html',
+      path: 'test-repo/dashboard.html',
+      isDirectory: false,
+      size: 24,
+      mimeType: 'text/html',
+      content: btoa('<h1>Dashboard</h1>'),
+      lastModified: new Date(),
+    }
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost')
+      const path = url.searchParams.get('path')
+
+      if (path === htmlFile.path) {
+        return {
+          ok: true,
+          json: async () => htmlFile,
+        } as Response
+      }
+
+      return {
+        ok: true,
+        json: async () => ({
+          name: 'test-repo',
+          path: 'test-repo',
+          isDirectory: true,
+          children: [htmlFile],
+        }),
+      } as Response
+    })
+
+    try {
+      render(
+        <FileBrowser
+          basePath="test-repo"
+          embedded={true}
+        />,
+        { wrapper: createWrapper() }
+      )
+
+      fireEvent.click(await screen.findByText('dashboard.html'))
+
+      expect(await screen.findByTestId('html-artifact-panel')).toHaveTextContent('test-repo/dashboard.html')
+      expect(screen.queryByTitle('HTML preview: dashboard.html')).not.toBeInTheDocument()
+    } finally {
+      globalThis.fetch = originalFetch
+      mobileSpy.mockRestore()
+    }
+  })
+
   it('exposes imperative handle with goBack, canGoBack, and getCurrentPath', () => {
     const ref = { current: null as unknown as FileBrowserHandle }
     
@@ -1091,5 +1154,3 @@ describe('FileBrowserSheet swipe decision integration', () => {
     mockUseSwipeBack.mockRestore()
   })
 })
-
-

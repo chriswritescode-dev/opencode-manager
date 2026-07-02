@@ -38,16 +38,16 @@ services:
     container_name: opencode-manager
     ports:
       - "5003:5003"
-      - "5100:5100"
-      - "5101:5101"
-      - "5102:5102"
-      - "5103:5103"
+      - "3055:3055"
+      - "3056:3056"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
       - OPENCODE_HOST=127.0.0.1
+      - DEV_PREVIEW_PORT=3056
+      - DEV_PREVIEW_PUBLIC_URL=${DEV_PREVIEW_PUBLIC_URL:-}
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
       - PROCESS_START_WAIT_MS=2000
@@ -146,19 +146,22 @@ ports:
   - "8080:5003"  # Access at localhost:8080
 ```
 
-### Dev Server Ports
+### Dev Server Port & Preview Proxy
 
-Ports 5100-5103 are exposed for running dev servers inside repositories:
+A repository's dev server listens on `$OCM_DEV_SERVER_PORT` inside the container. It defaults to `3055`, is configurable in **Settings** (`devServerPort`), and is passed to agents as the `$OCM_DEV_SERVER_PORT` environment variable.
+
+The in-app preview is served by a dedicated **authenticated preview listener** on a separate origin (`DEV_PREVIEW_PORT`, default `3056`). It validates your OpenCode Manager session, then proxies every request and HMR WebSocket to the dev server at the origin root with no path rewriting. Serving at root is what lets framework HMR work transparently across Vite, Next.js, Remix, SvelteKit, etc.
+
+Because the preview is a separate origin loaded directly by the browser, `3056` must be published to the host:
 
 ```yaml
 ports:
-  - "5100:5100"
-  - "5101:5101"
-  - "5102:5102"
-  - "5103:5103"
+  - "3056:3056"
 ```
 
-Configure your dev server to use one of these ports:
+The session cookie is shared with the preview origin because it is the same host on a different port (same site). Behind a reverse proxy that cannot expose `3056` directly, set `DEV_PREVIEW_PUBLIC_URL` to the externally reachable preview origin (e.g. `https://preview.example.com`).
+
+Run your dev server on `$OCM_DEV_SERVER_PORT` and bind to `0.0.0.0`:
 
 === "Vite"
 
@@ -166,7 +169,7 @@ Configure your dev server to use one of these ports:
     // vite.config.ts
     export default {
       server: {
-        port: 5100,
+        port: Number(process.env.OCM_DEV_SERVER_PORT) || 3055,
         host: '0.0.0.0'
       }
     }
@@ -175,13 +178,13 @@ Configure your dev server to use one of these ports:
 === "Next.js"
 
     ```bash
-    next dev -p 5100 -H 0.0.0.0
+    next dev -p $OCM_DEV_SERVER_PORT -H 0.0.0.0
     ```
 
 === "Express"
 
     ```javascript
-    app.listen(5100, '0.0.0.0')
+    app.listen(process.env.OCM_DEV_SERVER_PORT || 3055, '0.0.0.0')
     ```
 
 ## Volume Mounts
@@ -372,7 +375,7 @@ The container creates a default `AGENTS.md` file at `/workspace/.config/opencode
 
 Instructions for AI agents working in the container:
 - Reserved ports information
-- Available dev server ports
+- Dev server port (`$OCM_DEV_SERVER_PORT`, default 3055)
 - Docker-specific guidelines
 
 ### Editing

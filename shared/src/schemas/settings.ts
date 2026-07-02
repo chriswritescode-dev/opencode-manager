@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { NotificationPreferencesSchema, DEFAULT_NOTIFICATION_PREFERENCES } from "./notifications";
+import { DEFAULT_DEV_SERVER_PORT } from "../types/dev-server";
 
 export const CustomCommandSchema = z.object({
   name: z.string(),
@@ -157,6 +158,7 @@ export const UserPreferencesSchema = z.object({
   repoSortMode: z.enum(['recent', 'manual', 'name']).optional(),
   serverEnvVars: z.array(ServerEnvVarSchema).optional(),
   disabledDefaultServerEnvVars: z.array(z.string()).optional(),
+  devServerPort: z.number().int().positive().optional(),
 });
 
 export const DEFAULT_TTS_CONFIG: TTSConfig = {
@@ -207,6 +209,7 @@ export const DEFAULT_USER_PREFERENCES = {
   repoSortMode: 'recent' as const,
   serverEnvVars: [] as ServerEnvVar[],
   disabledDefaultServerEnvVars: [] as string[],
+  devServerPort: DEFAULT_DEV_SERVER_PORT,
 };
 
 export const SettingsResponseSchema = z.object({
