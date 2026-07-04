@@ -44,6 +44,7 @@ function makeStatus(overrides: Partial<ManagerUpgradeStatusResponse> = {}): Mana
     inDocker: true,
     socketAvailable: true,
     enabled: true,
+    strategy: 'pull',
     currentVersion: '1.0.0',
     job: null,
     ...overrides,

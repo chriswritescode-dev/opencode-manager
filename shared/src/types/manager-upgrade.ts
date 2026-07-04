@@ -1,5 +1,7 @@
 export type ManagerUpgradeJobStatus = 'pending' | 'pulling' | 'recreating' | 'completed' | 'failed'
 
+export type ManagerUpgradeStrategy = 'pull' | 'build'
+
 export interface ManagerUpgradeJob {
   id: number
   status: ManagerUpgradeJobStatus
@@ -16,6 +18,7 @@ export interface ManagerUpgradeStatusResponse {
   inDocker: boolean
   socketAvailable: boolean
   enabled: boolean
+  strategy: ManagerUpgradeStrategy
   currentVersion: string | null
   job: ManagerUpgradeJob | null
 }

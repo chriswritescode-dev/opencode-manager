@@ -349,6 +349,7 @@ const managerUpgradeService = new ManagerUpgradeService(db, {
     inDocker: isRunningInDocker(),
     socket: isDockerSocketAvailable(),
     enabled: process.env.OCM_MANAGER_UPGRADE_ENABLED !== 'false',
+    strategy: process.env.OCM_UPGRADE_STRATEGY === 'build' ? 'build' as const : 'pull' as const,
   }),
 })
 

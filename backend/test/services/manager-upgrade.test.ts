@@ -19,10 +19,11 @@ function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 5))
 }
 
-function createRunner(): { runner: DockerRunner; calls: { inspectSelf: SelfContainerInfo[]; pulled: string[]; spawned: Array<{ info: SelfContainerInfo; targetImage: string }> } } {
+function createRunner(): { runner: DockerRunner; calls: { inspectSelf: SelfContainerInfo[]; pulled: string[]; built: Array<{ info: SelfContainerInfo; targetImage: string }>; spawned: Array<{ info: SelfContainerInfo; targetImage: string }> } } {
   const calls = {
     inspectSelf: [] as SelfContainerInfo[],
     pulled: [] as string[],
+    built: [] as Array<{ info: SelfContainerInfo; targetImage: string }>,
     spawned: [] as Array<{ info: SelfContainerInfo; targetImage: string }>,
   }
   const runner: DockerRunner = {
@@ -38,6 +39,9 @@ function createRunner(): { runner: DockerRunner; calls: { inspectSelf: SelfConta
     }),
     pull: vi.fn().mockImplementation(async (image: string) => {
       calls.pulled.push(image)
+    }),
+    buildImage: vi.fn().mockImplementation(async (info: SelfContainerInfo, targetImage: string) => {
+      calls.built.push({ info, targetImage })
     }),
     spawnRecreate: vi.fn().mockImplementation((info: SelfContainerInfo, targetImage: string) => {
       calls.spawned.push({ info, targetImage })
@@ -63,7 +67,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: false, socket: true, enabled: true }),
+        capability: () => ({ inDocker: false, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const status = await service.getStatus()
@@ -78,7 +82,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const status = await service.getStatus()
@@ -98,7 +102,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const status = await service.getStatus()
@@ -115,7 +119,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: false, socket: true, enabled: true }),
+        capability: () => ({ inDocker: false, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await expect(service.startUpgrade()).rejects.toThrow(ManagerUpgradeError)
@@ -129,7 +133,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: false, enabled: true }),
+        capability: () => ({ inDocker: true, socket: false, enabled: true, strategy: 'pull' as const }),
       })
 
       await expect(service.startUpgrade()).rejects.toMatchObject({ status: 400 })
@@ -142,7 +146,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: false }),
+        capability: () => ({ inDocker: true, socket: true, enabled: false, strategy: 'pull' as const }),
       })
 
       await expect(service.startUpgrade()).rejects.toMatchObject({ status: 400 })
@@ -158,7 +162,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const job = await service.startUpgrade('0.15.0')
@@ -197,7 +201,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await service.startUpgrade('0.15.0')
@@ -210,7 +214,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await service.startUpgrade()
@@ -227,7 +231,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion,
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       // Insert active job *after* construction so reconcile doesn't clean it
@@ -259,7 +263,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockReturnValue(versionPromise),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       // Both calls start executing; both hit await getCurrentVersion and block
@@ -301,7 +305,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const job = await service.startUpgrade('0.15.0')
@@ -335,7 +339,7 @@ describe('ManagerUpgradeService', () => {
         runner,
         // Same as fromVersion — the recreate helper never completed
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const status = await service.getStatus()
@@ -356,7 +360,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const job = await service.startUpgrade('0.16.0')
@@ -377,7 +381,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const status = await service.getStatus()
@@ -399,7 +403,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.15.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await tick()
@@ -423,7 +427,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.16.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await tick()
@@ -446,7 +450,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await tick()
@@ -469,7 +473,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await tick()
@@ -493,7 +497,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const latest = getLatestUpgradeJob(db)
@@ -515,7 +519,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const latest = getLatestUpgradeJob(db)
@@ -530,7 +534,7 @@ describe('ManagerUpgradeService', () => {
       new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       const latest = getLatestUpgradeJob(db)
@@ -559,7 +563,7 @@ describe('ManagerUpgradeService', () => {
       const service = new ManagerUpgradeService(db, {
         runner,
         getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
-        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
       })
 
       await service.startUpgrade('0.15.0')
@@ -567,6 +571,114 @@ describe('ManagerUpgradeService', () => {
       // Should NOT produce 'localhost:0.15.0'
       expect(calls.pulled).toEqual(['localhost:5000/opencode-manager:0.15.0'])
       expect(calls.spawned[0]!.targetImage).toBe('localhost:5000/opencode-manager:0.15.0')
+    })
+  })
+
+  describe('startUpgrade - build strategy', () => {
+    function buildService(db: Database, runner: DockerRunner) {
+      return new ManagerUpgradeService(db, {
+        runner,
+        getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'build' as const }),
+      })
+    }
+
+    it('builds from source instead of pulling, then spawns recreate', async () => {
+      const { runner, calls } = createRunner()
+      const service = buildService(db, runner)
+
+      const job = await service.startUpgrade()
+      expect(job.status).toBe('pulling')
+      expect(job.toVersion).toBeNull()
+      expect(job.targetImage).toBe('opencode-manager:latest')
+
+      await tick()
+
+      expect(calls.pulled).toHaveLength(0)
+      expect(calls.built).toHaveLength(1)
+      expect(calls.built[0]!.targetImage).toBe('opencode-manager:latest')
+      expect(calls.spawned).toHaveLength(1)
+
+      const latest = getLatestUpgradeJob(db)
+      expect(latest!.status).toBe('recreating')
+    })
+
+    it('keeps OCM_IMAGE untouched (no tag replacement) in build mode', async () => {
+      process.env.OCM_IMAGE = 'my-local/opencode-manager:dev'
+      const { runner, calls } = createRunner()
+      const service = buildService(db, runner)
+
+      await service.startUpgrade()
+      await tick()
+
+      expect(calls.built[0]!.targetImage).toBe('my-local/opencode-manager:dev')
+      expect(calls.spawned[0]!.targetImage).toBe('my-local/opencode-manager:dev')
+    })
+
+    it('rejects targeted version upgrades with 400 in build mode', async () => {
+      const { runner, calls } = createRunner()
+      const service = buildService(db, runner)
+
+      await expect(service.startUpgrade('0.15.0')).rejects.toMatchObject({ status: 400 })
+      expect(calls.built).toHaveLength(0)
+      expect(calls.spawned).toHaveLength(0)
+      expect(getLatestUpgradeJob(db)).toBeNull()
+    })
+
+    it('marks job as failed with the build error when the build rejects', async () => {
+      const { runner, calls } = createRunner()
+      runner.buildImage = vi.fn().mockRejectedValue(new Error('Command failed with code 1: tsc error TS2304'))
+      const service = buildService(db, runner)
+
+      const job = await service.startUpgrade()
+      expect(job.status).toBe('pulling')
+
+      await tick()
+
+      expect(calls.spawned).toHaveLength(0)
+      const latest = getLatestUpgradeJob(db)
+      expect(latest!.status).toBe('failed')
+      expect(latest!.error).toContain('tsc error TS2304')
+    })
+  })
+
+  describe('startUpgrade - compose label fail-fast', () => {
+    it('throws 400 when the container has no compose labels', async () => {
+      const { runner, calls } = createRunner()
+      runner.inspectSelf = vi.fn().mockResolvedValue({
+        project: '',
+        service: '',
+        workingDir: '',
+        image: 'opencode-manager:latest',
+      })
+
+      const service = new ManagerUpgradeService(db, {
+        runner,
+        getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'pull' as const }),
+      })
+
+      await expect(service.startUpgrade()).rejects.toMatchObject({
+        status: 400,
+        message: expect.stringContaining('Compose-managed'),
+      })
+      expect(calls.pulled).toHaveLength(0)
+      expect(calls.spawned).toHaveLength(0)
+      expect(getLatestUpgradeJob(db)).toBeNull()
+    })
+  })
+
+  describe('getStatus - strategy', () => {
+    it('reports the configured strategy', async () => {
+      const { runner } = createRunner()
+      const service = new ManagerUpgradeService(db, {
+        runner,
+        getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
+        capability: () => ({ inDocker: true, socket: true, enabled: true, strategy: 'build' as const }),
+      })
+
+      const status = await service.getStatus()
+      expect(status.strategy).toBe('build')
     })
   })
 

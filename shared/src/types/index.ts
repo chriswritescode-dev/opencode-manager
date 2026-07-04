@@ -102,6 +102,7 @@ export interface SuccessResponse {
 
 export type {
   ManagerUpgradeJobStatus,
+  ManagerUpgradeStrategy,
   ManagerUpgradeJob,
   ManagerUpgradeStatusResponse,
 } from './manager-upgrade'

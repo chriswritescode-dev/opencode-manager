@@ -10,9 +10,11 @@ import {
   getActiveUpgradeJob,
 } from '../db/manager-upgrade'
 import type { ManagerUpgradeJob } from '../db/manager-upgrade'
-import type { ManagerUpgradeStatusResponse } from '@opencode-manager/shared/types'
+import type { ManagerUpgradeStatusResponse, ManagerUpgradeStrategy } from '@opencode-manager/shared/types'
 
 const RECREATE_STALE_MS = 10 * 60 * 1000
+const PULL_TIMEOUT_MS = 10 * 60 * 1000
+const BUILD_TIMEOUT_MS = 30 * 60 * 1000
 
 export interface SelfContainerInfo {
   project: string
@@ -24,6 +26,7 @@ export interface SelfContainerInfo {
 export interface DockerRunner {
   inspectSelf(): Promise<SelfContainerInfo>
   pull(image: string): Promise<void>
+  buildImage(info: SelfContainerInfo, targetImage: string): Promise<void>
   spawnRecreate(info: SelfContainerInfo, targetImage: string): void
 }
 
@@ -56,6 +59,7 @@ export interface UpgradeCapability {
   inDocker: boolean
   socket: boolean
   enabled: boolean
+  strategy: ManagerUpgradeStrategy
 }
 
 export class ManagerUpgradeService {
@@ -117,6 +121,7 @@ export class ManagerUpgradeService {
       inDocker: cap.inDocker,
       socketAvailable: cap.socket,
       enabled: cap.enabled,
+      strategy: cap.strategy,
       currentVersion,
       job: getLatestUpgradeJob(this.db),
     }
@@ -142,12 +147,26 @@ export class ManagerUpgradeService {
       throw new ManagerUpgradeError('An upgrade is already in progress', 409)
     }
 
+    if (cap.strategy === 'build' && targetTag) {
+      throw new ManagerUpgradeError(
+        'Targeted version upgrades are not available with the build strategy; the source working tree is rebuilt as-is',
+        400,
+      )
+    }
+
     const currentVersion = await this.deps.getCurrentVersion()
     const info = await this.deps.runner.inspectSelf()
 
+    if (!info.project || !info.service || !info.workingDir) {
+      throw new ManagerUpgradeError(
+        'Manager self-upgrade requires a Docker Compose-managed container; compose labels were not found on this container',
+        400,
+      )
+    }
+
     const baseImage = process.env.OCM_IMAGE || info.image
     const resolvedTag = targetTag ?? 'latest'
-    const targetImage = replaceImageTag(baseImage, resolvedTag)
+    const targetImage = cap.strategy === 'build' ? baseImage : replaceImageTag(baseImage, resolvedTag)
 
     // Synchronous check immediately before insert — no race with concurrent calls
     const active = getActiveUpgradeJob(this.db)
@@ -158,21 +177,33 @@ export class ManagerUpgradeService {
     const job = insertUpgradeJob(this.db, {
       status: 'pulling',
       fromVersion: currentVersion ?? undefined,
-      toVersion: resolvedTag,
+      toVersion: cap.strategy === 'build' ? undefined : resolvedTag,
       targetImage,
       startedAt: Date.now(),
     })
 
-    // The pull can take minutes; run it detached so the HTTP request returns
-    // immediately and progress/failure is surfaced via the polled job status.
-    void this.pullAndRecreate(job.id, info, targetImage)
+    // Acquiring the image (registry pull or source build) can take minutes;
+    // run it detached so the HTTP request returns immediately and
+    // progress/failure is surfaced via the polled job status.
+    void this.acquireAndRecreate(job.id, info, targetImage, cap.strategy)
 
     return job
   }
 
-  private async pullAndRecreate(jobId: number, info: SelfContainerInfo, targetImage: string): Promise<void> {
+  private async acquireAndRecreate(
+    jobId: number,
+    info: SelfContainerInfo,
+    targetImage: string,
+    strategy: ManagerUpgradeStrategy,
+  ): Promise<void> {
     try {
-      await this.deps.runner.pull(targetImage)
+      // Both phases run while this instance is alive, so failures are
+      // captured in the job. Only the final recreate is fire-and-forget.
+      if (strategy === 'build') {
+        await this.deps.runner.buildImage(info, targetImage)
+      } else {
+        await this.deps.runner.pull(targetImage)
+      }
       updateUpgradeJob(this.db, jobId, { status: 'recreating' })
       this.deps.runner.spawnRecreate(info, targetImage)
     } catch (err) {
@@ -218,16 +249,33 @@ export function createDockerRunner(): DockerRunner {
     },
 
     async pull(image: string): Promise<void> {
-      await executeCommand(['docker', 'pull', image], { timeout: 600000 })
+      await executeCommand(['docker', 'pull', image], { timeout: PULL_TIMEOUT_MS })
+    },
+
+    async buildImage(info: SelfContainerInfo, targetImage: string): Promise<void> {
+      // Attached (awaited) helper: the build constructs image layers only and
+      // never touches the running container, so a failure here is harmless
+      // and its output is captured into the upgrade job.
+      await executeCommand([
+        'docker', 'run', '--rm',
+        '-v', '/var/run/docker.sock:/var/run/docker.sock',
+        '-v', `${info.workingDir}:${info.workingDir}`,
+        '-w', info.workingDir,
+        '-e', `OCM_IMAGE=${targetImage}`,
+        'docker:cli',
+        'docker', 'compose', '-p', info.project, 'build', info.service,
+      ], { timeout: BUILD_TIMEOUT_MS })
     },
 
     spawnRecreate(info: SelfContainerInfo, targetImage: string): void {
       const socketBind = '/var/run/docker.sock:/var/run/docker.sock'
       const workBind = `${info.workingDir}:${info.workingDir}`
 
-      // Dynamic values are passed as environment variables (separate spawn
-      // args, never interpreted by a shell) and referenced inside the
-      // static shell command via $VAR — no shell injection possible.
+      // The image was already pulled or built by the attached phase, so the
+      // helper only performs the recreate. Dynamic values are passed as
+      // environment variables (separate spawn args, never interpreted by a
+      // shell) and referenced inside the static shell command via $VAR — no
+      // shell injection possible.
       spawn('docker', [
         'run', '-d', '--rm',
         '-v', socketBind,
@@ -238,7 +286,7 @@ export function createDockerRunner(): DockerRunner {
         '-e', `COMPOSE_SERVICE=${info.service}`,
         'docker:cli',
         'sh', '-c',
-        'sleep 2; docker compose -p "$COMPOSE_PROJECT" pull "$COMPOSE_SERVICE" && docker compose -p "$COMPOSE_PROJECT" up -d --no-build "$COMPOSE_SERVICE"',
+        'sleep 2; docker compose -p "$COMPOSE_PROJECT" up -d --no-build "$COMPOSE_SERVICE"',
       ], { detached: true, stdio: 'ignore' }).unref()
     },
   }
