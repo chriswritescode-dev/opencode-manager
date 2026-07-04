@@ -28,7 +28,6 @@ function createRunner(): { runner: DockerRunner; calls: { inspectSelf: SelfConta
   const runner: DockerRunner = {
     inspectSelf: vi.fn().mockImplementation(async () => {
       const info: SelfContainerInfo = {
-        containerId: 'abc123',
         project: 'opencode',
         service: 'manager',
         workingDir: '/app',
@@ -164,11 +163,15 @@ describe('ManagerUpgradeService', () => {
 
       const job = await service.startUpgrade('0.15.0')
 
-      expect(job.status).toBe('recreating')
+      // startUpgrade returns as soon as the job is created; the pull and
+      // recreate continue in the background and are reflected via job status.
+      expect(job.status).toBe('pulling')
       expect(job.toVersion).toBe('0.15.0')
       expect(job.targetImage).toBe('opencode-manager:0.15.0')
       expect(job.fromVersion).toBe('0.14.0')
       expect(job.error).toBeNull()
+
+      await tick()
 
       // Pull was called with the resolved target image
       expect(calls.pulled).toEqual(['opencode-manager:0.15.0'])
@@ -198,6 +201,7 @@ describe('ManagerUpgradeService', () => {
       })
 
       await service.startUpgrade('0.15.0')
+      await tick()
       expect(calls.pulled).toEqual(['my-registry/opencode-manager:0.15.0'])
     })
 
@@ -210,6 +214,7 @@ describe('ManagerUpgradeService', () => {
       })
 
       await service.startUpgrade()
+      await tick()
       expect(calls.pulled).toEqual(['opencode-manager:latest'])
     })
   })
@@ -279,6 +284,8 @@ describe('ManagerUpgradeService', () => {
         message: 'An upgrade is already in progress',
       })
 
+      await tick()
+
       // Only one pull and one spawn should have occurred
       expect(calls.pulled).toHaveLength(1)
       expect(calls.spawned).toHaveLength(1)
@@ -286,8 +293,8 @@ describe('ManagerUpgradeService', () => {
   })
 
   describe('startUpgrade - pull failure', () => {
-    // Cycle 4: pull fails → job marked failed, 500 thrown
-    it('marks job as failed and throws 500 when pull rejects', async () => {
+    // Cycle 4: pull fails in the background → job marked failed with the error
+    it('marks job as failed when the background pull rejects', async () => {
       const { runner, calls } = createRunner()
       runner.pull = vi.fn().mockRejectedValue(new Error('Network error'))
 
@@ -297,10 +304,10 @@ describe('ManagerUpgradeService', () => {
         capability: () => ({ inDocker: true, socket: true, enabled: true }),
       })
 
-      await expect(service.startUpgrade('0.15.0')).rejects.toMatchObject({
-        status: 500,
-        message: 'Network error',
-      })
+      const job = await service.startUpgrade('0.15.0')
+      expect(job.status).toBe('pulling')
+
+      await tick()
 
       // spawnRecreate should NOT have been called
       expect(calls.spawned).toHaveLength(0)
@@ -311,6 +318,70 @@ describe('ManagerUpgradeService', () => {
       expect(latest!.status).toBe('failed')
       expect(latest!.error).toBe('Network error')
       expect(latest!.finishedAt).not.toBeNull()
+    })
+  })
+
+  describe('stale recreating jobs', () => {
+    it('getStatus fails a recreating job older than the staleness bound', async () => {
+      const { runner } = createRunner()
+      insertUpgradeJob(db, {
+        status: 'recreating',
+        fromVersion: '0.14.0',
+        toVersion: '0.15.0',
+        startedAt: Date.now() - 11 * 60 * 1000,
+      })
+
+      const service = new ManagerUpgradeService(db, {
+        runner,
+        // Same as fromVersion — the recreate helper never completed
+        getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
+        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+      })
+
+      const status = await service.getStatus()
+      expect(status.job).not.toBeNull()
+      expect(status.job!.status).toBe('failed')
+      expect(status.job!.error).toMatch(/did not complete/i)
+    })
+
+    it('startUpgrade proceeds after expiring a stale recreating job', async () => {
+      const { runner, calls } = createRunner()
+      insertUpgradeJob(db, {
+        status: 'recreating',
+        fromVersion: '0.14.0',
+        toVersion: '0.15.0',
+        startedAt: Date.now() - 11 * 60 * 1000,
+      })
+
+      const service = new ManagerUpgradeService(db, {
+        runner,
+        getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
+        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+      })
+
+      const job = await service.startUpgrade('0.16.0')
+      expect(job.status).toBe('pulling')
+      await tick()
+      expect(calls.pulled).toEqual(['opencode-manager:0.16.0'])
+    })
+
+    it('getStatus leaves a fresh recreating job untouched', async () => {
+      const { runner } = createRunner()
+      insertUpgradeJob(db, {
+        status: 'recreating',
+        fromVersion: '0.14.0',
+        toVersion: '0.15.0',
+        startedAt: Date.now(),
+      })
+
+      const service = new ManagerUpgradeService(db, {
+        runner,
+        getCurrentVersion: vi.fn().mockResolvedValue('0.14.0'),
+        capability: () => ({ inDocker: true, socket: true, enabled: true }),
+      })
+
+      const status = await service.getStatus()
+      expect(status.job!.status).toBe('recreating')
     })
   })
 
@@ -492,6 +563,7 @@ describe('ManagerUpgradeService', () => {
       })
 
       await service.startUpgrade('0.15.0')
+      await tick()
       // Should NOT produce 'localhost:0.15.0'
       expect(calls.pulled).toEqual(['localhost:5000/opencode-manager:0.15.0'])
       expect(calls.spawned[0]!.targetImage).toBe('localhost:5000/opencode-manager:0.15.0')

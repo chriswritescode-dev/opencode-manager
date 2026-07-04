@@ -31,6 +31,7 @@ nav:
     - Repository & Git: features/git.md
     - File Browser: features/files.md
     - Chat & Sessions: features/chat.md
+    - Session Pinning: features/session-pins.md
     - Schedules & Recurring Jobs: features/schedules.md
     - AI Configuration: features/ai-config.md
     - Skills: features/skills.md
@@ -41,6 +42,7 @@ nav:
     - Text-to-Speech: features/tts.md
     - Speech-to-Text: features/stt.md
     - Push Notifications: features/notifications.md
+    - OpenCode Server Health: features/server-health.md
     - Mobile & PWA: features/mobile.md
   - Configuration:
     - Environment Variables: configuration/environment.md

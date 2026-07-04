@@ -31,6 +31,7 @@ import { opencodeServerManager, ConfigReloadError } from '../services/opencode-s
 import { getOrCreateInternalToken, rotateInternalToken } from '../services/internal-token'
 import { sseAggregator } from '../services/sse-aggregator'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+import { restartOpenCode, reloadOpenCodeConfig, getOpenCodeRestartCoordinator } from '../services/opencode-restart'
 import type { GitAuthService } from '../services/git-auth'
 import { DEFAULT_AGENTS_MD } from '../constants'
 import { validateSSHPrivateKey } from '../utils/ssh-validation'
@@ -90,25 +91,6 @@ function getOpenCodeConfigContentToWrite(
   }
 
   return JSON.stringify(appliedConfig, null, 2)
-}
-
-async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
-  if (openCodeSupervisor) {
-    await openCodeSupervisor.reloadConfig('settings_reload')
-    return
-  }
-
-  await opencodeServerManager.reloadConfig()
-}
-
-async function restartOpenCode(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
-  if (openCodeSupervisor) {
-    await openCodeSupervisor.restart('settings_restart')
-    return
-  }
-
-  opencodeServerManager.clearStartupError()
-  await opencodeServerManager.restart()
 }
 
 async function restartOpenCodeSafe(openCodeSupervisor: OpenCodeSupervisor | undefined, context: string): Promise<void> {
@@ -728,8 +710,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
     try {
       logger.info('Manual OpenCode server restart requested')
       opencodeServerManager.clearStartupError()
-      await restartOpenCode(openCodeSupervisor)
-      return c.json({ success: true, message: 'OpenCode server restarted successfully' })
+      const { resumedSessionIDs } = await restartOpenCode(openCodeSupervisor)
+      return c.json({
+        success: true,
+        message: 'OpenCode server restarted successfully',
+        resumedSessions: resumedSessionIDs,
+      })
     } catch (error) {
       logger.error('Failed to restart OpenCode server:', error)
       const startupError = opencodeServerManager.getLastStartupError()
@@ -1877,6 +1863,11 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       logger.error('Failed to rotate manager token:', error)
       return c.json({ error: 'Failed to rotate manager token' }, 500)
     }
+  })
+
+  app.get('/opencode-active-sessions', (c) => {
+    const sessions = getOpenCodeRestartCoordinator()?.captureResumableSessions() ?? []
+    return c.json({ count: sessions.length, sessions })
   })
 
   app.get('/opencode-discover-models', async (c) => {

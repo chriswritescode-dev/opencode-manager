@@ -15,8 +15,11 @@ import type {
   InstallSkillResponse,
   OpenCodeDirectoryFileInfo,
 } from './types/settings'
+import type { ManagerUpgradeJob, ManagerUpgradeStatusResponse } from '@opencode-manager/shared/types'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
+
+export type { ManagerUpgradeJob, ManagerUpgradeStatusResponse }
 
 const DEFAULT_USER_ID = 'default'
 
@@ -150,6 +153,10 @@ export const settingsApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     })
+  },
+
+  getActiveOpenCodeSessions: async (): Promise<{ count: number; sessions: { sessionID: string; directory: string }[] }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/settings/opencode-active-sessions`)
   },
 
   reloadOpenCodeConfig: async (): Promise<{ success: boolean; message: string; details?: string }> => {
@@ -378,7 +385,7 @@ export const settingsApi = {
     })
   },
 
-  getManagerUpgradeStatus: async (): Promise<ManagerUpgradeStatus> => {
+  getManagerUpgradeStatus: async (): Promise<ManagerUpgradeStatusResponse> => {
     return fetchWrapper(`${API_BASE_URL}/api/manager-upgrade/status`)
   },
 
@@ -430,24 +437,4 @@ export async function rotateManagerToken(): Promise<ManagerTokenResponse> {
   })
 }
 
-export type ManagerUpgradeJobStatus = 'pending' | 'pulling' | 'recreating' | 'completed' | 'failed'
 
-export interface ManagerUpgradeJob {
-  id: number
-  status: ManagerUpgradeJobStatus
-  fromVersion: string | null
-  toVersion: string | null
-  targetImage: string | null
-  error: string | null
-  startedAt: number
-  finishedAt: number | null
-}
-
-export interface ManagerUpgradeStatus {
-  supported: boolean
-  inDocker: boolean
-  socketAvailable: boolean
-  enabled: boolean
-  currentVersion: string | null
-  job: ManagerUpgradeJob | null
-}

@@ -1,17 +1,7 @@
 import type { Database } from 'bun:sqlite'
+import type { ManagerUpgradeJob, ManagerUpgradeJobStatus } from '@opencode-manager/shared/types'
 
-export type ManagerUpgradeStatus = 'pending' | 'pulling' | 'recreating' | 'completed' | 'failed'
-
-export interface ManagerUpgradeJob {
-  id: number
-  status: ManagerUpgradeStatus
-  fromVersion: string | null
-  toVersion: string | null
-  targetImage: string | null
-  error: string | null
-  startedAt: number
-  finishedAt: number | null
-}
+export type { ManagerUpgradeJob, ManagerUpgradeJobStatus }
 
 interface ManagerUpgradeJobRow {
   id: number
@@ -27,7 +17,7 @@ interface ManagerUpgradeJobRow {
 function rowToJob(row: ManagerUpgradeJobRow): ManagerUpgradeJob {
   return {
     id: row.id,
-    status: row.status as ManagerUpgradeStatus,
+    status: row.status as ManagerUpgradeJobStatus,
     fromVersion: row.from_version,
     toVersion: row.to_version,
     targetImage: row.target_image,
@@ -40,7 +30,7 @@ function rowToJob(row: ManagerUpgradeJobRow): ManagerUpgradeJob {
 export function insertUpgradeJob(
   db: Database,
   data: {
-    status: ManagerUpgradeStatus
+    status: ManagerUpgradeJobStatus
     fromVersion?: string
     toVersion?: string
     targetImage?: string
@@ -74,7 +64,7 @@ export function updateUpgradeJob(
   db: Database,
   id: number,
   patch: Partial<{
-    status: ManagerUpgradeStatus
+    status: ManagerUpgradeJobStatus
     error: string | null
     finishedAt: number | null
   }>,

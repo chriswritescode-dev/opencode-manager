@@ -5,7 +5,7 @@ import { AuthService } from '../services/auth'
 import { SetCredentialRequestSchema } from '../../../shared/src/schemas/auth'
 import { logger } from '../utils/logger'
 import type { OpenCodeClient } from '../services/opencode/client'
-import { opencodeServerManager } from '../services/opencode-single-server'
+import { reloadOpenCodeConfig } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import type { Database } from 'bun:sqlite'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
@@ -52,15 +52,6 @@ async function mirrorModelStateToFile(state: OpenCodeModelStateRecord): Promise<
   } catch (error) {
     logger.warn(`Failed to mirror model state to file ${modelStatePath}:`, error)
   }
-}
-
-async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
-  if (openCodeSupervisor) {
-    await openCodeSupervisor.reloadConfig('settings_reload')
-    return
-  }
-
-  await opencodeServerManager.reloadConfig()
 }
 
 export function createProvidersRoutes(db: Database, openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {

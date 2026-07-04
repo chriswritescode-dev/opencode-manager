@@ -20,6 +20,7 @@ function makeJobRow(overrides: Record<string, unknown> = {}) {
     prompt: 'Generate a weekly summary.',
     model: 'openai/gpt-5-mini',
     skill_metadata: JSON.stringify({ skillSlugs: ['planning'], notes: 'Optional notes' }),
+    permission_config: null,
     branch: null,
     created_at: Date.UTC(2026, 2, 8, 12, 0, 0),
     updated_at: Date.UTC(2026, 2, 9, 12, 0, 0),
@@ -47,6 +48,7 @@ function makeRunRow(overrides: Record<string, unknown> = {}) {
     run_branch: null,
     commit_hash: null,
     worktree_path: null,
+    workspace_id: null,
     ...overrides,
   }
 }
@@ -111,6 +113,7 @@ describe('schedule database queries', () => {
       prompt: 'Generate a weekly summary.',
       model: 'openai/gpt-5-mini',
       skillMetadata: { skillSlugs: ['planning'], notes: 'Optional notes' },
+      permissionConfig: null,
       branch: null,
       nextRunAt: Date.UTC(2026, 2, 9, 13, 0, 0),
     })
@@ -128,6 +131,7 @@ describe('schedule database queries', () => {
       'Generate a weekly summary.',
       'openai/gpt-5-mini',
       JSON.stringify({ skillSlugs: ['planning'], notes: 'Optional notes' }),
+      null,
       null,
       expect.any(Number),
       expect.any(Number),
@@ -165,6 +169,7 @@ describe('schedule database queries', () => {
       prompt: 'Run a new summary.',
       model: null,
       skillMetadata: null,
+      permissionConfig: null,
       branch: null,
       nextRunAt: null,
     })
@@ -179,6 +184,7 @@ describe('schedule database queries', () => {
       null,
       null,
       'Run a new summary.',
+      null,
       null,
       null,
       null,
@@ -299,6 +305,7 @@ describe('schedule database queries', () => {
     expect(updateStmt.run).toHaveBeenCalledWith(
       '/worktrees/feature-branch',
       'feature-x',
+      null,
       null,
       42,
       7,
@@ -602,8 +609,8 @@ describe('schedule database queries', () => {
   it('listScheduleRunArtifactsByJob maps run branch/worktree rows', () => {
     const stmt = {
       all: vi.fn().mockReturnValue([
-        { id: 3, status: 'completed', run_branch: 'schedule/7/run-3', worktree_path: null },
-        { id: 2, status: 'running', run_branch: 'schedule/7/run-2', worktree_path: '/wt/2' },
+        { id: 3, status: 'completed', run_branch: 'schedule/7/run-3', worktree_path: null, workspace_id: null },
+        { id: 2, status: 'running', run_branch: 'schedule/7/run-2', worktree_path: '/wt/2', workspace_id: null },
       ]),
     }
     mockDb.prepare.mockReturnValue(stmt)
@@ -612,8 +619,8 @@ describe('schedule database queries', () => {
 
     expect(stmt.all).toHaveBeenCalledWith(42, 7)
     expect(artifacts).toEqual([
-      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null },
-      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2' },
+      { id: 3, status: 'completed', runBranch: 'schedule/7/run-3', worktreePath: null, workspaceId: null },
+      { id: 2, status: 'running', runBranch: 'schedule/7/run-2', worktreePath: '/wt/2', workspaceId: null },
     ])
   })
 

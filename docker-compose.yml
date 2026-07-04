@@ -23,6 +23,7 @@ services:
       - WORKSPACE_PATH=/workspace
       - OCM_IMAGE=${OCM_IMAGE:-ghcr.io/chriswritescode-dev/opencode-manager:latest}
       - OCM_MANAGER_UPGRADE_ENABLED=${OCM_MANAGER_UPGRADE_ENABLED:-true}
+      - OCM_IN_DOCKER=true
       - PROCESS_START_WAIT_MS=2000
       - PROCESS_VERIFY_WAIT_MS=1000
       - HEALTH_CHECK_INTERVAL_MS=5000

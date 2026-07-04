@@ -15,15 +15,20 @@ import { createFileRoutes } from './routes/files'
 import { createScheduleRoutes } from './routes/schedules'
 import { createManagerUpgradeRoutes } from './routes/manager-upgrade'
 
-async function getAppVersion(): Promise<string> {
-  try {
-    const packageUrl = new URL('../../package.json', import.meta.url)
-    const packageJsonRaw = await readFile(packageUrl, 'utf-8')
-    const packageJson = JSON.parse(packageJsonRaw) as { version?: string }
-    return packageJson.version ?? 'unknown'
-  } catch {
-    return 'unknown'
-  }
+let cachedAppVersion: Promise<string> | null = null
+
+function getAppVersion(): Promise<string> {
+  cachedAppVersion ??= (async () => {
+    try {
+      const packageUrl = new URL('../../package.json', import.meta.url)
+      const packageJsonRaw = await readFile(packageUrl, 'utf-8')
+      const packageJson = JSON.parse(packageJsonRaw) as { version?: string }
+      return packageJson.version ?? 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  })()
+  return cachedAppVersion
 }
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
@@ -35,6 +40,7 @@ import { createAuthRoutes, createAuthInfoRoutes, syncAdminFromEnv } from './rout
 import { createAuth } from './auth'
 import { createAuthMiddleware } from './auth/middleware'
 import { createPromptTemplateRoutes } from './routes/prompt-templates'
+import { createSessionPinRoutes } from './routes/session-pins'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
@@ -53,6 +59,8 @@ import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
 import { ManagerUpgradeService, createDockerRunner } from './services/manager-upgrade'
 import { isRunningInDocker, isDockerSocketAvailable } from './utils/runtime-env'
+import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
+import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
 import { parse as parseJsonc } from 'jsonc-parser'
 import { getModelStatePath, ModelStateSchema } from './routes/providers'
@@ -294,7 +302,7 @@ try {
 
 const settingsServiceForSchedules = new SettingsService(db)
 const credentialProvider = new CredentialProvider(db)
-const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db)
+const scheduleWorktreeManager = new ScheduleWorktreeManager(gitAuthService, settingsServiceForSchedules, credentialProvider, db, openCodeClient)
 const scheduleService = new ScheduleService(db, openCodeClient, scheduleWorktreeManager)
 const scheduleRunnerInstance = new ScheduleRunner(scheduleService)
 
@@ -323,6 +331,13 @@ sseAggregator.setPendingActionsFetcher(openCodeClient)
 sseAggregator.setPasswordResolver(() => new SettingsService(db).getOpenCodeServerPassword())
 sseAggregator.start()
 
+sseAggregator.setScheduledSessionsResolver(
+  () => scheduleService.getActiveRunSessionIds(),
+)
+
+const openCodeRestartCoordinator = new OpenCodeRestartCoordinator(openCodeClient, sseAggregator)
+setOpenCodeRestartCoordinator(openCodeRestartCoordinator)
+
 void scheduleRunnerInstance.start()
 
 const settingsService = new SettingsService(db)
@@ -336,7 +351,6 @@ const managerUpgradeService = new ManagerUpgradeService(db, {
     enabled: process.env.OCM_MANAGER_UPGRADE_ENABLED !== 'false',
   }),
 })
-managerUpgradeService.reconcile()
 
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
@@ -360,6 +374,7 @@ protectedApi.route('/sse', createSSERoutes())
 protectedApi.route('/ssh', createSSHRoutes(gitAuthService))
 protectedApi.route('/notifications', createNotificationRoutes(notificationService))
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
+protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
 protectedApi.route('/manager-upgrade', createManagerUpgradeRoutes(managerUpgradeService))
 

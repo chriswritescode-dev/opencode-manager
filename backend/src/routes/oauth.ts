@@ -7,17 +7,8 @@ import {
   OAuthAuthorizeResponseSchema,
   OAuthCallbackRequestSchema
 } from '../../../shared/src/schemas/auth'
-import { opencodeServerManager } from '../services/opencode-single-server'
+import { reloadOpenCodeConfig } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
-
-async function reloadOpenCodeConfig(openCodeSupervisor?: OpenCodeSupervisor): Promise<void> {
-  if (openCodeSupervisor) {
-    await openCodeSupervisor.reloadConfig('settings_reload')
-    return
-  }
-
-  await opencodeServerManager.reloadConfig()
-}
 
 export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()

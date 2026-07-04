@@ -21,9 +21,11 @@ import { VersionSelectDialog } from './VersionSelectDialog'
 import { settingsApi } from '@/api/settings'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { parseJsonc, hasJsoncComments } from '@/lib/jsonc'
 import { showToast } from '@/lib/toast'
 import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 import { FetchError } from '@/api/fetchWrapper'
 import type { OpenCodeConfig, OpenCodeImportStatus } from '@/api/types/settings'
 
@@ -81,7 +83,16 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
   const [deleteConfirmConfig, setDeleteConfirmConfig] = useState<OpenCodeConfig | null>(null)
-  const [isRestartPromptOpen, setIsRestartPromptOpen] = useState(false)
+  const {
+    restartServerMutation,
+    upgradeOpenCodeMutation,
+    confirmOpen: isRestartPromptOpen,
+    setConfirmOpen: setIsRestartPromptOpen,
+    activeSessionCount,
+    requestRestart,
+    confirmRestart,
+    performUpgrade,
+  } = useOpenCodeServerActions()
   
   const agentsMdRef = useRef<HTMLButtonElement>(null)
   const commandsRef = useRef<HTMLButtonElement>(null)
@@ -124,56 +135,6 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     }
   }
 
-  const restartServerMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.restartOpenCodeServer()
-    },
-    onSuccess: () => {
-      invalidateConfigCaches(queryClient)
-    },
-  })
-
-  const upgradeOpenCodeMutation = useMutation({
-    mutationFn: async () => {
-      return await settingsApi.upgradeOpenCode()
-    },
-    onSuccess: (data) => {
-      if (data.upgraded && data.newVersion) {
-        queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-          if (!old) return old
-          return { ...old, opencodeVersion: data.newVersion }
-        })
-      }
-      invalidateConfigCaches(queryClient)
-      if (data.upgraded) {
-        showToast.success(`Upgraded to v${data.newVersion} and server restarted`, { id: 'upgrade-opencode' })
-      } else {
-        showToast.success('OpenCode is already up to date', { id: 'upgrade-opencode' })
-      }
-    },
-    onError: (error) => {
-      const defaultMessage = 'Failed to upgrade OpenCode'
-      
-      if (error && typeof error === 'object' && 'response' in error) {
-        const response = (error as { response?: { data?: { recovered?: boolean; recoveryMessage?: string; newVersion?: string } } }).response
-        const data = response?.data
-        
-        if (data?.recovered && data.newVersion) {
-          queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-            if (!old) return old
-            return { ...old, opencodeVersion: data.newVersion }
-          })
-          showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: 'upgrade-opencode' })
-        } else {
-          showToast.error(data?.recoveryMessage || defaultMessage, { id: 'upgrade-opencode' })
-        }
-      } else {
-        showToast.error(defaultMessage, { id: 'upgrade-opencode' })
-      }
-      invalidateConfigCaches(queryClient)
-    },
-  })
-
   const syncOpenCodeImportMutation = useMutation({
     mutationFn: async () => settingsApi.syncOpenCodeImport(),
     onSuccess: async () => {
@@ -183,50 +144,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     },
   })
 
-  const getApiErrorMessage = (error: unknown, fallback: string): string => {
-    if (error instanceof FetchError) {
-      let message = error.detail || error.message || fallback
-
-      if (error.validationIssues && error.validationIssues.length > 0) {
-        const issues = error.validationIssues
-          .map((issue) => `${issue.path}: ${issue.message}`)
-          .join('; ')
-        message = `Validation failed: ${issues}`
-      }
-
-      if (error.removedFields && error.removedFields.length > 0) {
-        message += ` (removed invalid fields: ${error.removedFields.join(', ')})`
-      }
-
-      return message
-    }
-
-    if (error && typeof error === 'object' && 'response' in error) {
-      const response = (error as { response?: { data?: { details?: string; error?: string; validationIssues?: Array<{ path: string; message: string }>; removedFields?: string[] } } }).response
-      const data = response?.data
-      
-      let message = data?.details || data?.error || fallback
-      
-      if (data?.validationIssues && data.validationIssues.length > 0) {
-        const issues = data.validationIssues
-          .map((issue) => `${issue.path}: ${issue.message}`)
-          .join('; ')
-        message = `Validation failed: ${issues}`
-      }
-      
-      if (data?.removedFields && data.removedFields.length > 0) {
-        const removed = data.removedFields.join(', ')
-        message += ` (removed invalid fields: ${removed})`
-      }
-      
-      return message
-    }
-    return fallback
-  }
-
-  const getRestartErrorMessage = (error: unknown): string => {
-    return getApiErrorMessage(error, 'Failed to restart OpenCode server')
-  }
+  const getApiErrorMessage = getOpenCodeApiErrorMessage
 
   const getOpenCodeImportErrorMessage = (error: unknown): string => {
     if (error instanceof FetchError && error.code === 'OPENCODE_IMPORT_PROTECTED') {
@@ -452,19 +370,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={async () => {
-                    showToast.loading('Upgrading OpenCode...', { id: 'upgrade-opencode' })
-                    try {
-                      await upgradeOpenCodeMutation.mutateAsync()
-                    } catch (error) {
-                      const errorMessage = error && typeof error === 'object' && 'response' in error
-                        ? ((error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.details
-                           || (error as { response?: { data?: { details?: string; error?: string } } }).response?.data?.error
-                           || 'Failed to upgrade OpenCode')
-                        : 'Failed to upgrade OpenCode'
-                      showToast.error(errorMessage, { id: 'upgrade-opencode' })
-                    }
-                  }}
+                  onClick={performUpgrade}
                   disabled={upgradeOpenCodeMutation.isPending}
                 >
                   {upgradeOpenCodeMutation.isPending ? (
@@ -477,15 +383,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={async () => {
-                    showToast.loading('Restarting OpenCode server...', { id: 'manual-restart' })
-                    try {
-                      await restartServerMutation.mutateAsync()
-                      showToast.success('Server restarted successfully', { id: 'manual-restart' })
-                    } catch (error) {
-                      showToast.error(getRestartErrorMessage(error), { id: 'manual-restart' })
-                    }
-                  }}
+                  onClick={requestRestart}
                   disabled={restartServerMutation.isPending}
                 >
                   {restartServerMutation.isPending ? (
@@ -519,7 +417,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
            </div>
            <Button
              size="sm"
-             onClick={() => setIsRestartPromptOpen(true)}
+             onClick={requestRestart}
              disabled={restartServerMutation.isPending}
              className="shrink-0"
            >
@@ -1080,18 +978,10 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
       <RestartServerDialog
         open={isRestartPromptOpen}
         onOpenChange={setIsRestartPromptOpen}
+        activeSessionCount={activeSessionCount}
         isRestarting={restartServerMutation.isPending}
         onCancel={() => setIsRestartPromptOpen(false)}
-        onConfirm={async () => {
-          showToast.loading('Restarting OpenCode server...', { id: 'config-restart' })
-          try {
-            await restartServerMutation.mutateAsync()
-            showToast.success('Server restarted successfully', { id: 'config-restart' })
-            setIsRestartPromptOpen(false)
-          } catch (error) {
-            showToast.error(getRestartErrorMessage(error), { id: 'config-restart' })
-          }
-        }}
+        onConfirm={confirmRestart}
       />
     </div>
   )

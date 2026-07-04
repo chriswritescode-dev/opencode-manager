@@ -58,6 +58,7 @@ class SSEAggregator {
   private started = false
   private pendingActionsFetcher: PendingActionsFetcher | null = null
   private passwordResolver: OpenCodePasswordResolver | null = null
+  private scheduledSessionsResolver: (() => Set<string>) | null = null
 
   private constructor() {}
 
@@ -67,6 +68,10 @@ class SSEAggregator {
 
   setPasswordResolver(resolver: OpenCodePasswordResolver | null): void {
     this.passwordResolver = resolver
+  }
+
+  setScheduledSessionsResolver(resolver: () => Set<string>): void {
+    this.scheduledSessionsResolver = resolver
   }
 
   reconnect(): void {
@@ -521,6 +526,10 @@ class SSEAggregator {
       }
     }
     return false
+  }
+
+  getScheduledSessionIds(): Set<string> {
+    return this.scheduledSessionsResolver?.() ?? new Set()
   }
 
   getActiveDirectories(): string[] {

@@ -30,6 +30,7 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **File Mentions** - Reference files with `@filename` autocomplete
 - **Plan/Build Modes** - Toggle between read-only and file-change modes
 - **Per-Agent Model Selection** — Each agent retains its own model selection independently
+- **Session Pinning** — Pin important sessions to a dedicated section at the top of the session list
 - **Mermaid Diagrams** - Visual diagram rendering in chat
 
 [Learn more →](chat.md)
@@ -103,3 +104,12 @@ OpenCode Manager provides a comprehensive web interface for managing OpenCode AI
 - **Session Continuity** — Navigating to the assistant always resumes the most recent session or creates one automatically
 
 [Learn more →](assistant-mode.md)
+
+### OpenCode Server Health
+
+- **Live Status** — Server health indicator in Settings (Healthy/Unhealthy/Starting)
+- **Graceful Restart** — Active sessions are aborted and resumed with `continue` after restart
+- **Auto-Recovery** — Configurable health monitoring with automatic recovery on failure
+- **Version Management** — View current versions and trigger OpenCode upgrades from the UI
+
+[Learn more →](server-health.md)

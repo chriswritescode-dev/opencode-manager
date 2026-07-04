@@ -1,10 +1,15 @@
+---
+hide:
+  - toc
+---
+
 # OpenCode Manager
 
 Mobile-first web interface for [OpenCode](https://opencode.ai) AI agents. Manage, control, and code from any device - your phone, tablet, or desktop.
 
 <p align="center">
-  <img src="images/ocmgr-main.webp" alt="OpenCode Manager" width="600" style="border: none" />
-  <img src="images/ocmgr-mobile.webp" alt="Mobile view" height="400" style="border: none; margin-left: 12px" />
+  <img src="images/ocmgr-main.webp" alt="OpenCode Manager" class="hero hero-desktop" style="border: none" />
+  <img src="images/ocmgr-mobile.webp" alt="Mobile view" class="hero hero-mobile" style="border: none" />
 </p>
 
 ## Quick Start
@@ -46,8 +51,10 @@ OpenCode Manager runs as a pnpm workspace:
 - **Chat & Sessions** — Real-time SSE streaming, slash commands, `@file` mentions, Plan/Build modes, Mermaid diagrams — [Learn more](features/chat.md)
 - **Files** — Directory browser with tree view, syntax highlighting, create/rename/delete, ZIP download — [Learn more](features/files.md)
 - **Schedules** — Recurring repo jobs with reusable prompts, run history, linked sessions — [Learn more](features/schedules.md)
+- **Session Pinning** — Pin important sessions to the top of the session list — [Learn more](features/session-pins.md)
 - **Assistant Mode** — Dedicated AI workspace with auto-provisioned skills for schedule management, notifications, settings, and repo listing — [Learn more](features/assistant-mode.md)
 - **AI Configuration** — Model/provider setup, OAuth for Anthropic/GitHub Copilot, custom agents — [Learn more](features/ai-config.md)
+- **Server Health & Restart** — Monitor server status, graceful restarts with session resume, auto-recovery — [Learn more](features/server-health.md)
 - **MCP Servers** — Add local or remote MCP servers with OAuth support — [Learn more](features/mcp.md)
 - **Skills** — Skill support for extended agent capabilities — [Learn more](features/skills.md)
 - **Mobile & PWA** — Responsive UI, installable on any device, iOS-optimized — [Learn more](features/mobile.md)

@@ -11,6 +11,8 @@ import { opencodeServerManager } from '../services/opencode-single-server'
 import type { GitAuthService } from '../services/git-auth'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 import { createStubOpenCodeClient } from '../../test/helpers/stub-opencode-client'
+import type { OpenCodeRestartCoordinator, ResumableSession } from '../services/opencode-restart-coordinator'
+import { setOpenCodeRestartCoordinator } from '../services/opencode-restart'
 
 interface TestUserPreferenceRow {
   preferences: string
@@ -448,5 +450,69 @@ describe('settings routes — opencode model discovery', () => {
     expect(res.status).toBe(200)
     const data = (await res.json()) as { models: string[] }
     expect(data.models).toEqual([])
+  })
+})
+
+describe('settings routes — restart coordinator wiring', () => {
+  let db: Database
+  let app: Hono
+
+  beforeEach(() => {
+    db = createTestDb()
+  })
+
+  afterEach(() => {
+    db.close()
+    setOpenCodeRestartCoordinator(null)
+  })
+
+  it('GET /opencode-active-sessions returns count and sessions from coordinator', async () => {
+    const fakeCoordinator = {
+      captureResumableSessions: vi.fn(() => [{
+        sessionID: 's1',
+        directory: '/a',
+      } satisfies ResumableSession]),
+      abortSessions: vi.fn(),
+      resumeSessions: vi.fn(),
+      runWithResume: vi.fn(),
+    } as unknown as OpenCodeRestartCoordinator
+    setOpenCodeRestartCoordinator(fakeCoordinator)
+
+    app = createTestApp(db)
+    const res = await app.request('/settings/opencode-active-sessions')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { count: number; sessions: ResumableSession[] }
+    expect(body.count).toBe(1)
+    expect(body.sessions).toEqual([{ sessionID: 's1', directory: '/a' }])
+    expect(fakeCoordinator.captureResumableSessions).toHaveBeenCalledTimes(1)
+  })
+
+  it('GET /opencode-active-sessions returns empty when no coordinator', async () => {
+    setOpenCodeRestartCoordinator(null)
+    app = createTestApp(db)
+    const res = await app.request('/settings/opencode-active-sessions')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { count: number; sessions: ResumableSession[] }
+    expect(body.count).toBe(0)
+    expect(body.sessions).toEqual([])
+  })
+
+  it('POST /opencode-restart routes through coordinator.runWithResume and returns resumedSessions', async () => {
+    const runWithResume = vi.fn().mockResolvedValue({ healthy: true, resumedSessionIDs: ['s1'] })
+    const fakeCoordinator = {
+      captureResumableSessions: vi.fn(() => []),
+      abortSessions: vi.fn(),
+      resumeSessions: vi.fn(),
+      runWithResume,
+    } as unknown as OpenCodeRestartCoordinator
+    setOpenCodeRestartCoordinator(fakeCoordinator)
+
+    app = createTestApp(db)
+    const res = await app.request('/settings/opencode-restart', { method: 'POST' })
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { success: boolean; resumedSessions: string[] }
+    expect(body.success).toBe(true)
+    expect(body.resumedSessions).toEqual(['s1'])
+    expect(runWithResume).toHaveBeenCalledTimes(1)
   })
 })

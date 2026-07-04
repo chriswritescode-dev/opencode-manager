@@ -1,7 +1,7 @@
 import type { Migration } from '../migration-runner'
 
 const migration: Migration = {
-  version: 16,
+  version: 19,
   name: 'manager-upgrade-jobs',
 
   up(db) {

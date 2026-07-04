@@ -19,6 +19,7 @@ import {
 } from '@/components/schedules/schedule-utils'
 import { getRepoDisplayName } from '@/lib/utils'
 import { ASSISTANT_REPO_ID, ASSISTANT_REPO_NAME } from '@opencode-manager/shared/utils'
+import { DEFAULT_DESTRUCTIVE_BASH_PATTERNS } from '@opencode-manager/shared/schemas'
 import { Loader2 } from 'lucide-react'
 import { usePromptTemplates, useDeletePromptTemplate } from '@/hooks/usePromptTemplates'
 import { PromptTemplateDialog } from './PromptTemplateDialog'
@@ -61,6 +62,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const initialSkillSlugsRef = useRef<string[] | undefined>(undefined)
   const initialSkillNotesRef = useRef<string | undefined>(undefined)
   const [branch, setBranch] = useState('')
+  const [allowExternalDirectory, setAllowExternalDirectory] = useState(false)
+  const [bashDenyPatterns, setBashDenyPatterns] = useState<string[]>([...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
   const [templateDialogOpen, setTemplateDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
@@ -218,6 +221,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     initialSkillSlugsRef.current = initialSkillSlugs
     initialSkillNotesRef.current = initialSkillNotes
     setBranch(job?.branch ?? '')
+    setAllowExternalDirectory(job?.permissionConfig?.allowExternalDirectory ?? false)
+    setBashDenyPatterns(job?.permissionConfig?.bashDenyPatterns ?? [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
   }, [job, open, templates])
 
   const applyPromptTemplate = (template: PromptTemplate) => {
@@ -250,6 +255,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
       model: model.trim() || undefined,
       prompt: prompt.trim(),
       branch: branch.trim() || null,
+      permissionConfig: {
+        allowExternalDirectory,
+        bashDenyPatterns: bashDenyPatterns.map((p) => p.trim()).filter(Boolean),
+      },
       ...(shouldIncludeSkillMetadata ? {
         skillMetadata: skillSlugs.length > 0 || skillNotes.trim()
           ? {
@@ -328,6 +337,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
             repoId={selectedRepoId}
             onRepoChange={onRepoChange}
             repoOptions={repoOptions}
+            allowExternalDirectory={allowExternalDirectory}
+            onAllowExternalDirectoryChange={setAllowExternalDirectory}
+            bashDenyPatterns={bashDenyPatterns}
+            onBashDenyPatternsChange={setBashDenyPatterns}
           />
 
           <TimingTab

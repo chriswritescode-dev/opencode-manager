@@ -58,4 +58,20 @@ describe('RestartServerDialog', () => {
     const laterButton = screen.getByRole('button', { name: /later/i })
     expect(laterButton).toBeDisabled()
   })
+
+  it('renders the active-session warning when activeSessionCount > 0', () => {
+    render(<RestartServerDialog {...baseProps} activeSessionCount={2} />)
+
+    expect(screen.getByText(/2 sessions/)).toBeInTheDocument()
+    expect(screen.getByText(/continue/)).toBeInTheDocument()
+  })
+
+  it('does not render the active-session warning when activeSessionCount is omitted', () => {
+    render(<RestartServerDialog {...baseProps} />)
+
+    expect(
+      screen.getByText(/Restart the OpenCode server after your changes are saved to apply them to the running server\./)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/sessions? currently working/)).not.toBeInTheDocument()
+  })
 })

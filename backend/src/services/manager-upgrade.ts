@@ -10,9 +10,11 @@ import {
   getActiveUpgradeJob,
 } from '../db/manager-upgrade'
 import type { ManagerUpgradeJob } from '../db/manager-upgrade'
+import type { ManagerUpgradeStatusResponse } from '@opencode-manager/shared/types'
+
+const RECREATE_STALE_MS = 10 * 60 * 1000
 
 export interface SelfContainerInfo {
-  containerId: string
   project: string
   service: string
   workingDir: string
@@ -95,14 +97,19 @@ export class ManagerUpgradeService {
     }
   }
 
-  async getStatus(): Promise<{
-    supported: boolean
-    inDocker: boolean
-    socketAvailable: boolean
-    enabled: boolean
-    currentVersion: string | null
-    job: ManagerUpgradeJob | null
-  }> {
+  private expireStaleRecreatingJob(): void {
+    const active = getActiveUpgradeJob(this.db)
+    if (active?.status === 'recreating' && Date.now() - active.startedAt > RECREATE_STALE_MS) {
+      updateUpgradeJob(this.db, active.id, {
+        status: 'failed',
+        error: 'recreate helper did not complete in time',
+        finishedAt: Date.now(),
+      })
+    }
+  }
+
+  async getStatus(): Promise<ManagerUpgradeStatusResponse> {
+    this.expireStaleRecreatingJob()
     const cap = this.deps.capability()
     const currentVersion = await this.deps.getCurrentVersion()
     return {
@@ -126,6 +133,8 @@ export class ManagerUpgradeService {
       )
     }
 
+    this.expireStaleRecreatingJob()
+
     // Check for an existing active job before any async Docker/version calls.
     // This prevents a hung inspectSelf() from blocking the 409 response.
     const activeEarly = getActiveUpgradeJob(this.db)
@@ -147,31 +156,33 @@ export class ManagerUpgradeService {
     }
 
     const job = insertUpgradeJob(this.db, {
-      status: 'pending',
+      status: 'pulling',
       fromVersion: currentVersion ?? undefined,
       toVersion: resolvedTag,
       targetImage,
       startedAt: Date.now(),
     })
 
-    updateUpgradeJob(this.db, job.id, { status: 'pulling' })
+    // The pull can take minutes; run it detached so the HTTP request returns
+    // immediately and progress/failure is surfaced via the polled job status.
+    void this.pullAndRecreate(job.id, info, targetImage)
 
+    return job
+  }
+
+  private async pullAndRecreate(jobId: number, info: SelfContainerInfo, targetImage: string): Promise<void> {
     try {
       await this.deps.runner.pull(targetImage)
+      updateUpgradeJob(this.db, jobId, { status: 'recreating' })
+      this.deps.runner.spawnRecreate(info, targetImage)
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      updateUpgradeJob(this.db, job.id, {
+      updateUpgradeJob(this.db, jobId, {
         status: 'failed',
         error: message,
         finishedAt: Date.now(),
       })
-      throw new ManagerUpgradeError(message, 500)
     }
-
-    updateUpgradeJob(this.db, job.id, { status: 'recreating' })
-    this.deps.runner.spawnRecreate(info, targetImage)
-
-    return getLatestUpgradeJob(this.db) as ManagerUpgradeJob
   }
 }
 
@@ -199,7 +210,6 @@ export function createDockerRunner(): DockerRunner {
       const labels: Record<string, string> = JSON.parse(labelsJson)
 
       return {
-        containerId,
         project: labels['com.docker.compose.project'] || '',
         service: labels['com.docker.compose.service'] || '',
         workingDir: labels['com.docker.compose.project.working_dir'] || '',

@@ -47,6 +47,8 @@ Apple's Push Notification Service (APNs) has strict requirements:
 
 ### 1. Generate VAPID Keys
 
+![Notification Settings](../images/notifications-settings.png)
+
 Generate VAPID public/private key pair:
 
 ```bash

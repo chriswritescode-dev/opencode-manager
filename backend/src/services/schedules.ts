@@ -7,6 +7,7 @@ import {
   type ScheduleRunTriggerSource,
   type UpdateScheduleJobRequest,
 } from '@opencode-manager/shared/types'
+import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 import { getRepoById } from '../db/queries'
 import type { ScheduleJobWithRepo } from '../db/schedules'
 import {
@@ -374,6 +375,11 @@ export class ScheduleService {
     this.onJobChange = handler
   }
 
+  getActiveRunSessionIds(): Set<string> {
+    const runs = listRunningScheduleRuns(this.db)
+    return new Set(runs.filter(r => r.sessionId).map(r => r.sessionId!))
+  }
+
   listAllEnabledJobs(): ScheduleJob[] {
     return listEnabledScheduleJobs(this.db)
   }
@@ -540,7 +546,7 @@ export class ScheduleService {
       throw new ScheduleServiceError('Cannot delete a run while it is in progress. Cancel it first.', 409)
     }
 
-    await this.worktreeManager.pruneRunArtifacts(repo, [{ runBranch: run.runBranch, worktreePath: run.worktreePath }])
+    await this.worktreeManager.pruneRunArtifacts(repo, [{ runBranch: run.runBranch, worktreePath: run.worktreePath, workspaceId: run.workspaceId }])
     const deleted = deleteScheduleRunById(this.db, repoId, jobId, runId)
     if (!deleted) {
       throw new ScheduleServiceError('Run not found', 404)
@@ -580,6 +586,7 @@ export class ScheduleService {
         updateScheduleRunWorktree(this.db, repoId, jobId, run.id, {
           worktreePath: wt.worktreePath,
           runBranch: wt.runBranch,
+          workspaceId: wt.workspaceId,
         })
       }
 
@@ -594,6 +601,7 @@ export class ScheduleService {
         body: JSON.stringify({
           title: sessionTitle,
           agent: job.agentSlug ?? undefined,
+          permission: buildSchedulePermissionRuleset(job.permissionConfig),
         }),
         headers: { 'Content-Type': 'application/json' },
       })
@@ -1111,11 +1119,12 @@ export class ScheduleService {
           worktreePath: fresh.worktreePath,
           runBranch: fresh.runBranch,
           triggerSource: fresh.triggerSource,
+          workspaceId: fresh.workspaceId,
         })
-        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null, commitHash })
+        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null, commitHash, workspaceId: null })
       } catch (error) {
         logger.error(`Failed to finalize worktree for run ${runId}:`, error)
-        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null })
+        updateScheduleRunWorktree(this.db, repoId, jobId, runId, { worktreePath: null, workspaceId: null })
       }
     } finally {
       ScheduleService.activeTeardowns.delete(key)

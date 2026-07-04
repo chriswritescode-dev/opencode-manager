@@ -67,6 +67,65 @@ Schedules can run with:
 
 If a requested model is no longer available, OpenCode Manager falls back to a valid configured model for that provider so the run can still start when possible.
 
+## Skills
+
+Each schedule can optionally attach skill slugs and notes. Skills modify the agent's behavior during the run — for example, you could attach a review-focused skill to a weekly code review schedule.
+
+![Skills Tab](../images/schedule-skills-tab.png)
+
+The **Skills** tab in the schedule dialog lets you:
+
+- Select one or more **skill slugs** from a multi-select input
+- Add free-form **notes** (max 2000 characters) that the agent receives as additional context
+
+Skill metadata is passed to the OpenCode workspace config when the run starts, making the selected skills available to the agent for that run only.
+
+## Worktree Isolation
+
+Each scheduled run executes in a **throwaway git worktree** — an isolated working copy branched off the repository's base branch. This provides two key guarantees:
+
+- **No side effects on the main working tree** — file changes, branch switches, and experimentations during the run are confined to the worktree.
+- **Clean state per run** — every run starts from a fresh branch (`schedule/{jobId}/run-{runId}`) based off the latest remote state.
+
+When the run completes or fails, the worktree is cleaned up automatically. The worktree is **never auto-pushed** — any changes an agent makes during a scheduled run stay local and are discarded after the run finishes. The real safety boundary is this disposal: modifications affect only the throwaway worktree and are not propagated back to the repository.
+
+### Branch Configuration
+
+By default, runs branch off the repository's default branch. You can override this by specifying a **base branch** in the schedule settings — the worktree branches off your chosen branch instead.
+
+![Branch and Worktree Configuration](../images/schedules/09-schedule-creation.png)
+
+## Permission Configuration
+
+Every schedule includes a **Permissions** section in the General tab. These settings control what the agent can access and execute during unattended runs.
+
+![Permissions Configuration](../images/schedule-permissions.png)
+
+### Allow Access Outside the Working Directory
+
+When **disabled** (the default), the agent's file operations are confined to the isolated worktree. Enable this if the schedule requires reading or writing files elsewhere on the system (e.g., accessing a shared configuration directory).
+
+### Blocked Bash Commands
+
+The following bash command patterns are always blocked by default:
+
+```
+git push --force*
+git push -f *
+sudo *
+dd *
+mkfs*
+shutdown*
+reboot*
+halt*
+kill -9 *
+killall *
+```
+
+These patterns prevent dangerous commands whose blast radius escapes the throwaway worktree. File-mutating commands (`rm -rf`, `git reset --hard`, etc.) are intentionally omitted because they only affect the disposable worktree.
+
+You can customize the deny list by adding or removing glob patterns. One pattern per line. Changes apply to all future runs of that schedule.
+
 ## Run History
 
 Each schedule stores a run history panel with:

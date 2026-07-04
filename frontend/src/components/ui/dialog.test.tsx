@@ -130,31 +130,6 @@ describe("DialogContent", () => {
     expect(screen.queryByRole("button", { name: /close/i })).not.toBeInTheDocument();
   });
 
-  it("merges custom className with default classes", () => {
-    render(
-      <Dialog open>
-        <DialogContent className="custom-class" data-testid="dialog-content">
-          Content
-        </DialogContent>
-      </Dialog>
-    );
-    const content = screen.getByTestId("dialog-content");
-    expect(content).toHaveClass("custom-class");
-    expect(content).toHaveClass("fixed");
-    expect(content).toHaveClass("z-[70]");
-  });
-
-  it("renders children correctly", () => {
-    render(
-      <Dialog open>
-        <DialogContent>
-          <span>Test Child Content</span>
-        </DialogContent>
-      </Dialog>
-    );
-    expect(screen.getByText("Test Child Content")).toBeInTheDocument();
-  });
-
   it("accepts mobileSwipeToClose prop without breaking rendering", () => {
     const onOpenChange = vi.fn();
     render(

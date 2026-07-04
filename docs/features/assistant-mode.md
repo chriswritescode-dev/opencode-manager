@@ -40,6 +40,8 @@ When the assistant self-edits its agent definition (e.g., to refine behavior or 
 3. A welcome prompt is automatically sent to orient the agent
 4. Subsequent visits resume the most recent session
 
+![Assistant Page](../images/assistant-page.png)
+
 No manual setup is required. The workspace directory and all managed files are created automatically.
 
 ## Session Views
