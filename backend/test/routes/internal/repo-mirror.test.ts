@@ -621,6 +621,22 @@ describe('internal-repo-mirror routes', () => {
       expect(res.status).toBe(404)
     })
 
+    it('rejects commit requests with zero uploaded parts', async () => {
+      const targetPath = join(getTmpRoot(), 'empty-parts-repo')
+      mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'empty-parts-repo', fullPath: targetPath })
+      mockCreateRepoRow.mockImplementation((_db: any, input: any) => ({ repo: { id: 1, fullPath: input.fullPath, localPath: input.localPath }, created: true }))
+
+      const beginRes = await begin(app, 0, { create: true, name: 'empty-parts-repo' })
+      expect(beginRes.status).toBe(200)
+      const beginJson = (await beginRes.json()) as BeginResponse
+
+      const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 0)
+      expect(commitRes.status).toBe(400)
+      const json = (await commitRes.json()) as { error: string }
+      expect(json.error).toBe('totalParts must be a positive integer')
+      expect(mockUpdateLastPulled).not.toHaveBeenCalled()
+    })
+
     it('rolls back created DB row when commit fails on invalid tarball', async () => {
       const targetPath = join(getTmpRoot(), 'test-repo')
       mockEnsureMirrorTargetPath.mockReturnValue({ localPath: 'test-repo', fullPath: targetPath })
@@ -739,7 +755,7 @@ describe('internal-repo-mirror routes', () => {
       expect(delRes.status).toBe(200)
       expect(mockDeleteRepo).toHaveBeenCalledWith({}, 11)
 
-      const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 0)
+      const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 1)
       expect(commitRes.status).toBe(404)
     })
   })
