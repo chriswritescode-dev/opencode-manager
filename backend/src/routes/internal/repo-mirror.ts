@@ -15,6 +15,8 @@ import { getErrorMessage } from '../../utils/error-utils'
 import { safeGitOut, gitOut } from './repo-sync-helpers'
 import {
   MIRROR_CHUNK_SIZE,
+  TOTAL_PARTS_INVALID_MESSAGE,
+  isValidTotalParts,
   createUploadSession,
   readUploadMeta,
   deleteUploadSession,
@@ -246,11 +248,10 @@ export function createInternalRepoMirrorRoutes(db: Database) {
 
     const { uploadId, totalParts, gzip } = body
     if (!uploadId) return c.json({ error: 'uploadId required' }, 400)
-    if (!Number.isInteger(totalParts)) return c.json({ error: 'totalParts must be a positive integer' }, 400)
+    if (!isValidTotalParts(totalParts)) return c.json({ error: TOTAL_PARTS_INVALID_MESSAGE }, 400)
 
     const meta = await readUploadMeta(uploadId)
     if (!meta) return c.json({ error: 'upload session not found' }, 404)
-    if (totalParts < 1) return c.json({ error: 'totalParts must be a positive integer' }, 400)
 
     let backupDir: string | undefined
     let staging: string | undefined

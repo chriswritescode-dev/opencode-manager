@@ -10,6 +10,12 @@ import { getReposPath } from '@opencode-manager/shared/config/env'
 export const MIRROR_CHUNK_SIZE = 8 * 1024 * 1024
 const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000
 
+export const TOTAL_PARTS_INVALID_MESSAGE = 'totalParts must be a positive integer'
+
+export function isValidTotalParts(totalParts: number): boolean {
+  return Number.isInteger(totalParts) && totalParts >= 1
+}
+
 export interface UploadMeta {
   uploadId: string
   repoId: number
@@ -88,8 +94,8 @@ export interface ExtractResult {
 }
 
 export async function extractPartsToStaging(uploadId: string, totalParts: number, gzip: boolean): Promise<ExtractResult> {
-  if (!Number.isInteger(totalParts) || totalParts < 1) {
-    throw new Error('totalParts must be a positive integer')
+  if (!isValidTotalParts(totalParts)) {
+    throw new Error(TOTAL_PARTS_INVALID_MESSAGE)
   }
 
   const stagingParent = getStagingRoot()

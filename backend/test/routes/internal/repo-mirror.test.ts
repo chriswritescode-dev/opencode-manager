@@ -755,7 +755,7 @@ describe('internal-repo-mirror routes', () => {
       expect(delRes.status).toBe(200)
       expect(mockDeleteRepo).toHaveBeenCalledWith({}, 11)
 
-      const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 0)
+      const commitRes = await commit(app, beginJson.repoId, beginJson.uploadId, 1)
       expect(commitRes.status).toBe(404)
     })
   })
