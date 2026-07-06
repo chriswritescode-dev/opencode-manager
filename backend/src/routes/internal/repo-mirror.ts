@@ -246,10 +246,11 @@ export function createInternalRepoMirrorRoutes(db: Database) {
 
     const { uploadId, totalParts, gzip } = body
     if (!uploadId) return c.json({ error: 'uploadId required' }, 400)
-    if (!Number.isInteger(totalParts) || totalParts < 0) return c.json({ error: 'totalParts must be a non-negative integer' }, 400)
+    if (!Number.isInteger(totalParts)) return c.json({ error: 'totalParts must be a positive integer' }, 400)
 
     const meta = await readUploadMeta(uploadId)
     if (!meta) return c.json({ error: 'upload session not found' }, 404)
+    if (totalParts < 1) return c.json({ error: 'totalParts must be a positive integer' }, 400)
 
     let backupDir: string | undefined
     let staging: string | undefined

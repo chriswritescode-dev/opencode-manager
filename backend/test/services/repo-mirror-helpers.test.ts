@@ -292,3 +292,22 @@ describe('isRepoInUse', () => {
     expect(result).toBe(true)
   })
 })
+
+describe('extractPartsToStaging', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    tmpRoot = path.join(os.tmpdir(), `mirror-test-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    fs.mkdirSync(tmpRoot, { recursive: true })
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('rejects zero-part commits before creating a staging directory', async () => {
+    const { extractPartsToStaging } = await import('../../src/routes/internal/repo-mirror-helpers')
+
+    await expect(extractPartsToStaging('upload-id', 0, false)).rejects.toThrow('totalParts must be a positive integer')
+    expect(fs.existsSync(path.join(tmpRoot, '.ocm-staging'))).toBe(false)
+  })
+})

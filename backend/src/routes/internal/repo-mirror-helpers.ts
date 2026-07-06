@@ -88,6 +88,10 @@ export interface ExtractResult {
 }
 
 export async function extractPartsToStaging(uploadId: string, totalParts: number, gzip: boolean): Promise<ExtractResult> {
+  if (!Number.isInteger(totalParts) || totalParts < 1) {
+    throw new Error('totalParts must be a positive integer')
+  }
+
   const stagingParent = getStagingRoot()
   mkdirSync(stagingParent, { recursive: true })
   const staging = mkdtempSync(join(stagingParent, 'recv-'))
