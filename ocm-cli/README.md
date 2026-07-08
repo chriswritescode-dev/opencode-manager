@@ -73,6 +73,20 @@ import ocm from '@opencode-manager/ocm-cli'
 export default [ocm]
 ```
 
+The package also exposes an OpenCode TUI plugin at
+`@opencode-manager/ocm-cli/tui`. It registers `/ocm-move`, which keeps the
+local session and copies the active session to the Manager after pushing the
+current repo state. Use it from inside an OpenCode session after `ocm login`
+and after the repo already exists on the Manager (`ocm push --create` if
+needed).
+
+```ts
+import ocm from '@opencode-manager/ocm-cli'
+import ocmTui from '@opencode-manager/ocm-cli/tui'
+
+export default [ocm, ocmTui]
+```
+
 ## Requirements
 
 - `opencode` available on `PATH`

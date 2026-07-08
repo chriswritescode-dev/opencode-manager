@@ -9,6 +9,7 @@ import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveTarget } from '../src/resolve-target.js'
+import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import packageJson from '../package.json' with { type: 'json' }
 
 const VERSION = packageJson.version
@@ -29,16 +30,6 @@ Usage:
   ocm --version             Show the installed ocm version
   ocm --help                Show this help
 `
-
-interface ManagerRepo {
-  repoId: number
-  name: string
-  branch: string | null
-  cloneStatus: string
-  directory: string
-  projectId?: string | null
-  extra: { repoId: number; localPath: string; fullPath: string }
-}
 
 function die(msg: string, code = 1): never {
   process.stderr.write(`ocm: ${msg}\n`)
@@ -122,17 +113,6 @@ function requireToken(state: OcmState): string {
     die(`no token in Keychain for ${state.managerUrl}. Run \`ocm login ${state.managerUrl}\`.`)
   }
   return token
-}
-
-async function fetchRepos(managerUrl: string, token: string): Promise<ManagerRepo[]> {
-  const res = await fetch(`${managerUrl}/api/internal/opencode-workspaces`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-  if (!res.ok) {
-    throw new Error(`manager responded ${res.status} ${res.statusText}`)
-  }
-  const data = (await res.json()) as { workspaces: ManagerRepo[] }
-  return data.workspaces
 }
 
 function attach(managerUrl: string, token: string, repo: ManagerRepo): never {
@@ -364,12 +344,7 @@ export async function cmdPush(args: string[]): Promise<void> {
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 
-  const remotes: RemoteRepoSummary[] = repos.map((r) => ({
-    repoId: r.repoId,
-    name: r.name,
-    projectId: r.projectId ?? null,
-    branch: r.branch,
-  }))
+  const remotes: RemoteRepoSummary[] = toRemoteRepoSummaries(repos)
 
   const plan = await prepareMirror(process.cwd(), remotes)
 
@@ -447,12 +422,7 @@ async function cmdPull(args: string[]): Promise<void> {
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 
-  const remotes: RemoteRepoSummary[] = repos.map((r) => ({
-    repoId: r.repoId,
-    name: r.name,
-    projectId: r.projectId ?? null,
-    branch: r.branch,
-  }))
+  const remotes: RemoteRepoSummary[] = toRemoteRepoSummaries(repos)
 
   const plan = await prepareMirror(process.cwd(), remotes)
 

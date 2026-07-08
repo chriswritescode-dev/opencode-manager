@@ -13,6 +13,9 @@
   "exports": {
     ".": {
       "import": "./dist/plugin.js"
+    },
+    "./tui": {
+      "import": "./dist/tui.js"
     }
   },
   "bin": {

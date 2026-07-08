@@ -6,37 +6,27 @@ const dist = join(root, 'dist')
 
 rmSync(dist, { recursive: true, force: true })
 
-console.log('Bundling ocm CLI...')
-const cliResult = await Bun.build({
-  entrypoints: [join(root, 'bin', 'ocm.ts')],
-  outdir: dist,
-  target: 'node',
-  format: 'esm',
-  naming: { entry: 'ocm.js' },
-})
+async function bundleEntry(label: string, entrypoint: string, outputName: string): Promise<void> {
+  console.log(`Bundling ${label}...`)
+  const result = await Bun.build({
+    entrypoints: [join(root, entrypoint)],
+    outdir: dist,
+    target: 'node',
+    format: 'esm',
+    naming: { entry: outputName },
+  })
 
-if (!cliResult.success) {
-  for (const log of cliResult.logs) {
+  if (result.success) return
+
+  for (const log of result.logs) {
     console.error(log)
   }
   process.exit(1)
 }
 
-console.log('Bundling opencode plugin entry...')
-const pluginResult = await Bun.build({
-  entrypoints: [join(root, 'src', 'plugin.ts')],
-  outdir: dist,
-  target: 'node',
-  format: 'esm',
-  naming: { entry: 'plugin.js' },
-})
-
-if (!pluginResult.success) {
-  for (const log of pluginResult.logs) {
-    console.error(log)
-  }
-  process.exit(1)
-}
+await bundleEntry('ocm CLI', join('bin', 'ocm.ts'), 'ocm.js')
+await bundleEntry('opencode plugin entry', join('src', 'plugin.ts'), 'plugin.js')
+await bundleEntry('TUI plugin entry', join('src', 'tui-plugin.ts'), 'tui.js')
 
 const ocmJsPath = join(dist, 'ocm.js')
 const ocmJsContent = readFileSync(ocmJsPath, 'utf-8')
