@@ -1,5 +1,5 @@
 import type { TuiPluginApi, TuiPluginModule } from './tui-types.js'
-import { readState } from './state.js'
+import { readInstallNotice, readState } from './state.js'
 import { getToken } from './keychain.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
@@ -9,6 +9,7 @@ import { createManagerReplay } from './remote-replay.js'
 import { readSessionEvents } from './local-history.js'
 
 const tui = async (api: TuiPluginApi): Promise<void> => {
+  showInstallNotice(api)
   api.keymap.registerLayer({
     commands: [
       {
@@ -21,6 +22,20 @@ const tui = async (api: TuiPluginApi): Promise<void> => {
         run: () => runSessionMove(api),
       },
     ],
+  })
+}
+
+function showInstallNotice(api: TuiPluginApi): void {
+  const notice = readInstallNotice()
+  if (!notice) return
+
+  api.ui.toast({
+    variant: 'success',
+    title: 'ocm installed',
+    message: notice.pathMissing
+      ? `Linked at ${notice.link}. Add export PATH="$HOME/.local/bin:$PATH" to your shell rc if ocm is unavailable.`
+      : `Linked at ${notice.link}`,
+    duration: 10000,
   })
 }
 

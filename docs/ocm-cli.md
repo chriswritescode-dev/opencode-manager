@@ -39,13 +39,9 @@ Add the TUI plugin entry to your OpenCode config and OpenCode will fetch the pac
 }
 ```
 
-The next time OpenCode starts it will run `bun install` for the plugin. You'll see:
+The next time OpenCode starts it will run `bun install` for the plugin. The installer stays quiet so it does not break the TUI layout; after the plugin loads, OpenCode shows a one-time toast confirming where `ocm` was linked.
 
-```
-ocm installed at /Users/you/.local/bin/ocm
-```
-
-If `~/.local/bin` is not on your PATH, the message will tell you. Add this to your shell rc:
+If `~/.local/bin` is not on your PATH, add this to your shell rc:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
