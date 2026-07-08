@@ -63,18 +63,19 @@ refuses to overwrite uncommitted local changes unless `--force` is passed.
 
 ## OpenCode TUI plugin
 
-The package exposes an OpenCode TUI plugin at
-`@opencode-manager/ocm-cli/tui`. It registers `/ocm-move`, which keeps the
-local session and copies the active session to the Manager after pushing the
-current repo state. Use it from inside an OpenCode session after `ocm login`
-and after the repo already exists on the Manager (`ocm push --create` if
-needed).
+The package exposes an OpenCode TUI plugin through its `./tui` package export.
+Configure the package name and OpenCode resolves that TUI entrypoint
+automatically. It registers `/ocm-move`, which keeps the local session and
+copies the active session to the Manager after pushing the current repo state.
+Use it from inside an OpenCode session after `ocm login` and after the repo
+already exists on the Manager (`ocm push --create` if needed).
 
 Enable it in `tui.json`:
 
 ```jsonc
 {
-  "plugin": ["@opencode-manager/ocm-cli/tui"]
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["@opencode-manager/ocm-cli"]
 }
 ```
 

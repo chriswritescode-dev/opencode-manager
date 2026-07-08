@@ -29,13 +29,13 @@ The CLI is published as `@opencode-manager/ocm-cli`. There are two install paths
 
 ### Option A — install via OpenCode's plugin loader (recommended)
 
-Add the TUI plugin entry to your OpenCode config and OpenCode will fetch the package on next start. The package `postinstall` script self-installs a `~/.local/bin/ocm` symlink for local plugin installs, so the `ocm` binary becomes available on your PATH automatically.
+Add the package to your OpenCode TUI config and OpenCode will fetch it on next start. The package exposes a `./tui` entrypoint, and OpenCode resolves that entrypoint automatically from the package name. The package `postinstall` script self-installs a `~/.local/bin/ocm` symlink for local plugin installs, so the `ocm` binary becomes available on your PATH automatically.
 
 ```jsonc
-// ~/.config/opencode/opencode.json
+// ~/.config/opencode/tui.json
 {
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@opencode-manager/ocm-cli/tui"]
+  "$schema": "https://opencode.ai/tui.json",
+  "plugin": ["@opencode-manager/ocm-cli"]
 }
 ```
 
@@ -47,7 +47,7 @@ If `~/.local/bin` is not on your PATH, add this to your shell rc:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The `./tui` entry registers `/ocm-move`, a TUI command that keeps the local session and copies the active session to the Manager after pushing the current repo state. Run it from inside a local OpenCode session after `ocm login` and after the repo exists on the Manager (`ocm push --create` if needed).
+The `@opencode-manager/ocm-cli` package entry registers `/ocm-move`, a TUI command that keeps the local session and copies the active session to the Manager after pushing the current repo state. Run it from inside a local OpenCode session after `ocm login` and after the repo exists on the Manager (`ocm push --create` if needed).
 
 ### Option B — global package manager install
 

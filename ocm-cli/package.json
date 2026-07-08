@@ -22,7 +22,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "scripts/postinstall.mjs"
   ],
   "scripts": {
     "build": "bun scripts/build.ts",
