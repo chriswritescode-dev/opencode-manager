@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 
@@ -11,8 +11,15 @@ export interface OcmState {
   updatedAt?: number
 }
 
+export interface InstallNotice {
+  link: string
+  binDir: string
+  pathMissing: boolean
+}
+
 const STATE_DIR = join(homedir(), '.config', 'opencode-manager')
 const STATE_FILE = join(STATE_DIR, 'state.json')
+const INSTALL_NOTICE_FILE = join(STATE_DIR, 'install-notice.json')
 
 export function getStatePath(): string {
   return STATE_FILE
@@ -39,5 +46,27 @@ export function writeState(state: OcmState): void {
 export function clearState(): void {
   if (existsSync(STATE_FILE)) {
     writeFileSync(STATE_FILE, '{}', { mode: 0o600 })
+  }
+}
+
+export function readInstallNotice(): InstallNotice | null {
+  if (!existsSync(INSTALL_NOTICE_FILE)) return null
+  try {
+    const raw = readFileSync(INSTALL_NOTICE_FILE, 'utf-8')
+    const parsed = JSON.parse(raw) as InstallNotice
+    if (!parsed.link || !parsed.binDir) return null
+    return parsed
+  } catch {
+    return null
+  } finally {
+    deleteInstallNotice()
+  }
+}
+
+function deleteInstallNotice(): void {
+  try {
+    unlinkSync(INSTALL_NOTICE_FILE)
+  } catch {
+    return
   }
 }

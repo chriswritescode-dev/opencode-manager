@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, symlinkSync, unlinkSync, lstatSync, readlinkSync, chmodSync } from 'node:fs'
+import { existsSync, mkdirSync, symlinkSync, unlinkSync, lstatSync, readlinkSync, chmodSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -26,15 +26,23 @@ if (process.env.npm_config_global === 'true' || process.env.npm_config_global ==
 }
 
 const binDir = join(homedir(), '.local', 'bin')
+const link = join(binDir, 'ocm')
+const noticeDir = join(homedir(), '.config', 'opencode-manager')
+const noticeFile = join(noticeDir, 'install-notice.json')
+
+function writeInstallNotice(pathMissing) {
+  try {
+    mkdirSync(noticeDir, { recursive: true })
+    writeFileSync(noticeFile, JSON.stringify({ link, binDir, pathMissing }, null, 2), { mode: 0o600 })
+  } catch {
+  }
+}
 
 try {
   mkdirSync(binDir, { recursive: true })
-} catch (err) {
-  process.stderr.write(`ocm-cli: cannot create ${binDir}: ${err.message}\n`)
+} catch {
   process.exit(0)
 }
-
-const link = join(binDir, 'ocm')
 
 try {
   const stat = lstatSync(link)
@@ -44,7 +52,6 @@ try {
     }
     unlinkSync(link)
   } else {
-    process.stderr.write(`ocm-cli: ${link} exists and is not a symlink; leaving alone\n`)
     process.exit(0)
   }
 } catch {
@@ -53,15 +60,9 @@ try {
 
 try {
   symlinkSync(target, link)
-} catch (err) {
-  process.stderr.write(`ocm-cli: failed to symlink ${link}: ${err.message}\n`)
+} catch {
   process.exit(0)
 }
 
-process.stdout.write(`ocm installed at ${link}\n`)
-
 const path = process.env.PATH ?? ''
-if (!path.split(':').includes(binDir)) {
-  process.stdout.write(`note: ${binDir} is not on your PATH. Add to your shell rc:\n`)
-  process.stdout.write(`  export PATH="${binDir}:$PATH"\n`)
-}
+writeInstallNotice(!path.split(':').includes(binDir))

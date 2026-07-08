@@ -61,17 +61,25 @@ tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
 tarball mirror (and proceeds automatically when there is no TTY to prompt). It
 refuses to overwrite uncommitted local changes unless `--force` is passed.
 
-## OpenCode plugin
+## OpenCode TUI plugin
 
-The package default export is an OpenCode plugin entrypoint. Importing the
-plugin performs a best-effort local `ocm` symlink install and then returns an
-empty plugin object.
+The package exposes an OpenCode TUI plugin at
+`@opencode-manager/ocm-cli/tui`. It registers `/ocm-move`, which keeps the
+local session and copies the active session to the Manager after pushing the
+current repo state. Use it from inside an OpenCode session after `ocm login`
+and after the repo already exists on the Manager (`ocm push --create` if
+needed).
 
-```ts
-import ocm from '@opencode-manager/ocm-cli'
+Enable it in `tui.json`:
 
-export default [ocm]
+```jsonc
+{
+  "plugin": ["@opencode-manager/ocm-cli/tui"]
+}
 ```
+
+The `ocm` binary is installed via the package `postinstall` (or `bin` field on
+global installs); the plugin surface is TUI-only.
 
 ## Requirements
 

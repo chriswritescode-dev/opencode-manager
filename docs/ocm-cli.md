@@ -29,29 +29,25 @@ The CLI is published as `@opencode-manager/ocm-cli`. There are two install paths
 
 ### Option A — install via OpenCode's plugin loader (recommended)
 
-Add the package to your OpenCode config and OpenCode will fetch it on next start. The package's plugin entry self-installs a `~/.local/bin/ocm` symlink, so the `ocm` binary becomes available on your PATH automatically.
+Add the TUI plugin entry to your OpenCode config and OpenCode will fetch the package on next start. The package `postinstall` script self-installs a `~/.local/bin/ocm` symlink for local plugin installs, so the `ocm` binary becomes available on your PATH automatically.
 
 ```jsonc
 // ~/.config/opencode/opencode.json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@opencode-manager/ocm-cli"]
+  "plugin": ["@opencode-manager/ocm-cli/tui"]
 }
 ```
 
-The next time OpenCode starts it will run `bun install` for the plugin and import it once. You'll see:
+The next time OpenCode starts it will run `bun install` for the plugin. The installer stays quiet so it does not break the TUI layout; after the plugin loads, OpenCode shows a one-time toast confirming where `ocm` was linked.
 
-```
-ocm-cli: installed `ocm` at /Users/you/.local/bin/ocm
-```
-
-If `~/.local/bin` is not on your PATH, the message will tell you. Add this to your shell rc:
+If `~/.local/bin` is not on your PATH, add this to your shell rc:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The plugin itself is a no-op — it does not register tools, commands, or hooks. Its only side effect is the bin symlink, so all real work happens through the `ocm` CLI.
+The `./tui` entry registers `/ocm-move`, a TUI command that keeps the local session and copies the active session to the Manager after pushing the current repo state. Run it from inside a local OpenCode session after `ocm login` and after the repo exists on the Manager (`ocm push --create` if needed).
 
 ### Option B — global package manager install
 
@@ -128,6 +124,10 @@ The child takes over the terminal (`stdio: inherit`); closing the TUI exits `ocm
 `ocm push` uses a fast git bundle + working-tree patch by default to sync `$PWD` to the matching Manager repo. Pass `--full` to use the legacy tarball mirror (skipping `node_modules`, `dist`, `.next`, `.venv`, `__pycache__`, `.turbo`, and anything matched by `.gitignore`). If the fast path fails, `ocm` prompts before reverting to the tarball mirror (and proceeds automatically when there is no TTY to prompt).
 
 `ocm pull` uses a fast git bundle + working-tree patch by default to sync the matching Manager repo over `$PWD`. Pass `--full` to use the legacy tarball mirror. If the fast path fails, `ocm` prompts before reverting to the tarball mirror (and proceeds automatically when there is no TTY to prompt).
+
+### TUI `/ocm-move`
+
+When the TUI plugin entry is installed, `/ocm-move` is available in local OpenCode sessions. It checks that the matching Manager repo has not diverged, pushes the local git state with the fast bundle + working-tree patch path, reads the active session history from the local OpenCode SQLite event database, rewrites local repo directories to the Manager repo directory, and replays the session through `/api/opencode-proxy/sync/replay`. The local session is retained.
 
 - `--force` skips the dirty-working-tree check on `pull` and the safety bail on `push`.
 - `--create` (on `push`) creates a new Manager repo when no `origin` match is found.
