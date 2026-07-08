@@ -165,7 +165,7 @@ export class ManagerApi {
     const query = opts.force === true ? '?force=1' : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
-    const body = Readable.toWeb(createReadStream(bundlePath)) as ReadableStream<Uint8Array>
+    const body = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
       method: 'POST',
       headers,

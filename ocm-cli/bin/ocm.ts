@@ -115,7 +115,24 @@ function requireToken(state: OcmState): string {
   return token
 }
 
-function attach(managerUrl: string, token: string, repo: ManagerRepo): never {
+async function warmUpInstance(managerUrl: string, token: string, directory: string): Promise<void> {
+  const url = `${managerUrl}/api/opencode-proxy/session?directory=${encodeURIComponent(directory)}`
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) {
+        await res.text()
+        return
+      }
+    } catch {
+      /* retry */
+    }
+    await new Promise((resolve) => setTimeout(resolve, attempt * 500))
+  }
+}
+
+async function attach(managerUrl: string, token: string, repo: ManagerRepo): Promise<never> {
+  await warmUpInstance(managerUrl, token, repo.directory)
   const proxyUrl = `${managerUrl}/api/opencode-proxy`
   const args = [
     'attach',
@@ -251,7 +268,7 @@ async function cmdUse(args: string[]): Promise<void> {
     lastRepoBranch: repo.branch,
   })
 
-  attach(state.managerUrl, token, repo)
+  await attach(state.managerUrl, token, repo)
 }
 
 async function cmdDefault(): Promise<void> {
@@ -284,13 +301,13 @@ async function cmdDefault(): Promise<void> {
         lastRepoDir: repo.directory,
         lastRepoBranch: repo.branch,
       })
-      attach(state.managerUrl, token, toManagerRepo(repo))
+      await attach(state.managerUrl, token, toManagerRepo(repo))
       return
     }
     case 'last': {
       const repo = result.repo
       info(`attaching to ${repo.name} (last used)`)
-      attach(state.managerUrl, token, toManagerRepo(repo))
+      await attach(state.managerUrl, token, toManagerRepo(repo))
       return
     }
     case 'cwd-ambiguous': {

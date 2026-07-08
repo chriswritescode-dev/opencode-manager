@@ -4,8 +4,9 @@ import { getToken } from './keychain.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
 import { prepareMirror, checkPushDivergence, mirrorUpFast } from './mirror.js'
-import { transferSession, type HistoryEventRow } from './session-move.js'
+import { transferSession } from './session-move.js'
 import { createManagerReplay } from './remote-replay.js'
+import { readSessionEvents } from './local-history.js'
 
 const tui = async (api: TuiPluginApi): Promise<void> => {
   api.keymap.registerLayer({
@@ -13,7 +14,9 @@ const tui = async (api: TuiPluginApi): Promise<void> => {
       {
         name: 'ocm.session.move',
         title: 'Move session to Manager',
-        description: 'Push repo state and move this session to OpenCode Manager',
+        desc: 'Push repo state and move this session to OpenCode Manager',
+        category: 'OpenCode Manager',
+        namespace: 'palette',
         slashName: 'ocm-move',
         run: () => runSessionMove(api),
       },
@@ -82,19 +85,9 @@ async function runSessionMove(api: TuiPluginApi): Promise<void> {
     api.ui.toast({ message: 'Pushing repo state…' })
     await mirrorUpFast(plan, { api: managerApi, force: false })
 
-    if (!api.client.sync) {
-      api.ui.toast({ variant: 'error', message: 'Local opencode is too old for session move (needs /sync API)' })
-      return
-    }
-
-    const raw = await api.client.sync.history.list({ body: {} })
-    const rows: HistoryEventRow[] = Array.isArray(raw)
-      ? (raw as HistoryEventRow[])
-      : ((raw as { data?: HistoryEventRow[] })?.data ?? [])
-
     const result = await transferSession(
       { sessionID, localRoot: plan.repoRoot, remoteDirectory },
-      { fetchLocalHistory: async () => rows, replayEvents: createManagerReplay(state.managerUrl, token) },
+      { fetchLocalHistory: () => readSessionEvents(sessionID), replayEvents: createManagerReplay(state.managerUrl, token) },
     )
 
     switch (result.kind) {

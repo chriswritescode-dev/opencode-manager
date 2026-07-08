@@ -13,6 +13,7 @@ async function bundleEntry(label: string, entrypoint: string, outputName: string
     outdir: dist,
     target: 'node',
     format: 'esm',
+    external: ['bun:sqlite'],
     naming: { entry: outputName },
   })
 
@@ -25,7 +26,6 @@ async function bundleEntry(label: string, entrypoint: string, outputName: string
 }
 
 await bundleEntry('ocm CLI', join('bin', 'ocm.ts'), 'ocm.js')
-await bundleEntry('opencode plugin entry', join('src', 'plugin.ts'), 'plugin.js')
 await bundleEntry('TUI plugin entry', join('src', 'tui-plugin.ts'), 'tui.js')
 
 const ocmJsPath = join(dist, 'ocm.js')
