@@ -207,7 +207,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-perm-1' })
       }
       if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
@@ -223,7 +223,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     await service.runJob(42, 7, 'manual')
 
     const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
+      ([req]) => (req as ForwardRequest).path === '/api/session' && (req as ForwardRequest).method === 'POST',
     )
     expect(sessionCall).toBeDefined()
     const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
@@ -247,7 +247,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-perm-2' })
       }
       if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
@@ -263,7 +263,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     await service.runJob(42, 7, 'manual')
 
     const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
+      ([req]) => (req as ForwardRequest).path === '/api/session' && (req as ForwardRequest).method === 'POST',
     )
     expect(sessionCall).toBeDefined()
     const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
@@ -286,7 +286,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-perm-3' })
       }
       if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
@@ -302,7 +302,7 @@ describe('ScheduleService permission ruleset in session creation', () => {
     await service.runJob(42, 7, 'manual')
 
     const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
+      ([req]) => (req as ForwardRequest).path === '/api/session' && (req as ForwardRequest).method === 'POST',
     )
     expect(sessionCall).toBeDefined()
     const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)

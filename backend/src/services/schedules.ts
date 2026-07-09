@@ -596,7 +596,9 @@ export class ScheduleService {
       const sessionTitle = buildSessionTitle(job)
       const sessionResponse = await this.openCodeClient.forward({
         method: 'POST',
-        path: '/session',
+        // OpenCode v1.16.0+ moved the session endpoints under the /api prefix
+        // (see PR #252). The old bare /session route returns 400 on v1.17.x.
+        path: '/api/session',
         directory: runDirectory,
         body: JSON.stringify({
           title: sessionTitle,
@@ -610,7 +612,12 @@ export class ScheduleService {
         throw new ScheduleServiceError('Failed to create OpenCode session', 502)
       }
 
-      const session = await sessionResponse.json() as SessionResponse
+      // POST /api/session wraps the session in a `data` envelope (v1.16.0+).
+      // Keep a fallback for older OpenCode servers that return the flat shape.
+      const sessionRaw = await sessionResponse.json()
+      const session: SessionResponse = sessionRaw && typeof sessionRaw === 'object' && 'data' in sessionRaw && sessionRaw.data
+        ? sessionRaw.data as SessionResponse
+        : sessionRaw as SessionResponse
       const runWithSession = updateScheduleRunMetadata(this.db, repoId, jobId, run.id, {
         sessionId: session.id,
         sessionTitle,

@@ -213,7 +213,7 @@ describe('ScheduleService', () => {
 
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-run-1' }))
       }
 
@@ -270,7 +270,7 @@ describe('ScheduleService', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ id: 'ses-content-type' })
       }
       if (path === '/session/ses-content-type/message' && method === 'POST') {
@@ -285,7 +285,7 @@ describe('ScheduleService', () => {
       expect(mocks.forward).toHaveBeenCalledWith(
         expect.objectContaining({
           method: 'POST',
-          path: '/session',
+          path: '/api/session',
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         }),
       )
@@ -311,7 +311,7 @@ describe('ScheduleService', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-run-2' }))
       }
 
@@ -395,7 +395,7 @@ describe('ScheduleService', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-run-6' }))
       }
 
@@ -876,7 +876,7 @@ describe('ScheduleService', () => {
             { name: 'code-review', description: 'Code review workflow', location: '/path/SKILL.md', content: 'Review instructions here' },
           ]))
         }
-        if (path === '/session' && method === 'POST') {
+        if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-1' }))
         }
         if (path === '/session/ses-skills-1/message' && method === 'POST') {
@@ -925,7 +925,7 @@ describe('ScheduleService', () => {
             { name: 'git-release', description: 'Git release workflow', location: '/path/SKILL.md', content: 'Release instructions here' },
           ]))
         }
-        if (path === '/session' && method === 'POST') {
+        if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-2' }))
         }
         if (path === '/session/ses-skills-2/message' && method === 'POST') {
@@ -968,7 +968,7 @@ describe('ScheduleService', () => {
 
       let capturedPromptBody: string | undefined
       routeForward(({ path, method, body }) => {
-        if (path === '/session' && method === 'POST') {
+        if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-3' }))
         }
         if (path === '/session/ses-skills-3/message' && method === 'POST') {
@@ -1012,7 +1012,7 @@ describe('ScheduleService', () => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(new Response('error', { status: 500 }))
         }
-        if (path === '/session' && method === 'POST') {
+        if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-4' }))
         }
         if (path === '/session/ses-skills-4/message' && method === 'POST') {
@@ -1056,7 +1056,7 @@ describe('ScheduleService', () => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(jsonResponse([]))
         }
-        if (path === '/session' && method === 'POST') {
+        if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ id: 'ses-skills-5' }))
         }
         if (path === '/session/ses-skills-5/message' && method === 'POST') {
@@ -1120,7 +1120,7 @@ describe('ScheduleService worktree isolation', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(worktreeRun)
     mocks.getScheduleRunById.mockReturnValue(worktreeRun)
     routeForward(({ path, method, directory }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         expect(directory).toBe(worktreePath)
         return Promise.resolve(jsonResponse({ id: 'ses-wt-1' }))
       }
@@ -1160,7 +1160,7 @@ describe('ScheduleService worktree isolation', () => {
     mocks.getScheduleRunById.mockReturnValue(runWithWorktree)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'ses-wt-1' }))
       }
       if (path === '/session/ses-wt-1/message' && method === 'POST') {
@@ -1199,7 +1199,7 @@ describe('ScheduleService worktree isolation', () => {
 
     let capturedDirectory: string | undefined
     routeForward(({ path, method, directory }) => {
-      if (path === '/session' && method === 'POST') {
+      if (path === '/api/session' && method === 'POST') {
         capturedDirectory = directory
         return Promise.resolve(jsonResponse({ id: 'ses-inline-1' }))
       }
