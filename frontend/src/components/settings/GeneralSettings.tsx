@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useSettings } from '@/hooks/useSettings'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { Loader2 } from 'lucide-react'
@@ -6,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 
 export function GeneralSettings() {
+  const { t } = useTranslation()
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
   const { data: versionInfo, isLoading: isVersionLoading } = useVersionCheck()
 
@@ -19,7 +21,7 @@ export function GeneralSettings() {
 
   return (
     <div className="bg-card border border-border rounded-lg p-6">
-      <h2 className="text-lg font-semibold text-foreground mb-6">General Preferences</h2>
+      <h2 className="text-lg font-semibold text-foreground mb-6">{t('settings.general')}</h2>
 
       <div className="space-y-6">
         <div className="flex items-center justify-center gap-3 py-3">
@@ -38,40 +40,40 @@ export function GeneralSettings() {
                   rel="noopener noreferrer"
                   className="text-xs font-medium text-green-500 hover:text-green-400 transition-colors"
                 >
-                  v{versionInfo.latestVersion} available
+                  {t('settings.versionAvailable', { version: versionInfo.latestVersion }) || `v${versionInfo.latestVersion} available`}
                 </a>
               )}
             </>
           ) : (
-            <span className="text-sm text-muted-foreground">unknown</span>
+            <span className="text-sm text-muted-foreground">{t('common.unknown')}</span>
           )}
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="theme">Theme</Label>
+          <Label htmlFor="theme">{t('settings.theme')}</Label>
           <Select
             value={preferences?.theme || 'dark'}
             onValueChange={(value) => updateSettings({ theme: value as 'dark' | 'light' | 'system' })}
           >
             <SelectTrigger id="theme">
-              <SelectValue placeholder="Select a theme" />
+              <SelectValue placeholder={t('settings.selectOption')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="dark">Dark</SelectItem>
-              <SelectItem value="light">Light</SelectItem>
-              <SelectItem value="system">System</SelectItem>
+              <SelectItem value="dark">{t('settings.dark')}</SelectItem>
+              <SelectItem value="light">{t('settings.light')}</SelectItem>
+              <SelectItem value="system">{t('settings.system')}</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-sm text-muted-foreground">
-            Choose your preferred color scheme
+            {t('settings.themeDescription') || 'Choose your preferred color scheme'}
           </p>
         </div>
 
         <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
           <div className="space-y-0.5">
-            <Label htmlFor="simpleChatMode" className="text-base">Simple chat mode</Label>
+            <Label htmlFor="simpleChatMode" className="text-base">{t('settings.simpleChatMode') || 'Simple chat mode'}</Label>
             <p className="text-sm text-muted-foreground">
-              Show only your messages and the assistant's replies. Hides tool calls, reasoning, diffs, and agent details.
+              {t('settings.simpleChatModeDescription') || "Show only your messages and the assistant's replies. Hides tool calls, reasoning, diffs, and agent details."}
             </p>
           </div>
           <Switch
@@ -83,9 +85,9 @@ export function GeneralSettings() {
 
         <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
           <div className="space-y-0.5">
-            <Label htmlFor="autoScroll" className="text-base">Auto-scroll</Label>
+            <Label htmlFor="autoScroll" className="text-base">{t('settings.autoScroll') || 'Auto-scroll'}</Label>
             <p className="text-sm text-muted-foreground">
-              Automatically scroll to bottom when new messages arrive
+              {t('settings.autoScrollDescription') || 'Automatically scroll to bottom when new messages arrive'}
             </p>
           </div>
           <Switch
@@ -99,9 +101,9 @@ export function GeneralSettings() {
           <>
             <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
               <div className="space-y-0.5">
-                <Label htmlFor="showReasoning" className="text-base">Show reasoning</Label>
+                <Label htmlFor="showReasoning" className="text-base">{t('settings.showReasoning') || 'Show reasoning'}</Label>
                 <p className="text-sm text-muted-foreground">
-                  Display model reasoning and thought process
+                  {t('settings.showReasoningDescription') || 'Display model reasoning and thought process'}
                 </p>
               </div>
               <Switch
@@ -113,9 +115,9 @@ export function GeneralSettings() {
 
             <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
               <div className="space-y-0.5">
-                <Label htmlFor="expandToolCalls" className="text-base">Expand tool calls</Label>
+                <Label htmlFor="expandToolCalls" className="text-base">{t('settings.expandToolCalls') || 'Expand tool calls'}</Label>
                 <p className="text-sm text-muted-foreground">
-                  Automatically expand tool call details by default
+                  {t('settings.expandToolCallsDescription') || 'Automatically expand tool call details by default'}
                 </p>
               </div>
               <Switch
@@ -127,9 +129,9 @@ export function GeneralSettings() {
 
             <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
               <div className="space-y-0.5">
-                <Label htmlFor="expandDiffs" className="text-base">Expand diffs</Label>
+                <Label htmlFor="expandDiffs" className="text-base">{t('settings.expandDiffs') || 'Expand diffs'}</Label>
                 <p className="text-sm text-muted-foreground">
-                  Show file diffs expanded by default for edit operations
+                  {t('settings.expandDiffsDescription') || 'Show file diffs expanded by default for edit operations'}
                 </p>
               </div>
               <Switch
@@ -142,11 +144,10 @@ export function GeneralSettings() {
         )}
 
 
-
         {isUpdating && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
-            <span>Saving...</span>
+            <span>{t('settings.saving') || 'Saving...'}</span>
           </div>
         )}
       </div>

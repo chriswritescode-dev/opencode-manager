@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -29,6 +30,7 @@ import { getRepoDisplayName } from "@/lib/utils";
 import { useSidebarAction } from "@/hooks/useSidebarAction";
 
 export function RepoDetail() {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -169,7 +171,7 @@ export function RepoDetail() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <p className="text-muted-foreground">
-          Repository not found
+          {t('repo.notFound')}
         </p>
       </div>
     );
@@ -181,7 +183,7 @@ export function RepoDetail() {
         <div className="text-center">
           <Loader2 className="w-8 h-8 animate-spin text-muted-foreground mx-auto mb-4" />
           <p className="text-muted-foreground">
-            {repo.cloneStatus === 'cloning' ? 'Cloning repository...' : 'Repository not ready'}
+            {repo.cloneStatus === 'cloning' ? t('repo.cloning') : t('repo.notReady')}
           </p>
         </div>
       </div>
@@ -326,39 +328,40 @@ interface CreateWorkspaceDialogProps {
 }
 
 function CreateWorkspaceDialog({ open, onOpenChange, onCreate, isCreating }: CreateWorkspaceDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[420px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Layers className="h-4 w-4 text-purple-400" />
-            Create Workspace
+            {t('repo.createWorkspace')}
           </DialogTitle>
           <DialogDescription>
-            Create an OpenCode worktree workspace for this repository.
+            {t('repo.createWorkspaceDesc')}
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
           <div className="flex items-center gap-2 font-medium">
             <GitBranch className="h-4 w-4 text-purple-400" />
-            Worktree
+            {t('git.createWorktreeWorkspace')}
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            OpenCode will create and manage a git worktree workspace.
+            {t('repo.worktreeDesc')}
           </p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreating}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button onClick={() => { void onCreate(); }} disabled={isCreating} className="bg-blue-600 hover:bg-blue-700 text-white">
             {isCreating ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Creating...
+                {t('repo.creating')}
               </>
             ) : (
-              'Create Workspace'
+              t('repo.createWorkspace')
             )}
           </Button>
         </DialogFooter>

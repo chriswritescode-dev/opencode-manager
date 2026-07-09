@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -30,6 +31,7 @@ export function OpenCodeConfigEditor({
   onUpdate,
   isUpdating
 }: OpenCodeConfigEditorProps) {
+  const { t } = useTranslation()
   const [editConfigContent, setEditConfigContent] = useState('')
   const [editError, setEditError] = useState('')
   const [editErrorLine, setEditErrorLine] = useState<number | null>(null)
@@ -137,7 +139,7 @@ export function OpenCodeConfigEditor({
           message: issue.message,
         }))
         setValidationIssues(issues)
-        setEditError(`Configuration validation failed: ${issues.map(getIssueText).join('; ')}`)
+        setEditError(`${t('createConfig.validationFailed') || 'Configuration validation failed'}: ${issues.map(getIssueText).join('; ')}`)
         return
       }
 
@@ -151,7 +153,7 @@ export function OpenCodeConfigEditor({
         if (line && editTextareaRef.current) {
           highlightErrorLine(editTextareaRef.current, line)
         }
-        setEditError(`Invalid JSON/JSONC: ${error.message}`)
+        setEditError(`${t('common.invalidJson') || 'Invalid JSON/JSONC'}: ${error.message}`)
       } else if (error instanceof FetchError) {
         setValidationIssues(error.validationIssues || [])
         setRemovedFields(error.removedFields || [])
@@ -159,7 +161,7 @@ export function OpenCodeConfigEditor({
       } else if (error instanceof Error) {
         setEditError(error.message)
       } else {
-        setEditError('Failed to save configuration')
+        setEditError(t('settings.failedToSaveConfig') || 'Failed to save configuration')
       }
     }
   }
@@ -189,7 +191,7 @@ export function OpenCodeConfigEditor({
       <DialogContent mobileFullscreen className="gap-0 flex flex-col p-0 md:p-6 w-full min-w-0 sm:max-w-4xl max-h-[90vh] sm:max-h-[85vh]">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle className="text-lg sm:text-xl font-semibold">
-            {`Edit Config: ${config.name}`}
+            {`${t('settings.editConfig') || 'Edit Config'}: ${config.name}`}
           </DialogTitle>
         </DialogHeader>
 
@@ -200,7 +202,7 @@ export function OpenCodeConfigEditor({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={handleFindKeyDown}
-              placeholder="Find in config..."
+              placeholder={t('settings.findInConfig')}
               className="pl-9 h-9 text-[16px] sm:text-xs md:text-sm"
               autoComplete="off"
               name="config-find"
@@ -209,15 +211,15 @@ export function OpenCodeConfigEditor({
           {query && (
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               {hasMatches
-                ? `${currentMatchIndex + 1} of ${matches.length}`
-                : '0 matches'}
+                ? `${currentMatchIndex + 1} ${t('common.of') || 'of'} ${matches.length}`
+                : `0 ${t('matches') || 'matches'}`}
             </span>
           )}
           <button
             onClick={prev}
             disabled={!hasMatches}
             className="p-1 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Previous match"
+            title={t('settings.previousMatch')}
           >
             <ChevronUp className="h-4 w-4" />
           </button>
@@ -225,7 +227,7 @@ export function OpenCodeConfigEditor({
             onClick={next}
             disabled={!hasMatches}
             className="p-1 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Next match"
+            title={t('settings.nextMatch')}
           >
             <ChevronDown className="h-4 w-4" />
           </button>
@@ -260,7 +262,7 @@ export function OpenCodeConfigEditor({
               <p className="text-xs sm:text-sm text-red-500 break-words">
                 {editError}
                 {editErrorLine && (
-                  <span className="ml-2 text-xs">(Line {editErrorLine})</span>
+                  <span className="ml-2 text-xs">{t('createConfig.line', { line: editErrorLine }) || `(Line ${editErrorLine})`}</span>
                 )}
               </p>
               {validationIssues.length > 0 && (
@@ -272,7 +274,7 @@ export function OpenCodeConfigEditor({
               )}
               {removedFields.length > 0 && (
                 <p className="text-xs sm:text-sm text-amber-600 break-words">
-                  Removed invalid fields: {removedFields.join(', ')}
+                  {t('settings.removedInvalidFields') || 'Removed invalid fields:'} {removedFields.join(', ')}
                 </p>
               )}
             </div>
@@ -285,7 +287,7 @@ export function OpenCodeConfigEditor({
             onClick={onClose}
             className="flex-1 sm:flex-none"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button 
             onClick={updateConfig} 
@@ -293,7 +295,7 @@ export function OpenCodeConfigEditor({
             className="flex-1 sm:flex-none"
           >
             {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Update
+            {t('common.update') || 'Update'}
           </Button>
         </DialogFooter>
       </DialogContent>

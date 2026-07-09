@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { History, Loader2, XCircle, CheckCircle2, Ban, ChevronDown, Trash2 } from 'lucide-react'
@@ -25,6 +26,7 @@ export function RunHistoryCards({
   onDeleteRun,
   deleteRunPending,
 }: RunHistoryCardsProps) {
+  const { t } = useTranslation()
   const [expandedRunId, setExpandedRunId] = useState<number | null>(null)
   const [expandedRunRepoId, setExpandedRunRepoId] = useState<number | null>(null)
   const [expandedRunJobId, setExpandedRunJobId] = useState<number | null>(null)
@@ -68,8 +70,8 @@ export function RunHistoryCards({
       <div className="flex items-center justify-center p-6">
         <div className="text-center">
           <History className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
-          <p className="text-sm font-medium">No runs yet</p>
-          <p className="text-xs text-muted-foreground mt-1">Use Run now to generate the first execution record and log bundle.</p>
+          <p className="text-sm font-medium">{t('schedule.noRunsYet')}</p>
+          <p className="text-xs text-muted-foreground mt-1">{t('schedule.useRunNowHint')}</p>
         </div>
       </div>
     )
@@ -104,7 +106,7 @@ export function RunHistoryCards({
                     <span className="text-xs text-muted-foreground">{run.triggerSource}</span>
                   </div>
                   <p className="mt-2 truncate text-sm font-medium leading-tight">
-                    {run.sessionTitle ?? 'No session recorded'}
+                    {run.sessionTitle ?? t('schedule.noSessionRecorded')}
                   </p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                     <span>{new Date(run.startedAt).toLocaleString()}</span>
@@ -117,7 +119,7 @@ export function RunHistoryCards({
                     {run.runBranch && !run.commitHash && run.status !== 'running' && (
                       <>
                         <span aria-hidden="true">•</span>
-                        <span className="italic">No changes committed</span>
+                        <span className="italic">{t('git.noChangesCommitted')}</span>
                       </>
                     )}
                   </div>
@@ -132,8 +134,8 @@ export function RunHistoryCards({
                   type="button"
                   onClick={() => onDeleteRun(run.id)}
                   disabled={deleteRunPending}
-                  title="Delete run"
-                  aria-label="Delete run"
+                  title={t('schedule.deleteRun')}
+                  aria-label={t('schedule.deleteRun')}
                   className="flex items-center px-2.5 text-muted-foreground transition-colors hover:text-red-400 disabled:opacity-50"
                 >
                   <Trash2 className="h-4 w-4" />

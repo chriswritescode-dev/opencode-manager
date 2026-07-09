@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 import { GeneralSettings } from '@/components/settings/GeneralSettings'
 import { GitSettings } from '@/components/settings/GitSettings'
 import { KeyboardShortcuts } from '@/components/settings/KeyboardShortcuts'
@@ -21,6 +22,7 @@ import { useSettingsDialog } from '@/hooks/useSettingsDialog'
 type SettingsView = 'menu' | 'general' | 'git' | 'shortcuts' | 'opencode' | 'providers' | 'account' | 'voice' | 'notifications'
 
 export function SettingsDialog() {
+  const { t } = useTranslation()
   const { isOpen, close, activeTab, setActiveTab } = useSettingsDialog()
   const [mobileView, setMobileView] = useState<SettingsView>('menu')
   const [isVersionDialogOpen, setIsVersionDialogOpen] = useState(false)
@@ -75,14 +77,14 @@ export function SettingsDialog() {
   }, [isOpen, close, isVersionDialogOpen])
 
   const menuItems = [
-    { id: 'account', icon: User, label: 'Account', description: 'Profile, passkeys, and sign out' },
-    { id: 'general', icon: Settings2, label: 'General Settings', description: 'App preferences and behavior' },
-    { id: 'notifications', icon: Bell, label: 'Notifications', description: 'Push notification preferences' },
-    { id: 'voice', icon: Volume2, label: 'Voice', description: 'Text-to-speech and speech-to-text settings' },
-    { id: 'git', icon: GitBranch, label: 'Git', description: 'Git identity and credentials for repositories' },
-    { id: 'shortcuts', icon: Keyboard, label: 'Keyboard Shortcuts', description: 'Customize keyboard shortcuts' },
-    { id: 'opencode', icon: Code, label: 'OpenCode Config', description: 'Manage OpenCode configurations, commands, and agents' },
-    { id: 'providers', icon: Key, label: 'Providers', description: 'Manage AI provider API keys' },
+    { id: 'account', icon: User, label: t('settings.account'), description: t('settings.accountDesc') || 'Profile, passkeys, and sign out' },
+    { id: 'general', icon: Settings2, label: t('settings.general'), description: t('settings.generalDesc') || 'App preferences and behavior' },
+    { id: 'notifications', icon: Bell, label: t('settings.notifications'), description: t('settings.notificationsDesc') || 'Push notification preferences' },
+    { id: 'voice', icon: Volume2, label: t('settings.voice'), description: t('settings.voiceDesc') || 'Text-to-speech and speech-to-text settings' },
+    { id: 'git', icon: GitBranch, label: t('settings.git'), description: t('settings.gitDesc') || 'Git identity and credentials for repositories' },
+    { id: 'shortcuts', icon: Keyboard, label: t('settings.shortcuts'), description: t('settings.shortcutsDesc') || 'Customize keyboard shortcuts' },
+    { id: 'opencode', icon: Code, label: t('settings.opencodeConfig'), description: t('settings.opencodeDesc') || 'Manage OpenCode configurations, commands, and agents' },
+    { id: 'providers', icon: Key, label: t('settings.providers'), description: t('settings.providersDesc') || 'Manage AI provider API keys' },
   ]
 
   const handleOpenMobileView = useCallback((view: SettingsView) => {
@@ -112,8 +114,8 @@ export function SettingsDialog() {
          <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">
            <div className="sticky top-0 z-10 bg-gradient-to-b from-background via-background to-transparent border-b border-border backdrop-blur-sm px-6 py-4 flex-shrink-0 flex items-center justify-between">
              <h2 className="text-2xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-               Settings
-             </h2>
+              {t('settings.title')}
+            </h2>
              <Button
                variant="ghost"
                size="icon"
@@ -127,28 +129,28 @@ export function SettingsDialog() {
             <div className="px-6 pt-6 pb-4 flex-shrink-0">
               <TabsList className="grid w-full grid-cols-8 bg-card p-1">
                 <TabsTrigger value="account" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Account
+                  {t('settings.account')}
                 </TabsTrigger>
                 <TabsTrigger value="general" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  General
+                  {t('settings.general')}
                 </TabsTrigger>
                 <TabsTrigger value="notifications" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Notify
+                  {t('settings.notifications')}
                 </TabsTrigger>
                 <TabsTrigger value="voice" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Voice
+                  {t('settings.voice')}
                 </TabsTrigger>
                 <TabsTrigger value="git" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Git
+                  {t('settings.git')}
                 </TabsTrigger>
                 <TabsTrigger value="shortcuts" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Shortcuts
+                  {t('settings.shortcuts')}
                 </TabsTrigger>
                 <TabsTrigger value="opencode" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  OpenCode
+                  {t('settings.opencodeConfig')}
                 </TabsTrigger>
                 <TabsTrigger value="providers" className="data-[state=active]:bg-blue-600 data-[state=active]:text-white text-muted-foreground transition-all duration-200">
-                  Providers
+                  {t('settings.providers')}
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -192,7 +194,7 @@ export function SettingsDialog() {
                   </Button>
                 )}
                <h2 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent">
-                 {mobileView === 'menu' ? 'Settings' : menuItems.find(item => item.id === mobileView)?.label}
+                 {mobileView === 'menu' ? t('settings.title') : menuItems.find(item => item.id === mobileView)?.label}
                </h2>
              </div>
              <Button

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Download } from 'lucide-react'
@@ -17,6 +18,7 @@ interface SkillsEditorProps {
 }
 
 export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
+  const { t } = useTranslation()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
   const [editingSkill, setEditingSkill] = useState<SkillFileInfo | null>(null)
@@ -28,11 +30,11 @@ export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
     mutationFn: (data: CreateSkillRequest) => settingsApi.createSkill(data),
     onSuccess: () => {
       invalidateSkillCaches(queryClient)
-      toast.success('Skill created successfully')
+      toast.success(t('settings.skillCreated') || 'Skill created successfully')
       setDialogOpen(false)
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Failed to create skill')
+      toast.error(error instanceof Error ? error.message : t('settings.failedToCreateSkill') || 'Failed to create skill')
     },
   })
 
@@ -41,12 +43,12 @@ export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
       settingsApi.updateSkill(name, scope, data, repoId),
     onSuccess: () => {
       invalidateSkillCaches(queryClient)
-      toast.success('Skill updated successfully')
+      toast.success(t('settings.skillUpdated') || 'Skill updated successfully')
       setDialogOpen(false)
       setEditingSkill(null)
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : 'Failed to update skill')
+      toast.error(error instanceof Error ? error.message : t('settings.failedToUpdateSkill') || 'Failed to update skill')
     },
   })
 
@@ -74,11 +76,11 @@ export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
         <div className="flex w-full items-center gap-2 sm:w-auto">
           <Button type="button" variant="outline" onClick={() => setInstallDialogOpen(true)} size="sm">
             <Download className="h-4 w-4 mr-1" />
-            Install Skill
+            {t('settings.installSkill')}
           </Button>
           <Button type="button" onClick={handleCreate} size="sm" className="flex-1 sm:flex-none">
             <Plus className="h-4 w-4 mr-1" />
-            Create Skill
+            {t('common.create')} {t('settings.skill') || 'Skill'}
           </Button>
         </div>
       </div>
@@ -87,10 +89,10 @@ export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
         isLoading={false}
         data={managedSkills}
         error={null}
-        primaryAction={{ label: 'Edit', onClick: handleEdit }}
-        rowActions={[{ label: 'Delete', onClick: setDeleteSkill, destructive: true }]}
-        emptyTitle="No skills created"
-        emptyHint="Create or install your first skill to get started."
+        primaryAction={{ label: t('common.edit'), onClick: handleEdit }}
+        rowActions={[{ label: t('common.delete'), onClick: setDeleteSkill, destructive: true }]}
+        emptyTitle={t('settings.noSkills') || 'No skills created'}
+        emptyHint={t('settings.noSkillsHint') || 'Create or install your first skill to get started.'}
         maxHeightClassName="max-h-[calc(100dvh-300px)] sm:max-h-[420px]"
       />
 
@@ -112,8 +114,8 @@ export function SkillsEditor({ managedSkills = [] }: SkillsEditorProps) {
         onOpenChange={(open) => !open && setDeleteSkill(null)}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteSkill(null)}
-        title="Delete Skill"
-        description="Delete this managed skill directory and bundled files? This action cannot be undone."
+        title={t('settings.deleteSkill')}
+        description={t('settings.deleteSkillConfirm') || 'Delete this managed skill directory and bundled files? This action cannot be undone.'}
         itemName={deleteSkill?.name}
         isDeleting={isDeleting}
       />

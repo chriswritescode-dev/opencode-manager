@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
@@ -20,35 +21,35 @@ interface McpServerCardProps {
   onDeleteServer: (serverId: string, serverName: string) => void
 }
 
-function getStatusBadge(status: McpStatus) {
+function getStatusBadge(status: McpStatus, t: ReturnType<typeof useTranslation>['t']) {
   switch (status.status) {
     case 'connected':
-      return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+      return <Badge variant="default" className="text-xs bg-green-600">{t('common.connected')}</Badge>
     case 'disabled':
-      return <Badge variant="secondary" className="text-xs">Disabled</Badge>
+      return <Badge variant="secondary" className="text-xs">{t('common.disabled')}</Badge>
     case 'failed':
       return (
         <Badge variant="destructive" className="text-xs flex items-center gap-1">
           <AlertCircle className="h-3 w-3" />
-          Failed
+          {t('common.failed')}
         </Badge>
       )
     case 'needs_auth':
       return (
         <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
           <Key className="h-3 w-3" />
-          Auth Required
+          {t('mcp.authRequired') || 'Auth Required'}
         </Badge>
       )
     case 'needs_client_registration':
       return (
         <Badge variant="outline" className="text-xs flex items-center gap-1 border-orange-500 text-orange-600">
           <AlertCircle className="h-3 w-3" />
-          Registration Required
+          {t('mcp.registrationRequired') || 'Registration Required'}
         </Badge>
       )
     default:
-      return <Badge variant="outline" className="text-xs">Unknown</Badge>
+      return <Badge variant="outline" className="text-xs">{t('common.unknown')}</Badge>
   }
 }
 
@@ -57,10 +58,10 @@ function getServerDisplayName(serverId: string): string {
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
-function getServerDescription(serverConfig: McpServerConfig): string {
+function getServerDescription(serverConfig: McpServerConfig, t: ReturnType<typeof useTranslation>['t']): string {
   if (serverConfig.type === 'local' && serverConfig.command) {
     const command = serverConfig.command.join(' ')
-    if (command.includes('filesystem')) return 'File system access'
+    if (command.includes('filesystem')) return t('mcp.fileSystemAccess') || 'File system access'
     if (command.includes('git')) return 'Git repository operations'
     if (command.includes('sqlite')) return 'SQLite database access'
     if (command.includes('postgres')) return 'PostgreSQL database access'
@@ -70,9 +71,9 @@ function getServerDescription(serverConfig: McpServerConfig): string {
     if (command.includes('puppeteer')) return 'Web automation'
     if (command.includes('fetch')) return 'HTTP requests'
     if (command.includes('memory')) return 'Persistent memory'
-    return `Local command: ${command}`
+    return `${t('mcp.localCommand') || 'Local command'}: ${command}`
   } else if (serverConfig.type === 'remote' && serverConfig.url) {
-    return `Remote server: ${serverConfig.url}`
+    return `${t('mcp.remoteServer') || 'Remote server'}: ${serverConfig.url}`
   }
   return 'MCP server'
 }
@@ -91,6 +92,7 @@ export function McpServerCard({
   onRemoveAuth,
   onDeleteServer
 }: McpServerCardProps) {
+  const { t } = useTranslation()
   const needsAuth = status?.status === 'needs_auth'
   const isRemote = serverConfig.type === 'remote'
   const hasOAuthConfig = isRemote && !!serverConfig.oauth
@@ -102,15 +104,15 @@ export function McpServerCard({
 
   const actions: SettingsListRowAction[] = []
   if (showAuthButton && onAuthenticate) {
-    actions.push({ label: 'Authenticate', onClick: () => onAuthenticate(serverId), icon: <Key className="h-4 w-4 mr-2" /> })
+    actions.push({ label: t('mcp.authenticate') || 'Authenticate', onClick: () => onAuthenticate(serverId), icon: <Key className="h-4 w-4 mr-2" /> })
   }
   if (connectedWithOAuth && onAuthenticate) {
-    actions.push({ label: 'Re-authenticate', onClick: () => onAuthenticate(serverId), icon: <RefreshCw className="h-4 w-4 mr-2" /> })
+    actions.push({ label: t('mcp.reauthenticate') || 'Re-authenticate', onClick: () => onAuthenticate(serverId), icon: <RefreshCw className="h-4 w-4 mr-2" /> })
   }
   if (connectedWithOAuth && onRemoveAuth) {
-    actions.push({ label: isRemovingAuth ? 'Removing...' : 'Remove Auth', onClick: () => onRemoveAuth(serverId), icon: <Shield className="h-4 w-4 mr-2" />, disabled: isRemovingAuth })
+    actions.push({ label: isRemovingAuth ? t('common.removing') || 'Removing...' : t('mcp.removeAuth'), onClick: () => onRemoveAuth(serverId), icon: <Shield className="h-4 w-4 mr-2" />, disabled: isRemovingAuth })
   }
-  actions.push({ label: 'Delete Server', onClick: () => onDeleteServer(serverId, displayName), icon: <Trash2 className="h-4 w-4 mr-2" />, destructive: true, separatorBefore: showAuthButton || connectedWithOAuth })
+  actions.push({ label: t('mcpManager.deleteServer'), onClick: () => onDeleteServer(serverId, displayName), icon: <Trash2 className="h-4 w-4 mr-2" />, destructive: true, separatorBefore: showAuthButton || connectedWithOAuth })
 
   return (
     <SettingsListRow
@@ -118,16 +120,16 @@ export function McpServerCard({
       badges={
         <>
           {connectedWithOAuth && (
-            <span title="OAuth authenticated">
+            <span title={t('mcp.oauthAuthenticated') || 'OAuth authenticated'}>
               <Shield className="h-3 w-3 text-muted-foreground" />
             </span>
           )}
-          {status ? getStatusBadge(status) : (
-            <Badge variant="outline" className="text-xs">Loading...</Badge>
+          {status ? getStatusBadge(status, t) : (
+            <Badge variant="outline" className="text-xs">{t('common.loading')}...</Badge>
           )}
         </>
       }
-      description={getServerDescription(serverConfig)}
+      description={getServerDescription(serverConfig, t)}
       belowDescription={errorMessage ? (
         <div className="flex items-start gap-1.5 mt-1.5 text-xs text-red-500">
           <XCircle className="h-3 w-3 flex-shrink-0 mt-0.5" />
@@ -143,7 +145,7 @@ export function McpServerCard({
             size="sm"
           >
             <Key className="h-3 w-3 mr-1" />
-            Auth
+            {t('mcp.auth') || 'Auth'}
           </Button>
         ) : (
           <Switch
@@ -154,7 +156,7 @@ export function McpServerCard({
         )
       }
       actions={actions}
-      actionsLabel={`Actions for ${displayName}`}
+      actionsLabel={`${t('common.actions')} ${t('for') || 'for'} ${displayName}`}
     />
   )
 }

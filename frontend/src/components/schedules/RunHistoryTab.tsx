@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -35,6 +36,8 @@ export function RunHistoryTab({
   onDeleteRun,
   deleteRunPending,
 }: RunHistoryTabProps) {
+  const { t } = useTranslation()
+
   if (!selectedJob) {
     if (selectedRunLoading) {
       return (
@@ -48,8 +51,8 @@ export function RunHistoryTab({
         <Card className="max-w-3xl border-dashed border-border/70 w-full">
           <CardContent className="flex flex-col items-center p-8 sm:p-10 text-center">
             <History className="h-10 w-10 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium">No job selected</p>
-            <p className="mt-2 text-sm text-muted-foreground">Select a job from the Jobs tab to view its run history</p>
+            <p className="text-lg font-medium">{t('schedule.noJobSelected')}</p>
+            <p className="mt-2 text-sm text-muted-foreground">{t('schedule.selectJobForHistory')}</p>
           </CardContent>
         </Card>
       </div>
@@ -59,7 +62,7 @@ export function RunHistoryTab({
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-2 pt-2">
-        <p className="text-sm font-medium text-muted-foreground">Run history</p>
+        <p className="text-sm font-medium text-muted-foreground">{t('schedule.runHistory')}</p>
         <Button
           variant="outline"
           size="sm"
@@ -67,7 +70,7 @@ export function RunHistoryTab({
           disabled={clearHistoryPending || !runs?.length}
         >
           {clearHistoryPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-          Clear history
+          {t('schedule.clearRunHistory')}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-hidden pt-2 xl:gap-4 xl:grid xl:grid-cols-[320px_minmax(0,1fr)] xl:grid-rows-1">

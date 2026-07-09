@@ -25,43 +25,45 @@ export interface NavModel {
   items: MoreDrawerItem[]
 }
 
-function getAssistantNavItem(_pathname: string, variant: NavPrimaryCta['variant'] = 'secondary'): NavPrimaryCta {
+type TFunction = (key: string) => string
+
+function getAssistantNavItem(_pathname: string, t: TFunction, variant: NavPrimaryCta['variant'] = 'secondary'): NavPrimaryCta {
   return {
     key: 'assistant',
-    label: 'Assistant',
+    label: t('assistant.assistant'),
     icon: Bot,
     to: getAssistantPath(),
     variant,
   }
 }
 
-function getBaseItems(): MoreDrawerItem[] {
+function getBaseItems(t: TFunction): MoreDrawerItem[] {
   return [
-    { key: 'settings', label: 'Settings', icon: Settings },
-    { key: 'logout', label: 'Logout', icon: LogOut },
+    { key: 'settings', label: t('nav.settings'), icon: Settings },
+    { key: 'logout', label: t('nav.logout'), icon: LogOut },
   ]
 }
 
-export function buildNavModel(pathname: string): NavModel {
-  const baseItems = getBaseItems()
+export function buildNavModel(pathname: string, t: TFunction): NavModel {
+  const baseItems = getBaseItems(t)
 
   const repoDetailMatch = /^\/repos\/(\d+)$/.exec(pathname)
   if (repoDetailMatch) {
     const id = repoDetailMatch[1]
     const items: MoreDrawerItem[] = [
-      { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+      { key: 'files', label: t('fileBrowser.open'), icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
-      { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
-      { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${id}/schedules` },
-      { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+      { key: 'skills', label: t('settings.skills'), icon: Sparkles, dialog: 'skills' },
+      { key: 'reset-permissions', label: t('repo.resetPermissions'), icon: ShieldOff, dialog: 'resetPermissions', danger: true },
+      { key: 'schedules', label: t('nav.schedules'), icon: CalendarClock, to: `/repos/${id}/schedules` },
+      { key: 'source-control', label: t('repo.sourceControl'), icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]
 
     return {
       primary: [
-        { key: 'new-session', label: 'New Session', icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
-        getAssistantNavItem(pathname),
+        { key: 'new-session', label: t('nav.newSession'), icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
+        getAssistantNavItem(pathname, t),
       ],
       items,
     }
@@ -70,20 +72,20 @@ export function buildNavModel(pathname: string): NavModel {
   const sessionDetailMatch = /^\/repos\/(\d+)\/sessions\/[^/]+$/.exec(pathname)
   if (sessionDetailMatch) {
     const items: MoreDrawerItem[] = [
-      { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+      { key: 'files', label: t('fileBrowser.open'), icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
-      { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
-      { key: 'lsp', label: 'LSP', icon: Code2, dialog: 'lsp' },
-      { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: `/repos/${sessionDetailMatch[1]}/schedules` },
-      { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+      { key: 'skills', label: t('settings.skills'), icon: Sparkles, dialog: 'skills' },
+      { key: 'lsp', label: t('mcp.lspServers'), icon: Code2, dialog: 'lsp' },
+      { key: 'reset-permissions', label: t('repo.resetPermissions'), icon: ShieldOff, dialog: 'resetPermissions', danger: true },
+      { key: 'schedules', label: t('nav.schedules'), icon: CalendarClock, to: `/repos/${sessionDetailMatch[1]}/schedules` },
+      { key: 'source-control', label: t('repo.sourceControl'), icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]
 
     return {
       primary: [
-        { key: 'new-session', label: 'New Session', icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
-        getAssistantNavItem(pathname),
+        { key: 'new-session', label: t('nav.newSession'), icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
+        getAssistantNavItem(pathname, t),
       ],
       items,
     }
@@ -91,19 +93,19 @@ export function buildNavModel(pathname: string): NavModel {
 
   if (isAssistantPath(pathname)) {
     const items: MoreDrawerItem[] = [
-      { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+      { key: 'files', label: t('fileBrowser.open'), icon: Folder, dialog: 'files' },
       { key: 'mcp', label: 'MCP', icon: Plug, dialog: 'mcp' },
-      { key: 'skills', label: 'Skills', icon: Sparkles, dialog: 'skills' },
-      { key: 'reset-permissions', label: 'Reset Permissions', icon: ShieldOff, dialog: 'resetPermissions', danger: true },
-      { key: 'schedules', label: 'Schedules', icon: CalendarClock, to: '/repos/0/schedules' },
-      { key: 'source-control', label: 'Source Control', icon: GitCommitHorizontal, dialog: 'sourceControl' },
+      { key: 'skills', label: t('settings.skills'), icon: Sparkles, dialog: 'skills' },
+      { key: 'reset-permissions', label: t('repo.resetPermissions'), icon: ShieldOff, dialog: 'resetPermissions', danger: true },
+      { key: 'schedules', label: t('nav.schedules'), icon: CalendarClock, to: '/repos/0/schedules' },
+      { key: 'source-control', label: t('repo.sourceControl'), icon: GitCommitHorizontal, dialog: 'sourceControl' },
       ...baseItems,
     ]
 
     return {
       primary: [
-        { key: 'new-session', label: 'New Session', icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
-        getAssistantNavItem(pathname, 'secondary'),
+        { key: 'new-session', label: t('nav.newSession'), icon: SquarePlus, onSelect: 'new-session', variant: 'primary' },
+        getAssistantNavItem(pathname, t, 'secondary'),
       ],
       items,
     }
@@ -112,8 +114,8 @@ export function buildNavModel(pathname: string): NavModel {
   if (pathname === '/schedules' || /^\/repos\/\d+\/schedules$/.test(pathname)) {
     return {
       primary: [
-        { key: 'new-schedule', label: 'New Schedule', icon: Clock, onSelect: 'new-schedule', variant: 'primary' },
-        getAssistantNavItem(pathname),
+        { key: 'new-schedule', label: t('schedule.create'), icon: Clock, onSelect: 'new-schedule', variant: 'primary' },
+        getAssistantNavItem(pathname, t),
       ],
       items: baseItems,
     }
@@ -122,12 +124,12 @@ export function buildNavModel(pathname: string): NavModel {
   if (pathname === '/') {
     return {
       primary: [
-        { key: 'new-repo', label: 'New Repo', icon: Plus, onSelect: 'new-repo', variant: 'primary' },
-        getAssistantNavItem(pathname),
+        { key: 'new-repo', label: t('nav.newRepo'), icon: Plus, onSelect: 'new-repo', variant: 'primary' },
+        getAssistantNavItem(pathname, t),
       ],
       items: [
-        { key: 'all-schedules', label: 'All Schedules', icon: CalendarClock, to: '/schedules' },
-        { key: 'files', label: 'Files', icon: Folder, dialog: 'files' },
+        { key: 'all-schedules', label: t('repo.allSchedules'), icon: CalendarClock, to: '/schedules' },
+        { key: 'files', label: t('fileBrowser.open'), icon: Folder, dialog: 'files' },
         ...baseItems,
       ],
     }
@@ -135,12 +137,12 @@ export function buildNavModel(pathname: string): NavModel {
 
   return {
     primary: [
-      getAssistantNavItem(pathname),
+      getAssistantNavItem(pathname, t),
     ],
     items: baseItems,
   }
 }
 
-export function buildMoreItems(pathname: string): MoreDrawerItem[] {
-  return buildNavModel(pathname).items
+export function buildMoreItems(pathname: string, t: TFunction): MoreDrawerItem[] {
+  return buildNavModel(pathname, t).items
 }

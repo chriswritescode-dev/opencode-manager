@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
@@ -20,6 +21,7 @@ const loginSchema = z.object({
 type LoginFormData = z.infer<typeof loginSchema>
 
 export function Login() {
+  const { t } = useTranslation()
   const { signInWithEmail, signInWithProvider, signInWithPasskey } = useAuth()
   const { config } = useLoaderData() as { config: AuthConfig }
   const theme = useTheme()
@@ -110,7 +112,7 @@ export function Login() {
               ) : (
                 <KeyRound className="mr-2 h-4 w-4" />
               )}
-              Sign in with Passkey
+              {t('login.loginButton')}
             </Button>
           )}
 
@@ -192,7 +194,7 @@ export function Login() {
                 <span className="w-full border-t border-border" />
               </div>
               <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">Or continue with email</span>
+                <span className="bg-card px-2 text-muted-foreground">{t('login.orContinueWithEmail')}</span>
               </div>
             </div>
           )}
@@ -200,7 +202,7 @@ export function Login() {
           {hasCredentials && (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email" className="text-sm text-muted-foreground">Email</Label>
+                <Label htmlFor="email" className="text-sm text-muted-foreground">{t('login.email')}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -214,7 +216,7 @@ export function Login() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm text-muted-foreground">Password</Label>
+                <Label htmlFor="password" className="text-sm text-muted-foreground">{t('login.password')}</Label>
                 <Input
                   id="password"
                   type="password"
@@ -233,7 +235,7 @@ export function Login() {
                 ) : (
                   <Mail className="mr-2 h-4 w-4" />
                 )}
-                Sign In
+                {t('login.loginButton')}
               </Button>
             </form>
           )}

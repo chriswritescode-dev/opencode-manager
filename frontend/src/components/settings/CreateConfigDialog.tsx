@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useRef } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -16,6 +17,7 @@ interface CreateConfigDialogProps {
 }
 
 export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating }: CreateConfigDialogProps) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [content, setContent] = useState('')
   const [isDefault, setIsDefault] = useState(false)
@@ -41,7 +43,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
         const match = error.message.match(/line (\d+)/i)
         const line = match ? parseInt(match[1]) : null
         setErrorLine(line)
-        setError(`JSON Error: ${error.message}`)
+        setError(`${t('common.jsonError') || 'JSON Error'}: ${error.message}`)
         if (line && textareaRef.current) {
           highlightErrorLine(textareaRef.current, line)
         }
@@ -49,7 +51,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
         setError(error.message)
         setErrorLine(null)
       } else {
-        setError('Failed to create configuration')
+        setError(t('createConfig.failedToCreate') || 'Failed to create configuration')
         setErrorLine(null)
       }
     }
@@ -73,9 +75,9 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
           const match = err.message.match(/line (\d+)/i)
           const line = match ? parseInt(match[1]) : null
           setErrorLine(line)
-          setError(`Invalid JSON/JSONC file: ${err.message}`)
+          setError(`${t('createConfig.invalidJson') || 'Invalid JSON/JSONC file'}: ${err.message}`)
         } else {
-          setError('Invalid JSON/JSONC file')
+          setError(t('createConfig.invalidJson') || 'Invalid JSON/JSONC file')
           setErrorLine(null)
         }
       }
@@ -106,21 +108,21 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
         <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
-          <DialogTitle>Create OpenCode Config</DialogTitle>
+          <DialogTitle>{t('createConfig.title')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 overflow-y-auto flex-1 pr-2">
           <div>
-            <Label htmlFor="config-name" className="pb-1">Config Name</Label>
+            <Label htmlFor="config-name" className="pb-1">{t('settings.configKey') || 'Config Name'}</Label>
             <Input
               id="config-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="my-config"
+              placeholder={t('settings.configNamePlaceholder') || 'my-config'}
             />
           </div>
           
           <div>
-            <Label htmlFor="config-upload" className="pb-1">Upload JSON File</Label>
+            <Label htmlFor="config-upload" className="pb-1">{t('createConfig.uploadJson') || 'Upload JSON File'}</Label>
             <Input
               id="config-upload"
               type="file"
@@ -130,7 +132,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
           </div>
 
           <div>
-            <Label htmlFor="config-content" className="pb-1">Config Content (JSON/JSONC)</Label>
+            <Label htmlFor="config-content" className="pb-1">{t('createConfig.configContent') || 'Config Content (JSON/JSONC)'}</Label>
             <Textarea
               id="config-content"
               ref={textareaRef}
@@ -144,7 +146,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
               <p className="text-sm text-red-500 mt-2">
                 {error}
                 {errorLine && (
-                  <span className="ml-2 text-xs">(Line {errorLine})</span>
+                  <span className="ml-2 text-xs">{t('createConfig.line', { line: errorLine }) || `(Line ${errorLine})`}</span>
                 )}
               </p>
             )}
@@ -156,13 +158,13 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
               checked={isDefault}
               onCheckedChange={setIsDefault}
             />
-            <Label htmlFor="config-default">Set as default configuration</Label>
+            <Label htmlFor="config-default">{t('settings.setAsDefault')}</Label>
           </div>
         </div>
 
         <div className="flex flex-row sm:flex-row justify-end gap-2 flex-shrink-0 pt-4 pb-4 border-t">
           <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1 sm:flex-none">
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button 
             type="button"
@@ -171,7 +173,7 @@ export function CreateConfigDialog({ isOpen, onOpenChange, onCreate, isUpdating 
             className="flex-1 sm:flex-none"
           >
             {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Create
+            {t('common.create')}
           </Button>
         </div>
       </DialogContent>

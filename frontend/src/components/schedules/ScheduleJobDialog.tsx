@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import type { CreateScheduleJobRequest, PromptTemplate, ScheduleJob } from '@opencode-manager/shared/types'
 import { getProvidersWithModels } from '@/api/providers'
@@ -42,6 +43,7 @@ type ScheduleJobDialogProps = {
 }
 
 export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit, showRepoSelector, repoId: selectedRepoId, onRepoChange }: ScheduleJobDialogProps) {
+  const { t } = useTranslation()
   const [schedulePreset, setSchedulePreset] = useState<SchedulePreset>('interval')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -139,7 +141,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     const assistantOption: ComboboxOption = {
       value: ASSISTANT_REPO_ID.toString(),
       label: ASSISTANT_REPO_NAME,
-      description: 'Built-in assistant',
+      description: t('schedule.builtinAssistant'),
     }
     const repoEntries = repos
       .filter((repo) => repo.cloneStatus === 'ready')
@@ -149,7 +151,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         description: repo.localPath,
       }))
     return [assistantOption, ...repoEntries]
-  }, [repos])
+  }, [repos, t])
 
   const modelOptions = useMemo<ComboboxOption[]>(() => {
     const configuredModels: ComboboxOption[] = []
@@ -166,7 +168,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         value: configModel,
         label: providerModel?.name || modelId,
         description: configModel,
-        group: 'Configured',
+        group: t('settings.configured'),
       })
     }
 
@@ -182,7 +184,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     )
 
     return [...configuredModels, ...allModels]
-  }, [providerModels, openCodeConfig])
+  }, [providerModels, openCodeConfig, t])
 
   const agentOptions = useMemo<ComboboxOption[]>(() => {
     return agents.map((agent) => ({
@@ -299,19 +301,19 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         className="flex h-dvh max-h-dvh w-full max-w-4xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-lg sm:h-[min(85vh,760px)] sm:max-h-[85vh] sm:max-w-[90vw] sm:w-[calc(100vw-1rem)]"
       >
         <DialogHeader className="shrink-0 space-y-1 border-b border-border px-3 sm:px-6 py-4">
-          <DialogTitle>{job ? 'Edit schedule' : 'New schedule'}</DialogTitle>
+          <DialogTitle>{job ? t('schedule.edit') : t('schedule.create')}</DialogTitle>
           <DialogDescription className="mt-0">
-            Create a reusable repo job with a visual schedule builder, manual runs, and optional advanced metadata.
+            {t('schedule.createDescription')}
           </DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="basics" className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="border-b border-border px-3 sm:px-6 pb-3">
             <TabsList className="grid h-9 w-full grid-cols-4 bg-card p-0.5">
-              <TabsTrigger value="basics" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">General</TabsTrigger>
-              <TabsTrigger value="timing" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Timing</TabsTrigger>
-              <TabsTrigger value="prompt" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Prompt</TabsTrigger>
-              <TabsTrigger value="skills" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">Skills</TabsTrigger>
+              <TabsTrigger value="basics" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">{t('schedule.general')}</TabsTrigger>
+              <TabsTrigger value="timing" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">{t('schedule.timing')}</TabsTrigger>
+              <TabsTrigger value="prompt" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">{t('schedule.prompt')}</TabsTrigger>
+              <TabsTrigger value="skills" className="h-8 px-2 text-xs sm:text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm">{t('schedule.skills')}</TabsTrigger>
             </TabsList>
           </div>
 
@@ -384,10 +386,10 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
         </Tabs>
 
         <div className="mt-0 shrink-0 border-t border-border px-3 sm:px-6 py-4 flex flex-row gap-2 sm:justify-end">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving} className="flex-1 sm:flex-none">{t('common.cancel')}</Button>
           <Button onClick={handleSubmit} disabled={isSaving || !name.trim() || !prompt.trim() || isScheduleConfigInvalid || (!!showRepoSelector && !job && selectedRepoId === undefined)} className="flex-1 sm:flex-none">
             {isSaving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            {isSaving ? 'Saving...' : job ? 'Save changes' : 'Create schedule'}
+            {isSaving ? t('common.saving') : job ? t('common.save') : t('schedule.create')}
           </Button>
         </div>
       </DialogContent>
@@ -407,8 +409,8 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
           }
         }}
         onCancel={() => { if (!deleteTemplateMutation.isPending) setDeletingTemplateId(null) }}
-        title="Delete template"
-        description="Are you sure you want to delete this template?"
+        title={t('schedule.deleteTemplate')}
+        description={t('discardDialog.confirm')}
         isDeleting={deleteTemplateMutation.isPending}
       />
     </Dialog>

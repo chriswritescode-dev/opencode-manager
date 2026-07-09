@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Loader2, GitBranch, GitBranchPlus, Download, Trash2, MoreVertical, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -51,6 +52,7 @@ export function RepoRowActions({
   isMobile,
   onActionsOpenChange,
 }: RepoRowActionsProps) {
+  const { t } = useTranslation()
   const [showDownloadDialog, setShowDownloadDialog] = useState(false)
   const [showSourceControl, setShowSourceControl] = useState(false)
   const [showWorktreeDialog, setShowWorktreeDialog] = useState(false)
@@ -69,10 +71,10 @@ export function RepoRowActions({
       queryClient.invalidateQueries({ queryKey: ['all-schedules'] })
       queryClient.invalidateQueries({ queryKey: ['all-schedule-runs'] })
       queryClient.invalidateQueries({ queryKey: ['repo-schedules', repo.id] })
-      showToast.success('Repository renamed')
+      showToast.success(t('repo.repositoryRenamed'))
     },
     onError: (error: unknown) => {
-      showToast.error(error instanceof Error ? error.message : 'Rename failed')
+      showToast.error(error instanceof Error ? error.message : t('repo.renameFailed'))
     },
   })
 
@@ -97,14 +99,14 @@ export function RepoRowActions({
   }
 
   const canCreateWorktree = isReady && !repo.isWorktree && Boolean(repo.repoUrl)
-  const deleteLabel = repo.isLocal ? 'Unlink Repository' : 'Delete Repository'
+  const deleteLabel = repo.isLocal ? t('repo.unlinkRepo') : t('repo.deleteRepo')
 
   const handleDownload = async (options: { includeGit?: boolean; includePaths?: string[] }) => {
     try {
       await downloadRepo(repo.id, repoName, options)
-      showToast.success('Download complete')
+      showToast.success(t('repo.downloadComplete'))
     } catch (error: unknown) {
-      showToast.error(error instanceof Error ? error.message : 'Download failed')
+      showToast.error(error instanceof Error ? error.message : t('repo.downloadFailed'))
     }
   }
 
@@ -114,11 +116,11 @@ export function RepoRowActions({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button
-              aria-label="Repository actions"
+              aria-label={t('repo.actions')}
               size="sm"
               variant="ghost"
               className="h-8 w-8 p-0"
-              title="Repository actions"
+              title={t('repo.actions')}
               onClick={(e) => e.stopPropagation()}
             >
               <MoreVertical className="w-4 h-4" />
@@ -135,18 +137,18 @@ export function RepoRowActions({
               disabled={!isReady}
             >
               <GitBranch className="w-4 h-4 mr-2" />
-              Source Control
+              {t('repo.sourceControl')}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handleRenameOpen(true)}>
               <Pencil className="w-4 h-4 mr-2" />
-              Rename
+              {t('repo.renameAction')}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => handleDownloadDialogOpen(true)}
               disabled={!isReady}
             >
               <Download className="w-4 h-4 mr-2" />
-              Download
+              {t('repo.downloadAction')}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => onDelete(repo.id)}
@@ -158,7 +160,7 @@ export function RepoRowActions({
               ) : (
                 <Trash2 className="w-4 h-4 mr-2" />
               )}
-              {repo.isLocal ? 'Unlink' : 'Delete'}
+              {repo.isLocal ? t('repo.unlink') : t('repo.delete')}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
@@ -180,8 +182,8 @@ export function RepoRowActions({
             onActionsOpenChange?.(open)
           }}
           onDownload={handleDownload}
-          title="Download Repository"
-          description="This will create a ZIP archive of the entire repository."
+          title={t('repo.download')}
+          description={t('repo.download')}
           itemName={repoName}
           targetPath={repo.fullPath}
         />
@@ -203,69 +205,69 @@ export function RepoRowActions({
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Rename Repository"
+                aria-label={t('tooltip.rename')}
                 size="sm"
                 variant="ghost"
                 onClick={() => handleRenameOpen(true)}
                 className="h-8 w-8 p-0"
-                title="Rename Repository"
+                title={t('tooltip.rename')}
               >
                 <Pencil className="w-4 h-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Rename Repository</TooltipContent>
+            <TooltipContent>{t('tooltip.rename')}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Source Control"
+                aria-label={t('tooltip.sourceControl')}
                 size="sm"
                 variant="ghost"
                 onClick={() => handleSourceControlOpen(true)}
                 disabled={!isReady}
                 className="h-8 w-8 p-0"
-                title="Source Control"
+                title={t('tooltip.sourceControl')}
               >
                 <GitBranch className="w-4 h-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Source Control</TooltipContent>
+            <TooltipContent>{t('tooltip.sourceControl')}</TooltipContent>
           </Tooltip>
 
           {canCreateWorktree && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  aria-label="Create Worktree"
+                  aria-label={t('tooltip.createWorktree')}
                   size="sm"
                   variant="ghost"
                   onClick={() => handleWorktreeDialogOpen(true)}
                   className="h-8 w-8 p-0"
-                  title="Create Worktree"
+                  title={t('tooltip.createWorktree')}
                 >
                   <GitBranchPlus className="w-4 h-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Create Worktree</TooltipContent>
+              <TooltipContent>{t('tooltip.createWorktree')}</TooltipContent>
             </Tooltip>
           )}
 
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                aria-label="Download Repository"
+                aria-label={t('tooltip.downloadRepo')}
                 size="sm"
                 variant="ghost"
                 onClick={() => handleDownloadDialogOpen(true)}
                 disabled={!isReady}
                 className="h-8 w-8 p-0"
-                title="Download Repository"
+                title={t('tooltip.downloadRepo')}
               >
                 <Download className="w-4 h-4" />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>Download Repository</TooltipContent>
+            <TooltipContent>{t('tooltip.downloadRepo')}</TooltipContent>
           </Tooltip>
 
           <Tooltip>
@@ -302,8 +304,8 @@ export function RepoRowActions({
         open={showDownloadDialog}
         onOpenChange={(open) => { setShowDownloadDialog(open); onActionsOpenChange?.(open); }}
         onDownload={handleDownload}
-        title="Download Repository"
-        description="This will create a ZIP archive of the entire repository."
+        title={t('repo.download')}
+        description={t('repo.download')}
         itemName={repoName}
         targetPath={repo.fullPath}
       />

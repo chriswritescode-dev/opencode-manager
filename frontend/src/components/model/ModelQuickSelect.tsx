@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Search, Star, Trash2, X } from 'lucide-react'
 import { useModelSelection } from '@/hooks/useModelSelection'
@@ -187,6 +188,7 @@ export function ModelQuickSelect({
   disabled,
   children,
 }: ModelQuickSelectProps) {
+  const { t } = useTranslation()
   const [isOpen, setIsOpen] = useState(false)
   const [showAllModels, setShowAllModels] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -346,7 +348,7 @@ export function ModelQuickSelect({
 
     if (favoriteModelsWithNames.length > 0) {
       sections.push({
-        title: 'Favorites',
+        title: t('common.favorites'),
         icon: <Star className="h-3.5 w-3.5" />,
         models: favoriteModelsWithNames,
       })
@@ -354,7 +356,7 @@ export function ModelQuickSelect({
 
     if (recentModelsWithNames.length > 0) {
       sections.push({
-        title: 'Recent',
+        title: t('common.recent'),
         icon: <Clock className="h-3.5 w-3.5" />,
         models: recentModelsWithNames,
       })
@@ -362,14 +364,14 @@ export function ModelQuickSelect({
 
     if (sections.length === 0 && quickModels.length > 0) {
       sections.push({
-        title: 'Models',
+        title: t('model.models'),
         icon: <ChevronRight className="h-3.5 w-3.5" />,
         models: quickModels,
       })
     }
 
     return sections
-  }, [favoriteModelsWithNames, quickModels, recentModelsWithNames])
+  }, [favoriteModelsWithNames, quickModels, recentModelsWithNames, t])
 
   const selectedProviderModels = useMemo(() => {
     if (!selectedProviderId) return []
@@ -437,7 +439,7 @@ export function ModelQuickSelect({
     const context = item.model?.limit?.context
     if (context) {
       const formattedContext = context >= 1000000 ? `${(context / 1000000).toFixed(1)}M` : context.toLocaleString()
-      return `${item.providerName} · ${formattedContext} context`
+      return `${item.providerName} · ${formattedContext} ${t('model.context')}`
     }
 
     return item.providerName
@@ -475,7 +477,7 @@ export function ModelQuickSelect({
               removeRecentModel({ providerID: item.providerID, modelID: item.modelID })
             }}
             className="rounded-full p-1.5 text-white/30 hover:bg-white/10 hover:text-white/70"
-            aria-label="Remove from recent"
+            aria-label={t('model.removeFromRecent')}
           >
             <Trash2 className="h-3.5 w-3.5 text-red-400" />
           </button>
@@ -487,7 +489,7 @@ export function ModelQuickSelect({
             toggleFavorite({ providerID: item.providerID, modelID: item.modelID })
           }}
           className="rounded-full p-1.5 text-white/50 transition-opacity hover:bg-white/10 hover:text-white"
-          aria-label={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
+          aria-label={isFavorite ? t('model.removeFromFavorites') : t('model.addToFavorites')}
         >
           <Star className={`h-4 w-4 ${isFavorite ? 'fill-yellow-400 text-yellow-400' : ''}`} />
         </button>
@@ -508,7 +510,7 @@ export function ModelQuickSelect({
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium text-white">{provider.label}</span>
-          <span className="mt-0.5 block truncate text-xs text-white/50">{provider.count} {provider.count === 1 ? 'model' : 'models'}</span>
+          <span className="mt-0.5 block truncate text-xs text-white/50">{provider.count} {provider.count === 1 ? t('model.model') : t('model.models')}</span>
         </span>
         <ChevronRight className="h-5 w-5 shrink-0 text-white/40" />
       </button>
@@ -520,9 +522,9 @@ export function ModelQuickSelect({
 
     return (
       <>
-        <DropdownMenuLabel>Variant</DropdownMenuLabel>
+        <DropdownMenuLabel>{t('model.variant')}</DropdownMenuLabel>
         <DropdownMenuItem onClick={() => clearVariant()} className={!currentVariant ? 'text-orange-500' : ''}>
-          Default
+          {t('common.default')}
           {!currentVariant && <Check className="ml-auto h-4 w-4" />}
         </DropdownMenuItem>
         {availableVariants.map(variant => (
@@ -535,7 +537,7 @@ export function ModelQuickSelect({
     )
   }
 
-  const selectedVariantLabel = currentVariant ? currentVariant : 'Default'
+  const selectedVariantLabel = currentVariant ? currentVariant : t('common.default')
 
   const handleMoreModelsBack = () => {
     if (selectedProviderId) {
@@ -547,8 +549,8 @@ export function ModelQuickSelect({
     setShowAllModels(false)
   }
 
-  const selectedModelLabel = selectedModelItem ? getPrimaryLabel(selectedModelItem) : 'Select model'
-  const selectedModelDescription = selectedModelItem ? getDescription(selectedModelItem) : 'Choose a model'
+  const selectedModelLabel = selectedModelItem ? getPrimaryLabel(selectedModelItem) : t('model.selectModel')
+  const selectedModelDescription = selectedModelItem ? getDescription(selectedModelItem) : t('model.selectOption')
 
   return (
     <>
@@ -560,7 +562,7 @@ export function ModelQuickSelect({
         onClose={() => handleOpenChange(false)}
         heightClass="h-[70dvh] max-h-[720px]"
         className="z-[300] border-white/10 bg-zinc-950 text-white shadow-2xl md:mx-auto md:max-w-lg"
-        ariaLabel="Select model"
+        ariaLabel={t('model.selectModel')}
       >
         <div className={`flex items-center justify-between gap-2 px-4 ${showAllModels ? 'pb-2 pt-2' : 'pb-3 pt-0'}`}>
           {showAllModels ? (
@@ -569,7 +571,7 @@ export function ModelQuickSelect({
                 type="button"
                 onClick={handleMoreModelsBack}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
-                aria-label="Back to quick models"
+                aria-label={t('model.backToQuick')}
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
@@ -578,7 +580,7 @@ export function ModelQuickSelect({
                 <Input
                   value={searchQuery}
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder={selectedProviderId ? 'Search models...' : 'Search providers...'}
+                  placeholder={selectedProviderId ? t('search.models') : t('search.providers')}
                   className="h-9 border-white/10 bg-white/5 pl-9 text-sm text-white placeholder:text-white/40"
                   autoComplete="off"
                   name="model-search"
@@ -591,7 +593,7 @@ export function ModelQuickSelect({
                 type="button"
                 onClick={() => handleOpenChange(false)}
                 className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-white/80 hover:bg-white/10"
-                aria-label="Close model selector"
+                aria-label={t('model.closeSelector')}
               >
                 <X className="h-5 w-5" />
               </button>
@@ -611,7 +613,7 @@ export function ModelQuickSelect({
                       type="button"
                       disabled={!model && !hasVariants}
                       className="flex h-9 w-24 items-center justify-center gap-1 rounded-md border border-white/10 bg-white/5 px-1.5 text-sm font-medium capitalize text-white/70 hover:bg-white/10 disabled:opacity-30"
-                      aria-label={`Current variant: ${selectedVariantLabel}`}
+                      aria-label={`${t('model.currentVariant')}: ${selectedVariantLabel}`}
                     >
                       <span className="truncate">{selectedVariantLabel}</span>
                       <ChevronDown className="h-3.5 w-3.5 shrink-0 text-white/40" />
@@ -633,7 +635,7 @@ export function ModelQuickSelect({
               <div className="p-3 space-y-1">
                 {connectedProviderItems.length > 0 && (
                   <>
-                    <p className="px-3 pb-1 text-xs font-medium text-white/45">Connected</p>
+                    <p className="px-3 pb-1 text-xs font-medium text-white/45">{t('common.connected')}</p>
                     {connectedProviderItems.map(provider => (
                       <button
                         key={provider.id}
@@ -646,7 +648,7 @@ export function ModelQuickSelect({
                         }`}
                       >
                         <div className="truncate">{provider.label}</div>
-                        <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? 'model' : 'models'}</div>
+                        <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? t('model.model') : t('model.models')}</div>
                       </button>
                     ))}
                     {availableProviderItems.length > 0 && <div className="mx-3 my-1 h-px bg-white/10" />}
@@ -654,7 +656,7 @@ export function ModelQuickSelect({
                 )}
                 {availableProviderItems.length > 0 && (
                   <>
-                    <p className="px-3 pb-1 text-xs font-medium text-white/45">Available</p>
+                    <p className="px-3 pb-1 text-xs font-medium text-white/45">{t('common.available')}</p>
                     {availableProviderItems.map(provider => (
                       <button
                         key={provider.id}
@@ -667,7 +669,7 @@ export function ModelQuickSelect({
                         }`}
                       >
                         <div className="truncate">{provider.label}</div>
-                        <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? 'model' : 'models'}</div>
+                        <div className="text-xs text-white/40">{provider.count} {provider.count === 1 ? t('model.model') : t('model.models')}</div>
                       </button>
                     ))}
                   </>
@@ -684,7 +686,7 @@ export function ModelQuickSelect({
                   itemHeight={MODEL_OPTION_ROW_HEIGHT}
                   renderItem={(item) => renderModelOption(item)}
                   getKey={(item) => item.key}
-                  emptyLabel="No models found"
+                  emptyLabel={t('model.noModelsFound')}
                   className="px-4 pb-4 pt-2"
                   resetKey={`${selectedProviderId ?? 'all'}:${deferredSearchQuery}`}
                 />
@@ -698,7 +700,7 @@ export function ModelQuickSelect({
                     itemHeight={MODEL_OPTION_ROW_HEIGHT}
                     renderItem={(item) => renderModelOption(item)}
                     getKey={(item) => item.key}
-                    emptyLabel="No models found"
+                    emptyLabel={t('model.noModelsFound')}
                     className="px-4 pb-4"
                     resetKey={`${selectedProviderId}:${deferredSearchQuery}`}
                   />
@@ -707,20 +709,20 @@ export function ModelQuickSelect({
                     <div className="space-y-1">
                       {connectedProviderItems.length > 0 && (
                         <>
-                          <p className="px-1 pb-1 text-xs font-medium text-white/45">Connected</p>
+                          <p className="px-1 pb-1 text-xs font-medium text-white/45">{t('common.connected')}</p>
                           {connectedProviderItems.map(renderProviderOption)}
                           {availableProviderItems.length > 0 && <div className="-mx-4 my-2 h-px bg-white/10" />}
                         </>
                       )}
                       {availableProviderItems.length > 0 && (
                         <>
-                          <p className="px-1 pb-1 text-xs font-medium text-white/45">Available</p>
+                          <p className="px-1 pb-1 text-xs font-medium text-white/45">{t('common.available')}</p>
                           {availableProviderItems.map(renderProviderOption)}
                         </>
                       )}
                     </div>
                     {filteredProviderItems.length === 0 && (
-                      <div className="py-10 text-center text-sm text-white/50">No providers found</div>
+                      <div className="py-10 text-center text-sm text-white/50">{t('model.noProvidersFound')}</div>
                     )}
                   </div>
                 )}
@@ -748,7 +750,7 @@ export function ModelQuickSelect({
                 onClick={() => setShowAllModels(true)}
                 className="flex w-full items-center justify-between bg-card px-6 py-4 text-left text-sm font-semibold text-white transition-colors hover:bg-accent active:bg-card"
               >
-                <span>More models</span>
+                <span>{t('model.moreModels')}</span>
                 <ChevronRight className="h-5 w-5 text-white/50" />
               </button>
             </div>

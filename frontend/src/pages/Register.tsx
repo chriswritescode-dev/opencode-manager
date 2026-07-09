@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Link, useLoaderData } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
@@ -25,6 +26,7 @@ const registerSchema = z.object({
 type RegisterFormData = z.infer<typeof registerSchema>
 
 export function Register() {
+  const { t } = useTranslation()
   const { signUpWithEmail } = useAuth()
   const { config } = useLoaderData() as { config: AuthConfig }
   const theme = useTheme()
@@ -63,8 +65,8 @@ export function Register() {
           />
           <p className="text-sm text-muted-foreground">
             {config.isFirstUser
-              ? 'Create the first admin account'
-              : 'Create your account'}
+              ? t('login.createAdminAccount')
+              : t('login.register')}
           </p>
         </div>
 
@@ -78,11 +80,11 @@ export function Register() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name" className="text-sm text-muted-foreground">Name</Label>
+              <Label htmlFor="name" className="text-sm text-muted-foreground">{t('login.name')}</Label>
               <Input
                 id="name"
                 type="text"
-                placeholder="Your name"
+                placeholder={t('login.yourNamePlaceholder')}
                 className="bg-input border-border focus:border-primary"
                 {...register('name')}
                 aria-invalid={!!errors.name}
@@ -92,7 +94,7 @@ export function Register() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-sm text-muted-foreground">Email</Label>
+              <Label htmlFor="email" className="text-sm text-muted-foreground">{t('login.email')}</Label>
               <Input
                 id="email"
                 type="email"
@@ -106,11 +108,11 @@ export function Register() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm text-muted-foreground">Password</Label>
+              <Label htmlFor="password" className="text-sm text-muted-foreground">{t('login.password')}</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="At least 8 characters"
+                placeholder={t('login.atLeast8Chars')}
                 className="bg-input border-border focus:border-primary"
                 {...register('password')}
                 aria-invalid={!!errors.password}
@@ -120,11 +122,11 @@ export function Register() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="confirmPassword" className="text-sm text-muted-foreground">Confirm Password</Label>
+              <Label htmlFor="confirmPassword" className="text-sm text-muted-foreground">{t('login.confirmPassword')}</Label>
               <Input
                 id="confirmPassword"
                 type="password"
-                placeholder="Confirm your password"
+                placeholder={t('login.confirmYourPassword')}
                 className="bg-input border-border focus:border-primary"
                 {...register('confirmPassword')}
                 aria-invalid={!!errors.confirmPassword}
@@ -139,15 +141,15 @@ export function Register() {
               ) : (
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
-              {config.isFirstUser ? 'Create Admin Account' : 'Create Account'}
+              {config.isFirstUser ? t('login.createAdminAccount') : t('login.registerButton')}
             </Button>
           </form>
         </div>
 
         <p className="text-center text-sm text-muted-foreground">
-          Already have an account?{' '}
+          {t('common.alreadyAccount')}{' '}
           <Link to="/login" className="text-primary hover:underline transition-colors">
-            Sign in
+            {t('login.loginButton')}
           </Link>
         </p>
       </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,6 +29,7 @@ export function OAuthCallbackDialog({
   onOpenChange, 
   onSuccess 
 }: OAuthCallbackDialogProps) {
+  const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [loadingMessage, setLoadingMessage] = useState('')
   const [authCode, setAuthCode] = useState('')
@@ -35,11 +37,11 @@ export function OAuthCallbackDialog({
 
   const handleCallback = async () => {
     setIsLoading(true)
-    setLoadingMessage('Completing authentication...')
+    setLoadingMessage(t('oauth.completingAuth') || 'Completing authentication...')
     setError(null)
 
     try {
-      setLoadingMessage('Restarting server with new credentials...')
+      setLoadingMessage(t('oauth.restartingServer') || 'Restarting server with new credentials...')
       await oauthApi.callback(
         providerId, 
         authResponse.method === 'code' 
@@ -76,11 +78,11 @@ export function OAuthCallbackDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-card border-border max-w-lg">
         <DialogHeader>
-          <DialogTitle>Complete {providerName} Authentication</DialogTitle>
+          <DialogTitle>{t('oauth.completeAuth', { provider: providerName }) || `Complete ${providerName} Authentication`}</DialogTitle>
           <DialogDescription>
             {isAutoMethod 
-              ? 'Follow the instructions below to complete authentication.'
-              : 'Enter the authorization code from the provider.'
+              ? t('oauth.followInstructions') || 'Follow the instructions below to complete authentication.'
+              : t('oauth.enterAuthCode') || 'Enter the authorization code from the provider.'
             }
           </DialogDescription>
         </DialogHeader>
@@ -103,11 +105,11 @@ export function OAuthCallbackDialog({
                   </code>
                   <CopyButton
                     content={deviceCode}
-                    title="Copy device code"
+                    title={t('oauth.copyDeviceCode')}
                     variant="ghost"
                     iconSize="sm"
                     className="flex-shrink-0"
-                    onCopy={() => showToast.success('Code copied to clipboard')}
+                    onCopy={() => showToast.success(t('common.copied'))}
                   />
                 </div>
               )}
@@ -120,15 +122,15 @@ export function OAuthCallbackDialog({
                   className="flex-1"
                 >
                   <ExternalLink className="h-4 w-4 mr-2" />
-                  Open Authorization Page
+                  {t('oauth.openAuthPage') || 'Open Authorization Page'}
                 </Button>
                 <CopyButton
                   content={authResponse.url}
-                  title="Copy authorization URL"
+                  title={t('oauth.copyAuthUrl')}
                   variant="ghost"
                   iconSize="sm"
                   className="flex-shrink-0"
-                  onCopy={() => showToast.success('URL copied to clipboard')}
+                  onCopy={() => showToast.success(t('common.copied'))}
                 />
               </div>
             </div>
@@ -136,21 +138,21 @@ export function OAuthCallbackDialog({
             {!isAutoMethod && (
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <Label htmlFor="authCode">Authorization Code</Label>
+                  <Label htmlFor="authCode">{t('oauth.authorizationCode')}</Label>
                   <CopyButton
                     content={authCode}
-                    title="Copy authorization code"
+                    title={t('oauth.copyAuthCode')}
                     variant="ghost"
                     iconSize="sm"
                     className="flex-shrink-0"
-                    onCopy={() => showToast.success('Code copied to clipboard')}
+                    onCopy={() => showToast.success(t('common.copied'))}
                   />
                 </div>
                 <Input
                   id="authCode"
                   value={authCode}
                   onChange={(e) => setAuthCode(e.target.value)}
-                  placeholder="Enter the authorization code..."
+                  placeholder={t('oauth.enterCode')}
                   className="bg-background border-border"
                   disabled={isLoading}
                 />
@@ -165,12 +167,12 @@ export function OAuthCallbackDialog({
               {isLoading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  {loadingMessage || 'Completing...'}
+                  {loadingMessage || t('oauth.completing') || 'Completing...'}
                 </>
               ) : (
                 <>
                   <CheckCircle className="h-4 w-4 mr-2" />
-                  Complete Authentication
+                  {t('oauth.completeAuthBtn') || 'Complete Authentication'}
                 </>
               )}
             </Button>

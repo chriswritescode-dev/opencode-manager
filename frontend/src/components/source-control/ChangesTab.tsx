@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useGitStatus } from '@/api/git'
 import { useGit } from '@/hooks/useGit'
@@ -18,6 +19,7 @@ interface ChangesTabProps {
 }
 
 export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selectedFile, isMobile, onError }: ChangesTabProps) {
+  const { t } = useTranslation()
   const { data: status, isLoading, error } = useGitStatus(repoId)
   const git = useGit(repoId, onError)
   const [commitMessage, setCommitMessage] = useState('')
@@ -72,7 +74,7 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
     return (
       <div className="text-center py-12 text-muted-foreground">
         <AlertCircle className="w-8 h-8 mx-auto mb-2 opacity-50" />
-        <p className="text-sm">Failed to load git status</p>
+        <p className="text-sm">{t('git.failedToLoadGitStatus')}</p>
         <p className="text-xs mt-1">{error.message}</p>
       </div>
     )
@@ -122,7 +124,7 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
           ) : (
             <div className="text-center py-12 text-muted-foreground">
               <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No uncommitted changes</p>
+              <p className="text-sm">{t('git.noUncommittedChanges')}</p>
             </div>
           )}
         </div>
@@ -130,7 +132,7 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
         {status.hasChanges && (
           <div className="p-3 border-t border-border space-y-2 flex-shrink-0">
             <Textarea
-              placeholder="Commit message..."
+              placeholder={t('git.commitMessage')}
               value={commitMessage}
               onChange={(e) => setCommitMessage(e.target.value)}
               className="min-h-[80px] md:text-sm resize-none"
@@ -150,10 +152,10 @@ export function ChangesTab({ repoId, onFileSelect, onClearFileSelection, selecte
               ) : (
                 <GitCommit className="w-4 h-4 mr-2" />
               )}
-              Commit {stagedFiles.length > 0 && `(${stagedFiles.length} staged)`}
+              {t('git.commitWithCount', { count: stagedFiles.length })}
             </Button>
             <p className="text-[10px] text-muted-foreground text-center">
-              {navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+Enter to commit
+              {t('git.commitShortcut')}
             </p>
           </div>
         )}

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Switch } from '@/components/ui/switch'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +37,8 @@ export function RepoMcpServerList({
   onAuthClick,
   onRemoveAuthClick,
 }: RepoMcpServerListProps) {
+  const { t } = useTranslation()
+
   const getDisplayName = (serverId: string): string => {
     const name = serverId.replace(/[-_]/g, ' ')
     return name.charAt(0).toUpperCase() + name.slice(1)
@@ -44,21 +47,21 @@ export function RepoMcpServerList({
   const getDescription = (serverConfig: McpServerConfig): string => {
     if (serverConfig.type === 'local' && serverConfig.command) {
       const command = serverConfig.command.join(' ')
-      if (command.includes('filesystem')) return 'File system access'
-      if (command.includes('git')) return 'Git repository operations'
-      if (command.includes('sqlite')) return 'SQLite database access'
-      if (command.includes('postgres')) return 'PostgreSQL database access'
-      if (command.includes('brave-search')) return 'Web search via Brave'
-      if (command.includes('github')) return 'GitHub repository access'
-      if (command.includes('slack')) return 'Slack integration'
-      if (command.includes('puppeteer')) return 'Web automation'
-      if (command.includes('fetch')) return 'HTTP requests'
-      if (command.includes('memory')) return 'Persistent memory'
+      if (command.includes('filesystem')) return t('repo.fileSystemAccess')
+      if (command.includes('git')) return t('repo.gitOperations')
+      if (command.includes('sqlite')) return t('repo.sqliteAccess')
+      if (command.includes('postgres')) return t('repo.postgresAccess')
+      if (command.includes('brave-search')) return t('repo.webSearch')
+      if (command.includes('github')) return t('repo.githubAccess')
+      if (command.includes('slack')) return t('repo.slackIntegration')
+      if (command.includes('puppeteer')) return t('repo.webAutomation')
+      if (command.includes('fetch')) return t('repo.httpRequests')
+      if (command.includes('memory')) return t('repo.persistentMemory')
       return `Local: ${command}`
     } else if (serverConfig.type === 'remote' && serverConfig.url) {
       return serverConfig.url
     }
-    return 'MCP server'
+    return t('repo.mcpServer')
   }
 
   const getStatusBadge = (status?: McpStatus) => {
@@ -66,24 +69,24 @@ export function RepoMcpServerList({
 
     switch (status.status) {
       case 'connected':
-        return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+        return <Badge variant="default" className="text-xs bg-green-600">{t('mcp.connected')}</Badge>
       case 'disabled':
-        return <Badge className="text-xs bg-gray-700 text-gray-300 border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">Disabled</Badge>
+        return <Badge className="text-xs bg-gray-700 text-gray-300 border-gray-600 dark:bg-gray-700 dark:text-gray-300 dark:border-gray-600">{t('mcp.disabled')}</Badge>
       case 'failed':
         return (
           <Badge variant="destructive" className="text-xs flex items-center gap-1">
             <AlertCircle className="h-3 w-3" />
-            Failed
+            {t('mcp.failed')}
           </Badge>
         )
       case 'needs_auth':
         return (
           <Badge variant="outline" className="text-xs border-yellow-500 text-yellow-600">
-            Needs Auth
+            {t('mcp.needsAuth')}
           </Badge>
         )
       default:
-        return <Badge variant="outline" className="text-xs">Unknown</Badge>
+        return <Badge variant="outline" className="text-xs">{t('mcp.unknown')}</Badge>
     }
   }
 
@@ -92,13 +95,13 @@ export function RepoMcpServerList({
       {hasFetchedStatus && serverIds.length === 0 ? (
         <div className="text-center py-6 text-muted-foreground">
           <Plug className="w-10 h-10 mx-auto mb-3 opacity-50" />
-          <p className="text-sm">No MCP servers configured for this location</p>
-          <p className="text-xs mt-1">Add them in Settings or in the project's opencode.json</p>
+          <p className="text-sm">{t('mcp.noServersLocation')}</p>
+          <p className="text-xs mt-1">{t('mcp.addInSettings')}</p>
         </div>
       ) : isLoadingStatus ? (
         <div className="flex items-center justify-center py-8">
           <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-          <span className="ml-2 text-sm text-muted-foreground">Loading...</span>
+          <span className="ml-2 text-sm text-muted-foreground">{t('mcp.loading')}</span>
         </div>
       ) : (
         <div className="space-y-3">
@@ -130,21 +133,21 @@ export function RepoMcpServerList({
                         <DropdownMenuTrigger asChild>
                           <button 
                             className="cursor-pointer hover:bg-accent rounded inline-flex items-center gap-1"
-                            title="Click for options"
+                            title={t('repo.clickForOptions')}
                           >
                             {status?.status === 'connected' && (
                               <span className="text-xs bg-green-600 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                Connected<ChevronDown className="h-3 w-3" />
+                                {t('mcp.connected')}<ChevronDown className="h-3 w-3" />
                               </span>
                             )}
                             {status?.status === 'needs_auth' && (
                               <span className="text-xs border border-yellow-500 text-yellow-600 px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                Needs Auth<ChevronDown className="h-3 w-3" />
+                                {t('mcp.needsAuth')}<ChevronDown className="h-3 w-3" />
                               </span>
                             )}
                             {status?.status === 'failed' && (
                               <span className="text-xs bg-red-500 text-white px-2 py-0.5 rounded-full inline-flex items-center gap-1">
-                                <AlertCircle className="h-3 w-3" />Failed<ChevronDown className="h-3 w-3" />
+                                <AlertCircle className="h-3 w-3" />{t('mcp.failed')}<ChevronDown className="h-3 w-3" />
                               </span>
                             )}
                           </button>
@@ -153,13 +156,13 @@ export function RepoMcpServerList({
                           {showAuthButton && (
                             <DropdownMenuItem onClick={() => onAuthClick(serverId)}>
                               <Key className="h-4 w-4 mr-2" />
-                              Authenticate
+                              {t('mcp.authenticate')}
                             </DropdownMenuItem>
                           )}
                           {connectedWithOAuth && (
                             <DropdownMenuItem onClick={() => onAuthClick(serverId)}>
                               <RefreshCw className="h-4 w-4 mr-2" />
-                              Re-authenticate
+                              {t('mcp.reAuthenticate')}
                             </DropdownMenuItem>
                           )}
                           {connectedWithOAuth && (
@@ -170,7 +173,7 @@ export function RepoMcpServerList({
                                 disabled={removeAuthMutation.isPending}
                               >
                                 <Shield className="h-4 w-4 mr-2" />
-                                {removeAuthMutation.isPending ? 'Removing...' : 'Remove Auth'}
+                                {removeAuthMutation.isPending ? t('mcp.removing') : t('mcp.removeAuthAction')}
                               </DropdownMenuItem>
                             </>
                           )}
@@ -181,7 +184,7 @@ export function RepoMcpServerList({
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate">
-                    {serverConfig ? getDescription(serverConfig) : 'MCP server'}
+                    {serverConfig ? getDescription(serverConfig) : t('repo.mcpServer')}
                   </p>
                   {failed && status.status === 'failed' && (
                     <div className="flex items-center gap-1 mt-1 text-xs text-red-500">
@@ -200,7 +203,7 @@ export function RepoMcpServerList({
                       size="sm"
                     >
                       <Key className="h-3 w-3 mr-1" />
-                      Auth
+                      {t('mcp.authAction')}
                     </Button>
                   ) : (
                     <Switch

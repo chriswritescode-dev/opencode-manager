@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAllSchedules, useAllScheduleRuns, useCancelRepoScheduleRun } from '@/hooks/useSchedules'
@@ -27,6 +28,7 @@ type ScheduleModeFilter = 'all' | 'cron' | 'interval'
 type SortOption = 'nextRun' | 'name' | 'repo'
 
 export function GlobalSchedules() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [selectedRepoId, setSelectedRepoId] = useState<number | undefined>(undefined)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
@@ -160,60 +162,60 @@ export function GlobalSchedules() {
   }, [jobs, statusFilter, scheduleModeFilter, repoFilter, sortOption])
 
   const repoOptions = useMemo(() => [
-    { value: 'all', label: 'All Repos', description: `${jobs.length} total jobs` },
+    { value: 'all', label: t('schedule.allRepos'), description: `${jobs.length} ${t('schedule.totalJobs')}` },
     ...uniqueRepos.map((repo) => ({
       value: repo.path,
       label: repo.name,
-      description: `${jobs.filter((j) => j.repoPath === repo.path).length} jobs`,
+      description: `${jobs.filter((j) => j.repoPath === repo.path).length} ${t('schedule.jobs')}`,
     })),
-  ], [jobs, uniqueRepos])
+  ], [jobs, uniqueRepos, t])
 
   const statusOptions = useMemo(() => [
-    { value: 'all', label: 'All Status' },
-    { value: 'enabled', label: 'Enabled' },
-    { value: 'disabled', label: 'Disabled' },
-  ], [])
+    { value: 'all', label: t('schedule.allStatus') },
+    { value: 'enabled', label: t('schedule.enabled') },
+    { value: 'disabled', label: t('common.disabled') },
+  ], [t])
 
   const modeOptions = useMemo(() => [
-    { value: 'all', label: 'All Modes' },
-    { value: 'cron', label: 'Cron' },
-    { value: 'interval', label: 'Interval' },
-  ], [])
+    { value: 'all', label: t('schedule.allModes') },
+    { value: 'cron', label: t('schedule.cron') },
+    { value: 'interval', label: t('schedule.interval') },
+  ], [t])
 
   const sortOptions = useMemo(() => [
-    { value: 'nextRun', label: 'Next Run' },
-    { value: 'name', label: 'Name' },
-    { value: 'repo', label: 'Repository' },
-  ], [])
+    { value: 'nextRun', label: t('schedule.nextRun') },
+    { value: 'name', label: t('common.name') },
+    { value: 'repo', label: t('schedule.repo') },
+  ], [t])
 
   const runStatusOptions = useMemo(() => [
-    { value: 'all', label: 'All Status' },
-    { value: 'running', label: 'Running' },
-    { value: 'completed', label: 'Completed' },
-    { value: 'failed', label: 'Failed' },
-    { value: 'cancelled', label: 'Cancelled' },
-  ], [])
+    { value: 'all', label: t('schedule.allStatus') },
+    { value: 'running', label: t('schedule.running') },
+    { value: 'completed', label: t('schedule.completed') },
+    { value: 'failed', label: t('schedule.failed') },
+    { value: 'cancelled', label: t('schedule.cancelled') },
+  ], [t])
 
   const runTriggerOptions = useMemo(() => [
-    { value: 'all', label: 'All Triggers' },
-    { value: 'manual', label: 'Manual' },
-    { value: 'schedule', label: 'Scheduled' },
-  ], [])
+    { value: 'all', label: t('schedule.allTriggers') },
+    { value: 'manual', label: t('schedule.manual') },
+    { value: 'schedule', label: t('schedule.scheduled') },
+  ], [t])
 
   const runSortOptions = useMemo(() => [
-    { value: 'startedAt', label: 'Date' },
-    { value: 'jobName', label: 'Job Name' },
-    { value: 'duration', label: 'Duration' },
-  ], [])
+    { value: 'startedAt', label: t('schedule.date') },
+    { value: 'jobName', label: t('schedule.jobName') },
+    { value: 'duration', label: t('schedule.duration') },
+  ], [t])
 
   const runRepoOptions = useMemo(() => [
-    { value: 'all', label: 'All Repos', description: '' },
+    { value: 'all', label: t('schedule.allRepos'), description: '' },
     ...uniqueRepos.map((repo) => ({
       value: `${jobs.find((j) => j.repoPath === repo.path)?.repoId ?? 0}|${repo.path}`,
       label: repo.name,
       description: repo.path,
     })),
-  ], [uniqueRepos, jobs])
+  ], [uniqueRepos, jobs, t])
 
   const handleDelete = () => {
     if (!deletingJob) {
@@ -294,10 +296,10 @@ export function GlobalSchedules() {
       <div className="flex items-center justify-center min-h-screen bg-background">
         <Card>
           <CardContent className="p-6">
-            <p className="text-destructive">Failed to load schedules</p>
+            <p className="text-destructive">{t('common.failed')}</p>
             <Button variant="outline" onClick={() => navigate('/')} className="mt-4">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Home
+              {t('common.back')}
             </Button>
           </CardContent>
         </Card>
@@ -311,7 +313,7 @@ export function GlobalSchedules() {
     <div className="h-dvh max-h-dvh overflow-hidden bg-background flex flex-col">
       <Header>
         <Header.BackButton to="/" />
-        <Header.Title>Schedules</Header.Title>
+        <Header.Title>{t('schedule.title')}</Header.Title>
         <div className="flex items-center gap-2">
           <Header.Actions>
             <Button
@@ -320,7 +322,7 @@ export function GlobalSchedules() {
               className="hidden sm:flex"
             >
               <Plus className="w-4 h-4 mr-2" />
-              New Schedule
+              {t('schedule.create')}
             </Button>
             <Button
               onClick={() => { openNewJob(); setSelectedRepoId(undefined) }}
@@ -337,13 +339,13 @@ export function GlobalSchedules() {
         <div className="border-b border-border px-4">
           <TabsList className="h-auto gap-0 rounded-none border-0 bg-transparent p-0">
             <TabsTrigger value="jobs" className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
-              Jobs
+              {t('schedule.jobs')}
             </TabsTrigger>
             <TabsTrigger value="runs" className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
-              Run History
+              {t('schedule.runHistory')}
             </TabsTrigger>
             <TabsTrigger value="prompts" className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-sm data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none">
-              Prompts
+              {t('schedule.prompts')}
             </TabsTrigger>
           </TabsList>
         </div>
@@ -351,12 +353,12 @@ export function GlobalSchedules() {
         <TabsContent value="jobs" className="mt-0 flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="px-4 pt-1 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline">Filter by repo:</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline">{t('schedule.filterByRepo')}</span>
               <Combobox
                 value={repoFilter}
                 onChange={setRepoFilter}
                 options={repoOptions}
-                placeholder="All Repos"
+                placeholder={t('schedule.allRepos')}
                 className="flex-1 sm:flex-none sm:min-w-[150px]"
               />
               <DropdownMenu>
@@ -378,16 +380,16 @@ export function GlobalSchedules() {
                     }}
                     className="text-xs text-muted-foreground"
                   >
-                    Clear all filters
+                    {t('schedule.clearAllFilters')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Status</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('schedule.statusLabel')}</DropdownMenuLabel>
                   <DropdownMenuCheckboxItem
                     checked={statusFilter === 'all'}
                     onCheckedChange={() => setStatusFilter('all')}
                     onSelect={(e) => e.preventDefault()}
                   >
-                    All Status
+                    {t('schedule.allStatus')}
                   </DropdownMenuCheckboxItem>
                   {statusOptions.filter((opt) => opt.value !== 'all').map((opt) => (
                     <DropdownMenuCheckboxItem
@@ -406,13 +408,13 @@ export function GlobalSchedules() {
                     </DropdownMenuCheckboxItem>
                   ))}
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Mode</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('schedule.modeLabel')}</DropdownMenuLabel>
                   <DropdownMenuCheckboxItem
                     checked={scheduleModeFilter === 'all'}
                     onCheckedChange={() => setScheduleModeFilter('all')}
                     onSelect={(e) => e.preventDefault()}
                   >
-                    All Modes
+                    {t('schedule.allModes')}
                   </DropdownMenuCheckboxItem>
                   {modeOptions.filter((opt) => opt.value !== 'all').map((opt) => (
                     <DropdownMenuCheckboxItem
@@ -431,7 +433,7 @@ export function GlobalSchedules() {
                     </DropdownMenuCheckboxItem>
                   ))}
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Sort</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('schedule.sortBy')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={sortOption} onValueChange={(v) => setSortOption(v as SortOption)}>
                     {sortOptions.map((opt) => (
                       <DropdownMenuRadioItem
@@ -448,7 +450,7 @@ export function GlobalSchedules() {
             </div>
             <div className="hidden sm:flex flex-wrap gap-x-4 gap-y-2">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Status:</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{t('schedule.statusLabel')}</span>
                 <div className="flex gap-1">
                   {statusOptions.map((opt) => (
                     <Button
@@ -464,7 +466,7 @@ export function GlobalSchedules() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Mode:</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{t('schedule.modeLabel')}</span>
                 <div className="flex gap-1">
                   {modeOptions.map((opt) => (
                     <Button
@@ -480,7 +482,7 @@ export function GlobalSchedules() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Sort:</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{t('schedule.sortLabel')}</span>
                 <div className="flex gap-1">
                   {sortOptions.map((opt) => (
                     <Button
@@ -507,14 +509,14 @@ export function GlobalSchedules() {
                       <CalendarClock className="h-8 w-8 text-muted-foreground" />
                     </div>
                     <div className="space-y-2">
-                      <p className="text-lg font-semibold">No schedules yet</p>
+                      <p className="text-lg font-semibold">{t('schedule.noSchedules')}</p>
                       <p className="text-sm text-muted-foreground">
-                        Create schedules for your repositories to automate recurring agent work.
+                        {t('schedule.emptyGlobal')}
                       </p>
                     </div>
                     <Button onClick={() => navigate('/')}>
                       <Plus className="w-4 h-4 mr-2" />
-                      Go to Repositories
+                      {t('schedule.goToRepos')}
                     </Button>
                   </CardContent>
                 </Card>
@@ -527,9 +529,9 @@ export function GlobalSchedules() {
                       <CalendarClock className="h-8 w-8 text-muted-foreground" />
                     </div>
                     <div className="space-y-2">
-                      <p className="text-lg font-semibold">No matching schedules</p>
+                      <p className="text-lg font-semibold">{t('schedule.noMatching')}</p>
                       <p className="text-sm text-muted-foreground">
-                        Try adjusting your filters to see more results.
+                        {t('schedule.noMatchingDesc')}
                       </p>
                     </div>
                     <Button
@@ -540,7 +542,7 @@ export function GlobalSchedules() {
                         setRepoFilter('all')
                       }}
                     >
-                      Clear Filters
+                      {t('schedule.clearFilters')}
                     </Button>
                   </CardContent>
                 </Card>
@@ -568,10 +570,10 @@ export function GlobalSchedules() {
                           </button>
                           <h3 className="font-medium truncate">{job.name}</h3>
                           <p className="mt-1 text-xs text-muted-foreground line-clamp-2">
-                            {job.description || 'No description'}
+                            {job.description || t('schedule.noDescription')}
                           </p>
                         </div>
-                        <Badge className={getJobStatusTone(job)}>{job.enabled ? 'Enabled' : 'Paused'}</Badge>
+                        <Badge className={getJobStatusTone(job)}>{job.enabled ? t('schedule.enabled') : t('schedule.paused')}</Badge>
                       </div>
 
                       <div className="space-y-2 text-xs text-muted-foreground">
@@ -584,14 +586,14 @@ export function GlobalSchedules() {
                         <div className="flex items-center gap-2">
                           <Clock3 className="h-3.5 w-3.5" />
                           <span>
-                            Next: {job.nextRunAt ? new Date(job.nextRunAt).toLocaleString() : 'Never'}
+                            {t('schedule.nextRunLabel')} {job.nextRunAt ? new Date(job.nextRunAt).toLocaleString() : t('schedule.nextRunNever')}
                           </span>
                         </div>
                         {job.lastRunAt && (
                           <div className="flex items-center gap-2">
                             <History className="h-3.5 w-3.5" />
                             <span>
-                              Last: {formatTimestamp(job.lastRunAt)}
+                              {t('schedule.lastRunLabel')} {formatTimestamp(job.lastRunAt)}
                             </span>
                           </div>
                         )}
@@ -609,7 +611,7 @@ export function GlobalSchedules() {
                           disabled={runMutation.isPending}
                         >
                           <PlayCircle className="h-3.5 w-3.5 mr-1" />
-                          Run
+                          {t('schedule.runNow')}
                         </Button>
                         <Button
                           variant="outline"
@@ -660,12 +662,12 @@ export function GlobalSchedules() {
         <TabsContent value="runs" className="mt-0 flex-1 min-h-0 flex flex-col overflow-hidden">
           <div className="px-4 pt-1 space-y-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline">Filter by repo:</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap hidden sm:inline">{t('schedule.filterByRepo')}</span>
               <Combobox
                 value={runRepoFilter}
                 onChange={setRunRepoFilter}
                 options={runRepoOptions}
-                placeholder="All Repos"
+                placeholder={t('schedule.allRepos')}
                 className="flex-1 sm:flex-none sm:min-w-[150px]"
               />
               <DropdownMenu>
@@ -687,16 +689,16 @@ export function GlobalSchedules() {
                     }}
                     className="text-xs text-muted-foreground"
                   >
-                    Clear all filters
+                    {t('schedule.clearAllFilters')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Status</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('schedule.statusLabel')}</DropdownMenuLabel>
                   <DropdownMenuCheckboxItem
                     checked={runStatusFilter === 'all'}
                     onCheckedChange={() => setRunStatusFilter('all')}
                     onSelect={(e) => e.preventDefault()}
                   >
-                    All Status
+                    {t('schedule.allStatus')}
                   </DropdownMenuCheckboxItem>
                   {runStatusOptions.filter((opt) => opt.value !== 'all').map((opt) => (
                     <DropdownMenuCheckboxItem
@@ -715,13 +717,13 @@ export function GlobalSchedules() {
                     </DropdownMenuCheckboxItem>
                   ))}
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Trigger</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('schedule.triggerLabel')}</DropdownMenuLabel>
                   <DropdownMenuCheckboxItem
                     checked={runTriggerFilter === 'all'}
                     onCheckedChange={() => setRunTriggerFilter('all')}
                     onSelect={(e) => e.preventDefault()}
                   >
-                    All Triggers
+                    {t('schedule.allTriggers')}
                   </DropdownMenuCheckboxItem>
                   {runTriggerOptions.filter((opt) => opt.value !== 'all').map((opt) => (
                     <DropdownMenuCheckboxItem
@@ -740,7 +742,7 @@ export function GlobalSchedules() {
                     </DropdownMenuCheckboxItem>
                   ))}
                   <DropdownMenuSeparator />
-                  <DropdownMenuLabel>Sort</DropdownMenuLabel>
+                  <DropdownMenuLabel>{t('schedule.sortBy')}</DropdownMenuLabel>
                   <DropdownMenuRadioGroup value={runSortOption} onValueChange={(v) => setRunSortOption(v as 'startedAt' | 'jobName' | 'duration')}>
                     {runSortOptions.map((opt) => (
                       <DropdownMenuRadioItem
@@ -757,7 +759,7 @@ export function GlobalSchedules() {
             </div>
             <div className="hidden sm:flex flex-wrap gap-x-4 gap-y-2">
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Status:</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{t('schedule.statusLabel')}</span>
                 <div className="flex gap-1">
                   {runStatusOptions.map((opt) => (
                     <Button
@@ -773,7 +775,7 @@ export function GlobalSchedules() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Trigger:</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{t('schedule.triggerLabel')}</span>
                 <div className="flex gap-1">
                   {runTriggerOptions.map((opt) => (
                     <Button
@@ -789,7 +791,7 @@ export function GlobalSchedules() {
                 </div>
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-xs text-muted-foreground whitespace-nowrap">Sort:</span>
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{t('schedule.sortLabel')}</span>
                 <div className="flex gap-1">
                   {runSortOptions.map((opt) => (
                     <Button
@@ -820,11 +822,11 @@ export function GlobalSchedules() {
                       <History className="h-8 w-8 text-muted-foreground" />
                     </div>
                     <div className="space-y-2">
-                      <p className="text-lg font-semibold">No runs found</p>
+                      <p className="text-lg font-semibold">{t('schedule.noRuns')}</p>
                       <p className="text-sm text-muted-foreground">
                         {runStatusFilter !== 'all' || runRepoFilter !== 'all' || runTriggerFilter !== 'all'
-                          ? 'Try adjusting your filters to see more results.'
-                          : 'Schedule runs will appear here once jobs start executing.'}
+                          ? t('schedule.noRunsDesc')
+                          : t('schedule.noRunsEmptyDesc')}
                       </p>
                     </div>
                     {(runStatusFilter !== 'all' || runRepoFilter !== 'all' || runTriggerFilter !== 'all' || runSortOption !== 'startedAt') && (
@@ -837,7 +839,7 @@ export function GlobalSchedules() {
                           setRunSortOption('startedAt')
                         }}
                       >
-                        Clear Filters
+                        {t('schedule.clearFilters')}
                       </Button>
                     )}
                   </CardContent>
@@ -897,8 +899,8 @@ export function GlobalSchedules() {
         onOpenChange={(open) => !open && closeDialog()}
         onConfirm={handleDelete}
         onCancel={closeDialog}
-        title="Delete Schedule"
-        description="This removes the job definition and all recorded run history for it."
+        title={t('schedule.deleteTitle')}
+        description={t('schedule.deleteDescription')}
         isDeleting={deleteMutation.isPending}
       />
     </div>

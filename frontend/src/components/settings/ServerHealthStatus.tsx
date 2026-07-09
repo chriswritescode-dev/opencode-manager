@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -11,6 +12,7 @@ interface ServerHealthStatusProps {
 }
 
 export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
+  const { t } = useTranslation()
   const { data: health } = useServerHealth()
   const {
     restartServerMutation,
@@ -29,7 +31,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
         <CardContent className="p-3">
           <div className="flex items-center justify-center gap-2">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">Loading server status...</span>
+            <span className="text-sm text-muted-foreground">{t('settings.loadingServerStatus') || 'Loading server status...'}</span>
           </div>
         </CardContent>
       </Card>
@@ -45,7 +47,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
           <div className="flex items-center gap-2 flex-wrap justify-center ">
             <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
             <p className="font-medium text-sm sm:text-base">
-              Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
+              {t('settings.serverStatus') || 'Server Status:'} {isUnhealthy ? t('settings.unhealthy') || 'Unhealthy' : t('settings.healthy') || 'Healthy'}
             </p>
             {health.error && (
               <p className="text-xs text-destructive">
@@ -75,7 +77,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               ) : (
                 <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               )}
-              <span className="text-xs sm:text-sm">Update</span>
+              <span className="text-xs sm:text-sm">{t('settings.update') || 'Update'}</span>
             </Button>
             <Button
               variant="outline"
@@ -88,7 +90,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               ) : (
                 <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               )}
-              <span className="text-xs sm:text-sm">Restart</span>
+              <span className="text-xs sm:text-sm">{t('settings.restart') || 'Restart'}</span>
             </Button>
             <Button
               variant="outline"
@@ -96,7 +98,7 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               onClick={onOpenVersionDialog}
             >
               <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-              <span className="text-xs sm:text-sm">Versions</span>
+              <span className="text-xs sm:text-sm">{t('settings.versions') || 'Versions'}</span>
             </Button>
           </div>
         </div>

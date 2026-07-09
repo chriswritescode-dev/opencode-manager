@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import { buildMoreItems, buildNavModel } from './moreDrawerItems'
 
+const t = (key: string) => key
+
 describe('buildMoreItems', () => {
   it('returns Settings + Logout + All Schedules + Files for root path', () => {
-    const items = buildMoreItems('/')
+    const items = buildMoreItems('/', t)
     expect(items).toHaveLength(4)
     expect(items[0].key).toBe('all-schedules')
     expect(items[1].key).toBe('files')
@@ -12,7 +14,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns repo-specific items for /repos/:id', () => {
-    const items = buildMoreItems('/repos/42')
+    const items = buildMoreItems('/repos/42', t)
     expect(items).toHaveLength(8)
     expect(items[0].key).toBe('files')
     expect(items[0].dialog).toBe('files')
@@ -32,7 +34,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns session-specific items for /repos/:id/sessions/:sid', () => {
-    const items = buildMoreItems('/repos/42/sessions/abc')
+    const items = buildMoreItems('/repos/42/sessions/abc', t)
     expect(items).toHaveLength(9)
     expect(items[0].key).toBe('files')
     expect(items[1].key).toBe('mcp')
@@ -48,7 +50,7 @@ describe('buildMoreItems', () => {
   })
 
   it('returns assistant workspace items for /repos/:id/assistant', () => {
-    const items = buildMoreItems('/repos/42/assistant')
+    const items = buildMoreItems('/repos/42/assistant', t)
     expect(items).toHaveLength(8)
     expect(items[0].key).toBe('files')
     expect(items[0].dialog).toBe('files')
@@ -62,21 +64,21 @@ describe('buildMoreItems', () => {
   })
 
   it('returns only Settings + Logout for /schedules', () => {
-    const items = buildMoreItems('/schedules')
+    const items = buildMoreItems('/schedules', t)
     expect(items).toHaveLength(2)
     expect(items[0].key).toBe('settings')
     expect(items[1].key).toBe('logout')
   })
 
   it('returns only Settings + Logout for /repos/:id/schedules', () => {
-    const items = buildMoreItems('/repos/42/schedules')
+    const items = buildMoreItems('/repos/42/schedules', t)
     expect(items).toHaveLength(2)
     expect(items[0].key).toBe('settings')
     expect(items[1].key).toBe('logout')
   })
 
   it('returns only Settings + Logout for unknown paths', () => {
-    const items = buildMoreItems('/unknown/path')
+    const items = buildMoreItems('/unknown/path', t)
     expect(items).toHaveLength(2)
     expect(items[0].key).toBe('settings')
     expect(items[1].key).toBe('logout')
@@ -85,7 +87,7 @@ describe('buildMoreItems', () => {
 
 describe('buildNavModel', () => {
   it('returns new-repo primary CTA for root path', () => {
-    const model = buildNavModel('/')
+    const model = buildNavModel('/', t)
     expect(model.primary).toHaveLength(2)
     expect(model.primary[0].key).toBe('new-repo')
     expect(model.primary[0].onSelect).toBe('new-repo')
@@ -94,7 +96,7 @@ describe('buildNavModel', () => {
   })
 
   it('returns new-session and assistant primary CTAs for repo detail', () => {
-    const model = buildNavModel('/repos/5')
+    const model = buildNavModel('/repos/5', t)
     expect(model.primary).toHaveLength(2)
     expect(model.primary[0].key).toBe('new-session')
     expect(model.primary[0].onSelect).toBe('new-session')
@@ -103,7 +105,7 @@ describe('buildNavModel', () => {
   })
 
   it('returns new-session and assistant primary CTAs for session detail', () => {
-    const model = buildNavModel('/repos/5/sessions/abc')
+    const model = buildNavModel('/repos/5/sessions/abc', t)
     expect(model.primary).toHaveLength(2)
     expect(model.primary[0].key).toBe('new-session')
     expect(model.primary[0].onSelect).toBe('new-session')
@@ -114,7 +116,7 @@ describe('buildNavModel', () => {
   })
 
   it('returns new-session and assistant primary CTAs for assistant workspace', () => {
-    const model = buildNavModel('/repos/5/assistant')
+    const model = buildNavModel('/repos/5/assistant', t)
     expect(model.primary).toHaveLength(2)
     expect(model.primary[0].key).toBe('new-session')
     expect(model.primary[0].onSelect).toBe('new-session')
@@ -125,7 +127,7 @@ describe('buildNavModel', () => {
   })
 
   it('returns new-session and assistant primary CTAs for canonical /assistant', () => {
-    const model = buildNavModel('/assistant')
+    const model = buildNavModel('/assistant', t)
     expect(model.primary).toHaveLength(2)
     expect(model.primary[0].key).toBe('new-session')
     expect(model.primary[0].onSelect).toBe('new-session')
@@ -136,14 +138,14 @@ describe('buildNavModel', () => {
   })
 
   it('returns new-schedule primary CTA for schedules routes', () => {
-    const model1 = buildNavModel('/schedules')
+    const model1 = buildNavModel('/schedules', t)
     expect(model1.primary).toHaveLength(2)
     expect(model1.primary[0].key).toBe('new-schedule')
     expect(model1.primary[0].onSelect).toBe('new-schedule')
     expect(model1.primary[1].key).toBe('assistant')
     expect(model1.primary[1].to).toBe('/assistant')
 
-    const model2 = buildNavModel('/repos/5/schedules')
+    const model2 = buildNavModel('/repos/5/schedules', t)
     expect(model2.primary).toHaveLength(2)
     expect(model2.primary[0].key).toBe('new-schedule')
     expect(model2.primary[0].onSelect).toBe('new-schedule')
@@ -152,15 +154,15 @@ describe('buildNavModel', () => {
   })
 
   it('returns assistant primary for unknown routes', () => {
-    const model = buildNavModel('/unknown/path')
+    const model = buildNavModel('/unknown/path', t)
     expect(model.primary).toHaveLength(1)
     expect(model.primary[0].key).toBe('assistant')
     expect(model.primary[0].to).toBe('/assistant')
   })
 
   it('preserves backwards compatibility with buildMoreItems', () => {
-    const model = buildNavModel('/repos/42')
-    const items = buildMoreItems('/repos/42')
+    const model = buildNavModel('/repos/42', t)
+    const items = buildMoreItems('/repos/42', t)
     expect(model.items).toEqual(items)
   })
 })

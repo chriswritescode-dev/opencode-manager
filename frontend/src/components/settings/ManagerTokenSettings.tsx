@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useManagerToken } from '@/hooks/useManagerToken'
 import { Button } from '@/components/ui/button'
@@ -11,6 +12,7 @@ interface ManagerTokenSettingsProps {
 }
 
 export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: ManagerTokenSettingsProps = {}) {
+  const { t } = useTranslation()
   const { token, isLoading, rotate } = useManagerToken()
   const [showToken, setShowToken] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -48,9 +50,9 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-3 min-w-0">
-          <h3 className="text-sm font-semibold truncate">Manager Internal Token</h3>
+          <h3 className="text-sm font-semibold truncate">{t('settings.managerToken') || 'Manager Internal Token'}</h3>
           <span className="text-xs text-muted-foreground truncate hidden sm:inline">
-            Bearer token for workspace plugin and API clients
+            {t('settings.managerTokenDescription') || 'Bearer token for workspace plugin and API clients'}
           </span>
         </div>
         <ChevronDown className={`h-4 w-4 transition-transform flex-shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
@@ -64,7 +66,7 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
                 <Input
                   id="manager-token"
                   type={showToken ? 'text' : 'password'}
-                  value={isLoading ? 'Loading...' : token ?? ''}
+                  value={isLoading ? `${t('common.loading')}...` : token ?? ''}
                   readOnly
                   className="flex-1 font-mono text-xs pr-9"
                   autoComplete="new-password"
@@ -103,7 +105,7 @@ export function ManagerTokenSettings({ isOpen: controlledOpen, onToggle }: Manag
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  Rotating will invalidate the existing token. Any plugin or client using it must be updated. Click Rotate again to confirm.
+                  {t('settings.rotateTokenConfirm') || 'Rotating will invalidate the existing token. Any plugin or client using it must be updated. Click Rotate again to confirm.'}
                 </AlertDescription>
               </Alert>
             )}

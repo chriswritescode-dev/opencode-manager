@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { RepoLspServerList } from './RepoLspServerList'
 import { useLSPStatus } from '@/hooks/useLSPStatus'
@@ -10,13 +11,14 @@ interface RepoLspDialogProps {
 }
 
 export function RepoLspDialog({ open, onOpenChange, opcodeUrl, directory }: RepoLspDialogProps) {
+  const { t } = useTranslation()
   const { isLoading, data } = useLSPStatus(opcodeUrl, directory)
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[600px] w-full">
         <DialogHeader>
-          <DialogTitle>LSP Servers</DialogTitle>
+          <DialogTitle>{t('mcp.lspServers')}</DialogTitle>
         </DialogHeader>
         <RepoLspServerList isLoading={isLoading} data={data} />
       </DialogContent>

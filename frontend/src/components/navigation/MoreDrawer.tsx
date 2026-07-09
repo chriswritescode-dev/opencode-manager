@@ -1,5 +1,6 @@
 import { useNavigate, useLocation, useParams } from 'react-router-dom'
 import { useState, useRef, useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ChevronDown, ChevronRight, Command as CommandIcon, FileText, X, GitBranch } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useServerHealth } from '@/hooks/useServerHealth'
@@ -29,6 +30,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
   const navigate = useNavigate()
   const location = useLocation()
   const { id } = useParams<{ id: string }>()
+  const { t } = useTranslation()
   const repoId = id ? Number(id) : null
   const [commandsOpen, setCommandsOpen] = useState(false)
   const [mentionFileBrowserOpen, setMentionFileBrowserOpen] = useState(false)
@@ -62,7 +64,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
 
   const currentBranch = repo?.currentBranch || repo?.branch
   const repoDisplayName = isAssistantRoute || isAssistantSession
-    ? 'Assistant'
+    ? t('assistant.assistant')
     : repo ? getRepoDisplayName(repo) : null
 
   const handleSettingsClick = () => {
@@ -118,7 +120,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
     onClose()
   }
 
-  const items = buildMoreItems(location.pathname)
+  const items = buildMoreItems(location.pathname, t)
   const commands = filterCommands('')
 
   const opencodeVersion = health?.opencodeVersion
@@ -140,7 +142,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
               type="button"
               onClick={onClose}
               className="shrink-0 rounded-sm p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="Close"
+              aria-label={t('common.close')}
             >
               <X className="h-5 w-5" />
             </button>
@@ -170,7 +172,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
                 aria-expanded={commandsOpen}
               >
                 <CommandIcon className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium text-foreground flex-1">Commands</span>
+                <span className="font-medium text-foreground flex-1">{t('settings.commands')}</span>
                 {commandsOpen ? (
                   <ChevronDown className="w-4 h-4 text-muted-foreground" />
                 ) : (
@@ -200,7 +202,7 @@ export function MoreDrawer({ isOpen, onClose }: MoreDrawerProps) {
                 className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent transition-colors text-left w-full"
               >
                 <FileText className="w-5 h-5 text-muted-foreground" />
-                <span className="font-medium text-foreground flex-1">Mention File</span>
+                <span className="font-medium text-foreground flex-1">{t('settings.mentionFile')}</span>
                 <ChevronRight className="w-4 h-4 text-muted-foreground" />
               </button>
             </div>

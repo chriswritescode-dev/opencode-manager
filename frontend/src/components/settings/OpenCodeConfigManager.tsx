@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
 import { Loader2, Plus, Trash2, Edit, Download, RotateCcw, FileText, ArrowUpCircle, History, ChevronDown, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -63,6 +64,7 @@ interface OpenCodeConfigManagerProps {
 const EXPANDED_SECTION_CONTENT_CLASS = 'p-2 sm:p-4'
 
 export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConfigManagerProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { data: health } = useServerHealth()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
@@ -348,7 +350,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
               <div className="flex items-center gap-2 flex-wrap justify-center ">
                 <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
                 <p className="font-medium text-sm sm:text-base">
-                  Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
+                  {t('opencodeConfig.serverStatus')} {isUnhealthy ? t('opencodeConfig.unhealthy') : t('opencodeConfig.healthy')}
                 </p>
                 {health.error && (
                   <p className="text-xs text-destructive">
@@ -378,7 +380,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                   ) : (
                     <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                   )}
-                  <span className="text-xs sm:text-sm">Update</span>
+                  <span className="text-xs sm:text-sm">{t('common.update')}</span>
                 </Button>
                 <Button
                   variant="outline"
@@ -391,7 +393,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                   ) : (
                     <RotateCcw className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                   )}
-                  <span className="text-xs sm:text-sm">Restart</span>
+                  <span className="text-xs sm:text-sm">{t('opencodeConfig.restart')}</span>
                 </Button>
                 <Button
                   variant="outline"
@@ -399,7 +401,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                   onClick={() => setIsVersionDialogOpen(true)}
                 >
                   <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                  <span className="text-xs sm:text-sm">Versions</span>
+                  <span className="text-xs sm:text-sm">{t('opencodeConfig.versions')}</span>
                 </Button>
               </div>
             </div>
@@ -412,7 +414,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
            <div className="flex items-center gap-2">
              <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
              <p className="text-sm">
-               Configuration changes are saved but require a server restart to take effect.
+               {t('opencodeConfig.restartDesc')}
              </p>
            </div>
            <Button
@@ -426,7 +428,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
              ) : (
                <RotateCcw className="h-3 w-3 mr-1" />
              )}
-             Restart Now
+             {t('opencodeConfig.restartNow')}
            </Button>
          </div>
        )}
@@ -435,9 +437,9 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
          <CardHeader className="pb-3">
            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                      <CardTitle className="text-sm sm:text-base">Existing OpenCode Host Import</CardTitle>
+                      <CardTitle className="text-sm sm:text-base">{t('opencodeConfig.existingHostImport')}</CardTitle>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Import your standalone OpenCode config and session state into this workspace, then restart the server so existing chats can reconnect.
+                  {t('opencodeConfig.hostImportDesc')}
                 </p>
               </div>
              <Button
@@ -465,63 +467,63 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                 ) : (
                   <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
                 )}
-                <span className="text-xs sm:text-sm">Import From Host</span>
+                <span className="text-xs sm:text-sm">{t('opencodeConfig.importFromHost')}</span>
               </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-3 text-sm">
             <div className="grid gap-3 md:grid-cols-2">
               <div className="rounded-lg border border-border p-3">
-                <p className="font-medium">Config Source</p>
+                <p className="font-medium">{t('opencodeConfig.configSource')}</p>
                 <p className="mt-1 break-all text-muted-foreground">
-                  {isImportStatusLoading ? 'Checking...' : importStatus?.configSourcePath || 'No importable OpenCode config found'}
+                  {isImportStatusLoading ? t('opencodeConfig.checking') : importStatus?.configSourcePath || t('opencodeConfig.noImportableConfig')}
                 </p>
               </div>
               <div className="rounded-lg border border-border p-3">
-                <p className="font-medium">State Source</p>
+                <p className="font-medium">{t('opencodeConfig.stateSource')}</p>
                 <p className="mt-1 break-all text-muted-foreground">
-                  {isImportStatusLoading ? 'Checking...' : importStatus?.stateSourcePath || 'No importable OpenCode state found'}
+                  {isImportStatusLoading ? t('opencodeConfig.checking') : importStatus?.stateSourcePath || t('opencodeConfig.noImportableState')}
                 </p>
               </div>
             </div>
             <div className="rounded-lg border border-border p-3">
-              <p className="font-medium">Workspace State</p>
+              <p className="font-medium">{t('opencodeConfig.workspaceState')}</p>
               <p className="mt-1 break-all text-muted-foreground">
-                {importStatus?.workspaceStatePath || 'Unavailable'}
+                {importStatus?.workspaceStatePath || t('opencodeConfig.unavailable')}
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 {importStatus?.workspaceStateExists
-                  ? 'A workspace session database already exists. Import is blocked to protect it from being replaced by detected host state.'
-                  : 'No workspace session database exists yet. Import will seed it from the detected host state.'}
+                  ? t('opencodeConfig.workspaceStateExists')
+                  : t('opencodeConfig.noWorkspaceState')}
               </p>
             </div>
             {syncOpenCodeImportMutation.error && (
               <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
-                <p className="font-medium text-destructive">Import blocked</p>
+                <p className="font-medium text-destructive">{t('opencodeConfig.importBlocked')}</p>
                 <p className="mt-1 text-sm text-destructive/90">
                   {getOpenCodeImportErrorMessage(syncOpenCodeImportMutation.error)}
                 </p>
                 <p className="mt-2 text-xs text-destructive/80">
-                  This workspace already has OpenCode session state, so host state import was stopped to prevent accidental replacement of existing chats and history. If you want to use host state instead, clear the workspace state first and then run the import again.
+                  {t('opencodeConfig.importBlockedDesc')}
                 </p>
               </div>
             )}
             {syncOpenCodeImportMutation.data?.relinkedRepos && (
               <div className="rounded-lg border border-border p-3">
-                <p className="font-medium">Last Relink Result</p>
+                <p className="font-medium">{t('opencodeConfig.lastRelinkResult')}</p>
                 <p className="mt-1 text-muted-foreground">
                   Linked {syncOpenCodeImportMutation.data.relinkedRepos.relinkedCount} repos, matched {syncOpenCodeImportMutation.data.relinkedRepos.existingCount} existing repos, skipped {syncOpenCodeImportMutation.data.relinkedRepos.nonRepoPathCount} non-repo session paths, and ignored {syncOpenCodeImportMutation.data.relinkedRepos.duplicatePathCount} duplicate session paths.
                 </p>
                 {syncOpenCodeImportMutation.data.relinkedRepos.errors.length > 0 && (
                   <p className="mt-2 text-xs text-destructive">
-                    {syncOpenCodeImportMutation.data.relinkedRepos.errors.length} repo paths could not be linked.
+                    {t('opencodeConfig.couldNotLink', { count: syncOpenCodeImportMutation.data.relinkedRepos.errors.length })}
                   </p>
                 )}
               </div>
             )}
             {!canImportFromHost && !isImportStatusLoading && (
               <p className="text-xs text-muted-foreground">
-                No host OpenCode config or state was detected. For Docker installs, bind your host OpenCode config and state into the container before using this action.
+                {t('opencodeConfig.noHostDetected')}
               </p>
             )}
           </CardContent>
@@ -544,13 +546,13 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
       {configs.length === 0 ? (
         <Card>
           <CardContent className="p-8 text-center">
-            <p className="text-muted-foreground">No OpenCode configurations found. Create your first config to get started.</p>
+            <p className="text-muted-foreground">{t('opencodeConfig.noConfigsFound')}</p>
           </CardContent>
         </Card>
       ) : (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm sm:text-base">OpenCode Configurations</CardTitle>
+            <CardTitle className="text-sm sm:text-base">{t('opencodeConfig.configurations')}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -566,9 +568,9 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                       <>
                         {activeConfig.name}
                         {activeConfig.isDefault && (
-                          <span className="text-orange-500 dark:text-orange-400"> (Active)</span>
+                          <span className="text-orange-500 dark:text-orange-400">{t('opencodeConfig.active')}</span>
                         )}
-                        {!activeConfig.isValid && ' (Invalid)'}
+                        {!activeConfig.isValid && t('opencodeConfig.invalid')}
                       </>
                     )}
                   </SelectValue>
@@ -578,9 +580,9 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                     <SelectItem key={config.id} value={config.name}>
                       {config.name}
                       {config.isDefault && (
-                        <span className="text-orange-500 dark:text-orange-400"> (Active)</span>
+                        <span className="text-orange-500 dark:text-orange-400">{t('opencodeConfig.active')}</span>
                       )}
-                      {!config.isValid && ' (Invalid)'}
+                      {!config.isValid && t('opencodeConfig.invalid')}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -588,7 +590,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
 
               <div className="flex items-center gap-2">
                 {activeConfig && !activeConfig.isValid && (
-                  <Badge variant="destructive">Invalid Config</Badge>
+                  <Badge variant="destructive">{t('opencodeConfig.invalidConfig')}</Badge>
                 )}
               </div>
 
@@ -605,7 +607,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <Download className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">Download</TooltipContent>
+                    <TooltipContent side="bottom">{t('settings.download')}</TooltipContent>
                   </Tooltip>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -618,7 +620,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <Edit className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">Edit</TooltipContent>
+                    <TooltipContent side="bottom">{t('common.edit')}</TooltipContent>
                   </Tooltip>
                   {!activeConfig?.isDefault && (
                     <Tooltip>
@@ -632,7 +634,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                           Apply
                         </Button>
                       </TooltipTrigger>
-                      <TooltipContent side="bottom">Apply as default</TooltipContent>
+                      <TooltipContent side="bottom">{t('opencodeConfig.applyAsDefault')}</TooltipContent>
                     </Tooltip>
                   )}
                   <Tooltip>
@@ -647,11 +649,11 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </TooltipTrigger>
-                    <TooltipContent side="bottom">Delete</TooltipContent>
+                    <TooltipContent side="bottom">{t('common.delete')}</TooltipContent>
                   </Tooltip>
                   <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
                     <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-                    <span className="text-xs sm:text-sm">New Config</span>
+                    <span className="text-xs sm:text-sm">{t('opencodeConfig.newConfig')}</span>
                   </Button>
                 </div>
               </TooltipProvider>
@@ -659,8 +661,8 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
 
             {activeConfig && (
               <div className="text-sm text-muted-foreground break-words">
-                <p className="truncate">Updated: {new Date(activeConfig.updatedAt).toLocaleString()}</p>
-                <p className="truncate">Created: {new Date(activeConfig.createdAt).toLocaleString()}</p>
+                <p className="truncate">{t('opencodeConfig.updated')}: {new Date(activeConfig.updatedAt).toLocaleString()}</p>
+                <p className="truncate">{t('opencodeConfig.created')}: {new Date(activeConfig.createdAt).toLocaleString()}</p>
               </div>
             )}
           </CardContent>
@@ -708,7 +710,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
             >
               <div className="flex items-center gap-3 min-w-0">
                 <FileText className="h-4 w-4 text-blue-500" />
-                <h4 className="text-sm font-medium truncate">Global Agent Instructions (AGENTS.md)</h4>
+                <h4 className="text-sm font-medium truncate">{t('opencodeConfig.globalAgentInstructions')}</h4>
               </div>
               <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />
             </button>
@@ -719,15 +721,15 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
             </div>
           </div>
 
-          <h3 className="text-base sm:text-lg font-semibold mb-4">Configure Commands, Agents & MCP Servers</h3>
+          <h3 className="text-base sm:text-lg font-semibold mb-4">{t('opencodeConfig.configureCmdsAgentsMcp')}</h3>
           <p className="text-sm text-muted-foreground mb-6">
-            Add custom commands, agents, and MCP servers to your OpenCode configurations. Select a configuration below to edit its settings.
+            {t('opencodeConfig.configureCmdsAgentsMcpDesc')}
           </p>
           
           {configs.length > 0 && (
             <div className="space-y-6">
               <div className='px-1'>
-                <Label className="text-sm sm:text-base font-medium">Select Configuration to Edit</Label>
+                <Label className="text-sm sm:text-base font-medium">{t('opencodeConfig.selectConfigToEdit')}</Label>
                 <Select
                   onValueChange={(value) => {
                     const config = configs.find(c => c.name === value)
@@ -741,7 +743,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
                   <SelectContent>
                     {configs.map(config => (
                       <SelectItem key={config.id} value={config.name}>
-                        {config.name} {config.isDefault && '(Default)'} {!config.isValid && '(Invalid)'}
+                        {config.name} {config.isDefault &&t('opencodeConfig.default')} {!config.isValid && '(Invalid)'}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect } from 'react'
 import { Loader2, Key, Lock, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -30,6 +31,7 @@ interface GitCredentialDialogProps {
 }
 
 export function GitCredentialDialog({ open, onOpenChange, onSave, credential, repos, assignedRepoIds, isDefault, isSaving }: GitCredentialDialogProps) {
+  const { t } = useTranslation()
   const [formData, setFormData] = useState<GitCredential>({
     name: '',
     host: '',
@@ -93,18 +95,18 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
     event?.stopPropagation()
 
     if (!formData.name.trim() || !formData.host.trim()) {
-      showToast.error('Name and host are required')
+      showToast.error(t('git.nameAndHostRequired') || 'Name and host are required')
       return
     }
 
     if (formData.type === 'pat') {
       if (!formData.token?.trim() && !(credential?.token && !tokenEdited)) {
-        showToast.error('Token is required for PAT type')
+        showToast.error(t('git.tokenRequired') || 'Token is required for PAT type')
         return
       }
     } else if (formData.type === 'ssh') {
       if (!formData.sshPrivateKey?.trim()) {
-        showToast.error('SSH key is required for SSH type')
+        showToast.error(t('git.sshKeyRequired') || 'SSH key is required for SSH type')
         return
       }
     }
@@ -124,13 +126,13 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
       setFormData({ name: '', host: '', type: 'pat', token: '', username: '', sshPrivateKey: '', passphrase: '' })
       onOpenChange(false)
     } catch {
-      showToast.error('Failed to save credential')
+      showToast.error(t('git.failedToSaveCredential') || 'Failed to save credential')
     }
   }
 
   const handleTestConnection = async () => {
     if (!formData.sshPrivateKey?.trim()) {
-      showToast.error('Please enter an SSH key first')
+      showToast.error(t('git.enterSshKeyFirst') || 'Please enter an SSH key first')
       return
     }
 
@@ -151,7 +153,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
         showToast.error(result.message)
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to test SSH connection'
+      const message = error instanceof Error ? error.message : t('git.failedToTestSsh') || 'Failed to test SSH connection'
       showToast.error(message)
     } finally {
       setIsTesting(false)
@@ -162,17 +164,17 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent mobileFullscreen className="max-w-lg h-[90vh] sm:h-auto sm:max-h-[85vh] flex flex-col">
         <DialogHeader className="flex-shrink-0 px-4 sm:px-6 pt-4 sm:pt-6 pb-2 sm:pb-3">
-          <DialogTitle>{credential ? 'Edit Git Credential' : 'Add Git Credential'}</DialogTitle>
+          <DialogTitle>{credential ? t('git.editCredential') || 'Edit Git Credential' : t('git.addCredential') || 'Add Git Credential'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={(e) => { e.preventDefault(); handleSubmit(); }}
               className="flex-1 min-h-0 flex flex-col px-4 sm:px-6 py-2 sm:py-3 overflow-y-auto">
           <div className="space-y-4 sm:space-y-4 flex-shrink-0">
             <div className="space-y-2">
-              <Label htmlFor="cred-name">Name *</Label>
+              <Label htmlFor="cred-name">{t('common.name')} *</Label>
               <Input
                 id="cred-name"
-                placeholder="GitHub Personal, Work GitLab"
+                placeholder={t('git.credentialNamePlaceholder') || 'GitHub Personal, Work GitLab'}
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 disabled={isSaving}
@@ -181,7 +183,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="cred-type">Authentication Type</Label>
+              <Label htmlFor="cred-type">{t('settings.authType')}</Label>
               <div className="flex gap-2">
                 <Button
                   type="button"
@@ -212,13 +214,13 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
                   className="flex-1"
                 >
                   <Lock className="h-4 w-4 mr-2" />
-                  SSH Key
+                  {t('ssh.hostKey')}
                 </Button>
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="cred-host">Host *</Label>
+              <Label htmlFor="cred-host">{t('git.host') || 'Host'} *</Label>
               <Input
                 id="cred-host"
                 placeholder="github.com"
@@ -233,12 +235,12 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
               <>
                 <div className="space-y-2">
                   <Label htmlFor="cred-token">
-                    Access Token {credential?.token && !tokenEdited ? '(unchanged)' : '*'}
+                    {t('git.accessToken') || 'Access Token'} {credential?.token && !tokenEdited ? t('git.unchanged') || '(unchanged)' : '*'}
                   </Label>
                   <Input
                     id="cred-token"
                     type="password"
-                    placeholder={credential?.token ? maskToken(credential.token) : 'Personal access token'}
+                    placeholder={credential?.token ? maskToken(credential.token) : t('git.personalAccessToken') || 'Personal access token'}
                     value={formData.token || ''}
                     onChange={(e) => {
                       setTokenEdited(true)
@@ -249,16 +251,16 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
                   />
                   {credential?.token && !tokenEdited && (
                     <p className="text-xs text-muted-foreground">
-                      Leave empty to keep existing token
+                      {t('git.leaveEmptyForExisting') || 'Leave empty to keep existing token'}
                     </p>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="cred-pat-username">Username (optional)</Label>
+                  <Label htmlFor="cred-pat-username">{t('login.name')} ({t('common.optional')})</Label>
                   <Input
                     id="cred-pat-username"
-                    placeholder="Auto-detected if empty"
+                    placeholder={t('git.autoDetected') || 'Auto-detected if empty'}
                     value={formData.username || ''}
                     onChange={(e) => setFormData({ ...formData, username: e.target.value })}
                     disabled={isSaving}
@@ -276,25 +278,25 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
                         disabled={isSaving}
                       />
                       <div className="space-y-1">
-                        <Label htmlFor="cred-default-github-token">Use as default GitHub token</Label>
+                        <Label htmlFor="cred-default-github-token">{t('settings.defaultGithubToken')}</Label>
                         <p className="text-xs text-muted-foreground">
-                          Used for GH_TOKEN/GITHUB_TOKEN unless a repository below overrides it.
+                          {t('settings.defaultGithubTokenDescription') || 'Used for GH_TOKEN/GITHUB_TOKEN unless a repository below overrides it.'}
                         </p>
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <Label>Use for specific repositories</Label>
+                      <Label>{t('settings.useForRepos')}</Label>
                       {repos.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">No repositories available.</p>
+                        <p className="text-xs text-muted-foreground">{t('git.noReposAvailable') || 'No repositories available.'}</p>
                       ) : (
                         <MultiSelect
                           value={selectedRepoIds.map(String)}
                           onChange={(values) => setSelectedRepoIds(values.map(Number))}
                           options={repoOptions}
-                          placeholder="Select repositories..."
-                          searchPlaceholder="Search repositories..."
-                          emptyMessage="No repositories found"
+                          placeholder={t('settings.selectRepository')}
+                          searchPlaceholder={t('common.searchDots')}
+                          emptyMessage={t('common.noResults')}
                           disabled={isSaving}
                         />
                       )}
@@ -305,7 +307,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
             ) : (
               <>
                 <div className="space-y-2">
-                  <Label htmlFor="cred-ssh-key">SSH Private Key *</Label>
+                  <Label htmlFor="cred-ssh-key">{t('ssh.hostKey')} *</Label>
                   <Textarea
                     id="cred-ssh-key"
                     placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
@@ -316,7 +318,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
                     className="font-mono text-xs sm:text-sm"
                   />
                   <p className="text-xs text-muted-foreground">
-                    Paste your private key content here
+                    {t('git.pastePrivateKey') || 'Paste your private key content here'}
                   </p>
                 </div>
 
@@ -328,34 +330,34 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
                     disabled={isSaving}
                     className="w-full"
                   >
-                    {showPassphraseInput ? 'Remove' : 'Add'} Passphrase
+                    {showPassphraseInput ? t('common.remove') || 'Remove' : t('common.add') || 'Add'} {t('settings.passphrase')}
                   </Button>
                 </div>
 
                 {showPassphraseInput && (
                   <div className="space-y-2">
-                    <Label htmlFor="cred-passphrase">Passphrase</Label>
+                    <Label htmlFor="cred-passphrase">{t('settings.passphrase')}</Label>
                     <Input
                       id="cred-passphrase"
                       type="password"
-                      placeholder="Enter passphrase for SSH key"
+                      placeholder={t('git.enterPassphrase') || 'Enter passphrase for SSH key'}
                       value={formData.passphrase || ''}
                       onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
                       disabled={isSaving}
                       autoComplete="new-password"
                     />
                     <p className="text-xs text-muted-foreground">
-                      This passphrase will be required for each git operation
+                      {t('git.passphraseRequired') || 'This passphrase will be required for each git operation'}
                     </p>
                   </div>
                 )}
 
                 <div className="space-y-2">
-                  <Label htmlFor="test-passphrase">Passphrase for Test (if protected)</Label>
+                  <Label htmlFor="test-passphrase">{t('git.passphraseForTest') || 'Passphrase for Test (if protected)'}</Label>
                   <Input
                     id="test-passphrase"
                     type="password"
-                    placeholder="Enter passphrase to test connection"
+                    placeholder={t('git.enterPassphraseToTest') || 'Enter passphrase to test connection'}
                     value={testPassphrase}
                     onChange={(e) => setTestPassphrase(e.target.value)}
                     disabled={isTesting || isSaving}
@@ -371,14 +373,14 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
                   className="w-full"
                 >
                   {isTesting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                  Test Connection
+                  {t('git.testConnection') || 'Test Connection'}
                 </Button>
 
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
-                  <p className="text-sm font-medium">Security Notice</p>
+                  <p className="text-sm font-medium">{t('git.securityNotice') || 'Security Notice'}</p>
                   <p className="text-xs mt-1">
-                    Your private key will be encrypted at rest. Never share it with anyone.
+                    {t('git.securityNoticeDescription') || 'Your private key will be encrypted at rest. Never share it with anyone.'}
                   </p>
                 </Alert>
               </>
@@ -394,7 +396,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
             disabled={isSaving}
             className="flex-1 sm:flex-none"
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             type="button"
@@ -405,7 +407,7 @@ export function GitCredentialDialog({ open, onOpenChange, onSave, credential, re
             className="flex-1 sm:flex-none"
           >
             {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {credential ? 'Update' : 'Add'}
+            {credential ? t('common.update') || 'Update' : t('common.add') || 'Add'}
           </Button>
         </DialogFooter>
       </DialogContent>

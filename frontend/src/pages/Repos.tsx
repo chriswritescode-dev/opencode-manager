@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { RepoList } from "@/components/repo/RepoList";
@@ -11,6 +12,7 @@ import { useSidebarAction } from "@/hooks/useSidebarAction";
 import { useDialogParam } from "@/hooks/useDialogParam";
 
 export function Repos() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [addRepoOpen, setAddRepoOpen] = useState(false);
   const [fileBrowserOpen, setFileBrowserOpen] = useDialogParam('files');
@@ -27,7 +29,7 @@ export function Repos() {
     <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col">
       <Header>
         <div className="flex items-center gap-3">
-          <Header.Title logo>OpenCode</Header.Title>
+          <Header.Title logo>{t('app.title')}</Header.Title>
         </div>
         <Header.Actions>
           <div className="flex items-center gap-1">
@@ -48,11 +50,11 @@ export function Repos() {
             className="hidden sm:flex text-foreground border-border hover:bg-accent transition-all duration-200 hover:scale-105"
           >
             <CalendarClock className="w-4 h-4 mr-2" />
-            All Schedules
+            {t('repo.allSchedules')}
           </Button>
           <Button onClick={() => setAddRepoOpen(true)} size="sm">
             <Plus className="w-4 h-4 mr-1" />
-            Repo
+            {t('repo.addRepo')}
           </Button>
           <span>
             <Header.Settings />
@@ -68,7 +70,7 @@ export function Repos() {
         isOpen={fileBrowserOpen}
         onClose={handleCloseFileBrowser}
         basePath=""
-        repoName="Workspace Root"
+        repoName={t('repo.workspaceRoot')}
         allowNavigateAboveBase={true}
       />
     </div>

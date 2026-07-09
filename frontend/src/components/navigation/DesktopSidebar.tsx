@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useDesktop } from '@/hooks/useDesktop'
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed'
@@ -22,6 +23,7 @@ export function DesktopSidebar() {
   const [collapsed, toggle] = useSidebarCollapsed()
   const [repoSwitcherOpen, setRepoSwitcherOpen] = useState(false)
   const { isAuthenticated, isLoading, logout } = useAuth()
+  const { t } = useTranslation()
 
   const isDesktop = useDesktop()
 
@@ -33,7 +35,7 @@ export function DesktopSidebar() {
     return null
   }
 
-  const { primary, items } = buildNavModel(location.pathname)
+  const { primary, items } = buildNavModel(location.pathname, t)
 
   const handlePrimaryClick = (item: NavPrimaryCta) => {
     if (item.to) {
@@ -72,7 +74,7 @@ export function DesktopSidebar() {
   }
 
   const navItems: MoreDrawerItem[] = [
-    { key: 'repos', label: 'Repos', icon: FolderGit2 },
+    { key: 'repos', label: t('nav.repos'), icon: FolderGit2 },
     ...items,
   ]
 
@@ -99,7 +101,7 @@ export function DesktopSidebar() {
         <div className="flex items-center justify-between px-2 py-1.5">
           {!collapsed && (
             <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-              Navigation
+              {t('nav.navigation')}
             </div>
           )}
           <SidebarCollapseToggle collapsed={collapsed} onToggle={toggle} />

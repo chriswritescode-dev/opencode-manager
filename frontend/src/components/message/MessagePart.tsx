@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { memo } from 'react'
 import type { components } from '@/api/opencode-types'
 import { Volume2, VolumeX, Loader2 } from 'lucide-react'
@@ -68,6 +69,7 @@ interface TTSButtonProps {
 }
 
 function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
+  const { t } = useTranslation()
   const { speakMessage, stop, isEnabled, isPlaying, isLoading, activeMessageId } = useTTS()
   
   if (!isEnabled || !content.trim()) {
@@ -88,7 +90,7 @@ function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
     <button
       onClick={handleClick}
       className={`p-1.5 rounded ${isThisPlaying ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30' : 'bg-card hover:bg-card-hover text-muted-foreground hover:text-foreground'} ${className}`}
-      title={isThisPlaying ? "Stop playback" : "Read aloud"}
+      title={isThisPlaying ? t('message.stopPlayback') : t('message.readAloud')}
       disabled={isLoading && !isThisPlaying}
     >
       {isLoading && isThisPlaying ? (
@@ -103,6 +105,7 @@ function TTSButton({ messageId, content, className = "" }: TTSButtonProps) {
 }
 
 export const MessagePart = memo(function MessagePart({ part, role, allParts, partIndex, onFileClick, onChildSessionClick, messageTextContent }: MessagePartProps) {
+  const { t } = useTranslation()
   const { preferences } = useSettings()
   const simpleChatMode = preferences?.simpleChatMode ?? false
   const showReasoning = preferences?.showReasoning ?? false
@@ -130,7 +133,7 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       return (
         <details className="border border-border rounded-lg my-2">
           <summary className="px-4 py-2 bg-muted hover:bg-accent cursor-pointer text-sm font-medium">
-            Reasoning
+            {t('message.reasoning')}
           </summary>
           <div className="p-4 bg-card text-sm text-muted-foreground whitespace-pre-wrap">
             {part.text}
@@ -141,14 +144,14 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       if (simpleChatMode) return null
       return (
         <div className="border border-border rounded-lg p-4 my-2 bg-card">
-          <div className="text-xs text-muted-foreground font-mono">Snapshot: {part.snapshot}</div>
+          <div className="text-xs text-muted-foreground font-mono">{t('message.snapshot')}: {part.snapshot}</div>
         </div>
       )
     case 'agent':
       if (simpleChatMode) return null
       return (
         <div className="border border-border rounded-lg p-4 my-2 bg-card">
-          <div className="text-sm font-medium text-blue-600 dark:text-blue-400">Agent: {part.name}</div>
+          <div className="text-sm font-medium text-blue-600 dark:text-blue-400">{t('message.agentLabel')}: {part.name}</div>
         </div>
       )
     case 'step-finish':
@@ -156,11 +159,11 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       {
         const isFree = part.cost === 0
         const totalTokens = part.tokens.input + part.tokens.output + (part.tokens.cache?.read || 0)
-        const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} tokens</span>
+        const costText = isMobile && isFree ? null : <span>${part.cost.toFixed(4)} • {totalTokens} {t('message.tokens')}</span>
         return (
           <div className="text-xs text-muted-foreground my-1 flex items-center gap-2">
             {costText}
-            <CopyButton content={copyableContent} title="Copy step complete" />
+            <CopyButton content={copyableContent} title={t('code.copyStepComplete')} />
             {messageTextContent && part.messageID && <TTSButton messageId={part.messageID} content={messageTextContent} />}
           </div>
         )
@@ -169,18 +172,18 @@ export const MessagePart = memo(function MessagePart({ part, role, allParts, par
       return (
         <span className="inline-flex items-center gap-1 px-2 py-1 rounded bg-muted border border-border text-sm text-foreground">
           <span className="text-blue-600 dark:text-blue-400">@</span>
-          <span className="font-medium">{part.filename || 'File'}</span>
+          <span className="font-medium">{part.filename || t('message.file')}</span>
         </span>
       )
     case 'retry':
       return <RetryPart part={part as RetryPartType} />
     case 'subtask': {
-      const label = part.description || part.prompt || 'Sub-agent task'
+      const label = part.description || part.prompt || t('message.subAgentTask')
       return (
         <div className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground shadow-sm shadow-blue-500/5">
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate">{label}</span>
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">sub-agent</span>
+            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{t('message.subAgent')}</span>
           </div>
         </div>
       )

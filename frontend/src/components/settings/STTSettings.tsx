@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -36,6 +37,7 @@ const sttFormSchema = z.object({
 type STTFormValues = z.infer<typeof sttFormSchema>
 
 export function STTSettings() {
+  const { t } = useTranslation()
   const { preferences, updateSettings } = useSettings()
   const { startRecording, stopRecording, abortRecording, isRecording, isProcessing, transcript, interimTranscript, error: sttError, isExternalProvider } = useSTT()
 
@@ -179,19 +181,19 @@ export function STTSettings() {
   return (
     <div className="bg-card border border-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-foreground">Speech-to-Text</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t('stt.speechToText')}</h2>
         <div className="flex items-center gap-2 text-sm">
           {saveStatus === 'saved' && (
             <>
               <CheckCircle2 className="h-4 w-4 text-green-500" />
-              <span className="text-green-600">Saved</span>
+              <span className="text-green-600">{t('stt.saved')}</span>
             </>
           )}
           {saveStatus === 'idle' && isDirty && isValid && (
-            <span className="text-amber-600">Unsaved changes</span>
+            <span className="text-amber-600">{t('stt.unsavedChanges')}</span>
           )}
           {saveStatus === 'idle' && !isDirty && (
-            <span className="text-muted-foreground">All changes saved</span>
+            <span className="text-muted-foreground">{t('stt.allChangesSaved')}</span>
           )}
         </div>
       </div>
@@ -228,7 +230,7 @@ export function STTSettings() {
                 name="provider"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Provider</FormLabel>
+                    <FormLabel>{t('stt.provider')}</FormLabel>
                     <FormControl>
                       <Combobox
                         value={field.value}
@@ -259,7 +261,7 @@ export function STTSettings() {
                     name="endpoint"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>API Endpoint</FormLabel>
+                        <FormLabel>{t('stt.apiEndpoint')}</FormLabel>
                         <FormControl>
                           <input
                             type="text"
@@ -281,7 +283,7 @@ export function STTSettings() {
                     name="apiKey"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>API Key</FormLabel>
+                        <FormLabel>{t('settings.apiKey')}</FormLabel>
                         <FormControl>
                           <div className="relative">
                             <input
@@ -313,7 +315,7 @@ export function STTSettings() {
                     render={({ field }) => (
                       <FormItem>
                         <div className="flex items-center justify-between">
-                          <FormLabel>Model</FormLabel>
+                          <FormLabel>{t('tts.model')}</FormLabel>
                           <button
                             type="button"
                             onClick={() => fetchModels(true)}
@@ -354,7 +356,7 @@ export function STTSettings() {
                     name="language"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Language</FormLabel>
+                        <FormLabel>{t('stt.language')}</FormLabel>
                         <FormControl>
                           <Combobox
                             value={field.value}

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useMemo } from 'react'
 import { Check } from 'lucide-react'
 
@@ -55,6 +56,7 @@ export function AgentQuickSelect({
   onAgentChange,
   isBashMode = false,
 }: AgentQuickSelectProps) {
+  const { t } = useTranslation()
   const { data: agents = [] } = useAgents(opcodeUrl, directory)
 
   const primaryAgents = useMemo(() => {
@@ -72,7 +74,7 @@ export function AgentQuickSelect({
   const styleVars = isBashMode 
     ? bashStyleVars 
     : getAgentStyleVars(currentAgent, findAgentColor(agents, currentAgent))
-  const displayName = isBashMode ? 'Bash' : capitalize(currentAgent)
+  const displayName = isBashMode ? t('agent.bash') : capitalize(currentAgent)
 
   const buttonContent = (
     <button

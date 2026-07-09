@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ export function SwitchConfigDialog({
   currentConfigName,
   onConfigSwitched,
 }: SwitchConfigDialogProps) {
+  const { t } = useTranslation()
   const [configs, setConfigs] = useState<OpenCodeConfig[]>([])
   const [selectedConfig, setSelectedConfig] = useState<string>('')
   const [loading, setLoading] = useState(true)
@@ -39,7 +41,7 @@ export function SwitchConfigDialog({
         setConfigs(response.configs || [])
         setSelectedConfig(currentConfigName || '')
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load configs')
+        setError(err instanceof Error ? err.message : t('common.failed'))
       } finally {
         setLoading(false)
       }
@@ -50,7 +52,7 @@ export function SwitchConfigDialog({
 
   const handleSwitch = async () => {
     if (!selectedConfig) {
-      setError('Please select a config')
+      setError(t('repo.selectConfig'))
       return
     }
 
@@ -66,7 +68,7 @@ export function SwitchConfigDialog({
       onConfigSwitched(selectedConfig)
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to switch config')
+      setError(err instanceof Error ? err.message : t('common.failed'))
     } finally {
       setSwitching(false)
     }
@@ -76,30 +78,30 @@ export function SwitchConfigDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Switch Config</DialogTitle>
+          <DialogTitle>{t('repo.switchConfig')}</DialogTitle>
           <DialogDescription>
-            Select a different OpenCode configuration for this repository
+            {t('repo.switchConfig')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
           {currentConfigName && (
             <div className="text-sm text-muted-foreground">
-              Current config: <span className="text-foreground font-semibold">{currentConfigName}</span>
+              {t('repo.currentConfig')}: <span className="text-foreground font-semibold">{currentConfigName}</span>
             </div>
           )}
 
           {loading ? (
             <div className="flex items-center justify-center py-6">
               <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-              <span className="ml-2 text-sm text-muted-foreground">Loading configs...</span>
+              <span className="ml-2 text-sm text-muted-foreground">{t('common.loading')}</span>
             </div>
           ) : configs.length === 0 ? (
-            <div className="text-sm text-muted-foreground">No configs available</div>
+            <div className="text-sm text-muted-foreground">{t('repo.noConfigs')}</div>
           ) : (
             <Select value={selectedConfig} onValueChange={setSelectedConfig}>
               <SelectTrigger className="bg-background border-border text-foreground">
-                <SelectValue placeholder="Select a config" />
+                <SelectValue placeholder={t('repo.selectConfig')} />
               </SelectTrigger>
               <SelectContent className="bg-popover border-border">
                 {configs.map((config) => (
@@ -107,7 +109,7 @@ export function SwitchConfigDialog({
                     <div className="flex items-center gap-2">
                       {config.name}
                       {config.isDefault && (
-                        <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">(default)</span>
+                        <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">({t('common.default')})</span>
                       )}
                     </div>
                   </SelectItem>
@@ -129,7 +131,7 @@ export function SwitchConfigDialog({
               onClick={() => onOpenChange(false)}
               className="border-border hover:bg-accent"
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={handleSwitch}
@@ -139,10 +141,10 @@ export function SwitchConfigDialog({
               {switching ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Switching...
+                  {t('common.pending')}
                 </>
               ) : (
-                'Switch Config'
+                t('repo.switchConfig')
               )}
             </Button>
           </div>

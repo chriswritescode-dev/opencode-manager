@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { TabsContent } from '@/components/ui/tabs'
@@ -26,6 +27,7 @@ type PromptTemplateCardProps = {
 }
 
 export function PromptTemplateCard({ template, selected = false, onApply, onEdit, onDelete }: PromptTemplateCardProps) {
+  const { t } = useTranslation()
   const cardClassName = `w-full rounded-xl border-2 p-4 text-left transition-all ${
     selected
       ? 'border-primary bg-primary/10 ring-2 ring-primary/30'
@@ -98,12 +100,14 @@ export function PromptTab({
   onDeleteTemplate,
   onNewTemplate,
 }: PromptTabProps) {
+  const { t } = useTranslation()
+
   return (
     <TabsContent value="prompt" className="mt-0 min-h-0 flex-1 overflow-y-auto px-3 pt-4 pb-5 sm:px-4">
       <div className="space-y-4">
         <div className="space-y-2">
           <div className="flex items-center justify-center gap-2">
-            <Label>Prompt templates</Label>
+            <Label>{t('schedule.promptTemplates')}</Label>
             <Button
               type="button"
               variant="outline"
@@ -112,7 +116,7 @@ export function PromptTab({
               onClick={onNewTemplate}
             >
               <Plus className="h-3 w-3" />
-              New
+              {t('common.create')}
             </Button>
           </div>
 
@@ -135,7 +139,7 @@ export function PromptTab({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="schedule-prompt">Prompt</Label>
+          <Label htmlFor="schedule-prompt">{t('schedule.prompt')}</Label>
           <Textarea
             id="schedule-prompt"
             value={prompt}
@@ -143,11 +147,11 @@ export function PromptTab({
               onPromptChange(event.target.value)
             }}
             className="min-h-[320px]"
-            placeholder="Review the repo, summarize notable risks, and open a session I can inspect later."
+            placeholder={t('schedule.reviewPrompt')}
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          This prompt becomes the first message sent to the agent when the schedule runs.
+          {t('schedule.promptHint')}
         </p>
       </div>
     </TabsContent>

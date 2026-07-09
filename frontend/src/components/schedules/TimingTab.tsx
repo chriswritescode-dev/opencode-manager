@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -49,13 +50,15 @@ export function TimingTab({
   timezone,
   onTimezoneChange,
 }: TimingTabProps) {
+  const { t } = useTranslation()
+
   return (
     <TabsContent value="timing" className="px-3 mt-0 min-h-0 flex-1 overflow-y-auto sm:px-6 pt-4 pb-5">
       <div className="space-y-4">
         <div className="space-y-3 rounded-lg border border-border bg-card p-4">
           <div>
-            <Label>Repeat</Label>
-            <p className="mt-1 text-xs text-muted-foreground">Use a simple scheduler builder by default. Advanced cron is still available if you need it.</p>
+            <Label>{t('schedule.repeat')}</Label>
+            <p className="mt-1 text-xs text-muted-foreground">{t('schedule.repeatHint')}</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -76,7 +79,7 @@ export function TimingTab({
         {schedulePreset === 'interval' ? (
           <div className="space-y-3 rounded-lg border border-border bg-card p-4">
             <div className="flex items-center justify-between gap-3">
-              <Label htmlFor="schedule-interval">Run every</Label>
+              <Label htmlFor="schedule-interval">{t('schedule.runEvery')}</Label>
               <Input
                 id="schedule-interval"
                 type="number"
@@ -99,7 +102,7 @@ export function TimingTab({
         ) : schedulePreset === 'hourly' ? (
           <div className="grid gap-4 rounded-lg border border-border bg-card p-4 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-end">
             <div className="space-y-2">
-              <Label htmlFor="schedule-hourly-minute">Minute</Label>
+              <Label htmlFor="schedule-hourly-minute">{t('schedule.minute')}</Label>
               <Input
                 id="schedule-hourly-minute"
                 type="number"
@@ -109,23 +112,23 @@ export function TimingTab({
                 onChange={(event) => onHourlyMinuteChange(event.target.value)}
               />
             </div>
-            <p className="text-sm text-muted-foreground">Run every hour at the selected minute mark.</p>
+            <p className="text-sm text-muted-foreground">{t('schedule.runEveryHourHint')}</p>
           </div>
         ) : schedulePreset === 'daily' || schedulePreset === 'weekdays' ? (
           <div className="grid gap-4 rounded-lg border border-border bg-card p-4 sm:grid-cols-2">
             <div className="space-y-2">
-              <Label htmlFor="schedule-time">Time</Label>
+              <Label htmlFor="schedule-time">{t('schedule.time')}</Label>
               <Input id="schedule-time" type="time" value={timeOfDay} onChange={(event) => onTimeOfDayChange(event.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="schedule-timezone">Timezone</Label>
+              <Label htmlFor="schedule-timezone">{t('schedule.timezone')}</Label>
               <Input id="schedule-timezone" value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} placeholder={getLocalTimeZone()} />
             </div>
           </div>
         ) : schedulePreset === 'weekly' ? (
           <div className="space-y-4 rounded-lg border border-border bg-card p-4">
             <div className="space-y-2">
-              <Label>Days</Label>
+              <Label>{t('schedule.days')}</Label>
               <div className="flex flex-wrap gap-2">
                 {weekdayOptions.map((option) => {
                   const selected = weeklyDays.includes(option.value)
@@ -147,11 +150,11 @@ export function TimingTab({
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="schedule-weekly-time">Time</Label>
+                <Label htmlFor="schedule-weekly-time">{t('schedule.time')}</Label>
                 <Input id="schedule-weekly-time" type="time" value={timeOfDay} onChange={(event) => onTimeOfDayChange(event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="schedule-weekly-timezone">Timezone</Label>
+                <Label htmlFor="schedule-weekly-timezone">{t('schedule.timezone')}</Label>
                 <Input id="schedule-weekly-timezone" value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} placeholder={getLocalTimeZone()} />
               </div>
             </div>
@@ -160,7 +163,7 @@ export function TimingTab({
           <div className="space-y-4 rounded-lg border border-border bg-card p-4">
             <div className="grid gap-4 sm:grid-cols-3">
               <div className="space-y-2">
-                <Label htmlFor="schedule-monthly-day">Day</Label>
+                <Label htmlFor="schedule-monthly-day">{t('schedule.day')}</Label>
                 <Input
                   id="schedule-monthly-day"
                   type="number"
@@ -171,11 +174,11 @@ export function TimingTab({
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="schedule-monthly-time">Time</Label>
+                <Label htmlFor="schedule-monthly-time">{t('schedule.time')}</Label>
                 <Input id="schedule-monthly-time" type="time" value={timeOfDay} onChange={(event) => onTimeOfDayChange(event.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="schedule-monthly-timezone">Timezone</Label>
+                <Label htmlFor="schedule-monthly-timezone">{t('schedule.timezone')}</Label>
                 <Input id="schedule-monthly-timezone" value={timezone} onChange={(event) => onTimezoneChange(event.target.value)} placeholder={getLocalTimeZone()} />
               </div>
             </div>
@@ -183,7 +186,7 @@ export function TimingTab({
         ) : (
           <div className="space-y-4 rounded-lg border border-border bg-card p-4">
             <div className="space-y-2">
-              <Label htmlFor="schedule-cron">Cron expression</Label>
+              <Label htmlFor="schedule-cron">{t('schedule.cronExpression')}</Label>
               <Input
                 id="schedule-cron"
                 value={cronExpression}
@@ -191,11 +194,11 @@ export function TimingTab({
                 placeholder="0 9 * * 1-5"
                 className="font-mono"
               />
-              <p className="text-xs text-muted-foreground">Examples: `0 9 * * 1-5` weekdays at 9 AM, `30 6 1 * *` monthly on the 1st at 6:30 AM.</p>
+              <p className="text-xs text-muted-foreground">{t('schedule.cronExamples')}</p>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="schedule-timezone">Timezone</Label>
+              <Label htmlFor="schedule-timezone">{t('schedule.timezone')}</Label>
               <Input
                 id="schedule-timezone"
                 value={timezone}
@@ -215,7 +218,7 @@ export function TimingTab({
         )}
 
         <div className="rounded-lg border border-border bg-muted/40 p-4">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Schedule Preview</p>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('schedule.schedulePreview')}</p>
           <p className="mt-2 text-sm font-medium break-words">{formatDraftScheduleSummary({ preset: schedulePreset, intervalMinutes, timeOfDay, hourlyMinute, weeklyDays, monthlyDay, cronExpression, timezone })}</p>
           {schedulePreset !== 'interval' && (
             <p className="mt-2 text-xs text-muted-foreground font-mono break-all">

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -62,6 +63,7 @@ export function CommandDialog({
   onSubmit,
   editingCommand,
 }: CommandDialogProps) {
+  const { t } = useTranslation();
   const form = useForm<CommandFormValues>({
     resolver: zodResolver(commandFormSchema),
     defaultValues: {
@@ -102,7 +104,7 @@ export function CommandDialog({
       <DialogContent mobileFullscreen className="sm:max-w-3xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
           <DialogTitle>
-            {editingCommand ? "Edit Command" : "Create Command"}
+            {editingCommand ? t('settings.editCommand') || "Edit Command" : t('settings.createCommand') || "Create Command"}
           </DialogTitle>
         </DialogHeader>
 
@@ -114,7 +116,7 @@ export function CommandDialog({
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Command Name</FormLabel>
+                    <FormLabel>{t('settings.commandName')}</FormLabel>
                     <FormControl>
                       <Input
                         {...field}
@@ -124,7 +126,7 @@ export function CommandDialog({
                       />
                     </FormControl>
                     <FormDescription>
-                      Use lowercase letters, numbers, and hyphens only
+                      {t('settings.commandNameDescription') || "Use lowercase letters, numbers, and hyphens only"}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -136,11 +138,11 @@ export function CommandDialog({
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>{t('common.description')}</FormLabel>
                     <FormControl>
                       <Textarea
                         {...field}
-                        placeholder="Brief description of what the command does"
+                        placeholder={t('settings.commandDescriptionPlaceholder') || "Brief description of what the command does"}
                       />
                     </FormControl>
                     <FormMessage />
@@ -153,18 +155,17 @@ export function CommandDialog({
                 name="template"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Template</FormLabel>
+                    <FormLabel>{t('settings.commandTemplate')}</FormLabel>
                     <FormControl>
                       <Textarea
                         {...field}
-                        placeholder="The prompt template that will be sent to the LLM. Use $ARGUMENTS or $1, $2, etc. for parameters."
+                        placeholder={t('settings.templatePlaceholder') || 'The prompt template that will be sent to the LLM. Use $ARGUMENTS or $1, $2, etc. for parameters.'}
                         rows={8}
                         className="font-mono md:text-sm"
                       />
                     </FormControl>
                     <FormDescription>
-                      Use $ARGUMENTS for all arguments or $1, $2, etc. for
-                      specific parameters
+                      {t('settings.templateDescription') || "Use $ARGUMENTS for all arguments or $1, $2, etc. for specific parameters"}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -177,7 +178,7 @@ export function CommandDialog({
                   name="agent"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Agent (optional)</FormLabel>
+                      <FormLabel>{t('settings.agent') || "Agent (optional)"}</FormLabel>
                       <FormControl>
                         <Input {...field} placeholder="build" />
                       </FormControl>
@@ -190,7 +191,7 @@ export function CommandDialog({
                   name="topP"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Top P (optional)</FormLabel>
+                      <FormLabel>{t('settings.topP')} ({t('common.optional')})</FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -213,7 +214,7 @@ export function CommandDialog({
                   name="model"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Model (optional)</FormLabel>
+                      <FormLabel>{t('model.selectModel')} ({t('common.optional')})</FormLabel>
                       <FormControl>
                         <Input
                           {...field}
@@ -232,9 +233,9 @@ export function CommandDialog({
                 render={({ field }) => (
                   <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
                     <div className="space-y-0.5">
-                      <FormLabel className="text-base">Run as subtask</FormLabel>
+                      <FormLabel className="text-base">{t('settings.runAsSubtask') || "Run as subtask"}</FormLabel>
                       <FormDescription>
-                        Execute this command as a separate subtask
+                        {t('settings.runAsSubtaskDescription') || "Execute this command as a separate subtask"}
                       </FormDescription>
                     </div>
                     <FormControl>
@@ -252,14 +253,13 @@ export function CommandDialog({
 
         <DialogFooter className="p-3 sm:p-4 border-t gap-2 pb-4">
           <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 sm:flex-none">
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button onClick={() => form.handleSubmit(handleSubmit)()} disabled={!form.formState.isValid} className="flex-1 sm:flex-none">
-            {editingCommand ? "Update" : "Create"}
+            {editingCommand ? t('common.update') || "Update" : t('common.create')}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
@@ -32,6 +33,7 @@ export function RepoSkillsDialog({
   directory,
   onSkillLoaded,
 }: RepoSkillsDialogProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [installDialogOpen, setInstallDialogOpen] = useState(false)
   const { deleteSkill, setDeleteSkill, confirmDelete, isDeleting } = useDeleteSkill()
@@ -68,14 +70,14 @@ export function RepoSkillsDialog({
           <DialogHeader className="p-4 sm:p-6 border-b shrink-0">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
-                <DialogTitle>Skills</DialogTitle>
+                <DialogTitle>{t('settings.skills')}</DialogTitle>
                 <DialogDescription>
-                  {canLoad ? 'Search and load a skill into the current session' : 'Skills available for this repository'}
+                  {canLoad ? t('settings.searchSkills') : t('settings.skills')}
                 </DialogDescription>
               </div>
               <Button type="button" variant="outline" size="sm" onClick={() => setInstallDialogOpen(true)}>
                 <Download className="h-4 w-4 mr-1" />
-                Install Skill
+                {t('settings.installSkill')}
               </Button>
             </div>
           </DialogHeader>
@@ -85,9 +87,9 @@ export function RepoSkillsDialog({
               data={data}
               error={error as Error | null}
               primaryAction={canLoad ? { label: 'Load', onClick: handleLoad } : undefined}
-              rowActions={[{ label: 'Delete', onClick: setDeleteSkill, destructive: true }]}
-              emptyTitle="No skills found"
-              emptyHint="Install a skill or add one to .opencode/skills/<name>/SKILL.md."
+              rowActions={[{ label: t('common.delete'), onClick: setDeleteSkill, destructive: true }]}
+              emptyTitle={t('common.noResults')}
+              emptyHint={t('settings.searchSkills')}
               maxHeightClassName="max-h-[55vh]"
             />
           </div>
@@ -105,8 +107,8 @@ export function RepoSkillsDialog({
         onOpenChange={(isOpen) => !isOpen && setDeleteSkill(null)}
         onConfirm={confirmDelete}
         onCancel={() => setDeleteSkill(null)}
-        title="Delete Skill"
-        description="Delete this managed skill directory and bundled files? This action cannot be undone."
+        title={t('settings.deleteSkill')}
+        description={t('settings.deleteSkill')}
         itemName={deleteSkill?.name}
         isDeleting={isDeleting}
       />
