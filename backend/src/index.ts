@@ -38,6 +38,8 @@ import { createSessionPinRoutes } from './routes/session-pins'
 import { createInternalRoutes } from './routes/internal'
 import { sweepStaleUploadSessions } from './routes/internal/repo-mirror-helpers'
 import { createOpenCodeProxyRoutes } from './routes/opencode-proxy'
+import { createDevServerRoutes } from './routes/dev-server'
+import { startPreviewServer } from './services/dev-server/preview-server'
 import { sseAggregator } from './services/sse-aggregator'
 import { ensureDirectoryExists, writeFileContent, fileExists, readFileContent } from './services/file-operations'
 import { SettingsService } from './services/settings'
@@ -358,6 +360,7 @@ protectedApi.route('/notifications', createNotificationRoutes(notificationServic
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
+protectedApi.route('/dev-server', createDevServerRoutes(db))
 
 app.route('/api', protectedApi)
 
@@ -483,4 +486,7 @@ serve({
   hostname: HOST,
 })
 
+startPreviewServer(auth, db)
+
 logger.info(`🚀 OpenCode WebUI API running on http://${HOST}:${PORT}`)
+logger.info(`🔍 Dev preview proxy running on http://${HOST}:${ENV.DEV_PREVIEW.PORT}`)

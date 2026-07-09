@@ -16,7 +16,7 @@ async function fetchGhEnv(cwd) {
   const cached = cache.get(cacheKey)
   if (cached && now < cached.expiry) return cached.env
   try {
-    const url = new URL(baseUrl + '/git-credentials/gh-env')
+    const url = new URL(baseUrl + '/shell-env')
     if (cwd) url.searchParams.set('cwd', cwd)
     const res = await fetch(url, {
       headers: { Authorization: 'Bearer ' + token },

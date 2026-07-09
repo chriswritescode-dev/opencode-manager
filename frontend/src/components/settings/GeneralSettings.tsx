@@ -1,13 +1,32 @@
+import { useState, useEffect } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { useVersionCheck } from '@/hooks/useVersionCheck'
 import { Loader2 } from 'lucide-react'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { DEFAULT_DEV_SERVER_PORT } from '@opencode-manager/shared'
 
 export function GeneralSettings() {
   const { preferences, isLoading, updateSettings, isUpdating } = useSettings()
   const { data: versionInfo, isLoading: isVersionLoading } = useVersionCheck()
+
+  const [devServerPort, setDevServerPort] = useState('')
+  useEffect(() => {
+    setDevServerPort(String(preferences?.devServerPort ?? DEFAULT_DEV_SERVER_PORT))
+  }, [preferences?.devServerPort])
+
+  const commitDevServerPort = () => {
+    const parsed = parseInt(devServerPort, 10)
+    if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) {
+      if (parsed !== preferences?.devServerPort) {
+        updateSettings({ devServerPort: parsed })
+      }
+    } else {
+      setDevServerPort(String(preferences?.devServerPort ?? DEFAULT_DEV_SERVER_PORT))
+    }
+  }
 
   if (isLoading) {
     return (
@@ -64,6 +83,22 @@ export function GeneralSettings() {
           </Select>
           <p className="text-sm text-muted-foreground">
             Choose your preferred color scheme
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="devServerPort">Dev server port</Label>
+          <Input
+            id="devServerPort"
+            type="number"
+            min={1}
+            max={65535}
+            value={devServerPort}
+            onChange={(e) => setDevServerPort(e.target.value)}
+            onBlur={commitDevServerPort}
+          />
+          <p className="text-sm text-muted-foreground">
+            Port the preview proxy checks, and the value agents receive in <span className="font-mono">$OCM_DEV_SERVER_PORT</span> to run the dev server on.
           </p>
         </div>
 

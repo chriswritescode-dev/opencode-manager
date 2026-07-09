@@ -53,7 +53,7 @@ describe('ocm-gh-env plugin', () => {
 
     expect(output.env).toEqual({ GH_TOKEN: 'ghp', GITHUB_TOKEN: 'ghp' })
     const [url, options] = fetchMock.mock.calls[0]!
-    expect(url.toString()).toBe('http://localhost:5003/api/internal/git-credentials/gh-env?cwd=%2Frepo')
+    expect(url.toString()).toBe('http://localhost:5003/api/internal/shell-env?cwd=%2Frepo')
     expect(options).toEqual({ headers: { Authorization: 'Bearer secret-token' } })
   })
 
