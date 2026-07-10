@@ -116,23 +116,21 @@ describe('OpenCodeRestartCoordinator', () => {
 
       // Assert interleaved ordering: aborts → restart → resumes
       expect(events).toEqual([
-        'forward:/session/s1/abort',
-        'forward:/session/s2/abort',
+        'forward:/api/session/s1/interrupt',
+        'forward:/api/session/s2/interrupt',
         'restart',
-        'forward:/session/s1/prompt_async',
-        'forward:/session/s2/prompt_async',
+        'forward:/api/session/s1/prompt',
+        'forward:/api/session/s2/prompt',
       ])
 
       // Aborts called first for both sessions
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/s1/abort',
-        directory: '/a',
+        path: '/api/session/s1/interrupt',
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/session/s2/abort',
-        directory: '/b',
+        path: '/api/session/s2/interrupt',
       })
 
       expect(restart).toHaveBeenCalledOnce()
@@ -141,18 +139,20 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(4)
       expect(forward).toHaveBeenNthCalledWith(3, {
         method: 'POST',
-        path: '/session/s1/prompt_async',
-        directory: '/a',
+        path: '/api/session/s1/prompt',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
+        body: JSON.stringify({ prompt: { text: 'continue' } }),
       })
       expect(forward).toHaveBeenNthCalledWith(4, {
         method: 'POST',
-        path: '/session/s2/prompt_async',
-        directory: '/b',
+        path: '/api/session/s2/prompt',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
+        body: JSON.stringify({ prompt: { text: 'continue' } }),
       })
+
+      // Verify resume body deserializes correctly
+      const resumeBody = JSON.parse(forward.mock.calls[2]![0].body as string)
+      expect(resumeBody).toEqual({ prompt: { text: 'continue' } })
 
       expect(result).toEqual({ healthy: true, resumedSessionIDs: ['s1', 's2'] })
     })
@@ -172,16 +172,15 @@ describe('OpenCodeRestartCoordinator', () => {
       // Aborts still happen
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/s1/abort',
-        directory: '/a',
+        path: '/api/session/s1/interrupt',
       })
       expect(restart).toHaveBeenCalledOnce()
 
-      // No prompt_async calls
-      const promptAsyncCalls = forward.mock.calls.filter(
-        (call: unknown[]) => (call[0] as { path: string }).path.includes('prompt_async'),
+      // No prompt calls
+      const promptCalls = forward.mock.calls.filter(
+        (call: unknown[]) => (call[0] as { path: string }).path.includes('/prompt'),
       )
-      expect(promptAsyncCalls).toHaveLength(0)
+      expect(promptCalls).toHaveLength(0)
 
       expect(result).toEqual({ healthy: false, resumedSessionIDs: [] })
     })
@@ -219,15 +218,13 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(2)
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/manual1/abort',
-        directory: '/a',
+        path: '/api/session/manual1/interrupt',
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/session/manual1/prompt_async',
-        directory: '/a',
+        path: '/api/session/manual1/prompt',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
+        body: JSON.stringify({ prompt: { text: 'continue' } }),
       })
 
       expect(result).toEqual({ healthy: true, resumedSessionIDs: ['manual1'] })
@@ -274,13 +271,11 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(2)
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/s1/abort',
-        directory: '/a',
+        path: '/api/session/s1/interrupt',
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/session/s2/abort',
-        directory: '/b',
+        path: '/api/session/s2/interrupt',
       })
     })
   })

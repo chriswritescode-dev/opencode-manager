@@ -116,6 +116,29 @@ function textResponse(body: string, status: number = 200): Response {
   return new Response(body, { status })
 }
 
+function promptReceipt(): Response {
+  return jsonResponse({
+    data: {
+      admittedSeq: 1,
+      id: 'msg-1',
+      sessionID: 'ses-test',
+      delivery: 'steer',
+      timeCreated: Math.floor(Date.now() / 1000),
+    },
+  })
+}
+
+function v2Messages(messages: Array<{
+  type: string
+  id?: string
+  content?: Array<{ type: string; text?: string }>
+  time?: { created?: number; completed?: number }
+  finish?: string
+  error?: { name?: string; data?: { message?: string } }
+}>): Response {
+  return jsonResponse({ data: messages.map(m => ({ ...m, id: m.id ?? 'msg-1' })), cursor: {} })
+}
+
 function createOpenCodeClientStub(): OpenCodeClient {
   return {
     forward: mocks.forward,
@@ -213,23 +236,28 @@ describe('ScheduleService', () => {
 
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return Promise.resolve(jsonResponse({ id: 'ses-run-1' }))
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-run-1' } }))
       }
 
-      if (path === '/session/ses-run-1/message' && method === 'POST') {
-        return Promise.resolve(textResponse(''))
+      if (path === `/api/session/ses-run-1/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
       }
 
-      if (path === '/session/ses-run-1/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([
-          {
-            info: { role: 'assistant', time: { completed: Date.now() } },
-            parts: [{ type: 'text', text: 'System health is stable.' }],
-          },
+      if (path.startsWith('/api/session/ses-run-1/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Stale status.' }], time: { created: 1, completed: 2 }, finish: 'stop' },
+          { type: 'assistant', content: [{ type: 'text', text: 'System health is stable.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
       }
 
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -259,6 +287,59 @@ describe('ScheduleService', () => {
     )
   })
 
+  it('strips thinking blocks from V2 assistant messages', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-think',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-think' } }))
+      }
+      if (path === `/api/session/ses-think/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
+      }
+      if (path.startsWith('/api/session/ses-think/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          {
+            type: 'assistant',
+            content: [{ type: 'text', text: '<think>Let me analyze the system logs...\nThe database connection is healthy.</think>The database connection is healthy.' }],
+            time: { created: 1000, completed: 2000 },
+            finish: 'stop',
+          },
+        ]))
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
+      throw new Error(`Unexpected proxy request: ${method} ${path}`)
+    })
+
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'completed',
+          responseText: 'The database connection is healthy.',
+        }),
+      )
+    })
+  })
+
   it('sends session and message JSON POSTs with Content-Type: application/json', async () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     const runWithSession: ScheduleRun = {
@@ -270,11 +351,22 @@ describe('ScheduleService', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-content-type' })
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-content-type' } })
       }
-      if (path === '/session/ses-content-type/message' && method === 'POST') {
-        return textResponse(JSON.stringify({ parts: [{ type: 'text', text: 'Done.' }] }))
+      if (path === `/api/session/ses-content-type/prompt` && method === 'POST') {
+        return promptReceipt()
+      }
+      if (path.startsWith('/api/session/ses-content-type/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected forward request: ${method} ${path}`)
     })
@@ -285,21 +377,76 @@ describe('ScheduleService', () => {
       expect(mocks.forward).toHaveBeenCalledWith(
         expect.objectContaining({
           method: 'POST',
-          path: '/session',
+          path: '/api/session',
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         }),
       )
       expect(mocks.forward).toHaveBeenCalledWith(
         expect.objectContaining({
           method: 'POST',
-          path: '/session/ses-content-type/message',
+          path: `/api/session/ses-content-type/prompt`,
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         }),
       )
     })
   })
 
-  it('completes a run immediately when the prompt endpoint returns JSON', async () => {
+  it('proceeds despite title PATCH failure', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-patch-fail',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-patch-fail' } }))
+      }
+
+      if (path === `/api/session/ses-patch-fail/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
+      }
+
+      if (path.startsWith('/api/session/ses-patch-fail/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Completed despite title issue.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(textResponse('Server Error', 500))
+      }
+
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
+      throw new Error(`Unexpected proxy request: ${method} ${path}`)
+    })
+
+    const result = await service.runJob(42, 7, 'manual')
+
+    expect(result).toEqual(runWithSession)
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'completed',
+          responseText: 'Completed despite title issue.',
+          sessionId: 'ses-patch-fail',
+        }),
+      )
+    })
+  })
+
+  it('completes a run after prompting the session', async () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     const runWithSession: ScheduleRun = {
       ...baseRun,
@@ -311,16 +458,27 @@ describe('ScheduleService', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return Promise.resolve(jsonResponse({ id: 'ses-run-2' }))
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-run-2' } }))
       }
 
-      if (path === '/session/ses-run-2/message' && method === 'POST') {
-        return Promise.resolve(textResponse(JSON.stringify({
-          parts: [{ type: 'text', text: 'Immediate status summary.' }],
-        })))
+      if (path === `/api/session/ses-run-2/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
       }
 
+      if (path.startsWith('/api/session/ses-run-2/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Immediate status summary.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -395,14 +553,21 @@ describe('ScheduleService', () => {
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return Promise.resolve(jsonResponse({ id: 'ses-run-6' }))
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-run-6' } }))
       }
 
-      if (path === '/session/ses-run-6/message' && method === 'POST') {
+      if (path === `/api/session/ses-run-6/prompt` && method === 'POST') {
         return Promise.resolve(textResponse('Provider unavailable', 500))
       }
 
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -425,6 +590,229 @@ describe('ScheduleService', () => {
     })
   })
 
+  it('fails the run when the V2 assistant message carries an error', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-err-v2',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-err-v2' } }))
+      }
+      if (path === `/api/session/ses-err-v2/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
+      }
+      if (path.startsWith('/api/session/ses-err-v2/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Partial output' }], error: { name: 'provider_error', data: { message: 'Model crashed' } } },
+        ]))
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
+      throw new Error(`Unexpected proxy request: ${method} ${path}`)
+    })
+
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'failed',
+          responseText: 'Partial output',
+          errorText: 'Model crashed',
+        }),
+      )
+    })
+  })
+
+  it('completes when the session stays active longer than RUN_POLL_TIMEOUT_MS', async () => {
+    let fakeNow = 1_700_000_000_000
+    const RUN_POLL_INTERVAL_MS = 2_000
+
+    vi.stubGlobal('Bun', { sleep: vi.fn(async () => { fakeNow += RUN_POLL_INTERVAL_MS }) })
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow)
+
+    try {
+      const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-active-long',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+
+      let activePolls = 0
+
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+      routeForward(({ path, method }) => {
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-active-long' } }))
+        }
+        if (path === `/api/session/ses-active-long/prompt` && method === 'POST') {
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-active-long/message') && method === 'GET') {
+          activePolls++
+          if (activePolls <= 155) {
+            return Promise.resolve(v2Messages([]))
+          }
+          return Promise.resolve(v2Messages([
+            { type: 'assistant', content: [{ type: 'text', text: 'Completed after active period' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+          ]))
+        }
+        if (path === '/api/session/active' && method === 'GET') {
+          if (activePolls > 155) {
+            return Promise.resolve(jsonResponse({ data: {} }))
+          }
+          return Promise.resolve(jsonResponse({ data: { 'ses-active-long': { type: 'running' } } }))
+        }
+        if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+          return Promise.resolve(jsonResponse({}))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+          expect.anything(),
+          42,
+          7,
+          5,
+          expect.objectContaining({
+            status: 'completed',
+            responseText: 'Completed after active period',
+          }),
+        )
+      })
+    } finally {
+      nowSpy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('completes when assistant message has time.completed even if session remains in active map', async () => {
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-completed-still-active',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started. Waiting for assistant response...',
+    }
+
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+    mocks.getScheduleRunById.mockReturnValue(runWithSession)
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-completed-still-active' } }))
+      }
+      if (path === `/api/session/ses-completed-still-active/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
+      }
+      if (path.startsWith('/api/session/ses-completed-still-active/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Completed while still active.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: { 'ses-completed-still-active': { type: 'running' } } }))
+      }
+      throw new Error(`Unexpected proxy request: ${method} ${path}`)
+    })
+
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({
+          status: 'completed',
+          responseText: 'Completed while still active.',
+          sessionId: 'ses-completed-still-active',
+        }),
+      )
+    })
+  })
+
+  it('times out when the session is inactive and never settles', async () => {
+    let fakeNow = 1_700_000_000_000
+    const RUN_POLL_INTERVAL_MS = 2_000
+
+    vi.stubGlobal('Bun', { sleep: vi.fn(async () => { fakeNow += RUN_POLL_INTERVAL_MS }) })
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => fakeNow)
+
+    try {
+      const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+      const runWithSession: ScheduleRun = {
+        ...baseRun,
+        sessionId: 'ses-timeout',
+        sessionTitle: 'Scheduled: Weekly engineering summary',
+        logText: 'Run started. Waiting for assistant response...',
+      }
+
+      mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+      mocks.getScheduleRunById.mockReturnValue(runWithSession)
+      routeForward(({ path, method }) => {
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-timeout' } }))
+        }
+        if (path === `/api/session/ses-timeout/prompt` && method === 'POST') {
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-timeout/message') && method === 'GET') {
+          return Promise.resolve(v2Messages([]))
+        }
+        if (path === '/api/session/active' && method === 'GET') {
+          return Promise.resolve(jsonResponse({ data: {} }))
+        }
+        if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+          return Promise.resolve(jsonResponse({}))
+        }
+        throw new Error(`Unexpected proxy request: ${method} ${path}`)
+      })
+
+      await service.runJob(42, 7, 'manual')
+
+      await vi.waitFor(() => {
+        expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+          expect.anything(),
+          42,
+          7,
+          5,
+          expect.objectContaining({
+            status: 'failed',
+            errorText: expect.stringContaining('Timed out'),
+          }),
+        )
+      })
+    } finally {
+      nowSpy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('cancels an in-progress run by aborting the linked session', async () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     const runningRun: ScheduleRun = {
@@ -443,14 +831,17 @@ describe('ScheduleService', () => {
     mocks.getScheduleRunById.mockReturnValue(runningRun)
     mocks.updateScheduleRun.mockReturnValue(cancelledRun)
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-run-3/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([]))
+      if (path.startsWith('/api/session/ses-run-3/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([]))
       }
 
-      if (path === '/session/ses-run-3/abort' && method === 'POST') {
+      if (path === `/api/session/ses-run-3/interrupt` && method === 'POST') {
         return Promise.resolve(textResponse(''))
       }
 
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -459,9 +850,8 @@ describe('ScheduleService', () => {
     expect(result).toEqual(cancelledRun)
     expect(mocks.forward).toHaveBeenCalledWith(
       expect.objectContaining({
-        path: '/session/ses-run-3/abort',
+        path: `/api/session/ses-run-3/interrupt`,
         method: 'POST',
-        directory: repo.fullPath,
       }),
     )
     expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
@@ -522,14 +912,17 @@ describe('ScheduleService', () => {
 
     mocks.getScheduleRunById.mockReturnValue(runningRun)
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-run-7/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([]))
+      if (path.startsWith('/api/session/ses-run-7/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([]))
       }
 
-      if (path === '/session/ses-run-7/abort' && method === 'POST') {
+      if (path === `/api/session/ses-run-7/interrupt` && method === 'POST') {
         return Promise.resolve(textResponse('Abort refused', 500))
       }
 
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -551,19 +944,14 @@ describe('ScheduleService', () => {
 
     mocks.listRunningScheduleRuns.mockReturnValue([orphanedRun])
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-run-4/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([
-          {
-            info: { role: 'assistant' },
-            parts: [{ type: 'text', text: 'Partial summary' }],
-          },
+      if (path.startsWith('/api/session/ses-run-4/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Partial summary' }] },
         ]))
       }
 
-      if (path === '/session/status' && method === 'GET') {
-        return Promise.resolve(jsonResponse({
-          'ses-run-4': { type: 'idle' },
-        }))
+      if (path === '/api/session/active' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
 
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
@@ -620,15 +1008,15 @@ describe('ScheduleService', () => {
 
     mocks.listRunningScheduleRuns.mockReturnValue([completedRun])
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-run-8/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([
-          {
-            info: { role: 'assistant', time: { completed: Date.now() } },
-            parts: [{ type: 'text', text: 'Recovered summary' }],
-          },
+      if (path.startsWith('/api/session/ses-run-8/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Recovered summary' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
       }
 
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -655,29 +1043,26 @@ describe('ScheduleService', () => {
       sessionTitle: 'Scheduled: Weekly engineering summary',
     }
     let messageRequests = 0
+    let assistantSeen = false
 
     mocks.listRunningScheduleRuns.mockReturnValue([resumedRun])
     mocks.getScheduleRunById.mockReturnValue(resumedRun)
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-run-9/message' && method === 'GET') {
+      if (path.startsWith('/api/session/ses-run-9/message') && method === 'GET') {
         messageRequests += 1
 
         if (messageRequests === 1) {
-          return Promise.resolve(jsonResponse([]))
+          return Promise.resolve(v2Messages([]))
         }
 
-        return Promise.resolve(jsonResponse([
-          {
-            info: { role: 'assistant', time: { completed: Date.now() } },
-            parts: [{ type: 'text', text: 'Recovered after reconnect' }],
-          },
+        assistantSeen = true
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Recovered after reconnect' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
       }
 
-      if (path === '/session/status' && method === 'GET') {
-        return Promise.resolve(jsonResponse({
-          'ses-run-9': { type: 'busy' },
-        }))
+      if (path === '/api/session/active' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ data: assistantSeen ? {} : { 'ses-run-9': { type: 'running' } } }))
       }
 
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
@@ -826,15 +1211,15 @@ describe('ScheduleService', () => {
 
     mocks.getScheduleRunById.mockReturnValueOnce(runningRun).mockReturnValueOnce(runningRun).mockReturnValueOnce(completedRun)
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-run-5/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([
-          {
-            info: { role: 'assistant', time: { completed: Date.now() } },
-            parts: [{ type: 'text', text: 'Completed summary' }],
-          },
+      if (path.startsWith('/api/session/ses-run-5/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Completed summary' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
       }
 
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
+      }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
 
@@ -876,14 +1261,20 @@ describe('ScheduleService', () => {
             { name: 'code-review', description: 'Code review workflow', location: '/path/SKILL.md', content: 'Review instructions here' },
           ]))
         }
-        if (path === '/session' && method === 'POST') {
-          return Promise.resolve(jsonResponse({ id: 'ses-skills-1' }))
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-1' } }))
         }
-        if (path === '/session/ses-skills-1/message' && method === 'POST') {
+        if (path === `/api/session/ses-skills-1/prompt` && method === 'POST') {
           capturedPromptBody = body
-          return Promise.resolve(textResponse(JSON.stringify({
-            parts: [{ type: 'text', text: 'Done.' }],
-          })))
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-skills-1/message') && method === 'GET') {
+          return Promise.resolve(v2Messages([
+            { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+          ]))
+        }
+        if (path === "/api/session/active" && method === "GET") {
+          return Promise.resolve(jsonResponse({ data: {} }))
         }
         throw new Error(`Unexpected proxy request: ${method} ${path}`)
       })
@@ -895,10 +1286,10 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.parts[0].text).toContain('<skill_content name="git-release">')
-      expect(parsed.parts[0].text).toContain('<skill_content name="code-review">')
-      expect(parsed.parts[0].text).toContain('Release instructions here')
-      expect(parsed.parts[0].text).toContain('Review instructions here')
+      expect(parsed.prompt.text).toContain('<skill_content name="git-release">')
+      expect(parsed.prompt.text).toContain('<skill_content name="code-review">')
+      expect(parsed.prompt.text).toContain('Release instructions here')
+      expect(parsed.prompt.text).toContain('Review instructions here')
     })
 
     it('appends skill notes when provided', async () => {
@@ -925,14 +1316,23 @@ describe('ScheduleService', () => {
             { name: 'git-release', description: 'Git release workflow', location: '/path/SKILL.md', content: 'Release instructions here' },
           ]))
         }
-        if (path === '/session' && method === 'POST') {
-          return Promise.resolve(jsonResponse({ id: 'ses-skills-2' }))
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-2' } }))
         }
-        if (path === '/session/ses-skills-2/message' && method === 'POST') {
+        if (path === `/api/session/ses-skills-2/prompt` && method === 'POST') {
           capturedPromptBody = body
-          return Promise.resolve(textResponse(JSON.stringify({
-            parts: [{ type: 'text', text: 'Done.' }],
-          })))
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-skills-2/message') && method === 'GET') {
+          return Promise.resolve(v2Messages([
+            { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+          ]))
+        }
+        if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+          return Promise.resolve(jsonResponse({}))
+        }
+        if (path === "/api/session/active" && method === "GET") {
+          return Promise.resolve(jsonResponse({ data: {} }))
         }
         throw new Error(`Unexpected proxy request: ${method} ${path}`)
       })
@@ -944,9 +1344,9 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.parts[0].text).toContain('<skill_content name="git-release">')
-      expect(parsed.parts[0].text).toContain('Release instructions here')
-      expect(parsed.parts[0].text).toContain('\nSkill notes: Focus on changelog')
+      expect(parsed.prompt.text).toContain('<skill_content name="git-release">')
+      expect(parsed.prompt.text).toContain('Release instructions here')
+      expect(parsed.prompt.text).toContain('\nSkill notes: Focus on changelog')
     })
 
     it('does not modify the prompt when skillSlugs is empty', async () => {
@@ -968,14 +1368,23 @@ describe('ScheduleService', () => {
 
       let capturedPromptBody: string | undefined
       routeForward(({ path, method, body }) => {
-        if (path === '/session' && method === 'POST') {
-          return Promise.resolve(jsonResponse({ id: 'ses-skills-3' }))
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-3' } }))
         }
-        if (path === '/session/ses-skills-3/message' && method === 'POST') {
+        if (path === `/api/session/ses-skills-3/prompt` && method === 'POST') {
           capturedPromptBody = body
-          return Promise.resolve(textResponse(JSON.stringify({
-            parts: [{ type: 'text', text: 'Done.' }],
-          })))
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-skills-3/message') && method === 'GET') {
+          return Promise.resolve(v2Messages([
+            { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+          ]))
+        }
+        if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+          return Promise.resolve(jsonResponse({}))
+        }
+        if (path === "/api/session/active" && method === "GET") {
+          return Promise.resolve(jsonResponse({ data: {} }))
         }
         throw new Error(`Unexpected proxy request: ${method} ${path}`)
       })
@@ -987,7 +1396,7 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.parts[0].text).toBe(job.prompt)
+      expect(parsed.prompt.text).toBe(job.prompt)
     })
 
     it('falls back to name-only injection when skill endpoint fails', async () => {
@@ -1012,14 +1421,23 @@ describe('ScheduleService', () => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(new Response('error', { status: 500 }))
         }
-        if (path === '/session' && method === 'POST') {
-          return Promise.resolve(jsonResponse({ id: 'ses-skills-4' }))
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-4' } }))
         }
-        if (path === '/session/ses-skills-4/message' && method === 'POST') {
+        if (path === `/api/session/ses-skills-4/prompt` && method === 'POST') {
           capturedPromptBody = body
-          return Promise.resolve(textResponse(JSON.stringify({
-            parts: [{ type: 'text', text: 'Done.' }],
-          })))
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-skills-4/message') && method === 'GET') {
+          return Promise.resolve(v2Messages([
+            { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+          ]))
+        }
+        if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+          return Promise.resolve(jsonResponse({}))
+        }
+        if (path === "/api/session/active" && method === "GET") {
+          return Promise.resolve(jsonResponse({ data: {} }))
         }
         throw new Error(`Unexpected proxy request: ${method} ${path}`)
       })
@@ -1031,7 +1449,7 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.parts[0].text).toContain('For this task, use the following skills: git-release')
+      expect(parsed.prompt.text).toContain('For this task, use the following skills: git-release')
     })
 
     it('falls back gracefully when a skill slug is not found in the list', async () => {
@@ -1056,14 +1474,23 @@ describe('ScheduleService', () => {
         if (path === '/skill' && method === 'GET') {
           return Promise.resolve(jsonResponse([]))
         }
-        if (path === '/session' && method === 'POST') {
-          return Promise.resolve(jsonResponse({ id: 'ses-skills-5' }))
+        if (path === '/api/session' && method === 'POST') {
+          return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-5' } }))
         }
-        if (path === '/session/ses-skills-5/message' && method === 'POST') {
+        if (path === `/api/session/ses-skills-5/prompt` && method === 'POST') {
           capturedPromptBody = body
-          return Promise.resolve(textResponse(JSON.stringify({
-            parts: [{ type: 'text', text: 'Done.' }],
-          })))
+          return Promise.resolve(promptReceipt())
+        }
+        if (path.startsWith('/api/session/ses-skills-5/message') && method === 'GET') {
+          return Promise.resolve(v2Messages([
+            { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+          ]))
+        }
+        if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+          return Promise.resolve(jsonResponse({}))
+        }
+        if (path === "/api/session/active" && method === "GET") {
+          return Promise.resolve(jsonResponse({ data: {} }))
         }
         throw new Error(`Unexpected proxy request: ${method} ${path}`)
       })
@@ -1075,7 +1502,7 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.parts[0].text).toContain('For this task, use the following skills: unknown-skill')
+      expect(parsed.prompt.text).toContain('For this task, use the following skills: unknown-skill')
     })
   })
 })
@@ -1118,17 +1545,23 @@ describe('ScheduleService worktree isolation', () => {
     setupWorktreePrepare()
 
     mocks.updateScheduleRunMetadata.mockReturnValue(worktreeRun)
-    mocks.getScheduleRunById.mockReturnValue(worktreeRun)
-    routeForward(({ path, method, directory }) => {
-      if (path === '/session' && method === 'POST') {
-        expect(directory).toBe(worktreePath)
-        return Promise.resolve(jsonResponse({ id: 'ses-wt-1' }))
+      mocks.getScheduleRunById.mockReturnValue(worktreeRun)
+      routeForward(({ path, method, body }) => {
+      if (path === '/api/session' && method === 'POST') {
+        const parsed = JSON.parse(body!)
+        expect(parsed.location.directory).toBe(worktreePath)
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-wt-1' } }))
       }
-      if (path === '/session/ses-wt-1/message' && method === 'POST') {
-        expect(directory).toBe(worktreePath)
-        return Promise.resolve(textResponse(JSON.stringify({
-          parts: [{ type: 'text', text: 'Worktree run done.' }],
-        })))
+      if (path === `/api/session/ses-wt-1/prompt` && method === 'POST') {
+        return Promise.resolve(textResponse(''))
+      }
+      if (path.startsWith('/api/session/ses-wt-1/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Worktree run done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
@@ -1160,13 +1593,22 @@ describe('ScheduleService worktree isolation', () => {
     mocks.getScheduleRunById.mockReturnValue(runWithWorktree)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return Promise.resolve(jsonResponse({ id: 'ses-wt-1' }))
+      if (path === '/api/session' && method === 'POST') {
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-wt-1' } }))
       }
-      if (path === '/session/ses-wt-1/message' && method === 'POST') {
-        return Promise.resolve(textResponse(JSON.stringify({
-          parts: [{ type: 'text', text: 'Worktree run done.' }],
-        })))
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+      if (path === `/api/session/ses-wt-1/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
+      }
+      if (path.startsWith('/api/session/ses-wt-1/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Worktree run done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
@@ -1198,15 +1640,25 @@ describe('ScheduleService worktree isolation', () => {
     mocks.getScheduleRunById.mockReturnValue(runWithSession)
 
     let capturedDirectory: string | undefined
-    routeForward(({ path, method, directory }) => {
-      if (path === '/session' && method === 'POST') {
-        capturedDirectory = directory
-        return Promise.resolve(jsonResponse({ id: 'ses-inline-1' }))
+    routeForward(({ path, method, body }) => {
+      if (path === '/api/session' && method === 'POST') {
+        const parsed = JSON.parse(body!)
+        capturedDirectory = parsed.location.directory
+        return Promise.resolve(jsonResponse({ data: { id: 'ses-inline-1' } }))
       }
-      if (path === '/session/ses-inline-1/message' && method === 'POST') {
-        return Promise.resolve(textResponse(JSON.stringify({
-          parts: [{ type: 'text', text: 'Inline run done.' }],
-        })))
+      if (path === `/api/session/ses-inline-1/prompt` && method === 'POST') {
+        return Promise.resolve(promptReceipt())
+      }
+      if (path.startsWith('/api/session/ses-inline-1/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Inline run done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
+        ]))
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return Promise.resolve(jsonResponse({}))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
@@ -1243,11 +1695,14 @@ describe('ScheduleService worktree isolation', () => {
     setupWorktreeFinalize('ghi789')
 
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-cancel-wt/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([]))
+      if (path.startsWith('/api/session/ses-cancel-wt/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([]))
       }
-      if (path === '/session/ses-cancel-wt/abort' && method === 'POST') {
+      if (path === `/api/session/ses-cancel-wt/interrupt` && method === 'POST') {
         return Promise.resolve(textResponse(''))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
@@ -1280,13 +1735,11 @@ describe('ScheduleService worktree isolation', () => {
 
     // Session exists but has no completed message — triggers finalizeRecoveredRun
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-recover-wt/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([]))
+      if (path.startsWith('/api/session/ses-recover-wt/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([]))
       }
-      if (path === '/session/status' && method === 'GET') {
-        return Promise.resolve(jsonResponse({
-          'ses-recover-wt': { type: 'idle' },
-        }))
+      if (path === '/api/session/active' && method === 'GET') {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
@@ -1321,10 +1774,13 @@ describe('ScheduleService worktree isolation', () => {
     activeTeardowns.add('42:7:5')
 
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-race-double/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([
-          { info: { role: 'assistant', time: { completed: Date.now() } }, parts: [{ type: 'text', text: 'Already done' }] },
+      if (path.startsWith('/api/session/ses-race-double/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Already done' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
@@ -1362,11 +1818,14 @@ describe('ScheduleService worktree isolation', () => {
     mocks.getScheduleRunById.mockReturnValue(runningRun)
 
     routeForward(({ path, method }) => {
-      if (path === '/session/ses-guard-cycle/message' && method === 'GET') {
-        return Promise.resolve(jsonResponse([]))
+      if (path.startsWith('/api/session/ses-guard-cycle/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([]))
       }
-      if (path === '/session/ses-guard-cycle/abort' && method === 'POST') {
+      if (path === `/api/session/ses-guard-cycle/interrupt` && method === 'POST') {
         return Promise.resolve(textResponse(''))
+      }
+      if (path === "/api/session/active" && method === "GET") {
+        return Promise.resolve(jsonResponse({ data: {} }))
       }
       throw new Error(`Unexpected proxy request: ${method} ${path}`)
     })
