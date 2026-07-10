@@ -129,7 +129,15 @@ function v2Messages(messages: Array<{
   finish?: string
   error?: { name?: string; data?: { message?: string } }
 }>): Response {
-  return jsonResponse({ data: messages.map(m => ({ ...m, id: m.id ?? 'msg-1' })), cursor: {} })
+  return jsonResponse(messages.map(m => ({
+    info: {
+      id: m.id ?? 'msg-1',
+      role: m.type,
+      time: m.time,
+      error: m.error,
+    },
+    parts: m.content,
+  })))
 }
 
 function createOpenCodeClientStub(): OpenCodeClient {
@@ -232,7 +240,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -241,7 +249,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
         return jsonResponse({ data: [] })
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])
@@ -294,7 +302,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -303,7 +311,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
         return jsonResponse({ data: [] })
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])
@@ -346,7 +354,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -355,7 +363,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
         return jsonResponse({ data: [] })
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])
@@ -398,7 +406,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -407,7 +415,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
         return jsonResponse({ data: [] })
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])
@@ -450,7 +458,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -459,7 +467,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
         return jsonResponse({ data: [{ id: 'q-1' }] })
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])
@@ -501,7 +509,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -510,7 +518,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
         return textResponse('Internal Server Error', 500)
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])
@@ -554,7 +562,7 @@ describe('ScheduleService permission auto-responder', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path === `/api/session/ses-perm-auto/prompt` && method === 'POST') {
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
         return promptReceipt()
       }
       if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
@@ -570,7 +578,7 @@ describe('ScheduleService permission auto-responder', () => {
         replyCount++
         return jsonResponse({})
       }
-      if (path.startsWith('/api/session/ses-perm-auto/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
         return v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
         ])

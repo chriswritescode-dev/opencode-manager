@@ -119,8 +119,8 @@ describe('OpenCodeRestartCoordinator', () => {
         'forward:/api/session/s1/interrupt',
         'forward:/api/session/s2/interrupt',
         'restart',
-        'forward:/api/session/s1/prompt',
-        'forward:/api/session/s2/prompt',
+        'forward:/session/s1/message',
+        'forward:/session/s2/message',
       ])
 
       // Aborts called first for both sessions
@@ -139,20 +139,22 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(4)
       expect(forward).toHaveBeenNthCalledWith(3, {
         method: 'POST',
-        path: '/api/session/s1/prompt',
+        path: '/session/s1/message',
+        directory: '/a',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: { text: 'continue' } }),
+        body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
       })
       expect(forward).toHaveBeenNthCalledWith(4, {
         method: 'POST',
-        path: '/api/session/s2/prompt',
+        path: '/session/s2/message',
+        directory: '/b',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: { text: 'continue' } }),
+        body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
       })
 
       // Verify resume body deserializes correctly
       const resumeBody = JSON.parse(forward.mock.calls[2]![0].body as string)
-      expect(resumeBody).toEqual({ prompt: { text: 'continue' } })
+      expect(resumeBody).toEqual({ parts: [{ type: 'text', text: 'continue' }] })
 
       expect(result).toEqual({ healthy: true, resumedSessionIDs: ['s1', 's2'] })
     })
@@ -176,11 +178,11 @@ describe('OpenCodeRestartCoordinator', () => {
       })
       expect(restart).toHaveBeenCalledOnce()
 
-      // No prompt calls
-      const promptCalls = forward.mock.calls.filter(
-        (call: unknown[]) => (call[0] as { path: string }).path.includes('/prompt'),
+      // No resume calls
+      const resumeCalls = forward.mock.calls.filter(
+        (call: unknown[]) => (call[0] as { path: string }).path.includes('/message'),
       )
-      expect(promptCalls).toHaveLength(0)
+      expect(resumeCalls).toHaveLength(0)
 
       expect(result).toEqual({ healthy: false, resumedSessionIDs: [] })
     })
@@ -222,9 +224,10 @@ describe('OpenCodeRestartCoordinator', () => {
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/api/session/manual1/prompt',
+        path: '/session/manual1/message',
+        directory: '/a',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: { text: 'continue' } }),
+        body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
       })
 
       expect(result).toEqual({ healthy: true, resumedSessionIDs: ['manual1'] })

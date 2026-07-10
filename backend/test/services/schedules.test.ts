@@ -136,7 +136,15 @@ function v2Messages(messages: Array<{
   finish?: string
   error?: { name?: string; data?: { message?: string } }
 }>): Response {
-  return jsonResponse({ data: messages.map(m => ({ ...m, id: m.id ?? 'msg-1' })), cursor: {} })
+  return jsonResponse(messages.map(m => ({
+    info: {
+      id: m.id ?? 'msg-1',
+      role: m.type,
+      time: m.time,
+      error: m.error,
+    },
+    parts: m.content,
+  })))
 }
 
 function createOpenCodeClientStub(): OpenCodeClient {
@@ -240,11 +248,11 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-run-1' } }))
       }
 
-      if (path === `/api/session/ses-run-1/prompt` && method === 'POST') {
+      if (path === `/session/ses-run-1/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
 
-      if (path.startsWith('/api/session/ses-run-1/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-1/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Stale status.' }], time: { created: 1, completed: 2 }, finish: 'stop' },
           { type: 'assistant', content: [{ type: 'text', text: 'System health is stable.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
@@ -302,10 +310,10 @@ describe('ScheduleService', () => {
       if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-think' } }))
       }
-      if (path === `/api/session/ses-think/prompt` && method === 'POST') {
+      if (path === `/session/ses-think/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
-      if (path.startsWith('/api/session/ses-think/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-think/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           {
             type: 'assistant',
@@ -354,10 +362,10 @@ describe('ScheduleService', () => {
       if (path === '/api/session' && method === 'POST') {
         return jsonResponse({ data: { id: 'ses-content-type' } })
       }
-      if (path === `/api/session/ses-content-type/prompt` && method === 'POST') {
+      if (path === `/session/ses-content-type/message` && method === 'POST') {
         return promptReceipt()
       }
-      if (path.startsWith('/api/session/ses-content-type/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-content-type/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -384,7 +392,7 @@ describe('ScheduleService', () => {
       expect(mocks.forward).toHaveBeenCalledWith(
         expect.objectContaining({
           method: 'POST',
-          path: `/api/session/ses-content-type/prompt`,
+          path: `/session/ses-content-type/message`,
           headers: expect.objectContaining({ 'Content-Type': 'application/json' }),
         }),
       )
@@ -407,11 +415,11 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-patch-fail' } }))
       }
 
-      if (path === `/api/session/ses-patch-fail/prompt` && method === 'POST') {
+      if (path === `/session/ses-patch-fail/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
 
-      if (path.startsWith('/api/session/ses-patch-fail/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-patch-fail/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Completed despite title issue.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -462,11 +470,11 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-run-2' } }))
       }
 
-      if (path === `/api/session/ses-run-2/prompt` && method === 'POST') {
+      if (path === `/session/ses-run-2/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
 
-      if (path.startsWith('/api/session/ses-run-2/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-2/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Immediate status summary.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -557,8 +565,12 @@ describe('ScheduleService', () => {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-run-6' } }))
       }
 
-      if (path === `/api/session/ses-run-6/prompt` && method === 'POST') {
+      if (path === `/session/ses-run-6/message` && method === 'POST') {
         return Promise.resolve(textResponse('Provider unavailable', 500))
+      }
+
+      if (path.startsWith('/session/ses-run-6/message') && method === 'GET') {
+        return Promise.resolve(v2Messages([]))
       }
 
       if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
@@ -605,10 +617,10 @@ describe('ScheduleService', () => {
       if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-err-v2' } }))
       }
-      if (path === `/api/session/ses-err-v2/prompt` && method === 'POST') {
+      if (path === `/session/ses-err-v2/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
-      if (path.startsWith('/api/session/ses-err-v2/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-err-v2/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Partial output' }], error: { name: 'provider_error', data: { message: 'Model crashed' } } },
         ]))
@@ -663,10 +675,10 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-active-long' } }))
         }
-        if (path === `/api/session/ses-active-long/prompt` && method === 'POST') {
+        if (path === `/session/ses-active-long/message` && method === 'POST') {
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-active-long/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-active-long/message') && method === 'GET') {
           activePolls++
           if (activePolls <= 155) {
             return Promise.resolve(v2Messages([]))
@@ -722,10 +734,10 @@ describe('ScheduleService', () => {
       if (path === '/api/session' && method === 'POST') {
         return Promise.resolve(jsonResponse({ data: { id: 'ses-completed-still-active' } }))
       }
-      if (path === `/api/session/ses-completed-still-active/prompt` && method === 'POST') {
+      if (path === `/session/ses-completed-still-active/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
-      if (path.startsWith('/api/session/ses-completed-still-active/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-completed-still-active/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Completed while still active.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -778,10 +790,10 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-timeout' } }))
         }
-        if (path === `/api/session/ses-timeout/prompt` && method === 'POST') {
+        if (path === `/session/ses-timeout/message` && method === 'POST') {
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-timeout/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-timeout/message') && method === 'GET') {
           return Promise.resolve(v2Messages([]))
         }
         if (path === '/api/session/active' && method === 'GET') {
@@ -831,7 +843,7 @@ describe('ScheduleService', () => {
     mocks.getScheduleRunById.mockReturnValue(runningRun)
     mocks.updateScheduleRun.mockReturnValue(cancelledRun)
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-run-3/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-3/message') && method === 'GET') {
         return Promise.resolve(v2Messages([]))
       }
 
@@ -912,7 +924,7 @@ describe('ScheduleService', () => {
 
     mocks.getScheduleRunById.mockReturnValue(runningRun)
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-run-7/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-7/message') && method === 'GET') {
         return Promise.resolve(v2Messages([]))
       }
 
@@ -944,7 +956,7 @@ describe('ScheduleService', () => {
 
     mocks.listRunningScheduleRuns.mockReturnValue([orphanedRun])
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-run-4/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-4/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Partial summary' }] },
         ]))
@@ -1008,7 +1020,7 @@ describe('ScheduleService', () => {
 
     mocks.listRunningScheduleRuns.mockReturnValue([completedRun])
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-run-8/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-8/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Recovered summary' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -1048,7 +1060,7 @@ describe('ScheduleService', () => {
     mocks.listRunningScheduleRuns.mockReturnValue([resumedRun])
     mocks.getScheduleRunById.mockReturnValue(resumedRun)
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-run-9/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-9/message') && method === 'GET') {
         messageRequests += 1
 
         if (messageRequests === 1) {
@@ -1211,7 +1223,7 @@ describe('ScheduleService', () => {
 
     mocks.getScheduleRunById.mockReturnValueOnce(runningRun).mockReturnValueOnce(runningRun).mockReturnValueOnce(completedRun)
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-run-5/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-run-5/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Completed summary' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -1264,11 +1276,11 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-1' } }))
         }
-        if (path === `/api/session/ses-skills-1/prompt` && method === 'POST') {
+        if (path === `/session/ses-skills-1/message` && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-skills-1/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-skills-1/message') && method === 'GET') {
           return Promise.resolve(v2Messages([
             { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
           ]))
@@ -1286,10 +1298,10 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.prompt.text).toContain('<skill_content name="git-release">')
-      expect(parsed.prompt.text).toContain('<skill_content name="code-review">')
-      expect(parsed.prompt.text).toContain('Release instructions here')
-      expect(parsed.prompt.text).toContain('Review instructions here')
+      expect(parsed.parts[0].text).toContain('<skill_content name="git-release">')
+      expect(parsed.parts[0].text).toContain('<skill_content name="code-review">')
+      expect(parsed.parts[0].text).toContain('Release instructions here')
+      expect(parsed.parts[0].text).toContain('Review instructions here')
     })
 
     it('appends skill notes when provided', async () => {
@@ -1319,11 +1331,11 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-2' } }))
         }
-        if (path === `/api/session/ses-skills-2/prompt` && method === 'POST') {
+        if (path === `/session/ses-skills-2/message` && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-skills-2/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-skills-2/message') && method === 'GET') {
           return Promise.resolve(v2Messages([
             { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
           ]))
@@ -1344,9 +1356,9 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.prompt.text).toContain('<skill_content name="git-release">')
-      expect(parsed.prompt.text).toContain('Release instructions here')
-      expect(parsed.prompt.text).toContain('\nSkill notes: Focus on changelog')
+      expect(parsed.parts[0].text).toContain('<skill_content name="git-release">')
+      expect(parsed.parts[0].text).toContain('Release instructions here')
+      expect(parsed.parts[0].text).toContain('\nSkill notes: Focus on changelog')
     })
 
     it('does not modify the prompt when skillSlugs is empty', async () => {
@@ -1371,11 +1383,11 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-3' } }))
         }
-        if (path === `/api/session/ses-skills-3/prompt` && method === 'POST') {
+        if (path === `/session/ses-skills-3/message` && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-skills-3/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-skills-3/message') && method === 'GET') {
           return Promise.resolve(v2Messages([
             { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
           ]))
@@ -1396,7 +1408,7 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.prompt.text).toBe(job.prompt)
+      expect(parsed.parts[0].text).toBe(job.prompt)
     })
 
     it('falls back to name-only injection when skill endpoint fails', async () => {
@@ -1424,11 +1436,11 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-4' } }))
         }
-        if (path === `/api/session/ses-skills-4/prompt` && method === 'POST') {
+        if (path === `/session/ses-skills-4/message` && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-skills-4/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-skills-4/message') && method === 'GET') {
           return Promise.resolve(v2Messages([
             { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
           ]))
@@ -1449,7 +1461,7 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.prompt.text).toContain('For this task, use the following skills: git-release')
+      expect(parsed.parts[0].text).toContain('For this task, use the following skills: git-release')
     })
 
     it('falls back gracefully when a skill slug is not found in the list', async () => {
@@ -1477,11 +1489,11 @@ describe('ScheduleService', () => {
         if (path === '/api/session' && method === 'POST') {
           return Promise.resolve(jsonResponse({ data: { id: 'ses-skills-5' } }))
         }
-        if (path === `/api/session/ses-skills-5/prompt` && method === 'POST') {
+        if (path === `/session/ses-skills-5/message` && method === 'POST') {
           capturedPromptBody = body
           return Promise.resolve(promptReceipt())
         }
-        if (path.startsWith('/api/session/ses-skills-5/message') && method === 'GET') {
+        if (path.startsWith('/session/ses-skills-5/message') && method === 'GET') {
           return Promise.resolve(v2Messages([
             { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
           ]))
@@ -1502,7 +1514,7 @@ describe('ScheduleService', () => {
       })
 
       const parsed = JSON.parse(capturedPromptBody!)
-      expect(parsed.prompt.text).toContain('For this task, use the following skills: unknown-skill')
+      expect(parsed.parts[0].text).toContain('For this task, use the following skills: unknown-skill')
     })
   })
 })
@@ -1552,10 +1564,10 @@ describe('ScheduleService worktree isolation', () => {
         expect(parsed.location.directory).toBe(worktreePath)
         return Promise.resolve(jsonResponse({ data: { id: 'ses-wt-1' } }))
       }
-      if (path === `/api/session/ses-wt-1/prompt` && method === 'POST') {
+      if (path === `/session/ses-wt-1/message` && method === 'POST') {
         return Promise.resolve(textResponse(''))
       }
-      if (path.startsWith('/api/session/ses-wt-1/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-wt-1/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Worktree run done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -1599,10 +1611,10 @@ describe('ScheduleService worktree isolation', () => {
       if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
         return Promise.resolve(jsonResponse({}))
       }
-      if (path === `/api/session/ses-wt-1/prompt` && method === 'POST') {
+      if (path === `/session/ses-wt-1/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
-      if (path.startsWith('/api/session/ses-wt-1/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-wt-1/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Worktree run done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -1646,10 +1658,10 @@ describe('ScheduleService worktree isolation', () => {
         capturedDirectory = parsed.location.directory
         return Promise.resolve(jsonResponse({ data: { id: 'ses-inline-1' } }))
       }
-      if (path === `/api/session/ses-inline-1/prompt` && method === 'POST') {
+      if (path === `/session/ses-inline-1/message` && method === 'POST') {
         return Promise.resolve(promptReceipt())
       }
-      if (path.startsWith('/api/session/ses-inline-1/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-inline-1/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Inline run done.' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -1695,7 +1707,7 @@ describe('ScheduleService worktree isolation', () => {
     setupWorktreeFinalize('ghi789')
 
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-cancel-wt/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-cancel-wt/message') && method === 'GET') {
         return Promise.resolve(v2Messages([]))
       }
       if (path === `/api/session/ses-cancel-wt/interrupt` && method === 'POST') {
@@ -1735,7 +1747,7 @@ describe('ScheduleService worktree isolation', () => {
 
     // Session exists but has no completed message — triggers finalizeRecoveredRun
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-recover-wt/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-recover-wt/message') && method === 'GET') {
         return Promise.resolve(v2Messages([]))
       }
       if (path === '/api/session/active' && method === 'GET') {
@@ -1774,7 +1786,7 @@ describe('ScheduleService worktree isolation', () => {
     activeTeardowns.add('42:7:5')
 
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-race-double/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-race-double/message') && method === 'GET') {
         return Promise.resolve(v2Messages([
           { type: 'assistant', content: [{ type: 'text', text: 'Already done' }], time: { created: Math.floor(Date.now() / 1000), completed: Math.floor(Date.now() / 1000) }, finish: 'stop' },
         ]))
@@ -1818,7 +1830,7 @@ describe('ScheduleService worktree isolation', () => {
     mocks.getScheduleRunById.mockReturnValue(runningRun)
 
     routeForward(({ path, method }) => {
-      if (path.startsWith('/api/session/ses-guard-cycle/message') && method === 'GET') {
+      if (path.startsWith('/session/ses-guard-cycle/message') && method === 'GET') {
         return Promise.resolve(v2Messages([]))
       }
       if (path === `/api/session/ses-guard-cycle/interrupt` && method === 'POST') {

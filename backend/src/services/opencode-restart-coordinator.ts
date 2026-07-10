@@ -60,9 +60,10 @@ export class OpenCodeRestartCoordinator {
         try {
           const response = await this.client.forward({
             method: 'POST',
-            path: `/api/session/${s.sessionID}/prompt`,
+            path: `/session/${s.sessionID}/message`,
+            directory: s.directory,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: { text: 'continue' } }),
+            body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
           })
           return response.ok ? s.sessionID : null
         } catch (error) {

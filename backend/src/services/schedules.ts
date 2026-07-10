@@ -670,7 +670,7 @@ export class ScheduleService {
     }
 
     if (run.sessionId) {
-      const messages = await this.listSessionMessages(run.sessionId)
+      const messages = await this.listSessionMessages(run.sessionId, run.worktreePath ?? repo.fullPath)
       const assistantState = getAssistantMessageState(messages)
       const terminal = isRunTerminal(assistantState)
 
@@ -744,21 +744,34 @@ export class ScheduleService {
     const repo = this.assertRepo(input.repoId)
 
     try {
-      const promptResponse = await this.openCodeClient.forward({
-        method: 'POST',
-        path: `/api/session/${input.sessionId}/prompt`,
-        body: JSON.stringify({
-          prompt: { text: await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, input.directory, this.openCodeClient) },
-        }),
-        headers: { 'Content-Type': 'application/json' },
-      })
+      const promptText = await buildPromptWithSkills(input.job.prompt, input.job.skillMetadata, input.directory, this.openCodeClient)
 
-      if (!promptResponse.ok) {
-        const errorText = await promptResponse.text()
-        throw new ScheduleServiceError(errorText || 'Failed to run scheduled prompt', 502)
-      }
+      // POST /session/{id}/message (the SDK's session.prompt) drives the agent turn and
+      // resolves when it completes. Fire it without awaiting completion so monitorRunCompletion
+      // can poll for the result, answer pending permissions, and enforce the stall timeout.
+      // A failed submit is captured and surfaced to the monitor loop so the run fails fast.
+      let submitErrorText: string | null = null
+      const submitPromise = (async () => {
+        try {
+          const promptResponse = await this.openCodeClient.forward({
+            method: 'POST',
+            path: `/session/${input.sessionId}/message`,
+            directory: input.directory,
+            body: JSON.stringify({
+              parts: [{ type: 'text', text: promptText }],
+            }),
+            headers: { 'Content-Type': 'application/json' },
+          })
+          if (!promptResponse.ok) {
+            const errorText = await promptResponse.text()
+            submitErrorText = errorText || 'Failed to run scheduled prompt'
+          }
+        } catch (error) {
+          submitErrorText = getErrorMessage(error)
+        }
+      })()
 
-      await this.respondToPendingRequests(input.sessionId, input.ruleset)
+      await this.respondToPendingRequests(input.sessionId, input.ruleset, input.directory)
 
       await this.monitorRunCompletion({
         sessionMonitor: input.sessionMonitor,
@@ -770,7 +783,9 @@ export class ScheduleService {
         triggerSource: input.triggerSource,
         ruleset: input.ruleset,
         directory: input.directory,
+        getSubmitError: () => submitErrorText,
       })
+      await submitPromise
       return
     } catch (error) {
       const finishedAt = Date.now()
@@ -819,10 +834,11 @@ export class ScheduleService {
     triggerSource: ScheduleRunTriggerSource
     ruleset: SchedulePermissionRuleset
     directory: string
+    getSubmitError?: () => string | null
   }): Promise<void> {
     try {
       const repo = this.assertRepo(input.repoId)
-      const currentMessages = await this.listSessionMessages(input.sessionId)
+      const currentMessages = await this.listSessionMessages(input.sessionId, input.directory)
       const currentAssistantState = getAssistantMessageState(currentMessages)
       const terminal = isRunTerminal(currentAssistantState)
       if (terminal.terminal) {
@@ -841,7 +857,7 @@ export class ScheduleService {
         return
       }
 
-      const response = await this.waitForAssistantMessage(input.job, input.sessionId, input.sessionMonitor, input.ruleset)
+      const response = await this.waitForAssistantMessage(input.job, input.sessionId, input.directory, input.sessionMonitor, input.ruleset, input.getSubmitError)
       const currentRun = getScheduleRunById(this.db, input.repoId, input.job.id, input.runId)
       if (!currentRun || currentRun.status !== 'running') {
         return
@@ -926,11 +942,12 @@ export class ScheduleService {
     }
   }
 
-  private async respondToPendingRequests(sessionId: string, ruleset: SchedulePermissionRuleset): Promise<void> {
+  private async respondToPendingRequests(sessionId: string, ruleset: SchedulePermissionRuleset, directory: string): Promise<void> {
     try {
       const permResponse = await this.openCodeClient.forward({
         method: 'GET',
         path: `/api/session/${sessionId}/permission`,
+        directory,
       })
 
       if (permResponse.ok) {
@@ -944,6 +961,7 @@ export class ScheduleService {
             const replyResponse = await this.openCodeClient.forward({
               method: 'POST',
               path: `/api/session/${sessionId}/permission/${req.id}/reply`,
+              directory,
               body: JSON.stringify(replyBody),
               headers: { 'Content-Type': 'application/json' },
             })
@@ -965,6 +983,7 @@ export class ScheduleService {
       const questionResponse = await this.openCodeClient.forward({
         method: 'GET',
         path: `/api/session/${sessionId}/question`,
+        directory,
       })
 
       if (questionResponse.ok) {
@@ -974,6 +993,7 @@ export class ScheduleService {
             const rejectResponse = await this.openCodeClient.forward({
               method: 'POST',
               path: `/api/session/${sessionId}/question/${q.id}/reject`,
+              directory,
             })
             if (!rejectResponse.ok && rejectResponse.status !== 404) {
               logger.warn(`Unexpected status ${rejectResponse.status} rejecting question ${q.id} in session ${sessionId}`)
@@ -1003,10 +1023,10 @@ export class ScheduleService {
         return
       }
 
-      const messages = await this.listSessionMessages(run.sessionId)
+      const messages = await this.listSessionMessages(run.sessionId, runDirectory)
       const assistantState = getAssistantMessageState(messages)
 
-      const activeSessions = await this.getActiveSessions()
+      const activeSessions = await this.getActiveSessions(runDirectory)
       const sessionActive = run.sessionId ? run.sessionId in activeSessions : false
       const terminal = isRunTerminal(assistantState)
 
@@ -1118,14 +1138,22 @@ export class ScheduleService {
   private async waitForAssistantMessage(
     job: ScheduleJob,
     sessionId: string,
+    directory: string,
     sessionMonitor: SessionMonitor,
     ruleset: SchedulePermissionRuleset,
+    getSubmitError?: () => string | null,
   ): Promise<{ responseText: string | null; errorText: string | null }> {
     let timeoutStartedAt: number | null = null
 
     while (true) {
-      await this.respondToPendingRequests(sessionId, ruleset)
-      const messages = await this.listSessionMessages(sessionId)
+      await this.respondToPendingRequests(sessionId, ruleset, directory)
+
+      const submitErrorText = getSubmitError?.()
+      if (submitErrorText) {
+        return { responseText: null, errorText: submitErrorText }
+      }
+
+      const messages = await this.listSessionMessages(sessionId, directory)
       const assistantState = getAssistantMessageState(messages)
 
       if (assistantState?.errorText) {
@@ -1143,7 +1171,7 @@ export class ScheduleService {
         }
       }
 
-      const activeSessions = await this.getActiveSessions()
+      const activeSessions = await this.getActiveSessions(directory)
       const sessionActive = sessionId in activeSessions
 
       if (assistantState?.completed) {
@@ -1172,40 +1200,45 @@ export class ScheduleService {
     }
   }
 
-  private async listSessionMessages(sessionId: string): Promise<SessionMessage[]> {
-    const allMessages: SessionMessage[] = []
-    let cursor: string | null = null
-    let pages = 0
-    const MAX_PAGES = 10
+  private async listSessionMessages(sessionId: string, directory: string): Promise<SessionMessage[]> {
+    // Uses the SDK's session.messages endpoint (GET /session/{id}/message), which returns
+    // the directory-scoped message list as a plain array of { info, parts }. The /api/session
+    // variant does not resolve worktree-scoped sessions reliably, so a directory is required.
+    const messagesResponse = await this.openCodeClient.forward({
+      method: 'GET',
+      path: `/session/${sessionId}/message`,
+      directory,
+    })
 
-    do {
-      const query = cursor
-        ? `/api/session/${sessionId}/message?limit=200&cursor=${encodeURIComponent(cursor)}`
-        : `/api/session/${sessionId}/message?limit=200`
+    if (!messagesResponse.ok) {
+      const errorText = await messagesResponse.text()
+      throw new ScheduleServiceError(errorText || 'Failed to fetch session messages', 502)
+    }
 
-      const messagesResponse = await this.openCodeClient.forward({
-        method: 'GET',
-        path: query,
-      })
-
-      if (!messagesResponse.ok) {
-        const errorText = await messagesResponse.text()
-        throw new ScheduleServiceError(errorText || 'Failed to fetch session messages', 502)
+    const body = await messagesResponse.json() as Array<{
+      info?: {
+        id?: string
+        role?: string
+        time?: { created?: number; completed?: number }
+        error?: { name?: string; data?: { message?: string } }
       }
+      parts?: SessionMessageContent[]
+    }>
 
-      const body = await messagesResponse.json() as { data: SessionMessage[]; cursor?: { next?: string } }
-      allMessages.push(...body.data)
-      cursor = body.cursor?.next ?? null
-      pages++
-    } while (cursor && pages < MAX_PAGES)
-
-    return allMessages
+    return body.map((message) => ({
+      id: message.info?.id ?? '',
+      type: message.info?.role ?? '',
+      content: message.parts,
+      error: message.info?.error,
+      time: message.info?.time,
+    }))
   }
 
-  private async getActiveSessions(): Promise<Record<string, SessionActiveEntry>> {
+  private async getActiveSessions(directory: string): Promise<Record<string, SessionActiveEntry>> {
     const response = await this.openCodeClient.forward({
       method: 'GET',
       path: '/api/session/active',
+      directory,
     })
 
     if (!response.ok) {
