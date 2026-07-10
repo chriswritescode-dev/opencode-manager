@@ -5,26 +5,26 @@ describe('buildSchedulePermissionRuleset', () => {
   it('returns the allow-all baseline with default deny rules when given null', () => {
     const result = buildSchedulePermissionRuleset(null)
 
-    expect(result['*']).toBe('allow')
-    expect(result.external_directory).toBe('deny')
+    expect(result[0]).toEqual({ permission: '*', pattern: '*', action: 'allow' })
+    expect(result).toContainEqual({ permission: 'external_directory', pattern: '*', action: 'deny' })
     for (const pattern of DEFAULT_DESTRUCTIVE_BASH_PATTERNS) {
-      expect(result.bash?.[pattern]).toBe('deny')
+      expect(result).toContainEqual({ permission: 'bash', pattern, action: 'deny' })
     }
   })
 
   it('returns only the allow-all baseline when all permissions are granted', () => {
     const result = buildSchedulePermissionRuleset({ allowExternalDirectory: true, bashDenyPatterns: [] })
 
-    expect(result).toEqual({ '*': 'allow' })
+    expect(result).toEqual([{ permission: '*', pattern: '*', action: 'allow' }])
   })
 
   it('includes a single custom bash deny pattern alongside external_directory deny', () => {
     const result = buildSchedulePermissionRuleset({ allowExternalDirectory: false, bashDenyPatterns: ['rm -rf *'] })
 
-    expect(result).toEqual({
-      '*': 'allow',
-      external_directory: 'deny',
-      bash: { 'rm -rf *': 'deny' },
-    })
+    expect(result).toEqual([
+      { permission: '*', pattern: '*', action: 'allow' },
+      { permission: 'external_directory', pattern: '*', action: 'deny' },
+      { permission: 'bash', pattern: 'rm -rf *', action: 'deny' },
+    ])
   })
 })

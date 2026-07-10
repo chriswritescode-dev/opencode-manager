@@ -309,6 +309,6 @@ describe('ScheduleService permission ruleset in session creation', () => {
     expect(body.title).toBe('Scheduled: Weekly engineering summary')
     expect(body.agent).toBe('my-agent')
     expect(body.permission).toBeDefined()
-    expect(body.permission['*']).toBe('allow')
+    expect(body.permission[0]).toEqual({ permission: '*', pattern: '*', action: 'allow' })
   })
 })
