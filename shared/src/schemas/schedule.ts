@@ -38,35 +38,39 @@ export type SchedulePermissionConfig = z.infer<typeof SchedulePermissionConfigSc
 
 export type SchedulePermissionAction = 'allow' | 'deny' | 'ask'
 
-export interface SchedulePermissionRuleset {
-  '*': SchedulePermissionAction
-  external_directory?: SchedulePermissionAction
-  bash?: Record<string, SchedulePermissionAction>
+/**
+ * A single OpenCode session permission rule. `permission` is the tool name
+ * (e.g. `bash`, `external_directory`, or `*` for all), `pattern` is the glob
+ * matched against the tool argument, and `action` is the resulting decision.
+ */
+export interface SchedulePermissionRule {
+  permission: string
+  pattern: string
+  action: SchedulePermissionAction
 }
 
+export type SchedulePermissionRuleset = SchedulePermissionRule[]
+
 /**
- * Builds an OpenCode permission config object for an unattended scheduled run.
+ * Builds the OpenCode session permission ruleset for an unattended scheduled run.
  *
- * OpenCode's config/API permission format is keyed by tool, where each value is
- * either a shorthand action or a glob-pattern -> action map (see
- * https://opencode.ai/docs/permissions). A top-level `*` sets the baseline; the
- * server merges tool entries after it and the last matching rule wins, so the
- * `bash` deny patterns override the allow-all baseline for matching commands.
+ * OpenCode's `POST /session` `permission` field expects an ordered array of
+ * `{ permission, pattern, action }` rules (`PermissionV1.Ruleset`), evaluated
+ * with last-match-wins semantics (see https://opencode.ai/docs/permissions).
+ * A leading `*`/`*` allow rule sets the allow-all baseline; the trailing
+ * `external_directory` and `bash` deny rules then override it for external
+ * directory access and matching destructive command patterns.
  */
 export function buildSchedulePermissionRuleset(
   config: SchedulePermissionConfig | null | undefined,
 ): SchedulePermissionRuleset {
   const cfg = SchedulePermissionConfigSchema.parse(config ?? {})
-  const ruleset: SchedulePermissionRuleset = { '*': 'allow' }
+  const ruleset: SchedulePermissionRuleset = [{ permission: '*', pattern: '*', action: 'allow' }]
   if (!cfg.allowExternalDirectory) {
-    ruleset.external_directory = 'deny'
+    ruleset.push({ permission: 'external_directory', pattern: '*', action: 'deny' })
   }
-  if (cfg.bashDenyPatterns.length > 0) {
-    const bash: Record<string, SchedulePermissionAction> = {}
-    for (const pattern of cfg.bashDenyPatterns) {
-      bash[pattern] = 'deny'
-    }
-    ruleset.bash = bash
+  for (const pattern of cfg.bashDenyPatterns) {
+    ruleset.push({ permission: 'bash', pattern, action: 'deny' })
   }
   return ruleset
 }
