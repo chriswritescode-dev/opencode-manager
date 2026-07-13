@@ -1,4 +1,5 @@
 import { memo, useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { FolderGit2, FolderOpen, CalendarClock, Menu, Info, History, Bot } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -26,6 +27,7 @@ interface GlobalTabsArgs {
   isInsideRepo: boolean
   repoId: string | null
   updateParams: ReturnType<typeof useUrlParams>['updateParams']
+  t: (key: string) => string
 }
 
 type TabBarMode = 'hidden' | 'global' | 'schedule'
@@ -63,7 +65,7 @@ function getMobileTabRouteState(pathname: string): MobileTabRouteState {
   }
 }
 
-function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, updateParams }: GlobalTabsArgs): TabDef[] {
+function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideRepo, repoId, updateParams, t }: GlobalTabsArgs): TabDef[] {
   const handleFilesClick = () => {
     if (isInsideRepo && repoId) {
       updateParams((p) => { p.set('dialog', 'files'); p.delete('mobileTab') }, 'push')
@@ -80,35 +82,35 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
   return [
     {
       key: 'repos',
-      label: 'Repos',
+      label: t('nav.repos'),
       icon: FolderGit2,
       onClick: () => open('repos'),
       active: openSheet === 'repos' || (pathname === '/' && !openSheet),
     },
     {
       key: 'files',
-      label: 'Files',
+      label: t('fileBrowser.open'),
       icon: FolderOpen,
       onClick: handleFilesClick,
       active: openSheet === 'files',
     },
     {
       key: 'assistant',
-      label: 'Assistant',
+      label: t('assistant.assistant'),
       icon: Bot,
       onClick: handleAssistantClick,
       active: isAssistantPath(pathname) && !openSheet,
     },
     {
       key: 'schedules',
-      label: 'Schedules',
+      label: t('nav.schedules'),
       icon: CalendarClock,
       onClick: () => navigate('/schedules'),
       active: pathname === '/schedules' && !openSheet,
     },
     {
       key: 'more',
-      label: 'More',
+      label: t('nav.more'),
       icon: Menu,
       onClick: () => open('more'),
       active: openSheet === 'more',
@@ -116,25 +118,25 @@ function buildGlobalTabs({ pathname, openSheet, open, close, navigate, isInsideR
   ]
 }
 
-function buildScheduleTabs(scheduleTab: ScheduleTab, setScheduleTab: (tab: ScheduleTab) => void): TabDef[] {
+function buildScheduleTabs(scheduleTab: ScheduleTab, setScheduleTab: (tab: ScheduleTab) => void, t: (key: string) => string): TabDef[] {
   return [
     {
       key: 'jobs',
-      label: 'Jobs',
+      label: t('schedule.jobs'),
       icon: CalendarClock,
       onClick: () => setScheduleTab('jobs'),
       active: scheduleTab === 'jobs',
     },
     {
       key: 'detail',
-      label: 'Detail',
+      label: t('schedule.detail'),
       icon: Info,
       onClick: () => setScheduleTab('detail'),
       active: scheduleTab === 'detail',
     },
     {
       key: 'runs',
-      label: 'Runs',
+      label: t('schedule.runs'),
       icon: History,
       onClick: () => setScheduleTab('runs'),
       active: scheduleTab === 'runs',
@@ -180,6 +182,7 @@ const TabBarRow = memo(function TabBarRow({ tabs }: TabBarRowProps) {
 export const MobileTabBar = memo(function MobileTabBar() {
   const { pathname } = useLocation()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { openSheet, open, close } = useMobileTabBar()
   const { updateParams } = useUrlParams()
   const { scheduleTab, setScheduleTab } = useScheduleUrlState()
@@ -188,7 +191,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
 
   const tabs = useMemo<TabDef[]>(
     () => (routeState.mode === 'schedule'
-      ? buildScheduleTabs(scheduleTab, setScheduleTab)
+      ? buildScheduleTabs(scheduleTab, setScheduleTab, t)
       : buildGlobalTabs({
         pathname,
         openSheet,
@@ -198,6 +201,7 @@ export const MobileTabBar = memo(function MobileTabBar() {
         isInsideRepo: routeState.isInsideRepo,
         repoId: routeState.repoId,
         updateParams,
+        t,
       })),
     [
       routeState,

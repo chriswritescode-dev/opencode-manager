@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useForm } from 'react-hook-form'
+import { useTranslation } from 'react-i18next'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useSettings } from '@/hooks/useSettings'
@@ -73,6 +74,7 @@ const ttsFormSchema = z.object({
 type TTSFormValues = z.infer<typeof ttsFormSchema>
 
 export function TTSSettings() {
+  const { t } = useTranslation()
   const { preferences, updateSettings } = useSettings()
   const { speakWithConfig, stop, isPlaying, isLoading: isTTSLoading, error: ttsError } = useTTS()
   const { refreshAll } = useTTSDiscovery()
@@ -243,26 +245,26 @@ export function TTSSettings() {
   return (
     <div className="bg-card border border-border rounded-lg p-6">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-foreground">Text-to-Speech</h2>
+        <h2 className="text-lg font-semibold text-foreground">{t('tts.textToSpeech')}</h2>
         {/* Show auto-save status instead of save button */}
         <div className="flex items-center gap-2 text-sm">
           {saveStatus === 'saving' && (
             <>
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-              <span className="text-muted-foreground">Saving...</span>
+              <span className="text-muted-foreground">{t('tts.saving')}</span>
             </>
           )}
           {saveStatus === 'saved' && (
             <>
               <CheckCircle2 className="h-4 w-4 text-green-500" />
-              <span className="text-green-600">Saved</span>
+              <span className="text-green-600">{t('tts.saved')}</span>
             </>
           )}
           {saveStatus === 'idle' && isDirty && isValid && (
-            <span className="text-amber-600">Unsaved changes</span>
+            <span className="text-amber-600">{t('tts.unsavedChanges')}</span>
           )}
           {saveStatus === 'idle' && !isDirty && (
-            <span className="text-muted-foreground">All changes saved</span>
+            <span className="text-muted-foreground">{t('tts.allChangesSaved')}</span>
           )}
         </div>
       </div>
@@ -275,9 +277,9 @@ export function TTSSettings() {
             render={({ field }) => (
               <FormItem className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                 <div className="space-y-0.5">
-                  <FormLabel className="text-base">Enable TTS</FormLabel>
+                  <FormLabel className="text-base">{t('tts.enable')}</FormLabel>
                   <FormDescription>
-                    Allow text-to-speech playback for messages
+                    {t('tts.enableDesc')}
                   </FormDescription>
                 </div>
                 <FormControl>
@@ -297,9 +299,9 @@ export function TTSSettings() {
               render={({ field }) => (
                 <FormItem className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                   <div className="space-y-0.5">
-                    <FormLabel className="text-base">Auto-play replies</FormLabel>
+                    <FormLabel className="text-base">{t('tts.autoPlay')}</FormLabel>
                     <FormDescription>
-                      Automatically speak new assistant replies when they complete.
+                      {t('tts.autoPlayDesc')}
                     </FormDescription>
                   </div>
                   <FormControl>
@@ -331,10 +333,10 @@ export function TTSSettings() {
                 >
                   <MonitorSpeaker className={`h-6 w-6 ${watchProvider === 'builtin' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
                   <span className={`font-medium ${watchProvider === 'builtin' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
-                    Built-in Browser
+                    {t('tts.builtinLabel')}
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
-                    No API key or URL needed
+                    {t('tts.builtinDesc')}
                   </span>
                 </button>
                 <button
@@ -350,15 +352,15 @@ export function TTSSettings() {
                 >
                   <Globe className={`h-6 w-6 ${watchProvider === 'external' ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
                   <span className={`font-medium ${watchProvider === 'external' ? 'text-blue-700 dark:text-blue-300' : ''}`}>
-                    External API
+                    {t('tts.externalLabel')}
                   </span>
                   <span className="text-xs text-muted-foreground text-center">
-                    OpenAI, Kokoro, etc.
+                    {t('tts.externalDesc')}
                   </span>
                 </button>
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                Choose how you want to generate speech. Built-in works offline with no setup required.
+                {t('tts.providerDesc')}
               </div>
 
               {/* External Provider Settings */}
@@ -369,7 +371,7 @@ export function TTSSettings() {
                     name="endpoint"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>TTS Server URL</FormLabel>
+                        <FormLabel>{t('tts.serverUrl')}</FormLabel>
                         <FormControl>
                           <Input
                             placeholder="https://api.openai.com"
@@ -382,7 +384,7 @@ export function TTSSettings() {
                           />
                         </FormControl>
                         <FormDescription>
-                          Base URL of your TTS service (e.g., https://x.x.x.x:Port)
+                          {t('tts.endpointDesc')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -394,7 +396,7 @@ export function TTSSettings() {
                     name="apiKey"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>API Key</FormLabel>
+                        <FormLabel>{t('tts.apiKey')}</FormLabel>
                         <FormControl>
                           <Input
                             type="password"
@@ -408,7 +410,7 @@ export function TTSSettings() {
                           />
                         </FormControl>
                         <FormDescription>
-                          API key for the TTS service
+                          {t('tts.apiKeyDesc')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -434,23 +436,23 @@ export function TTSSettings() {
                       
                       return (
                       <FormItem>
-                        <FormLabel>Voice</FormLabel>
+                        <FormLabel>{t('tts.voice')}</FormLabel>
                         <FormControl>
                           <Combobox
                             value={field.value}
                             onChange={field.onChange}
                             options={voiceOptions}
-                            placeholder={hasKokoroVoices ? "Select a voice or type custom name (e.g., am_adam+am_echo)..." : "Select a voice..."}
+                            placeholder={hasKokoroVoices ? "Select a voice or type custom name (e.g., am_adam+am_echo)..." : t('tts.selectVoice')}
                             disabled={!watchEnabled || isLoadingVoices}
                             allowCustomValue={true}
                           />
                         </FormControl>
                         <FormDescription>
-                          {isLoadingVoices ? 'Loading available voices...' : 
-                           voicesCached ? `Available voices (${availableVoices.length}) - cached` :
-                           availableVoices.length > 0 ? `Available voices (${availableVoices.length})${hasKokoroVoices ? ' - Support composite voices (e.g., am_adam+am_echo)' : ''}` :
-                           watchEnabled && watchApiKey ? 'No voices available - check endpoint and API key' :
-                           'Configure TTS to discover voices'}
+                          {isLoadingVoices ? t('tts.loadingVoices') : 
+                           voicesCached ? t('tts.voicesAvailableCached', { count: availableVoices.length }) :
+                           availableVoices.length > 0 ? `${t('tts.voicesAvailable', { count: availableVoices.length })}${hasKokoroVoices ? ' - Support composite voices (e.g., am_adam+am_echo)' : ''}` :
+                           watchEnabled && watchApiKey ? t('tts.noVoiceApiKey') :
+                           t('tts.configureToDiscover')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -463,7 +465,7 @@ export function TTSSettings() {
                     name="model"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Model</FormLabel>
+                        <FormLabel>{t('tts.model')}</FormLabel>
                         <FormControl>
                           <Combobox
                             value={field.value}
@@ -472,17 +474,17 @@ export function TTSSettings() {
                               value: model,
                               label: model
                             }))}
-                            placeholder="Select a model or type custom name..."
+                            placeholder={t('tts.selectModelPlaceholder')}
                             disabled={!watchEnabled || isLoadingModels}
                             allowCustomValue={true}
                           />
                         </FormControl>
                         <FormDescription>
-                          {isLoadingModels ? 'Loading available models...' : 
-                           modelsCached ? `Available models (${availableModels.length}) - cached` :
-                           availableModels.length > 0 ? `Available models (${availableModels.length})` :
-                           watchEnabled && watchApiKey ? 'No models available - check endpoint and API key' :
-                           'Configure TTS to discover models'}
+                          {isLoadingModels ? t('tts.loadingModels') : 
+                           modelsCached ? t('tts.modelsAvailableCached', { count: availableModels.length }) :
+                           availableModels.length > 0 ? t('tts.modelsAvailable', { count: availableModels.length }) :
+                           watchEnabled && watchApiKey ? t('tts.noModelsAvailable') :
+                           t('tts.configureToDiscoverModels')}
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -491,9 +493,9 @@ export function TTSSettings() {
 
                   <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                     <div className="space-y-0.5">
-                      <div className="text-base font-medium">Refresh Discovery Data</div>
+                      <div className="text-base font-medium">{t('tts.refreshDiscovery')}</div>
                       <p className="text-sm text-muted-foreground">
-                        Force refresh available models and voices from the endpoint
+                        {t('tts.refreshDiscoveryDesc')}
                       </p>
                     </div>
                     <Button
@@ -511,7 +513,7 @@ export function TTSSettings() {
                       ) : (
                         <>
                           <RefreshCw className="h-4 w-4 mr-2" />
-                          Refresh
+                          {t('common.refresh')}
                         </>
                       )}
                     </Button>
@@ -533,13 +535,13 @@ export function TTSSettings() {
                       
                       return (
                       <FormItem>
-                        <FormLabel>Browser Voice</FormLabel>
+                        <FormLabel>{t('tts.browserVoice')}</FormLabel>
                         <FormControl>
                           <Combobox
                             value={field.value}
                             onChange={field.onChange}
                             options={voiceOptions}
-                            placeholder={isCheckingBuiltin ? "Loading voices..." : "Select a voice..."}
+                            placeholder={isCheckingBuiltin ? t('tts.checking') : t('tts.selectVoice')}
                             disabled={!watchEnabled || isCheckingBuiltin || browserVoices.length === 0}
                             allowCustomValue={false}
                           />
@@ -548,14 +550,14 @@ export function TTSSettings() {
                           {isCheckingBuiltin ? (
                             <span className="flex items-center gap-1">
                               <Loader2 className="h-3 w-3 animate-spin" />
-                              Checking for voices...
+                              {t('tts.checkingForVoices')}
                             </span>
                           ) : browserVoices.length > 0 ? (
-                            `${browserVoices.length} voices available in your browser`
+                            t('tts.voicesInBrowser', { count: browserVoices.length })
                           ) : !hasWebSpeechSupport ? (
-                            <span className="text-destructive">Web Speech API not supported in this browser</span>
+                            <span className="text-destructive">{t('tts.webSpeechNotSupported')}</span>
                           ) : (
-                            'No voices found - try refreshing'
+                            t('tts.noVoicesFound')
                           )}
                         </FormDescription>
                         <FormMessage />
@@ -567,8 +569,7 @@ export function TTSSettings() {
                   {!hasWebSpeechSupport && (
                     <div className="rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 p-4">
                       <div className="text-sm text-yellow-800 dark:text-yellow-200">
-                        <strong>Browser Not Supported</strong>: Your browser doesn't support Web Speech API. 
-                        Please use Chrome, Safari, Firefox, or Edge, or switch to an external API provider.
+                        <strong>{t('tts.browserNotSupported')}</strong>: {t('tts.browserNotSupportedDesc')}
                       </div>
                     </div>
                   )}
@@ -576,9 +577,9 @@ export function TTSSettings() {
                   {hasWebSpeechSupport && browserVoices.length === 0 && (
                     <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                       <div className="space-y-0.5">
-                        <div className="text-base font-medium">Check for Voices</div>
+                        <div className="text-base font-medium">{t('tts.checkForVoices')}</div>
                         <p className="text-sm text-muted-foreground">
-                          Your browser may need permission to access voices
+                          {t('tts.checkVoicesDesc')}
                         </p>
                       </div>
                       <Button
@@ -591,12 +592,12 @@ export function TTSSettings() {
                         {isCheckingBuiltin ? (
                           <>
                             <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                            Checking...
+                            {t('tts.checking')}
                           </>
                         ) : (
                           <>
                             <RefreshCw className="h-4 w-4 mr-2" />
-                            Check for Voices
+                            {t('tts.checkForVoices')}
                           </>
                         )}
                       </Button>
@@ -612,7 +613,7 @@ export function TTSSettings() {
                 render={({ field }) => (
                   <FormItem>
                     <div className="flex justify-between">
-                      <FormLabel>Speed</FormLabel>
+                      <FormLabel>{t('tts.speed')}</FormLabel>
                       <span className="text-sm text-muted-foreground">
                         {field.value.toFixed(2)}x
                       </span>
@@ -628,7 +629,7 @@ export function TTSSettings() {
                       />
                     </FormControl>
                     <FormDescription>
-                      Playback speed (0.25x to 4.0x). Note: Web Speech API has limited speed control.
+                      {t('tts.speedDesc')}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -637,9 +638,9 @@ export function TTSSettings() {
 
               <div className="flex flex-row items-center justify-between rounded-lg border border-border p-4">
                 <div className="space-y-0.5">
-                  <div className="text-base font-medium">Test TTS</div>
+                  <div className="text-base font-medium">{t('tts.test')}</div>
                   <p className="text-sm text-muted-foreground">
-                    Verify your TTS configuration works
+                    {t('tts.testDesc')}
                   </p>
                   {ttsError && (
                     <p className="text-sm text-destructive flex items-center gap-1">
@@ -650,7 +651,7 @@ export function TTSSettings() {
                   {watchProvider === 'builtin' && !hasWebSpeechSupport && (
                     <p className="text-sm text-destructive flex items-center gap-1">
                       <XCircle className="h-4 w-4" />
-                      Web Speech API is not available
+                      {t('tts.webSpeechNotAvailable')}
                     </p>
                   )}
                 </div>
@@ -664,17 +665,17 @@ export function TTSSettings() {
                   {isTTSLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Testing...
+                      {t('tts.testing')}
                     </>
                   ) : isPlaying ? (
                     <>
                       <SquareFill className="h-4 w-4 mr-2" />
-                      Stop
+                      {t('tts.stopShort')}
                     </>
                   ) : (
                     <>
                       <Volume2 className="h-4 w-4 mr-2" />
-                      Test
+                      {t('tts.testShort')}
                     </>
                   )}
                 </Button>

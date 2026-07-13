@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { CalendarClock, History, Info } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -10,6 +11,8 @@ interface ScheduleTabMenuProps {
 }
 
 export function ScheduleTabMenu({ activeTab, onTabChange, className }: ScheduleTabMenuProps) {
+  const { t } = useTranslation()
+
   return (
     <div className={cn('flex border-t border-border bg-card/80 backdrop-blur-sm pb-1', className)}>
       <button
@@ -23,7 +26,7 @@ export function ScheduleTabMenu({ activeTab, onTabChange, className }: ScheduleT
         onClick={() => onTabChange('jobs')}
       >
         <CalendarClock className="h-5 w-5" />
-        <span>Jobs</span>
+        <span>{t('schedule.jobs')}</span>
       </button>
       <button
         type="button"
@@ -36,7 +39,7 @@ export function ScheduleTabMenu({ activeTab, onTabChange, className }: ScheduleT
         onClick={() => onTabChange('detail')}
       >
         <Info className="h-5 w-5" />
-        <span>Detail</span>
+        <span>{t('schedule.detail')}</span>
       </button>
       <button
         type="button"
@@ -49,7 +52,7 @@ export function ScheduleTabMenu({ activeTab, onTabChange, className }: ScheduleT
         onClick={() => onTabChange('runs')}
       >
         <History className="h-5 w-5" />
-        <span>Runs</span>
+        <span>{t('schedule.runs')}</span>
       </button>
     </div>
   )

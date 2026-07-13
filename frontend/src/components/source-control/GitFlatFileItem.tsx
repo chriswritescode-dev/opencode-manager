@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { Plus, Minus, FileText, FilePlus, FileX, FileSearch, CircleDot, RotateCcw } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -23,6 +24,7 @@ const statusIcons = {
 }
 
 export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage, onDiscard }: GitFlatFileItemProps) {
+  const { t } = useTranslation()
   const StatusIcon = statusIcons[file.status] || FileText
   const statusColor = GIT_STATUS_COLORS[file.status] || 'text-muted-foreground'
 
@@ -64,7 +66,7 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
       </div>
       {file.staged && (
         <span className={cn('text-[10px] px-1.5 py-0.5 rounded flex-shrink-0', GIT_UI_COLORS.stagedBadge)}>
-          staged
+          {t('git.staged')}
         </span>
       )}
       {(file.additions !== undefined || file.deletions !== undefined) && (
@@ -97,7 +99,7 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
           size="sm"
           className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
           onClick={handleDiscard}
-          title="Discard changes"
+          title={t('git.discardChanges')}
         >
           <RotateCcw className="w-3 h-3 text-rose-500" />
         </Button>

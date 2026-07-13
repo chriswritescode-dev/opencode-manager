@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -20,6 +21,7 @@ import { SwitchConfigDialog } from "@/components/repo/SwitchConfigDialog"
 import { Plus } from "lucide-react"
 
 export function AssistantRedirect() {
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const repoId = 0
@@ -53,14 +55,14 @@ export function AssistantRedirect() {
     <div className="h-dvh max-h-dvh overflow-hidden bg-gradient-to-br from-background via-background to-background flex flex-col pb-[calc(env(safe-area-inset-bottom)+56px)] sm:pb-0">
       <Header>
         <Header.BackButton to="/" />
-        <Header.Title>Assistant</Header.Title>
+        <Header.Title>{t('assistant.assistant')}</Header.Title>
         <Header.Actions>
           <div className="flex items-center gap-1">
             <PendingActionsGroup />
           </div>
           <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} size="sm" className="hidden sm:inline-flex bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
             <Plus className="w-4 h-4 mr-2" />
-            <span>New Session</span>
+            <span>{t('session.new')}</span>
           </Button>
           <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} size="sm" className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
             <Plus className="w-5 h-5" />
@@ -69,9 +71,9 @@ export function AssistantRedirect() {
       </Header>
       <div className="flex-1 flex flex-col min-h-0">
         {repoError ? (
-          <div className="p-4 text-sm text-muted-foreground">Failed to load Assistant sessions</div>
+          <div className="p-4 text-sm text-muted-foreground">{t('common.failed')}</div>
         ) : repoLoading || !repo?.fullPath ? (
-          <div className="p-4 text-sm text-muted-foreground">Loading Assistant sessions...</div>
+          <div className="p-4 text-sm text-muted-foreground">{t('common.loading')}</div>
         ) : (
           <SessionList
             opcodeUrl={opcodeUrl}
@@ -82,7 +84,7 @@ export function AssistantRedirect() {
       </div>
       {assistantDirectory && (
         <>
-          <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={assistantFileBasePath} repoName="Assistant" repoId={repoId} />
+          <FileBrowserSheet isOpen={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} basePath={assistantFileBasePath} repoName={t('assistant.assistant')} repoId={repoId} />
           <RepoMcpDialog open={mcpDialogOpen} onOpenChange={setMcpDialogOpen} directory={assistantDirectory} />
           {assistantDirectory && opcodeUrl ? (
             <RepoSkillsDialog
@@ -100,7 +102,7 @@ export function AssistantRedirect() {
               repoId={repoId}
             />
           )}
-          <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName="Assistant" />
+          <SourceControlPanel repoId={repoId} isOpen={sourceControlOpen} onClose={() => setSourceControlOpen(false)} currentBranch={repo?.currentBranch || repo?.branch || "main"} repoName={t('assistant.assistant')} />
           <ResetPermissionsDialog open={resetPermissionsOpen} onOpenChange={setResetPermissionsOpen} repoId={repoId} />
         </>
       )}

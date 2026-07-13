@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useMemo, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -15,6 +16,7 @@ import { ApiKeyDialog } from '@/components/model/ApiKeyDialog'
 import { invalidateProviderCaches } from '@/lib/queryInvalidation'
 
 export function ProviderSettings() {
+  const { t } = useTranslation()
   const [selectedProvider, setSelectedProvider] = useState<string | null>(null)
   const [oauthDialogOpen, setOauthDialogOpen] = useState(false)
   const [oauthCallbackDialogOpen, setOauthCallbackDialogOpen] = useState(false)
@@ -168,9 +170,9 @@ export function ProviderSettings() {
     <div className="space-y-8">
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-foreground mb-2">OAuth Providers</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-2">{t('settings.oauthProviders') || 'OAuth Providers'}</h2>
           <p className="text-sm text-muted-foreground">
-            Connect to AI providers using OAuth authentication.
+            {t('settings.oauthProvidersDescription') || 'Connect to AI providers using OAuth authentication.'}
           </p>
         </div>
 
@@ -178,7 +180,7 @@ export function ProviderSettings() {
         <Card className="bg-card border-border">
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground text-center">
-              No OAuth-capable providers available.
+              {t('settings.noOAuthProviders') || 'No OAuth-capable providers available.'}
             </p>
           </CardContent>
         </Card>
@@ -199,18 +201,18 @@ export function ProviderSettings() {
                       {hasKey ? (
                         <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0">
                           <Check className="h-3 w-3 mr-1" />
-                          Connected
+                          {t('common.connected')}
                         </Badge>
                       ) : (
                         <Badge variant="secondary" className="shrink-0">
                           <X className="h-3 w-3 mr-1" />
-                          Not Connected
+                          {t('common.disconnected')}
                         </Badge>
                       )}
                     </div>
                     <CardDescription>
                       {modelCount > 0 && (
-                        <span className="text-xs">{modelCount} model{modelCount !== 1 ? 's' : ''}</span>
+                        <span className="text-xs">{modelCount} {modelCount !== 1 ? t('settings.models') || 'models' : t('settings.model') || 'model'}</span>
                       )}
                     </CardDescription>
                     <div className="flex flex-wrap gap-2">
@@ -223,7 +225,7 @@ export function ProviderSettings() {
                         }}
                       >
                         <Shield className="h-4 w-4 mr-1" />
-                        {hasKey ? 'Reconnect' : 'Connect'}
+                        {hasKey ? t('settings.reconnect') || 'Reconnect' : t('common.connect') || 'Connect'}
                       </Button>
                       {hasKey && (
                         <Button
@@ -232,7 +234,7 @@ export function ProviderSettings() {
                           onClick={() => handleDeleteCredential(provider.id)}
                           disabled={deleteCredentialMutation.isPending}
                         >
-                          Disconnect
+                          {t('common.disconnect') || 'Disconnect'}
                         </Button>
                       )}
                     </div>
@@ -270,9 +272,9 @@ export function ProviderSettings() {
 
       <div className="space-y-4">
         <div>
-          <h2 className="text-lg font-semibold text-foreground mb-2">API Keys</h2>
+          <h2 className="text-lg font-semibold text-foreground mb-2">{t('settings.apiKeys') || 'API Keys'}</h2>
           <p className="text-sm text-muted-foreground">
-            Manage API keys for AI providers.
+            {t('settings.apiKeysDescription') || 'Manage API keys for AI providers.'}
           </p>
         </div>
 
@@ -286,7 +288,7 @@ export function ProviderSettings() {
             ) : (
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             )}
-            <span className="font-medium text-sm">Connected</span>
+            <span className="font-medium text-sm">{t('common.connected')}</span>
             <Badge variant="secondary" className="ml-auto">
               {apiKeyProviders.connected.length}
             </Badge>
@@ -296,7 +298,7 @@ export function ProviderSettings() {
             <div className="pl-6 space-y-2">
               {apiKeyProviders.connected.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-2">
-                  No providers configured. Add an API key below to get started.
+                  {t('settings.noConnectedProviders') || 'No providers configured. Add an API key below to get started.'}
                 </p>
               ) : (
                 apiKeyProviders.connected.map((provider) => {
@@ -311,14 +313,14 @@ export function ProviderSettings() {
                             </CardTitle>
                             {modelCount > 0 && (
                               <CardDescription className="text-xs">
-                                {modelCount} model{modelCount !== 1 ? 's' : ''}
+                                {modelCount} {modelCount !== 1 ? t('settings.models') || 'models' : t('settings.model') || 'model'}
                               </CardDescription>
                             )}
                           </div>
                           <div className="flex items-center gap-1">
                             <Badge variant="default" className="bg-green-600 hover:bg-green-700 shrink-0 text-xs">
                               <Check className="h-3 w-3 mr-1" />
-                              Connected
+                              {t('common.connected')}
                             </Badge>
                             <Button
                               size="sm"
@@ -358,7 +360,7 @@ export function ProviderSettings() {
             ) : (
               <ChevronRight className="h-4 w-4 text-muted-foreground" />
             )}
-            <span className="font-medium text-sm">Available Providers</span>
+            <span className="font-medium text-sm">{t('settings.availableProviders') || 'Available Providers'}</span>
             <Badge variant="secondary" className="ml-auto">
               {apiKeyProviders.available.length}
             </Badge>
@@ -369,7 +371,7 @@ export function ProviderSettings() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search providers..."
+                  placeholder={t('settings.searchProviders')}
                   value={availableSearch}
                   onChange={(e) => setAvailableSearch(e.target.value)}
                   className="pl-9 md:text-sm"
@@ -380,7 +382,7 @@ export function ProviderSettings() {
               <div className="space-y-2 max-h-64 overflow-y-auto scrollbar-thin pt-4 pb-1 pr-1 [mask-image:linear-gradient(to_bottom,transparent,black_16px,black)]">
                 {filteredAvailableProviders.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-2">
-                    {availableSearch ? 'No providers match your search.' : 'No available providers.'}
+                    {availableSearch ? t('settings.noProvidersMatch') || 'No providers match your search.' : t('settings.noAvailableProviders') || 'No available providers.'}
                   </p>
                 ) : (
                   filteredAvailableProviders.map((provider, index) => {
@@ -393,7 +395,7 @@ export function ProviderSettings() {
                           </span>
                           {modelCount > 0 && (
                             <span className="text-xs text-muted-foreground">
-                              {modelCount} model{modelCount !== 1 ? 's' : ''}
+                              {modelCount} {modelCount !== 1 ? t('settings.models') || 'models' : t('settings.model') || 'model'}
                             </span>
                           )}
                         </div>
@@ -404,7 +406,7 @@ export function ProviderSettings() {
                           className="h-7 px-2"
                         >
                           <Key className="h-3.5 w-3.5 mr-1" />
-                          Add Key
+                          {t('settings.addKey') || 'Add Key'}
                         </Button>
                       </div>
                     )
@@ -443,8 +445,8 @@ export function ProviderSettings() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         onCancel={handleDeleteCancel}
-        title="Remove Credentials"
-        description={`Are you sure you want to remove credentials for ${deleteTarget || 'this provider'}?`}
+        title={t('settings.removeCredentials')}
+        description={`${t('common.confirm') || 'Are you sure you want to remove credentials for'} ${deleteTarget || t('settings.thisProvider') || 'this provider'}?`}
         isDeleting={deleteCredentialMutation.isPending}
       />
     </div>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useRef, useEffect } from 'react'
 import type { components } from '@/api/opencode-types'
 import { useSettings } from '@/hooks/useSettings'
@@ -27,6 +28,7 @@ function getTaskSessionId(part: ToolPart): string | undefined {
 }
 
 function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (filePath: string) => void }) {
+  const { t } = useTranslation()
   const jsonString = JSON.stringify(json, null, 2)
   const references = detectFileReferences(jsonString)
 
@@ -50,7 +52,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
           onFileClick?.(ref.filePath)
         }}
         className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
-        title={`Click to open ${ref.filePath}`}
+        title={t('tooltip.openFile', { file: ref.filePath })}
       >
         {ref.fullMatch}
       </span>
@@ -67,6 +69,7 @@ function ClickableJson({ json, onFileClick }: { json: unknown; onFileClick?: (fi
 }
 
 export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCallPartProps) {
+  const { t } = useTranslation()
   const { preferences } = useSettings()
   const { userBashCommands } = useUserBash()
   const taskSessionId = part.tool === 'task' ? getTaskSessionId(part) : undefined
@@ -156,7 +159,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
   if (part.tool === 'task') {
     const sessionId = taskSessionId
-    const description = previewText || 'Sub-agent task'
+    const description = previewText || t('message.subAgentTask')
     const status = part.state.status
 
     const isPending = status === 'pending'
@@ -183,7 +186,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         {isCompleted && <span className="text-green-600 text-sm font-medium">✓</span>}
         {isError && <span className="text-red-600 text-sm font-medium">✗</span>}
         <span className="font-medium text-foreground truncate">{description}</span>
-        <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">sub-agent</span>
+        <span className="text-[11px] font-medium text-orange-600 dark:text-orange-400 shrink-0">{t('message.subAgent')}</span>
         {sessionId && <ExternalLink className="w-3 h-3 shrink-0 text-blue-600 dark:text-blue-400" />}
       </div>
     )
@@ -193,7 +196,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
         <button
           onClick={() => onChildSessionClick?.(sessionId)}
           className="my-1 w-full rounded-lg border border-blue-500/20 bg-blue-500/5 px-3 py-1.5 text-left text-xs text-muted-foreground hover:bg-blue-500/10 hover:border-blue-500/30 transition-all duration-200 shadow-sm shadow-blue-500/5"
-          title="View subagent session"
+          title={t('session.viewSubagent')}
         >
           {content}
         </button>
@@ -211,7 +214,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
     if (part.state.status === 'error') {
       return (
         <div className="my-2 text-sm text-red-600 dark:text-red-400">
-          Error updating tasks: {part.state.error}
+          {t('message.todoError')}: {part.state.error}
         </div>
       )
     }
@@ -243,7 +246,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
           <pre className="bg-accent p-3 rounded text-xs overflow-x-auto whitespace-pre-wrap">
             {output}
           </pre>
-          <CopyButton content={output} title="Copy output" className="absolute top-2 right-2" />
+          <CopyButton content={output} title={t('code.copyOutput')} className="absolute top-2 right-2" />
         </div>
       </div>
     )
@@ -284,7 +287,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               }
             }}
             className="text-blue-600 dark:text-blue-400 text-xs truncate hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted"
-            title={`Click to open ${previewText}`}
+            title={t('tooltip.openFile', { file: previewText })}
           >
             {previewText}
           </span>
@@ -301,14 +304,14 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 onChildSessionClick?.(sessionId)
               }}
               className="text-blue-600 dark:text-blue-400 text-xs hover:text-blue-700 dark:hover:text-blue-300 cursor-pointer underline decoration-dotted flex items-center gap-1"
-              title="View subagent session"
+              title={t('session.viewSubagent')}
             >
               <ExternalLink className="w-3 h-3" />
-              View Session
+              {t('session.viewSubagent')}
             </span>
           ) : null
         })()}
-         <span className="text-muted-foreground text-xs ml-auto">({isWaitingPermission ? 'awaiting permission' : isWaitingQuestion ? 'awaiting answer' : part.state.status})</span>
+         <span className="text-muted-foreground text-xs ml-auto">({isWaitingPermission ? t('session.awaitingPermission') : isWaitingQuestion ? t('session.awaitingAnswer') : part.state.status})</span>
       </button>
 
       {expanded && (
@@ -320,7 +323,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '150ms' }} />
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style={{ animationDelay: '300ms' }} />
               </div>
-              <span>Preparing tool call...</span>
+              <span>{t('message.preparingToolCall')}</span>
             </div>
           )}
 
@@ -329,10 +332,10 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               {part.tool === 'bash' ? (
                 <div className="text-sm">
                   <div className="flex items-center gap-2 mb-1">
-                    <div className="text-muted-foreground">Command:</div>
+                    <div className="text-muted-foreground">{t('message.command')}:</div>
                     <CopyButton
                       content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
-                      title="Copy command"
+                      title={t('code.copyCommand')}
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
@@ -340,16 +343,16 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                   </div>
                   <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
+                    <span>{isWaitingPermission ? t('session.waitingForPermission') : t('message.running')}</span>
                   </div>
                 </div>
               ) : (
                 <div className="text-sm">
-                  <div className="text-muted-foreground mb-1">Input:</div>
+                  <div className="text-muted-foreground mb-1">{t('message.input')}:</div>
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
                   <div className={`flex items-center gap-2 mt-2 text-xs ${isWaitingPermission ? 'text-orange-600 dark:text-orange-400' : 'text-yellow-600 dark:text-yellow-400'}`}>
                     <Loader2 className="w-3 h-3 animate-spin" />
-                    <span>{isWaitingPermission ? 'Waiting for permission...' : 'Running...'}</span>
+                    <span>{isWaitingPermission ? t('session.waitingForPermission') : t('message.running')}</span>
                   </div>
                 </div>
               )}
@@ -361,10 +364,10 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
               {part.tool === 'bash' ? (
                 <div className="text-sm">
                   <div className="flex items-center gap-2 mb-1">
-                    <div className="text-muted-foreground">Command:</div>
+                    <div className="text-muted-foreground">{t('message.command')}:</div>
                     <CopyButton
                       content={typeof part.state.input?.command === 'string' ? part.state.input.command : ''}
-                      title="Copy command"
+                      title={t('code.copyCommand')}
                     />
                   </div>
                   <div className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words">
@@ -373,24 +376,24 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
                 </div>
               ) : (
                 <div className="text-sm">
-                  <div className="text-muted-foreground mb-1">Input:</div>
+                  <div className="text-muted-foreground mb-1">{t('message.input')}:</div>
                   <ClickableJson json={part.state.input} onFileClick={onFileClick} />
                 </div>
               )}
               <div className="text-sm">
-                <div className="text-muted-foreground mb-1">Output:</div>
+                <div className="text-muted-foreground mb-1">{t('message.output')}:</div>
                 <div className="relative">
                   <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-all">
                     {part.state.status === 'completed' ? part.state.output : ''}
                   </pre>
                   {part.state.status === 'completed' && part.state.output && (
-                    <CopyButton content={part.state.output} title="Copy output" className="absolute top-1 right-1" iconSize="sm" />
+                    <CopyButton content={part.state.output} title={t('code.copyOutput')} className="absolute top-1 right-1" iconSize="sm" />
                   )}
                 </div>
               </div>
               {part.state.time && (
                 <div className="text-xs text-muted-foreground">
-                  Duration: {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
+                  {t('message.duration')}: {((part.state.time.end - part.state.time.start) / 1000).toFixed(2)}s
                 </div>
               )}
             </>
@@ -398,7 +401,7 @@ export function ToolCallPart({ part, onFileClick, onChildSessionClick }: ToolCal
 
           {part.state.status === 'error' && (
             <div className="text-sm">
-              <div className="text-red-600 dark:text-red-400 mb-1">Error:</div>
+              <div className="text-red-600 dark:text-red-400 mb-1">{t('common.error')}:</div>
               <pre className="bg-accent p-2 rounded text-xs overflow-x-auto whitespace-pre-wrap break-words text-red-600 dark:text-red-300">
                 {part.state.error}
               </pre>

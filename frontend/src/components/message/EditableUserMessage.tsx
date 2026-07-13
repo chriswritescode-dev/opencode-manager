@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { memo, useState, useRef, useEffect } from 'react'
 import { Send, X, Pencil, Loader2 } from 'lucide-react'
 import { useRefreshMessage } from '@/hooks/useRemoveMessage'
@@ -24,6 +25,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
   onCancel,
   model
 }: EditableUserMessageProps) {
+  const { t } = useTranslation()
   const [editedContent, setEditedContent] = useState(content)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const isMobile = useMobile()
@@ -89,13 +91,13 @@ export const EditableUserMessage = memo(function EditableUserMessage({
         onKeyDown={handleKeyDown}
         onFocus={() => setIsEditingMessage(true)}
         className="w-full p-3 rounded-lg bg-background border border-primary/50 focus:border-primary focus:ring-1 focus:ring-primary outline-none resize-none min-h-[60px] text-[16px] md:text-sm"
-        placeholder="Edit your message..."
+        placeholder={t('session.editMessagePlaceholder')}
         disabled={refreshMessage.isPending}
       />
       
       <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">
-          Press <kbd className="px-1 py-0.5 rounded bg-muted text-xs">Cmd+Enter</kbd> to send, <kbd className="px-1 py-0.5 rounded bg-muted text-xs">Esc</kbd> to cancel
+          {t('session.editMessageHint')}
         </span>
         
         <div className={`flex items-center ${isMobile ? 'gap-3' : 'gap-2'}`}>
@@ -105,7 +107,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
             className="flex items-center gap-1 px-3 py-1.5 rounded text-sm border border-muted-foreground/40 bg-secondary text-secondary-foreground hover:bg-secondary/80 hover:border-muted-foreground/60 transition-colors disabled:opacity-50"
           >
             <X className="w-4 h-4" />
-            Cancel
+            {t('common.cancel')}
           </button>
           
           <button
@@ -118,7 +120,7 @@ export const EditableUserMessage = memo(function EditableUserMessage({
             ) : (
               <Send className="w-4 h-4" />
             )}
-            Resend
+            {t('session.resend')}
           </button>
         </div>
       </div>
@@ -137,6 +139,7 @@ export const ClickableUserMessage = memo(function ClickableUserMessage({
   onClick,
   isEditable
 }: ClickableUserMessageProps) {
+  const { t } = useTranslation()
   const isMobile = useMobile()
   
   if (!isEditable) {
@@ -151,7 +154,7 @@ export const ClickableUserMessage = memo(function ClickableUserMessage({
     <button
       onClick={onClick}
       className="text-left text-sm whitespace-pre-wrap break-words w-full group/edit hover:bg-blue-600/10 rounded p-1 -m-1 transition-colors flex items-start gap-2"
-      title="Click to edit and resend"
+      title={t('session.clickToEdit')}
     >
       <span className="flex-1">{content}</span>
       <Pencil className={`w-4 h-4 flex-shrink-0 mt-0.5 text-muted-foreground transition-all ${isMobile ? 'opacity-100' : 'opacity-50 group-hover/edit:opacity-100 group-hover/edit:text-primary'}`} />

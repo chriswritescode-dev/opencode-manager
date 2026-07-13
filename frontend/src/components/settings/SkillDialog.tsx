@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -34,6 +35,7 @@ interface SkillDialogProps {
 }
 
 export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: SkillDialogProps) {
+  const { t } = useTranslation()
   const { data: repos = [] } = useQuery<Repo[]>({
     queryKey: ['repos'],
     queryFn: listRepos,
@@ -68,7 +70,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
 
   const handleSubmit = (values: SkillFormValues) => {
     if (!editingSkill && values.scope === 'project' && !selectedRepoId) {
-      form.setError('scope', { message: 'Please select a repository for project-scoped skills' })
+      form.setError('scope', { message: t('settings.selectRepositoryHint') || 'Please select a repository for project-scoped skills' })
       return
     }
 
@@ -106,7 +108,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent mobileFullscreen className="sm:max-w-2xl sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 pb-safe">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
-          <DialogTitle>{editingSkill ? 'Edit Skill' : 'Create Skill'}</DialogTitle>
+          <DialogTitle>{editingSkill ? t('settings.editSkill') || 'Edit Skill' : t('settings.createSkill') || 'Create Skill'}</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-2 sm:p-4">
@@ -117,7 +119,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
                 name="name"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Skill Name</FormLabel>
+                    <FormLabel>{t('settings.skillName')}</FormLabel>
                     <FormControl>
                       <Input
                         {...field}
@@ -127,7 +129,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
                       />
                     </FormControl>
                     <FormDescription>
-                      Use lowercase letters, numbers, and hyphens only
+                      {t('settings.skillNameDescription') || 'Use lowercase letters, numbers, and hyphens only'}
                     </FormDescription>
                     <FormMessage />
                   </FormItem>
@@ -139,11 +141,11 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>{t('common.description')}</FormLabel>
                     <FormControl>
                       <Textarea
                         {...field}
-                        placeholder="Brief description of what this skill does"
+                        placeholder={t('settings.skillDescriptionPlaceholder') || 'Brief description of what this skill does'}
                       />
                     </FormControl>
                     <FormMessage />
@@ -156,7 +158,7 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
                 name="body"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Skill Body</FormLabel>
+                    <FormLabel>{t('settings.skillBody')}</FormLabel>
                     <FormControl>
                       <Textarea
                         {...field}
@@ -175,16 +177,16 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
                 name="scope"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Scope</FormLabel>
+                    <FormLabel>{t('settings.scope')}</FormLabel>
                     <Select onValueChange={field.onChange} value={field.value} disabled={!!editingSkill}>
                       <FormControl>
                         <SelectTrigger className={editingSkill ? 'bg-muted' : ''}>
-                          <SelectValue placeholder="Select scope" />
+                          <SelectValue placeholder={t('settings.selectScope')} />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
-                        <SelectItem value="global">Global</SelectItem>
-                        <SelectItem value="project">Project</SelectItem>
+                        <SelectItem value="global">{t('settings.global')}</SelectItem>
+                        <SelectItem value="project">{t('settings.project')}</SelectItem>
                       </SelectContent>
                     </Select>
                     <FormMessage />
@@ -194,14 +196,14 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
 
               {scope === 'project' && (
                 <FormItem>
-                  <FormLabel>Repository</FormLabel>
+                  <FormLabel>{t('repo.selectRepo')}</FormLabel>
                   <FormControl>
                     <Select
                       value={selectedRepoId?.toString()}
                       onValueChange={(value) => setSelectedRepoId(value ? parseInt(value, 10) : undefined)}
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select repository" />
+                        <SelectValue placeholder={t('settings.selectRepository')} />
                       </SelectTrigger>
                       <SelectContent>
                         {repos.map((repo) => (
@@ -221,14 +223,14 @@ export function SkillDialog({ open, onOpenChange, onSubmit, editingSkill }: Skil
 
         <DialogFooter className="flex flex-row gap-2 pt-2 border-t border-border sm:justify-end pb-4 p-3">
           <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 sm:flex-none">
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={() => form.handleSubmit(handleSubmit)()}
             disabled={!form.formState.isValid}
             className="flex-1 sm:flex-none"
           >
-            {editingSkill ? 'Update' : 'Create'}
+            {editingSkill ? t('common.update') || 'Update' : t('common.create')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useParams } from 'react-router-dom'
 import type { CreateScheduleJobRequest, ScheduleJob } from '@opencode-manager/shared/types'
@@ -27,6 +28,7 @@ import { getReturnToPath } from '@/lib/navigation'
 import { CalendarClock, Loader2, Plus } from 'lucide-react'
 
 export function Schedules() {
+  const { t } = useTranslation()
   const { id } = useParams<{ id: string }>()
   const location = useLocation()
   const repoId = id ? Number(id) : undefined
@@ -141,7 +143,7 @@ export function Schedules() {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <p className="text-muted-foreground">
-          {repoId === 0 ? 'Assistant not found' : 'Repository not found'}
+          {repoId === 0 ? t('common.error') : t('repo.notFound')}
         </p>
       </div>
     )
@@ -262,7 +264,7 @@ export function Schedules() {
           <Header.Actions>
             <Button onClick={openNewJob} size="sm" className="hidden sm:flex">
               <Plus className="w-4 h-4 mr-2" />
-              New Schedule
+              {t('schedule.create')}
             </Button>
             <Button onClick={openNewJob} size="sm" className="sm:hidden h-10 w-10 p-0">
               <Plus className="w-5 h-5" />
@@ -280,12 +282,12 @@ export function Schedules() {
                   <CalendarClock className="h-6 w-6 text-muted-foreground" />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xl font-semibold tracking-tight">No schedules yet</p>
-                  <p className="text-sm text-muted-foreground">Create a schedule for this repo to automate recurring agent work, then inspect runs, logs, and sessions here.</p>
+                  <p className="text-xl font-semibold tracking-tight">{t('schedule.noSchedules')}</p>
+                  <p className="text-sm text-muted-foreground">{t('schedule.emptyDesc')}</p>
                 </div>
                 <Button onClick={openNewJob}>
                   <Plus className="w-4 h-4 mr-2" />
-                  Create First Schedule
+                  {t('schedule.createFirst')}
                 </Button>
               </CardContent>
             </Card>
@@ -358,8 +360,8 @@ export function Schedules() {
         onOpenChange={(open) => !open && closeDialog()}
         onConfirm={handleDelete}
         onCancel={() => closeDialog()}
-        title="Delete Schedule"
-        description="This removes the job definition and all recorded run history for it."
+        title={t('schedule.deleteTitle')}
+        description={t('schedule.deleteDescription')}
         isDeleting={deleteMutation.isPending}
       />
 
@@ -368,22 +370,22 @@ export function Schedules() {
         onOpenChange={(open) => !open && setClearRunsOpen(false)}
         onConfirm={handleClearHistory}
         onCancel={() => setClearRunsOpen(false)}
-        title="Clear run history"
+        title={t('schedule.clearRunHistory')}
         description={
           <>
-            <p className="mb-2">This permanently deletes all <strong>{clearableRuns.length}</strong> finished run{clearableRuns.length === 1 ? '' : 's'} for this schedule.</p>
+            <p className="mb-2">{t('schedule.clearDescription')}</p>
             {clearableBranches > 0 && (
-              <p className="mb-1">Git artifacts that will be pruned:</p>
+              <p className="mb-1">{t('schedule.gitArtifactsPruned')}</p>
             )}
             <ul className="list-disc pl-5 space-y-0.5 text-sm text-muted-foreground">
               {clearableWorktrees > 0 && (
-                <li><strong>{clearableWorktrees}</strong> worktree{clearableWorktrees === 1 ? '' : 's'}</li>
+                <li><strong>{clearableWorktrees}</strong> {t('schedule.worktrees')}</li>
               )}
               {clearableBranches > 0 && (
-                <li><strong>{clearableBranches}</strong> run branch{clearableBranches === 1 ? '' : 'es'}</li>
+                <li><strong>{clearableBranches}</strong> {t('schedule.runBranches')}</li>
               )}
             </ul>
-            <p className="mt-2">A run in progress is kept. This cannot be undone.</p>
+            <p className="mt-2">{t('schedule.runInProgressKept')}</p>
           </>
         }
         isDeleting={clearRunsMutation.isPending}
@@ -394,8 +396,8 @@ export function Schedules() {
         onOpenChange={(open) => !open && setRunToDelete(null)}
         onConfirm={handleConfirmDeleteRun}
         onCancel={() => setRunToDelete(null)}
-        title="Delete run"
-        description="This permanently deletes this run along with its git run branch and worktree. This cannot be undone."
+        title={t('schedule.deleteRun')}
+        description={t('schedule.deleteRunDescription')}
         isDeleting={deleteRunMutation.isPending}
       />
     </div>

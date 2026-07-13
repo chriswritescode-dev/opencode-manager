@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect, useMemo } from 'react'
 import { useSettings } from '@/hooks/useSettings'
 import { Button } from '@/components/ui/button'
@@ -15,6 +16,7 @@ interface EnvVar {
 }
 
 export function ServerEnvVarsSettings() {
+  const { t } = useTranslation()
   const { preferences, updateSettingsAsync, isUpdating } = useSettings()
   const [isOpen, setIsOpen] = useState(false)
   const [envVars, setEnvVars] = useState<EnvVar[]>([])
@@ -67,9 +69,9 @@ export function ServerEnvVarsSettings() {
         disabledDefaultServerEnvVars: disabledDefaultKeys,
       })
       setNeedsRestart(true)
-      showToast.success('Environment variables saved')
+      showToast.success(t('settings.envVarsSaved') || 'Environment variables saved')
     } catch {
-      showToast.error('Failed to save environment variables')
+      showToast.error(t('settings.failedToSaveEnvVars') || 'Failed to save environment variables')
     }
   }
 
@@ -81,7 +83,7 @@ export function ServerEnvVarsSettings() {
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-2 min-w-0">
-          <h3 className="text-sm font-semibold truncate">Server Environment Variables</h3>
+          <h3 className="text-sm font-semibold truncate">{t('settings.serverEnv')}</h3>
           <Badge variant="outline" className="text-xs">
             {enabledDefaultCount + (preferences?.serverEnvVars ?? []).length}
           </Badge>
@@ -95,14 +97,14 @@ export function ServerEnvVarsSettings() {
             <Alert>
               <RotateCcw className="h-4 w-4" />
               <AlertDescription>
-                Restart the OpenCode server to apply environment variable changes.
+                {t('settings.envVarsRestartHint') || 'Restart the OpenCode server to apply environment variable changes.'}
               </AlertDescription>
             </Alert>
           )}
 
           <div className="space-y-2">
             <div className="rounded-md border bg-muted/20 p-3 space-y-2">
-              <div className="text-xs font-medium text-muted-foreground">Default variables</div>
+              <div className="text-xs font-medium text-muted-foreground">{t('settings.defaultVariables') || 'Default variables'}</div>
               {DEFAULT_SERVER_ENV_VARS.map((envVar) => {
                 const isEnabled = !disabledDefaultSet.has(envVar.key)
 
@@ -111,13 +113,13 @@ export function ServerEnvVarsSettings() {
                     <div className="min-w-0">
                       <div className="font-mono text-xs truncate">{envVar.key}={envVar.value}</div>
                       <p className="text-xs text-muted-foreground">
-                        Required for OpenCode workspace listing and deletion.
+                        {t('settings.envVarRequiredHint') || 'Required for OpenCode workspace listing and deletion.'}
                       </p>
                     </div>
                     <Switch
                       checked={isEnabled}
                       onCheckedChange={(checked) => handleDefaultToggle(envVar.key, checked)}
-                      aria-label={`Toggle ${envVar.key}`}
+                      aria-label={`${t('common.toggle') || 'Toggle'} ${envVar.key}`}
                     />
                   </div>
                 )
@@ -139,7 +141,7 @@ export function ServerEnvVarsSettings() {
                     <Input
                       value={envVar.value}
                       onChange={(event) => handleChange(index, 'value', event.target.value)}
-                      placeholder="value"
+                      placeholder={t('common.value') || 'value'}
                       className="font-mono"
                     />
                   </div>
@@ -157,7 +159,7 @@ export function ServerEnvVarsSettings() {
             })}
             {blockedKeys.length > 0 && (
               <p className="text-xs text-destructive">
-                Reserved keys cannot be overridden: {blockedKeys.join(', ')}
+                {t('settings.reservedKeysHint') || 'Reserved keys cannot be overridden:'} {blockedKeys.join(', ')}
               </p>
             )}
           </div>
@@ -165,7 +167,7 @@ export function ServerEnvVarsSettings() {
           <div className="flex gap-2 pt-1">
             <Button type="button" variant="outline" size="sm" onClick={handleAdd}>
               <Plus className="h-3 w-3 mr-1" />
-              Add variable
+              {t('settings.addVariable') || 'Add variable'}
             </Button>
             <Button
               type="button"
@@ -173,13 +175,12 @@ export function ServerEnvVarsSettings() {
               onClick={handleSave}
               disabled={isUpdating || blockedKeys.length > 0}
             >
-              {isUpdating ? 'Saving...' : 'Save'}
+              {isUpdating ? `${t('common.saving') || 'Saving'}...` : t('common.save')}
             </Button>
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Variables are injected into the OpenCode server process at startup.
-            Changes require a server restart.
+            {t('settings.envVarsDescription') || 'Variables are injected into the OpenCode server process at startup. Changes require a server restart.'}
           </p>
         </div>
       )}

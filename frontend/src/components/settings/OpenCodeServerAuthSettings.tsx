@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useOpenCodeServerAuth } from '@/hooks/useOpenCodeServerAuth'
 import { Button } from '@/components/ui/button'
@@ -11,6 +12,7 @@ interface OpenCodeServerAuthSettingsProps {
 }
 
 export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }: OpenCodeServerAuthSettingsProps = {}) {
+  const { t } = useTranslation()
   const { status, setPassword, clearPassword } = useOpenCodeServerAuth()
   const [password, setPasswordValue] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -27,10 +29,10 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
   }
 
   const getStatusText = () => {
-    if (!status) return 'Loading...'
-    if (status.source === 'db') return 'Set (configured via UI)'
-    if (status.source === 'env') return 'Set (configured via env var)'
-    return 'Not set'
+    if (!status) return `${t('common.loading')}...`
+    if (status.source === 'db') return t('settings.setViaUi') || 'Set (configured via UI)'
+    if (status.source === 'env') return t('settings.setViaEnv') || 'Set (configured via env var)'
+    return t('settings.notSet') || 'Not set'
   }
 
   const getStatusIcon = () => {
@@ -48,7 +50,7 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
         className="w-full px-4 py-3 flex items-center justify-between hover:bg-muted/50 transition-colors"
       >
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-semibold">OpenCode Server Authentication</h3>
+          <h3 className="text-sm font-semibold">{t('settings.opencodeServerAuth') || 'OpenCode Server Authentication'}</h3>
           <span className="text-xs text-muted-foreground flex items-center gap-1">
             {getStatusIcon()}
             {getStatusText()}
@@ -64,7 +66,7 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
               <Alert variant="destructive">
                 <AlertTriangle className="h-4 w-4" />
                 <AlertDescription>
-                  If you set OPENCODE_HOST=0.0.0.0 in Docker without a password, the server will refuse to start.
+                  {t('settings.authNoPasswordWarning') || 'If you set OPENCODE_HOST=0.0.0.0 in Docker without a password, the server will refuse to start.'}
                 </AlertDescription>
               </Alert>
             )}
@@ -76,7 +78,7 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPasswordValue(e.target.value)}
-                  placeholder="Enter new password"
+                  placeholder={t('settings.enterNewPassword') || 'Enter new password'}
                   className="pr-9"
                   autoComplete="new-password"
                   name="opencode-server-password"
@@ -93,11 +95,11 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
                 onClick={handleSave}
                 disabled={password.length < 8 || setPassword.isPending}
               >
-                {setPassword.isPending ? 'Saving...' : 'Save'}
+                {setPassword.isPending ? `${t('common.saving') || 'Saving'}...` : t('common.save')}
               </Button>
             </div>
             {password.length > 0 && password.length < 8 && (
-              <p className="text-xs text-destructive">Password must be at least 8 characters</p>
+              <p className="text-xs text-destructive">{t('settings.passwordMinLength') || 'Password must be at least 8 characters'}</p>
             )}
             {status?.source === 'db' && (
               <Button
@@ -105,7 +107,7 @@ export function OpenCodeServerAuthSettings({ isOpen: controlledOpen, onToggle }:
                 onClick={() => clearPassword.mutate()}
                 disabled={clearPassword.isPending}
               >
-                {clearPassword.isPending ? 'Clearing...' : 'Clear stored password'}
+                {clearPassword.isPending ? `${t('common.clearing') || 'Clearing'}...` : t('settings.clearStoredPassword') || 'Clear stored password'}
               </Button>
             )}
           </div>

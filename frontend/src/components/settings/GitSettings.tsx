@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSettings } from '@/hooks/useSettings'
@@ -15,6 +16,7 @@ function ensureCredentialId(credential: GitCredential): GitCredential {
 }
 
 export function GitSettings() {
+  const { t } = useTranslation()
   const { preferences, isLoading, updateSettingsAsync, isUpdating } = useSettings()
   const queryClient = useQueryClient()
   const [gitCredentials, setGitCredentials] = useState<GitCredential[]>([])
@@ -99,9 +101,9 @@ export function GitSettings() {
     try {
       await updateSettingsAsync({ gitCredentials: newCredentials, defaultGitCredentialId: nextDefaultGitCredentialId, gitIdentity })
       await syncRepoAssignments(nextCredential.id!, options.repoIds)
-      showToast.success('Credential saved')
+      showToast.success(t('git.credentialSaved') || 'Credential saved')
     } catch {
-      showToast.error('Failed to save credential')
+      showToast.error(t('git.failedToSaveCredential') || 'Failed to save credential')
     }
   }
 
@@ -119,9 +121,9 @@ export function GitSettings() {
       if (removedCredentialId) {
         await syncRepoAssignments(removedCredentialId, [])
       }
-      showToast.success('Credential deleted')
+      showToast.success(t('git.credentialDeleted') || 'Credential deleted')
     } catch {
-      showToast.error('Failed to delete credential')
+      showToast.error(t('git.failedToDeleteCredential') || 'Failed to delete credential')
     }
   }
 
@@ -134,16 +136,16 @@ export function GitSettings() {
   const saveAll = async () => {
     setIsSaving(true)
     try {
-      showToast.loading('Saving git configuration...', { id: 'git-config' })
+      showToast.loading(t('git.savingConfig') || 'Saving git configuration...', { id: 'git-config' })
       const result = await updateSettingsAsync({ gitCredentials, defaultGitCredentialId, gitIdentity })
       setHasChanges(false)
       if (result.reloadError) {
-        showToast.success('Git configuration saved (server reload pending)', { id: 'git-config' })
+        showToast.success(t('git.configSavedReload') || 'Git configuration saved (server reload pending)', { id: 'git-config' })
       } else {
-        showToast.success('Git configuration saved', { id: 'git-config' })
+        showToast.success(t('git.configSaved') || 'Git configuration saved', { id: 'git-config' })
       }
     } catch {
-      showToast.error('Failed to save git configuration', { id: 'git-config' })
+      showToast.error(t('git.failedToSaveConfig') || 'Failed to save git configuration', { id: 'git-config' })
     } finally {
       setIsSaving(false)
     }
@@ -161,9 +163,9 @@ export function GitSettings() {
     <div className="bg-card border border-border rounded-lg">
       <div className="flex items-center justify-between px-6 py-4 border-b border-border">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">Git Configuration</h2>
+          <h2 className="text-lg font-semibold text-foreground">{t('git.settings')}</h2>
           <p className="text-sm text-muted-foreground">
-            Manage your git identity and credentials for repository operations
+            {t('git.manageIdentity') || 'Manage your git identity and credentials for repository operations'}
           </p>
         </div>
         {hasChanges && (
@@ -175,7 +177,7 @@ export function GitSettings() {
             disabled={isSaving || isUpdating}
           >
             {isSaving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
-            Save Changes
+            {t('common.save')}
           </Button>
         )}
       </div>
@@ -184,22 +186,22 @@ export function GitSettings() {
          <div>
             <div className="flex items-center gap-3 px-6 py-3">
               <User className="w-4 h-4 text-muted-foreground" />
-              <span className="font-medium">Identity</span>
+              <span className="font-medium">{t('git.identity') || 'Identity'}</span>
               <span className="text-xs text-muted-foreground ml-auto">
-                {gitIdentity.name || gitIdentity.email ? `${gitIdentity.name || 'No name'} <${gitIdentity.email || 'No email'}>` : 'Not configured'}
+                {gitIdentity.name || gitIdentity.email ? `${gitIdentity.name || t('git.noName') || 'No name'} <${gitIdentity.email || t('git.noEmail') || 'No email'}>` : t('git.notConfigured') || 'Not configured'}
               </span>
             </div>
 
             <div className="px-6 space-y-4 sm:ml-7">
               <p className="text-sm text-muted-foreground">
-                Author identity used for git commits. Leave empty to use system defaults.
+                {t('git.identityDescription') || 'Author identity used for git commits. Leave empty to use system defaults.'}
               </p>
              <div className="grid pb-4 grid-cols-1 sm:grid-cols-2 gap-4">
                <div className="space-y-2">
-                 <Label htmlFor="git-name">Name</Label>
+                 <Label htmlFor="git-name">{t('git.name')}</Label>
                  <Input
                    id="git-name"
-                   placeholder="Your Name"
+                   placeholder={t('git.namePlaceholder') || 'Your Name'}
                    value={gitIdentity.name}
                    onChange={(e) => updateIdentity('name', e.target.value)}
                    disabled={isSaving}
@@ -207,11 +209,11 @@ export function GitSettings() {
                  />
                </div>
                <div className="space-y-2">
-                 <Label htmlFor="git-email">Email</Label>
+                 <Label htmlFor="git-email">{t('git.email')}</Label>
                  <Input
                    id="git-email"
                    type="email"
-                   placeholder="you@example.com"
+                   placeholder={t('git.emailPlaceholder') || 'you@example.com'}
                    value={gitIdentity.email}
                    onChange={(e) => updateIdentity('email', e.target.value)}
                    disabled={isSaving}
@@ -225,16 +227,16 @@ export function GitSettings() {
          <div>
             <div className="flex items-center gap-3 px-6 py-3">
               <Key className="w-4 h-4 text-muted-foreground" />
-              <span className="font-medium">Credentials</span>
+              <span className="font-medium">{t('git.credentials') || 'Credentials'}</span>
               <span className="text-xs text-muted-foreground ml-auto">
-                {gitCredentials.length} configured
+                {t('git.credentialsCount', { count: gitCredentials.length }) || `${gitCredentials.length} configured`}
               </span>
             </div>
 
             <div className="px-6 space-y-4 sm:ml-7">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Credentials for cloning private repositories
+                  {t('git.credentialsDescription') || 'Credentials for cloning private repositories'}
                 </p>
                <Button
                  type="button"
@@ -244,14 +246,14 @@ export function GitSettings() {
                  disabled={isSaving}
                >
                  <Plus className="h-4 w-4 mr-2" />
-                 Add
+                 {t('common.add') || 'Add'}
                 </Button>
               </div>
 
               {gitCredentials.length === 0 ? (
                <div className="rounded-lg border border-dashed border-border p-4 text-center">
                  <p className="text-sm text-muted-foreground">
-                   No credentials configured. Click "Add" to add credentials.
+                   {t('git.noCredentials') || 'No credentials configured. Click "Add" to add credentials.'}
                  </p>
                </div>
              ) : (
@@ -259,10 +261,10 @@ export function GitSettings() {
                  <table className="w-full text-sm">
                     <thead className="bg-muted/50">
                      <tr>
-                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Name</th>
-                       <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Host</th>
-                       <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">Type</th>
-                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Actions</th>
+                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">{t('common.name')}</th>
+                       <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t('git.host') || 'Host'}</th>
+                       <th className="px-3 py-2 text-left font-medium text-muted-foreground hidden sm:table-cell">{t('common.type')}</th>
+                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">{t('common.actions')}</th>
                      </tr>
                    </thead>
                    <tbody className="divide-y divide-border">
@@ -270,7 +272,7 @@ export function GitSettings() {
                        <tr key={index} className="hover:bg-accent/30 transition-colors">
                          <td className="px-3 py-2">
                            <div>
-                             <span className="font-medium">{cred.name || 'Unnamed'}</span>
+                             <span className="font-medium">{cred.name || t('git.unnamed') || 'Unnamed'}</span>
                              <div className="text-xs text-muted-foreground sm:hidden">{cred.host}</div>
                            </div>
                          </td>
@@ -291,7 +293,7 @@ export function GitSettings() {
                                 className="h-7 w-7 p-0"
                                 onClick={(e) => handleEditClick(e, index)}
                                 disabled={isSaving}
-                                title="Edit"
+                                title={t('common.edit')}
                               >
                                 <Pencil className="h-3.5 w-3.5" />
                               </Button>
@@ -302,7 +304,7 @@ export function GitSettings() {
                                 className="h-7 w-7 p-0 text-destructive hover:text-destructive"
                                 onClick={(e) => handleDeleteClick(e, index)}
                                 disabled={isSaving}
-                                title="Delete"
+                                title={t('common.delete')}
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
                               </Button>

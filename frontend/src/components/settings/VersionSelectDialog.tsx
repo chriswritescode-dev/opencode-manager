@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Check, Download } from 'lucide-react'
@@ -13,6 +14,7 @@ interface VersionSelectDialogProps {
 }
 
 export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogProps) {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [selectedVersion, setSelectedVersion] = useState<string | null>(null)
 
@@ -52,17 +54,17 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
           })
           showToast.success(`Install failed but server recovered at v${data.newVersion}`)
         } else {
-          showToast.error(data?.recoveryMessage || 'Failed to install version')
+          showToast.error(data?.recoveryMessage || t('settings.failedToInstallVersion') || 'Failed to install version')
         }
       } else {
-        showToast.error('Failed to install version')
+        showToast.error(t('settings.failedToInstallVersion') || 'Failed to install version')
       }
     },
   })
 
   const handleInstall = () => {
     if (!selectedVersion) return
-    showToast.loading(`Installing OpenCode v${selectedVersion}...`, { id: 'install-version' })
+    showToast.loading(`${t('versionNotifier.newVersion') || 'Installing OpenCode'} v${selectedVersion}...`, { id: 'install-version' })
     installMutation.mutate(selectedVersion, {
       onSettled: () => {
         showToast.dismiss('install-version')
@@ -82,9 +84,9 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Select OpenCode Version</DialogTitle>
+          <DialogTitle>{t('settings.selectOpenCodeVersion') || 'Select OpenCode Version'}</DialogTitle>
           <DialogDescription>
-            Choose a version to install. Current version: {data?.currentVersion ? `v${data.currentVersion}` : 'Unknown'}
+            {t('settings.chooseVersionToInstall') || 'Choose a version to install.'} {t('common.current') || 'Current'}: {data?.currentVersion ? `v${data.currentVersion}` : t('common.unknown')}
           </DialogDescription>
         </DialogHeader>
 
@@ -96,7 +98,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
 
         {error && (
           <div className="text-center py-8 text-red-500">
-            Failed to fetch versions
+            {t('settings.failedToFetchVersions') || 'Failed to fetch versions'}
           </div>
         )}
 
@@ -127,7 +129,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
                             v{release.version}
                             {isCurrent && (
                               <span className="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-600 dark:text-green-400">
-                                Current
+                                {t('common.current') || 'Current'}
                               </span>
                             )}
                           </div>
@@ -149,7 +151,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
                 onClick={() => onOpenChange(false)}
                 disabled={installMutation.isPending}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 onClick={handleInstall}
@@ -161,7 +163,7 @@ export function VersionSelectDialog({ open, onOpenChange }: VersionSelectDialogP
                 ) : (
                   <Download className="h-4 w-4 mr-2" />
                 )}
-                {selectedVersion ? `Install` : 'Select version'}
+                {selectedVersion ? t('settings.install') || 'Install' : t('settings.selectVersion') || 'Select version'}
               </Button>
             </div>
           </>

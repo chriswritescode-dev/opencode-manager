@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from "react";
 import { useParams, useNavigate, Navigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -64,6 +65,7 @@ const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
 const PROMPT_OVERLAY_CLEARANCE_PX = 16
 
 export function SessionDetail() {
+  const { t } = useTranslation();
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -413,14 +415,14 @@ export function SessionDetail() {
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
           <div className="w-8 h-8 animate-spin rounded-full border-2 border-muted border-t-foreground" />
-          <span className="text-muted-foreground">Loading repository...</span>
+          <span className="text-muted-foreground">{t('common.loading')}</span>
         </div>
       </div>
     );
   }
 
   const workspaceDisplayName = isAssistantSession || !repo
-    ? 'Assistant'
+    ? t('assistant.assistant')
     : getRepoDisplayName(repo);
   const tabFromUrl = new URLSearchParams(location.search).get('repoTab') ?? undefined;
   const sessionBackPath = getSessionListPath(repoId, isAssistantSession, tabFromUrl);
@@ -442,10 +444,10 @@ export function SessionDetail() {
                   size="sm"
                   onClick={handleParentSessionClick}
                   className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/20 h-7 px-2 gap-1"
-                  title="Back to parent session"
+                  title={t('session.backToParent')}
                 >
                   <CornerUpLeft className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline text-xs">Parent</span>
+                  <span className="hidden sm:inline text-xs">{t('session.parent')}</span>
                 </Button>
                 <div className="hidden sm:block">
                   <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
@@ -455,7 +457,7 @@ export function SessionDetail() {
               <Header.BackButton to={sessionBackPath} className="text-xs sm:text-sm" />
             )}
             <Header.EditableTitle
-              value={session?.title || "Untitled Session"}
+              value={session?.title || t('session.untitled')}
               onChange={handleSessionTitleUpdate}
               subtitle={<span className="text-orange-600 dark:text-orange-400">{workspaceDisplayName}</span>}
             />
@@ -520,16 +522,16 @@ export function SessionDetail() {
                     }}
                     onClick={handleClearPrompt}
                     className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-destructive-foreground border border-red-500/60 hover:border-red-400 shadow-md shadow-red-500/30 hover:shadow-red-500/50 backdrop-blur-md transition-all duration-200 active:scale-95 hover:scale-105 ring-1 ring-red-500/20 hover:ring-red-500/40"
-                    aria-label="Clear"
+                    aria-label={t('common.clear')}
                   >
                     <X className="w-5 h-5" />
-                    <span className="text-sm font-medium hidden sm:inline">Clear</span>
+                    <span className="text-sm font-medium hidden sm:inline">{t('common.clear')}</span>
                   </button>
                 )}
               </div>
               {leaderActive && (
                 <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-primary/90 text-primary-foreground border border-primary shadow-lg backdrop-blur-md animate-pulse">
-                  <span className="text-sm font-medium">Waiting for shortcut key...</span>
+                  <span className="text-sm font-medium">{t('session.waitingForShortcut')}</span>
                 </div>
               )}
               {minimizedQuestion && minimizedQuestion.sessionID === sessionId && (
@@ -572,7 +574,7 @@ export function SessionDetail() {
       {/* Sessions Dialog */}
       <Dialog open={sessionsDialogOpen} onOpenChange={setSessionsDialogOpen}>
         <DialogContent className="max-w-4xl max-h-[80vh]">
-          <DialogTitle>Sessions</DialogTitle>
+          <DialogTitle>{t('session.sessions')}</DialogTitle>
           <div className="overflow-y-auto max-h-[60vh] mt-4">
             {opcodeUrl && (
               <SessionList

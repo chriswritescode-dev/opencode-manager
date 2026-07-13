@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ interface SkillInstallDialogProps {
 }
 
 export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillInstallDialogProps) {
+  const { t } = useTranslation()
   const [sourceType, setSourceType] = useState<'github' | 'upload'>('github')
   const [url, setUrl] = useState('')
   const [scope, setScope] = useState<SkillScope>('global')
@@ -67,7 +69,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
       })
     },
     onSuccess: () => {
-      toast.success('Skill installed successfully')
+      toast.success(t('settings.skillInstallSuccess') || 'Skill installed successfully')
       resetForm()
       onInstalled()
       onOpenChange(false)
@@ -77,21 +79,21 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
         setOverwrite(true)
         return
       }
-      toast.error(error instanceof Error ? error.message : 'Failed to install skill')
+      toast.error(error instanceof Error ? error.message : t('settings.skillInstallFailed') || 'Failed to install skill')
     },
   })
 
   const handleSubmit = () => {
     if (sourceType === 'github' && !url.trim()) {
-      toast.error('Please enter a GitHub URL')
+      toast.error(t('settings.enterGitHubUrl') || 'Please enter a GitHub URL')
       return
     }
     if (sourceType === 'upload' && files.length === 0) {
-      toast.error('Please select at least one file')
+      toast.error(t('settings.selectFileFirst') || 'Please select at least one file')
       return
     }
     if (scope === 'project' && !selectedRepoId) {
-      toast.error('Please select a repository')
+      toast.error(t('settings.selectRepository') || 'Please select a repository')
       return
     }
     installMutation.mutate()
@@ -116,7 +118,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
     const relPath = files[0].webkitRelativePath || files[0].name
     return (
       <p className="text-sm text-muted-foreground">
-        {files.length} file{files.length > 1 ? 's' : ''} selected (first: {relPath})
+        {files.length} {files.length > 1 ? t('common.files') || 'files' : t('common.file') || 'file'} {t('common.selected')} ({t('common.first') || 'first'}: {relPath})
       </p>
     )
   }
@@ -125,31 +127,31 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent mobileFullscreen className="sm:max-w-lg sm:max-h-[85vh] gap-0 flex flex-col p-0 md:p-6 pb-safe">
         <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
-          <DialogTitle>Install Skill</DialogTitle>
+          <DialogTitle>{t('settings.installSkill')}</DialogTitle>
         </DialogHeader>
 
         <div className="flex-1 overflow-y-auto p-2 sm:p-4">
           <div className="space-y-4">
             <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as 'github' | 'upload')}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="github">GitHub URL</TabsTrigger>
-                <TabsTrigger value="upload">Upload</TabsTrigger>
+                <TabsTrigger value="github">{t('settings.githubUrl')}</TabsTrigger>
+                <TabsTrigger value="upload">{t('common.upload')}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="github" className="mt-4 space-y-4">
                 <div className="space-y-2">
-                  <Label>GitHub URL</Label>
+                  <Label>{t('settings.githubUrl')}</Label>
                   <Input
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
-                    placeholder="Paste a GitHub skill URL"
+                    placeholder={t('settings.pasteGitHubUrl')}
                   />
                 </div>
               </TabsContent>
 
               <TabsContent value="upload" className="mt-4 space-y-4">
                 <div className="space-y-2">
-                  <Label>Skill File</Label>
+                  <Label>{t('settings.skillFile')}</Label>
                   <Input
                     type="file"
                     accept=".md,text/markdown"
@@ -157,7 +159,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Skill Folder</Label>
+                  <Label>{t('settings.skillFolder')}</Label>
                   <Input
                     type="file"
                     accept=".md,text/markdown"
@@ -170,27 +172,27 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
             </Tabs>
 
             <div className="space-y-2">
-              <Label>Scope</Label>
+              <Label>{t('settings.scope')}</Label>
               <Select value={scope} onValueChange={(v) => setScope(v as SkillScope)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select scope" />
+                  <SelectValue placeholder={t('settings.selectScope')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="global">Global</SelectItem>
-                  <SelectItem value="project">Project</SelectItem>
+                  <SelectItem value="global">{t('settings.global')}</SelectItem>
+                  <SelectItem value="project">{t('settings.project')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             {scope === 'project' && (
               <div className="space-y-2">
-                <Label>Repository</Label>
+                <Label>{t('repo.selectRepo')}</Label>
                 <Select
                   value={selectedRepoId?.toString()}
                   onValueChange={(value) => setSelectedRepoId(value ? parseInt(value, 10) : undefined)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select repository" />
+                    <SelectValue placeholder={t('settings.selectRepository')} />
                   </SelectTrigger>
                   <SelectContent>
                     {repos.map((repo) => (
@@ -206,7 +208,7 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
             {overwrite && (
               <Alert>
                 <AlertDescription>
-                  A skill with this name already exists. Install again to overwrite the managed skill directory.
+                  {t('settings.skillOverwriteHint') || 'A skill with this name already exists. Install again to overwrite the managed skill directory.'}
                 </AlertDescription>
               </Alert>
             )}
@@ -215,15 +217,15 @@ export function SkillInstallDialog({ open, onOpenChange, onInstalled }: SkillIns
 
         <DialogFooter className="flex flex-row gap-2 pt-2 border-t border-border sm:justify-end pb-4 p-3">
           <Button variant="outline" onClick={() => handleOpenChange(false)} className="flex-1 sm:flex-none">
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={installMutation.isPending}
             className="flex-1 sm:flex-none"
           >
-            {installMutation.isPending && 'Installing...'}
-            {!installMutation.isPending && (overwrite ? 'Overwrite and install' : 'Install')}
+            {installMutation.isPending && `${t('common.loading')}...`}
+            {!installMutation.isPending && (overwrite ? t('settings.overwriteAndInstall') || 'Overwrite and install' : t('settings.install') || 'Install')}
           </Button>
         </DialogFooter>
       </DialogContent>

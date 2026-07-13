@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, GitBranch, FolderOpen, AlertCircle } from "lucide-react";
@@ -45,6 +46,7 @@ export function RepoCard({
   hasSelectedRepos = false,
   selectionMode = false,
 }: RepoCardProps) {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const [actionsOpen, setActionsOpen] = useState(false);
 
@@ -109,13 +111,13 @@ export function RepoCard({
               {isCloning ? (
                 <span className="flex items-center gap-1.5">
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                  Cloning...
+                  {t('repo.clone')}
                 </span>
               ) : (
                 <>
                   <span className={`flex items-center gap-1 shrink-0 ${repo.isWorktree ? 'text-purple-400' : ''}`}>
                     <GitBranch className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate max-w-[80px]">{branchToDisplay || "main"}</span>
+                    <span className="truncate max-w-[80px]">{branchToDisplay || t('common.default')}</span>
                   </span>
                   {isDirty && (
                     <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400 shrink-0">

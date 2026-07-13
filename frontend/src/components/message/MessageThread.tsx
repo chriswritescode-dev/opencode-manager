@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { memo, useMemo, useState, useCallback, useEffect } from 'react'
 import { Pencil } from 'lucide-react'
 import { MessagePart } from './MessagePart'
@@ -174,6 +175,7 @@ const MessageRow = memo(function MessageRow({
   simpleChatMode,
   showReasoning,
 }: MessageRowProps) {
+  const { t } = useTranslation()
   const msg = msgWithParts.info
   const parts = msgWithParts.parts
   const streaming = isMessageStreaming(msg)
@@ -240,7 +242,7 @@ const MessageRow = memo(function MessageRow({
         <div className="flex items-center justify-between gap-2 mb-1">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground">
-              {msg.role === 'user' ? 'You' : (msg.role === 'assistant' && 'modelID' in msg ? msg.modelID : 'Assistant')}
+              {msg.role === 'user' ? t('session.you') : (msg.role === 'assistant' && 'modelID' in msg ? msg.modelID : t('assistant.assistant'))}
             </span>
             {msg.time && (
               <span className="text-xs text-muted-foreground">
@@ -251,14 +253,14 @@ const MessageRow = memo(function MessageRow({
               <button
                 onClick={() => handleStartEditUserMessage(msg.id, nextAssistantMsg.id)}
                 className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
-                title="Edit message"
+                title={t('session.editMessage')}
               >
                 <Pencil className="w-3.5 h-3.5" />
               </button>
             )}
             {isQueued && (
               <span className="text-xs font-semibold bg-amber-500 text-amber-950 px-1.5 py-0.5 rounded">
-                QUEUED
+                {t('session.queued')}
               </span>
             )}
           </div>
@@ -332,6 +334,7 @@ export const MessageThread = memo(function MessageThread({
   onUndoMessage,
   model
 }: MessageThreadProps) {
+  const { t } = useTranslation()
   const [editingUserMessageId, setEditingUserMessageId] = useState<string | null>(null)
   const [editingForAssistantId, setEditingForAssistantId] = useState<string | null>(null)
   const sessionStatus = useSessionStatusForSession(sessionID)
@@ -396,7 +399,7 @@ export const MessageThread = memo(function MessageThread({
             : parsed?.todos ? parsed.todos as Todo[]
             : []
         } catch (_) {
-          console.warn('Failed to parse todo output:', _)
+          // Silent parse failure
         }
       }
 
@@ -419,7 +422,7 @@ export const MessageThread = memo(function MessageThread({
   if (!messages || messages.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground">
-        No messages yet. Start a conversation below.
+        {t('session.noMessages')}
       </div>
     )
   }

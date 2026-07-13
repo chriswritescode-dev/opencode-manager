@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -19,6 +20,7 @@ const setupSchema = z.object({
 type SetupFormData = z.infer<typeof setupSchema>
 
 export function Setup() {
+  const { t } = useTranslation()
   const { signUpWithEmail } = useAuth()
   const theme = useTheme()
   const [error, setError] = useState<string | null>(null)
@@ -54,7 +56,7 @@ export function Setup() {
             alt="OpenCode" 
             className="h-8 w-auto"
           />
-          <p className="text-sm text-muted-foreground">Create Admin Account</p>
+          <p className="text-sm text-muted-foreground">{t('login.createAdminAccount')}</p>
         </div>
 
         <div className="rounded-lg border border-border bg-card p-6 space-y-4">
@@ -67,11 +69,11 @@ export function Setup() {
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name" className="text-sm text-muted-foreground">Name</Label>
+              <Label htmlFor="name" className="text-sm text-muted-foreground">{t('login.name')}</Label>
               <Input
                 id="name"
                 type="text"
-                placeholder="Your name"
+                placeholder={t('login.yourNamePlaceholder')}
                 className="bg-input border-border focus:border-primary"
                 {...register('name')}
                 aria-invalid={!!errors.name}
@@ -81,7 +83,7 @@ export function Setup() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="email" className="text-sm text-muted-foreground">Email</Label>
+              <Label htmlFor="email" className="text-sm text-muted-foreground">{t('login.email')}</Label>
               <Input
                 id="email"
                 type="email"
@@ -95,11 +97,11 @@ export function Setup() {
               )}
             </div>
             <div className="space-y-2">
-              <Label htmlFor="password" className="text-sm text-muted-foreground">Password</Label>
+              <Label htmlFor="password" className="text-sm text-muted-foreground">{t('login.password')}</Label>
               <Input
                 id="password"
                 type="password"
-                placeholder="At least 8 characters"
+                placeholder={t('login.atLeast8Chars')}
                 className="bg-input border-border focus:border-primary"
                 {...register('password')}
                 aria-invalid={!!errors.password}
@@ -114,7 +116,7 @@ export function Setup() {
               ) : (
                 <UserPlus className="mr-2 h-4 w-4" />
               )}
-              Create Admin Account
+              {t('login.setupButton')}
             </Button>
           </form>
         </div>

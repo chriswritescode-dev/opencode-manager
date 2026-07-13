@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useState } from "react";
 import { Search, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,20 +34,6 @@ interface RepoListControlsProps {
   onSelectionModeChange: (enabled: boolean) => void;
 }
 
-const FILTER_OPTIONS: { value: RepoFilterMode; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "recent", label: "Recent" },
-  { value: "attention", label: "Changes" },
-  { value: "worktrees", label: "Worktrees" },
-  { value: "local", label: "Local" },
-];
-
-const SORT_OPTIONS: { value: RepoSortMode; label: string }[] = [
-  { value: "recent", label: "Recent" },
-  { value: "manual", label: "Manual" },
-  { value: "name", label: "Name" },
-];
-
 export function RepoListControls({
   searchQuery,
   onSearchChange,
@@ -66,18 +53,33 @@ export function RepoListControls({
   selectionMode,
   onSelectionModeChange,
 }: RepoListControlsProps) {
+  const { t } = useTranslation();
   const isMobile = useMobile();
   const [showMenu, setShowMenu] = useState(false);
 
+  const FILTER_OPTIONS: { value: RepoFilterMode; label: string }[] = [
+    { value: "all", label: t("repo.allFilter") },
+    { value: "recent", label: t("repo.recent") },
+    { value: "attention", label: t("repo.changes") },
+    { value: "worktrees", label: t("repo.worktrees") },
+    { value: "local", label: t("repo.localFilter") },
+  ];
+
+  const SORT_OPTIONS: { value: RepoSortMode; label: string }[] = [
+    { value: "recent", label: t("repo.recent") },
+    { value: "manual", label: t("repo.manualSort") },
+    { value: "name", label: t("repo.nameSort") },
+  ];
+
   const currentSortLabel =
-    SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? "Recent";
+    SORT_OPTIONS.find((s) => s.value === sortMode)?.label ?? t("repo.recent");
   const inSelectionMode = selectedCount > 0;
 
   const getDeleteLabel = () => {
     if (hasLocalRepos && !hasClonedRepos) {
-      return "Unlink";
+      return t("repo.unlink");
     }
-    return "Delete";
+    return t("repo.delete");
   };
 
   if (inSelectionMode) {
@@ -85,7 +87,7 @@ export function RepoListControls({
       <div className="px-2 md:px-0">
         <div className="flex items-center gap-2 bg-accent/50 rounded-md p-2">
           <span className="text-sm font-medium text-foreground shrink-0 min-w-[80px]">
-            {selectedCount} selected
+            {selectedCount} {t("common.selected")}
           </span>
           <Button
             variant="ghost"
@@ -93,7 +95,7 @@ export function RepoListControls({
             className="shrink-0 h-9 text-xs"
             size="sm"
           >
-            {allVisibleSelected ? "Unselect All" : "Select All"}
+            {allVisibleSelected ? t("repo.unselectAll") : t("repo.selectAll")}
           </Button>
           <Button
             variant="ghost"
@@ -125,7 +127,7 @@ export function RepoListControls({
           <Input
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search repositories..."
+            placeholder={t("repo.searchReposPlaceholder")}
             className="pl-9 h-9"
             autoComplete="off"
             name="repo-search"
@@ -146,7 +148,7 @@ export function RepoListControls({
                   onSelectionModeChange(checked === true)
                 }
               >
-                Select repositories
+                {t("session.selectRepositories")}
               </DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
               {FILTER_OPTIONS.map((option) => {
@@ -238,13 +240,13 @@ export function RepoListControls({
       {!isMobile && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>
-            {filteredCount} {filteredCount === 1 ? "repo" : "repos"}
-            {searchQuery && ` matching "${searchQuery}"`}
+            {filteredCount} {filteredCount === 1 ? t("repo.repo") : t("repo.repos")}
+            {searchQuery && ` ${t("repo.matching")} "${searchQuery}"`}
           </span>
           {attentionCount > 0 && filterMode !== "attention" && (
             <span>
               {attentionCount}{" "}
-              {attentionCount === 1 ? "needs attention" : "need attention"}
+              {attentionCount === 1 ? t("repo.needsAttention") : t("repo.needAttention")}
             </span>
           )}
         </div>
@@ -252,4 +254,3 @@ export function RepoListControls({
     </div>
   );
 }
-

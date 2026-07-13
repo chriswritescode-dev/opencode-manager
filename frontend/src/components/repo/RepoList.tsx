@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next"
 import { useState, useMemo } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { DndContext, closestCenter, KeyboardSensor, MouseSensor, TouchSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
@@ -36,7 +37,7 @@ function formatActivityLabel(timestamp: number): string {
   const days = Math.floor(hours / 24)
 
   if (days > 0) {
-    return days === 1 ? '1d ago' : `${days}d ago`
+    return days === 1 ? t('common.date') + ' ago' : `${days}d ago`
   }
   if (hours > 0) {
     return hours === 1 ? '1h ago' : `${hours}h ago`
@@ -44,7 +45,7 @@ function formatActivityLabel(timestamp: number): string {
   if (minutes > 0) {
     return minutes === 1 ? '1m ago' : `${minutes}m ago`
   }
-  return 'just now'
+  return t('common.latest')
 }
 
 interface RepoCardWrapperProps {
@@ -147,6 +148,7 @@ function StaticRepoCard({
 }
 
 export function RepoList() {
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const isMobile = useMobile()
   const { preferences, updateSettings } = useSettings()
@@ -332,8 +334,8 @@ export function RepoList() {
       case !!error:
         return (
           <div className="text-center p-8 text-destructive">
-            Failed to load repositories:{" "}
-            {error instanceof Error ? error.message : "Unknown error"}
+            Failed to load repositories:{t('common.error')}
+            {error instanceof Error ? error.message : t('repo.unknownError')}
           </div>
         )
 
@@ -342,7 +344,7 @@ export function RepoList() {
           <div className="text-center p-12">
             <GitBranch className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
             <p className="text-zinc-500">
-              No repositories yet. Add one to get started.
+              {t('repo.noReposYet')}
             </p>
           </div>
         )
@@ -427,7 +429,7 @@ export function RepoList() {
                     <div className="text-center p-12">
                       <Search className="w-12 h-12 mx-auto mb-4 text-zinc-600" />
                       <p className="text-zinc-500">
-                        {sections[0]?.emptyMessage || `No repositories found${searchQuery ? ` matching "${searchQuery}"` : ''}`}
+                        {sections[0]?.emptyMessage || `${t('repo.noReposFound')}${searchQuery ? ` "${searchQuery}"` : ''}`}
                       </p>
                     </div>
                   )

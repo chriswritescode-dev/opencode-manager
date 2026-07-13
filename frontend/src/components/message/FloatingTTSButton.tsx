@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useCallback, useRef } from 'react'
 import { Volume2, VolumeX } from 'lucide-react'
 import { useTTS } from '@/hooks/useTTS'
@@ -13,6 +14,7 @@ interface FloatingTTSButtonProps {
 const LONG_PRESS_DURATION = 500
 
 export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps) {
+  const { t } = useTranslation()
   const { speakMessage, stop, isPlaying, isLoading } = useTTS()
   const { preferences, updateSettings } = useSettings()
 
@@ -40,12 +42,12 @@ export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps
       didLongPressFireRef.current = true
       setIsLongPressVisual(true)
       updateSettings({ tts: { ...(preferences?.tts ?? DEFAULT_TTS_CONFIG), autoPlay: nextAutoPlay } })
-      showToast.info(nextAutoPlay ? 'Auto-play enabled' : 'Auto-play disabled', {
+      showToast.info(nextAutoPlay ? t('message.autoPlayEnabled') : t('message.autoPlayDisabled'), {
         id: 'tts-autoplay-toggle',
         duration: 1800,
       })
     }, LONG_PRESS_DURATION)
-  }, [autoPlay, updateSettings, preferences?.tts, clearLongPressTimer])
+  }, [autoPlay, updateSettings, preferences?.tts, clearLongPressTimer, t])
 
   const handlePointerUp = useCallback(() => {
     clearLongPressTimer()
@@ -76,11 +78,11 @@ export function FloatingTTSButton({ messageId, content }: FloatingTTSButtonProps
 
   const showStop = isAnyPlaybackActive
   const pillTitle = showStop
-    ? 'Stop playback'
+    ? t('message.stopPlayback')
     : hasContent
-      ? 'Play latest reply'
-      : 'TTS controls'
-  const pillAriaLabel = `${pillTitle}. ${autoPlay ? 'Auto-play enabled.' : 'Auto-play disabled.'} hold to toggle auto-play`
+      ? t('message.playLatestReply')
+      : t('message.ttsControls')
+  const pillAriaLabel = `${pillTitle}. ${autoPlay ? t('message.autoPlayEnabledShort') : t('message.autoPlayDisabledShort')}. ${t('message.holdToToggleAutoPlay')}`
   const buttonToneClasses = showStop
     ? 'justify-center px-3 py-1.5 rounded-lg bg-gradient-to-br from-red-600 to-red-700 border border-red-500/60 shadow-red-500/30 ring-red-500/20 hover:ring-red-500/40 text-white'
     : autoPlay

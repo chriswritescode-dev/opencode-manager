@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useEffect, useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -27,6 +28,7 @@ export function WorkspaceManager({
   onCreateWorkspace,
   isDeleting = false,
 }: WorkspaceManagerProps) {
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [manageMode, setManageMode] = useState(false)
@@ -92,21 +94,21 @@ export function WorkspaceManager({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent mobileFullscreen className="flex flex-col gap-0 overflow-hidden p-0 sm:max-h-[85vh] sm:max-w-[560px]">
           <DialogHeader className="border-b border-border px-4 py-4">
-            <DialogTitle>Workspaces</DialogTitle>
-            <DialogDescription>Choose where new sessions should start.</DialogDescription>
+            <DialogTitle>{t('workspace.title')}</DialogTitle>
+            <DialogDescription>{t('workspace.chooseWhere')}</DialogDescription>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
             <div className="flex items-center justify-between gap-3">
             {manageMode ? (
               <div className="flex items-center gap-2">
-                <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Select all workspaces" />
+                <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label={t('workspace.selectAll')} />
                 <span className="text-xs text-muted-foreground">
-                  {selectedCount > 0 ? `${selectedCount} selected` : 'Select all'}
+                  {selectedCount > 0 ? `${selectedCount} ${t('common.selected')}` : t('workspace.selectAll')}
                 </span>
               </div>
             ) : (
               <span className="text-xs text-muted-foreground">
-                {activeWorkspaceDirectory ? 'Selected workspace' : 'Select a workspace'}
+                {activeWorkspaceDirectory ? t('workspace.selectedWorkspace') : t('workspace.selectWorkspace')}
               </span>
             )}
             <div className="flex shrink-0 items-center gap-1">
@@ -121,7 +123,7 @@ export function WorkspaceManager({
                 }}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
-                New
+                {t('workspace.newWorkspace')}
               </Button>
               {manageMode ? (
                 <>
@@ -134,7 +136,7 @@ export function WorkspaceManager({
                     onClick={() => setConfirmOpen(true)}
                   >
                     <Trash2 className="h-3.5 w-3.5 mr-1" />
-                    Delete
+                    {t('workspace.delete')}
                   </Button>
                   <Button
                     type="button"
@@ -146,7 +148,7 @@ export function WorkspaceManager({
                       setManageMode(false)
                     }}
                   >
-                    Done
+                    {t('workspace.done')}
                   </Button>
                 </>
               ) : (
@@ -157,7 +159,7 @@ export function WorkspaceManager({
                   className="h-7"
                   onClick={() => setManageMode(true)}
                 >
-                  Manage
+                  {t('workspace.manage')}
                 </Button>
               )}
             </div>
@@ -168,7 +170,7 @@ export function WorkspaceManager({
               <input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search workspaces..."
+                placeholder={t('repo.searchWorkspaces')}
                 className="h-10 w-full rounded-md border border-border bg-background pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:border-primary"
               />
             </div>
@@ -199,7 +201,7 @@ export function WorkspaceManager({
                   >
                     <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                     <span className={isActive ? 'truncate text-orange-600 dark:text-orange-400' : 'truncate'}>{label}</span>
-                    {isActive && <span className="text-xs text-orange-600 dark:text-orange-400">Selected</span>}
+                    {isActive && <span className="text-xs text-orange-600 dark:text-orange-400">{t('workspace.selected')}</span>}
                     {workspace.fullPath && (
                       <span className="ml-auto hidden truncate text-xs text-muted-foreground md:block md:max-w-[45%]">
                         {workspace.fullPath}
@@ -217,7 +219,7 @@ export function WorkspaceManager({
                     checked={isChecked}
                     disabled={isDeleting}
                     onCheckedChange={(checked) => toggle(workspaceId, checked === true)}
-                    aria-label={`Select workspace ${label}`}
+                    aria-label={`${t('workspace.selectAll')} ${label}`}
                   />
                   <GitBranch className="h-3.5 w-3.5 text-primary flex-shrink-0" />
                   <span className="truncate">{label}</span>
@@ -231,7 +233,7 @@ export function WorkspaceManager({
             })}
             {filteredWorkspaces.length === 0 && (
               <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
-                No workspaces found
+                {t('workspace.noWorkspaces')}
               </div>
             )}
             </div>
@@ -244,11 +246,11 @@ export function WorkspaceManager({
         onOpenChange={setConfirmOpen}
         onConfirm={handleConfirm}
         onCancel={() => setConfirmOpen(false)}
-        title={selectedCount === 1 ? 'Delete Workspace' : 'Delete Workspaces'}
+        title={selectedCount === 1 ? t('workspace.title') : t('workspace.title')}
         description={
           selectedCount === 1
-            ? 'Are you sure you want to delete this OpenCode workspace? This removes the workspace and its sessions in OpenCode.'
-            : `Are you sure you want to delete ${selectedCount} OpenCode workspaces? This removes the workspaces and their sessions in OpenCode.`
+            ? t('workspace.title')
+            : t('workspace.title')
         }
         isDeleting={isDeleting}
       />

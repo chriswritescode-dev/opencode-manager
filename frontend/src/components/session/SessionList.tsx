@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { useCallback, useState, useMemo, useEffect } from "react";
 import { useSessionsAcrossDirectories, useDeleteSession, useCreateSession } from "@/hooks/useOpenCode";
 import type { DeleteSessionTarget } from "@/hooks/useOpenCode";
@@ -30,6 +31,7 @@ export const SessionList = ({
   activeSessionID,
   onSelectSession,
 }: SessionListProps) => {
+  const { t } = useTranslation();
   const directoriesList = useMemo(() => {
     const source = directories && directories.length > 0 ? directories : directory ? [directory] : [];
     return Array.from(new Set(source.filter(Boolean)));
@@ -102,12 +104,12 @@ export const SessionList = ({
   }, [isLoading, filteredSessions.length, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   if (isLoading) {
-    return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
+    return <div className="p-4 text-sm text-muted-foreground">{t('session.loading')}</div>;
   }
 
   if (!sessions || sessions.length === 0) {
     if (hasNextPage || isFetchingNextPage) {
-      return <div className="p-4 text-sm text-muted-foreground">Loading sessions...</div>;
+      return <div className="p-4 text-sm text-muted-foreground">{t('session.loading')}</div>;
     }
     if (!searchQuery.trim()) {
       return (
@@ -117,9 +119,9 @@ export const SessionList = ({
             onClick={() => createSession.mutate({ agent: undefined })}
           >
             <div className="flex flex-col items-center justify-center gap-2 text-center">
-              <p className="font-medium">No sessions yet</p>
+              <p className="font-medium">{t('session.new')}</p>
               <p className="text-sm text-muted-foreground">
-                Click here to start a new session
+                {t('session.new')}
               </p>
             </div>
           </Card>
@@ -221,10 +223,10 @@ export const SessionList = ({
         {manageMode ? (
           <div className="flex items-center gap-2 bg-accent/50 rounded-md p-2">
             <span className="text-sm font-medium text-foreground shrink-0">
-              {selectedSessions.size} selected
+              {selectedSessions.size} {t('common.selected')}
             </span>
             <Button variant="ghost" onClick={toggleSelectAll} className="shrink-0 h-9 text-xs" size="sm">
-              {allVisibleSelected ? "Unselect All" : "Select All"}
+              {allVisibleSelected ? t('session.unselectAll') : t('session.selectAll')}
             </Button>
             <Button
               variant="ghost"
@@ -234,7 +236,7 @@ export const SessionList = ({
               size="sm"
             >
               <Trash2 className="w-3 h-3 mr-1" />
-              Delete
+              {t('common.delete')}
             </Button>
             <Button
               variant="ghost"
@@ -251,7 +253,7 @@ export const SessionList = ({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 type="text"
-                placeholder="Search sessions..."
+                placeholder={t('session.search')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 h-9"
@@ -262,7 +264,7 @@ export const SessionList = ({
             <Button
               variant="outline"
               size="icon"
-              aria-label="Manage sessions"
+              aria-label={t('session.manage')}
               className="shrink-0 size-9"
               onClick={() => {
                 setManageMode(true);
@@ -283,13 +285,13 @@ export const SessionList = ({
         <div className="flex flex-col gap-4">
           {filteredSessions.length === 0 && !isFetchingNextPage ? (
             <div className="text-sm text-muted-foreground text-center py-4">
-              No sessions found
+              {t('session.noSessionsFound')}
             </div>
           ) : (
             <>
               {pinnedSessions.length > 0 && (
                 <>
-                  <div className="text-xs font-semibold text-muted-foreground px-1 py-2">Pinned</div>
+                  <div className="text-xs font-semibold text-muted-foreground px-1 py-2">{t('session.pinned')}</div>
                   {pinnedSessions.map((session) => renderSessionCard(session, true))}
                   {(todaySessions.length > 0 || olderSessions.length > 0) && (
                     <div className="my-2 h-px bg-border/80" />
@@ -300,7 +302,7 @@ export const SessionList = ({
               {todaySessions.length > 0 && (
                 <>
                   <div className="text-xs font-semibold text-muted-foreground px-1 py-2">
-                    Today
+                    {t('session.today')}
                   </div>
                   {todaySessions.map((session) => renderSessionCard(session, false))}
                 </>
@@ -314,7 +316,7 @@ export const SessionList = ({
           )}
           {isFetchingNextPage && (
             <div className="text-sm text-muted-foreground text-center py-4">
-              Loading more sessions...
+              {t('session.loadingMore')}
             </div>
           )}
         </div>

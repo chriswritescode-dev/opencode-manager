@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 import { Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -55,6 +56,7 @@ export function SkillLibraryList({
   emptyHint,
   maxHeightClassName = 'max-h-[420px]',
 }: SkillLibraryListProps) {
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<SkillFilter>('all')
 
@@ -81,15 +83,15 @@ export function SkillLibraryList({
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search skills..."
+            placeholder={t('settings.searchSkills')}
             className="pl-9"
           />
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1">
           {(['all', 'project', 'global'] as const).map((key) => (
             <Button key={key} type="button" variant={filter === key ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilter(key)}>
-              <span>{key.charAt(0).toUpperCase() + key.slice(1)}</span>
-              <span>{counts[key]}</span>
+              <span>{t(`skillLibrary.${key}`)}</span>
+              {counts[key] > 0 && <span className="ml-1">{counts[key]}</span>}
             </Button>
           ))}
         </div>
@@ -99,9 +101,9 @@ export function SkillLibraryList({
         isLoading={isLoading}
         error={error}
         isEmpty={filteredSkills.length === 0}
-        emptyTitle={emptyTitle ?? 'No skills available'}
-        emptyHint={emptyHint ?? 'Create or install a skill to get started.'}
-        errorTitle="Failed to load skills"
+        emptyTitle={emptyTitle ?? t('skillLibrary.noSkills')}
+        emptyHint={emptyHint ?? t('skillLibrary.noSkillsHint')}
+        errorTitle={t('skillLibrary.loadError')}
         maxHeightClassName={maxHeightClassName}
       >
         {filteredSkills.map((skill) => (
@@ -113,7 +115,7 @@ export function SkillLibraryList({
             onClick={primaryAction ? () => primaryAction.onClick(skill) : undefined}
             primaryAction={primaryAction ? { label: primaryAction.label, onClick: () => primaryAction.onClick(skill) } : undefined}
             actions={rowActions.map((a) => ({ label: a.label, destructive: a.destructive, onClick: () => a.onClick(skill) }))}
-            actionsLabel={`Actions for ${skill.name}`}
+            actionsLabel={t('skillLibrary.actionsFor', { name: skill.name })}
             badges={
               <>
                 <Badge variant={skill.scope === 'global' ? 'secondary' : 'outline'} className="shrink-0 sm:hidden">

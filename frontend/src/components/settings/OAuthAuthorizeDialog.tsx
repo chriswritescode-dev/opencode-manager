@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useMemo, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -57,6 +58,7 @@ export function OAuthAuthorizeDialog({
   onOpenChange, 
   onSuccess 
 }: OAuthAuthorizeDialogProps) {
+  const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [selectedMethodIndex, setSelectedMethodIndex] = useState<number | null>(null)
@@ -83,7 +85,7 @@ export function OAuthAuthorizeDialog({
     const missingPrompt = visiblePrompts.some((prompt) => !methodInputs[prompt.key]?.trim())
 
     if (missingPrompt) {
-      setError('Please complete all authentication fields')
+      setError(t('oauth.completeAllFields') || 'Please complete all authentication fields')
       setSelectedMethodIndex(methodIndex)
       return
     }
@@ -105,7 +107,7 @@ export function OAuthAuthorizeDialog({
     } finally {
       setIsLoading(false)
     }
-  }, [methods, providerId, onSuccess, getMethodInputs])
+  }, [methods, providerId, onSuccess, getMethodInputs, t])
 
   useEffect(() => {
     if (open && oauthMethods.length === 1 && !autoStarted && !isLoading) {
@@ -148,9 +150,9 @@ export function OAuthAuthorizeDialog({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-card border-border w-full sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Connect to {providerName}</DialogTitle>
+          <DialogTitle>{t('oauth.connectTo', { provider: providerName }) || `Connect to ${providerName}`}</DialogTitle>
           <DialogDescription>
-            Select an authentication method to connect your {providerName} account.
+            {t('oauth.selectMethod', { provider: providerName }) || `Select an authentication method to connect your ${providerName} account.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -177,11 +179,11 @@ export function OAuthAuthorizeDialog({
                     variant={selectedMethodIndex === index ? 'default' : 'outline'}
                   >
                     <ExternalLink className="h-4 w-4 mr-2 shrink-0" />
-                    <span className="truncate">{isLoading && selectedMethodIndex === index ? 'Authorizing...' : method.label}</span>
+                    <span className="truncate">{isLoading && selectedMethodIndex === index ? t('oauth.authorizing') || 'Authorizing...' : method.label}</span>
                   </Button>
                   {isBrowserLocal && (
                     <Badge variant="secondary" className="text-xs shrink-0">
-                      Localhost only
+                      {t('oauth.localhostOnly') || 'Localhost only'}
                     </Badge>
                   )}
                 </div>
@@ -210,7 +212,7 @@ export function OAuthAuthorizeDialog({
                             disabled={isLoading}
                           >
                             <SelectTrigger className="bg-background border-border">
-                              <SelectValue placeholder="Select an option" />
+                              <SelectValue placeholder={t('settings.selectOption')} />
                             </SelectTrigger>
                             <SelectContent>
                               {prompt.options.map((option) => (
@@ -229,14 +231,14 @@ export function OAuthAuthorizeDialog({
                       disabled={isLoading || !canSubmitPrompts}
                       className="w-full"
                     >
-                      {isLoading && selectedMethodIndex === index ? 'Authorizing...' : 'Continue'}
+                      {isLoading && selectedMethodIndex === index ? t('oauth.authorizing') || 'Authorizing...' : t('common.continue') || 'Continue'}
                     </Button>
                   </div>
                 )}
                 
                 {isBrowserLocal && (
                   <p className="text-xs text-muted-foreground pl-1 break-words">
-                    This method relies on a callback server started by OpenCode and may not work when OCM is remote.
+                    {t('oauth.browserLocalHint') || 'This method relies on a callback server started by OpenCode and may not work when OCM is remote.'}
                   </p>
                 )}
               </div>
@@ -245,7 +247,7 @@ export function OAuthAuthorizeDialog({
         </div>
 
         <div className="text-xs text-muted-foreground">
-          <p>• Some methods may require completing authorization in your browser</p>
+          <p>{t('oauth.someMethodsHint') || '• Some methods may require completing authorization in your browser'}</p>
         </div>
       </DialogContent>
     </Dialog>

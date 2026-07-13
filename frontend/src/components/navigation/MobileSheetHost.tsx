@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useMobileTabBar } from '@/hooks/useMobileTabBar'
 import { useMobile } from '@/hooks/useMobile'
 import { FileBrowserSheet } from '@/components/file-browser/FileBrowserSheet'
@@ -7,6 +8,7 @@ import { MoreDrawer } from '@/components/navigation/MoreDrawer'
 
 export function MobileSheetHost() {
   const isMobile = useMobile()
+  const { t } = useTranslation()
   const { openSheet, close } = useMobileTabBar()
 
   if (!isMobile) return null
@@ -19,7 +21,7 @@ export function MobileSheetHost() {
           isOpen
           onClose={close}
           basePath=""
-          repoName="Workspace Root"
+          repoName={t('fileBrowser.workspaceRoot')}
           allowNavigateAboveBase={true}
         />
       )}

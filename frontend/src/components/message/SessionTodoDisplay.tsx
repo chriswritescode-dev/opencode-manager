@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next'
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { ChevronDown, ChevronRight, X } from 'lucide-react'
 import { TodoItem } from './TodoItem'
@@ -14,6 +15,7 @@ const todoSignature = (todos: Todo[]) =>
   todos.map((t) => `${t.id}:${t.status}`).join(',')
 
 export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
+  const { t } = useTranslation()
   const todos = useSessionTodosForSession(sessionID)
   const [isCollapsed, setIsCollapsed] = useState(true)
   const [isDismissed, setIsDismissed] = useState(false)
@@ -85,7 +87,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
         <div className="flex items-center gap-2">
           <ChevronRight className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm text-muted-foreground">
-            Tasks: {stats.completed}/{stats.total} complete
+            {t('session.tasksProgress', { completed: stats.completed, total: stats.total })}
           </span>
           <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
             <div
@@ -96,7 +98,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
           <button
             onClick={handleDismiss}
             className="ml-1 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            aria-label="Dismiss tasks"
+            aria-label={t('session.dismissTasks')}
           >
             <X className="w-3.5 h-3.5" />
           </button>
@@ -113,7 +115,7 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
       >
         <ChevronDown className="w-4 h-4 text-muted-foreground" />
         <span className="text-sm text-muted-foreground">
-          Tasks: {stats.completed}/{stats.total} complete
+          {t('session.tasksProgress', { completed: stats.completed, total: stats.total })}
         </span>
         <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
           <div
@@ -124,15 +126,15 @@ export function SessionTodoDisplay({ sessionID }: SessionTodoDisplayProps) {
         <button
           onClick={handleDismiss}
           className="ml-1 p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-          aria-label="Dismiss tasks"
+          aria-label={t('session.dismissTasks')}
         >
           <X className="w-3.5 h-3.5" />
         </button>
       </div>
       <div data-testid="todo-expanded-list" className="max-h-[80px] sm:max-h-[160px] overflow-y-auto p-1.5 sm:p-2 bg-muted/30">
-        {renderGroup('In Progress', inProgress)}
-        {renderGroup('Pending', pending)}
-        {renderGroup('Completed', completedTodos)}
+        {renderGroup(t('session.inProgress'), inProgress)}
+        {renderGroup(t('common.pending'), pending)}
+        {renderGroup(t('common.completed'), completedTodos)}
       </div>
     </div>
   )

@@ -1,4 +1,5 @@
 import { useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +30,7 @@ export function ApiKeyDialog({
   onSuccess,
   mode = 'add',
 }: ApiKeyDialogProps) {
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,12 +46,11 @@ export function ApiKeyDialog({
       setApiKey("");
       onSuccess();
     } catch (err) {
-      setError("Failed to save API key. Please try again.");
-      console.error("Failed to set API key:", err);
+      setError(t('settings.saveApiKeyFailed'));
     } finally {
       setIsSubmitting(false);
     }
-  }, [provider, apiKey, onSuccess]);
+  }, [provider, apiKey, onSuccess, t]);
 
   const handleClose = useCallback(() => {
     setApiKey("");
@@ -68,23 +69,23 @@ export function ApiKeyDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Key className="h-5 w-5" />
-            {isEditMode ? `Update ${provider.name} API Key` : `Connect ${provider.name}`}
+            {isEditMode ? t('settings.updateApiKey', { name: provider.name }) : t('settings.connectProvider', { name: provider.name })}
           </DialogTitle>
           <DialogDescription>
             {isEditMode 
-              ? `Enter a new API key for ${provider.name}.`
-              : `Enter your API key to use models from ${provider.name}.`
+              ? t('settings.enterNewApiKey', { name: provider.name })
+              : t('settings.enterApiKey', { name: provider.name })
             }
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           <div className="space-y-2">
-            <Label htmlFor="api-key">API Key</Label>
+            <Label htmlFor="api-key">{t('settings.apiKey')}</Label>
             <Input
               id="api-key"
               type="password"
-              placeholder={`Enter your ${envVarName}`}
+              placeholder={`${t('settings.enterYour')} ${envVarName}`}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               onKeyDown={(e) => {
@@ -95,7 +96,7 @@ export function ApiKeyDialog({
               autoFocus
             />
             <p className="text-xs text-muted-foreground">
-              Environment variable: <code className="bg-muted px-1 py-0.5 rounded">{envVarName}</code>
+              {t('settings.environmentVariable')}: <code className="bg-muted px-1 py-0.5 rounded">{envVarName}</code>
             </p>
           </div>
 
@@ -111,23 +112,23 @@ export function ApiKeyDialog({
               className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               <ExternalLink className="h-3 w-3" />
-              Get an API key
+              {t('settings.getApiKey')}
             </a>
           )}
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={handleClose} disabled={isSubmitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleSubmit} disabled={!apiKey.trim() || isSubmitting}>
             {isSubmitting ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                {isEditMode ? 'Updating...' : 'Connecting...'}
+                {isEditMode ? t('common.updating') : t('common.connecting')}
               </>
             ) : (
-              isEditMode ? 'Update' : 'Connect'
+              isEditMode ? t('common.update') : t('common.connect')
             )}
           </Button>
         </DialogFooter>
