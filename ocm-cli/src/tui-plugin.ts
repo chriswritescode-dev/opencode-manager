@@ -1,4 +1,4 @@
-import type { TuiPluginApi, TuiPluginModule } from './tui-types.js'
+import type { TuiPluginApi } from './tui-types.js'
 import { readInstallNotice, readState } from './state.js'
 import { getToken } from './keychain.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
@@ -8,7 +8,7 @@ import { transferSession } from './session-move.js'
 import { createManagerReplay } from './remote-replay.js'
 import { readSessionEvents } from './local-history.js'
 
-const tui = async (api: TuiPluginApi): Promise<void> => {
+export async function setupOcm(api: TuiPluginApi): Promise<void> {
   showInstallNotice(api)
   api.keymap.registerLayer({
     commands: [
@@ -124,4 +124,4 @@ async function runSessionMove(api: TuiPluginApi): Promise<void> {
   }
 }
 
-export default { id: 'ocm', tui } satisfies TuiPluginModule
+export { readRemoteContext } from './remote-context.js'
