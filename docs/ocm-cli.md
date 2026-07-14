@@ -111,13 +111,17 @@ ocm --help                Show this help
 Under the hood, `ocm` execs:
 
 ```bash
-opencode attach https://manager.example.com/api/opencode-proxy \
+OCM_REMOTE_MANAGER_URL=https://manager.example.com \
+OCM_REMOTE_REPO_NAME=my-repo \
+  opencode attach https://manager.example.com/api/opencode-proxy \
   --dir /path/to/repo/on/manager \
   --password <manager-token> \
   --username opencode
 ```
 
 The child takes over the terminal (`stdio: inherit`); closing the TUI exits `ocm` but leaves the Manager-side session intact.
+
+When the TUI plugin is installed, these internal child-process variables add a `⇅ REMOTE <host> · <repo>` indicator to the bottom of Manager-attached TUI windows. Local launches show no indicator.
 
 ### Mirror commands
 
@@ -142,6 +146,8 @@ Both can be used in place of `ocm login`:
 | Variable | Description |
 |---|---|
 | `OPENCODE_MANAGER_URL` | Manager base URL (e.g., `https://manager.example.com`). Not currently consumed by the CLI — use `ocm login`. |
+| `OCM_REMOTE_MANAGER_URL` | Internal child-process context set by `ocm attach`; controls the remote TUI indicator. Not a login setting. |
+| `OCM_REMOTE_REPO_NAME` | Internal child-process context set by `ocm attach`; labels the remote TUI indicator. Not a login setting. |
 | Keychain entry under `https://manager.example.com` | Token used for Bearer auth on Manager API calls and Basic auth on the OpenCode proxy. |
 
 ---

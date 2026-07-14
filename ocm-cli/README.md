@@ -65,7 +65,9 @@ refuses to overwrite uncommitted local changes unless `--force` is passed.
 
 The package exposes an OpenCode TUI plugin through its `./tui` package export.
 Configure the package name and OpenCode resolves that TUI entrypoint
-automatically. It registers `/ocm-move`, which keeps the local session and
+automatically. When attached to a Manager via `ocm`, the plugin shows a
+`⇅ REMOTE <host> · <repo>` indicator at the bottom of the TUI; local launches
+show nothing. It registers `/ocm-move`, which keeps the local session and
 copies the active session to the Manager after pushing the current repo state.
 Use it from inside an OpenCode session after `ocm login` and after the repo
 already exists on the Manager (`ocm push --create` if needed).

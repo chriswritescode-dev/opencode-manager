@@ -9,6 +9,7 @@ import { createProgressReporter } from '../src/progress.js'
 import { getBranchName, getOriginUrl } from '../src/local-repo.js'
 import { resolveOpenCodeProjectId } from '@opencode-manager/shared/project-id'
 import { resolveTarget } from '../src/resolve-target.js'
+import { buildRemoteAttachEnv } from '../src/remote-context.js'
 import { type ManagerRepo, fetchRepos, toRemoteRepoSummaries } from '../src/manager-repos.js'
 import packageJson from '../package.json' with { type: 'json' }
 
@@ -141,7 +142,10 @@ async function attach(managerUrl: string, token: string, repo: ManagerRepo): Pro
     '--password', token,
     '--username', 'opencode',
   ]
-  const child = spawn('opencode', args, { stdio: 'inherit' })
+  const child = spawn('opencode', args, {
+    stdio: 'inherit',
+    env: { ...process.env, ...buildRemoteAttachEnv(managerUrl, repo.name) },
+  })
   child.on('close', (code) => process.exit(code ?? 0))
   child.on('error', (err) => die(`failed to spawn opencode: ${err.message}`))
   // hand control to child
