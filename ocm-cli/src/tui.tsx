@@ -14,7 +14,7 @@ const tui = async (api: TuiPluginApi): Promise<void> => {
     return (
       <box flexDirection="row" flexShrink={0} gap={1}>
         <text fg={theme.accent}>
-          <b>⇅ REMOTE</b>
+          <b>REMOTE</b>
         </text>
         <text fg={theme.textMuted}>{label}</text>
       </box>
