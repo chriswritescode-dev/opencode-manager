@@ -8,21 +8,24 @@ const tui = async (api: TuiPluginApi): Promise<void> => {
   const remote = readRemoteContext(process.env)
   if (!remote) return
 
+  const label = remote.repoName ? `${remote.managerHost} · ${remote.repoName}` : remote.managerHost
+  const indicator = (ctx: TuiSlotContext) => {
+    const theme = ctx.theme.current
+    return (
+      <box flexDirection="row" flexShrink={0} gap={1}>
+        <text fg={theme.accent}>
+          <b>⇅ REMOTE</b>
+        </text>
+        <text fg={theme.textMuted}>{label}</text>
+      </box>
+    )
+  }
+
   api.slots.register({
     order: 300,
     slots: {
-      app_bottom(ctx: TuiSlotContext) {
-        const theme = ctx.theme.current
-        const label = remote.repoName ? `${remote.managerHost} · ${remote.repoName}` : remote.managerHost
-        return (
-          <box flexDirection="row" flexShrink={0} gap={1} paddingLeft={1} paddingRight={1}>
-            <text fg={theme.accent}>
-              <b>⇅ REMOTE</b>
-            </text>
-            <text fg={theme.text}>{label}</text>
-          </box>
-        )
-      },
+      session_prompt_right: indicator,
+      home_prompt_right: indicator,
     },
   })
 }
