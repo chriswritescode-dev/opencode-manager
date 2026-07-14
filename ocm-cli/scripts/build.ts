@@ -1,5 +1,6 @@
-import { chmodSync, copyFileSync, writeFileSync, rmSync, readFileSync } from 'fs'
+import { chmodSync, writeFileSync, rmSync, readFileSync } from 'fs'
 import { join } from 'path'
+import solidPlugin from '@opentui/solid/bun-plugin'
 
 const root = join(import.meta.dir, '..')
 const dist = join(root, 'dist')
@@ -26,9 +27,24 @@ async function bundleEntry(label: string, entrypoint: string, outputName: string
 }
 
 await bundleEntry('ocm CLI', join('bin', 'ocm.ts'), 'ocm.js')
-await bundleEntry('TUI plugin impl', join('src', 'tui-plugin.ts'), 'tui-plugin.js')
 
-copyFileSync(join(root, 'src', 'tui.tsx'), join(dist, 'tui.tsx'))
+console.log('Bundling TUI plugin...')
+const tuiResult = await Bun.build({
+  entrypoints: [join(root, 'src', 'tui.tsx')],
+  outdir: dist,
+  target: 'node',
+  format: 'esm',
+  plugins: [solidPlugin],
+  external: ['@opentui/solid', '@opentui/core', 'solid-js'],
+  naming: { entry: 'tui.js' },
+})
+
+if (!tuiResult.success) {
+  for (const log of tuiResult.logs) {
+    console.error(log)
+  }
+  process.exit(1)
+}
 
 const ocmJsPath = join(dist, 'ocm.js')
 const ocmJsContent = readFileSync(ocmJsPath, 'utf-8')
