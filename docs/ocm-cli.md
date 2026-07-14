@@ -121,7 +121,7 @@ OCM_REMOTE_REPO_NAME=my-repo \
 
 The child takes over the terminal (`stdio: inherit`); closing the TUI exits `ocm` but leaves the Manager-side session intact.
 
-When the TUI plugin is installed, these internal child-process variables add a `⇅ REMOTE <host> · <repo>` indicator to the bottom of Manager-attached TUI windows. Local launches show no indicator.
+When the TUI plugin is installed, these internal child-process variables add a `REMOTE <host> · <repo>` indicator to the bottom of Manager-attached TUI windows. Local launches show no indicator.
 
 ### Mirror commands
 
