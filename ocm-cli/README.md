@@ -49,11 +49,13 @@ it falls back to the last selected repo, then to local `opencode`.
 and attaches OpenCode to it.
 
 `ocm push` syncs the current git repo to the matching Manager repo using a fast
-git bundle + working-tree patch by default. Pass `--full` to use the legacy
-tarball mirror. If the fast path fails, `ocm` prompts before reverting to the
-tarball mirror (and proceeds automatically when there is no TTY to prompt). Use
-`--create` to create a Manager repo when no project match exists, and `--yes` to
-confirm creation in non-interactive shells.
+git bundle + working-tree patch by default. The CLI reports granular progress
+phases during push: bundling, uploading (with byte counts), server processing,
+and patching. Pass `--full` to use the legacy tarball mirror. If the fast path
+fails, `ocm` prompts before reverting to the tarball mirror (and proceeds
+automatically when there is no TTY to prompt). Use `--create` to create a Manager
+repo when no project match exists, and `--yes` to confirm creation in
+non-interactive shells.
 
 `ocm pull` syncs the matching Manager repo over the current working tree using a
 fast git bundle + working-tree patch by default. Pass `--full` to use the legacy
