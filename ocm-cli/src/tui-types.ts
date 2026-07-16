@@ -18,11 +18,17 @@ export type TuiRouteCurrent = { name: 'session'; params: { sessionID: string } }
 export type TuiSessionInfo = { id: string; directory: string; title?: string }
 export type TuiToast = { title?: string; message: string; variant?: 'info' | 'success' | 'error' | 'warning'; duration?: number }
 export type TuiCommandDef = { name: string; title: string; desc?: string; category?: string; namespace?: string; slashName?: string; run: () => void | Promise<void> }
+export type TuiDialogConfirmProps = { title: string; message: string; onConfirm?: () => void; onCancel?: () => void }
+export type TuiDialogSelectOption<Value = unknown> = { title: string; value?: Value; description?: string; disabled?: boolean; onSelect?: () => void }
+export type TuiDialogSelectProps<Value = unknown> = { title: string; placeholder?: string; options: TuiDialogSelectOption<Value>[]; onSelect?: (option: TuiDialogSelectOption<Value>) => void }
+export type TuiDialogStack = { replace: (render: () => unknown, onClose?: () => void) => void; clear: () => void }
+export type TuiLifecycle = { readonly signal: AbortSignal; onDispose: (fn: () => void | Promise<void>) => () => void }
 export type TuiPluginApi = {
   route: { readonly current: TuiRouteCurrent }
   state: { session: { get: (sessionID: string) => TuiSessionInfo | undefined } }
-  ui: { toast: (input: TuiToast) => void }
-  keymap: { registerLayer: (layer: { commands: TuiCommandDef[]; bindings?: Record<string, unknown> }) => unknown }
+  ui: { toast: (input: TuiToast) => void; DialogConfirm: (props: TuiDialogConfirmProps) => unknown; DialogSelect: <Value = unknown>(props: TuiDialogSelectProps<Value>) => unknown; dialog: TuiDialogStack }
+  keymap: { registerLayer: (layer: { commands: TuiCommandDef[]; bindings?: Record<string, unknown> }) => unknown; dispatchCommand: (name: string) => unknown }
   slots: { register: (registration: TuiSlotRegistration) => string }
+  lifecycle: TuiLifecycle
 }
 export type TuiPluginModule = { id?: string; tui: (api: TuiPluginApi, options?: Record<string, unknown>) => Promise<void> }

@@ -69,8 +69,12 @@ automatically. When attached to a Manager via `ocm`, the plugin shows a
 `REMOTE <host> · <repo>` indicator at the bottom of the TUI; local launches
 show nothing. It registers `/ocm-move`, which keeps the local session and
 copies the active session to the Manager after pushing the current repo state.
-Use it from inside an OpenCode session after `ocm login` and after the repo
-already exists on the Manager (`ocm push --create` if needed).
+When multiple Manager repos match, a picker dialog lets you choose the
+destination. A confirmation dialog gates the move before any push. On success
+you can optionally warp — exit the local TUI and attach to the moved session
+on the Manager immediately. Use it from inside an OpenCode session after
+`ocm login` and after the repo already exists on the Manager
+(`ocm push --create` if needed).
 
 Enable it in `tui.json`:
 

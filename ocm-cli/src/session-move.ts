@@ -103,6 +103,7 @@ function coerceTimestamp(data: Record<string, unknown>): void {
 export type TransferDeps = {
   fetchLocalHistory: () => Promise<HistoryEventRow[]>
   replayEvents: (remoteDirectory: string, events: ReplayEvent[]) => Promise<{ sessionID: string }>
+  onProgress?: (replayed: number, total: number) => void
 }
 
 export type TransferInput = { sessionID: string; localRoot: string; remoteDirectory: string }
@@ -134,18 +135,25 @@ export async function transferSession(input: TransferInput, deps: TransferDeps):
   })
 
   const batches = planReplayBatches(rewritten)
+  const total = rewritten.length
   let replayed = 0
+  deps.onProgress?.(replayed, total)
 
   for (const batch of batches) {
     try {
       await deps.replayEvents(input.remoteDirectory, batch)
       replayed += batch.length
+      deps.onProgress?.(replayed, total)
     } catch (err) {
       return { kind: 'replay-failed', message: err instanceof Error ? err.message : String(err) }
     }
   }
 
   return { kind: 'moved', sessionID: input.sessionID, replayedEvents: replayed }
+}
+
+export function moveReminderText(directory: string): string {
+  return `<system-reminder>The user has changed the current working directory to "${directory}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`
 }
 
 function deepClone<T>(obj: T): T {
