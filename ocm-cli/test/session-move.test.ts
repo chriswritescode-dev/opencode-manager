@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { collectSessionEvents, rewriteEventsForRemote, transferSession, planReplayBatches, type HistoryEventRow, type ReplayEvent, type TransferDeps } from '../src/session-move.js'
+import { collectSessionEvents, rewriteEventsForRemote, transferSession, planReplayBatches, moveReminderText, type HistoryEventRow, type ReplayEvent, type TransferDeps } from '../src/session-move.js'
 
 describe('collectSessionEvents', () => {
   it('collects a session\'s events in seq order with remapped aggregateID', () => {
@@ -269,6 +269,21 @@ describe('transferSession', () => {
     expect(replayCalls[0]!.events[0]!.data.info.directory).toBe('/workspace/repos/repo')
   })
 
+  it('reports replay progress after each batch', async () => {
+    const history = makeHistoryEvents('ses_a', 25)
+    const progress: [number, number][] = []
+
+    const deps: TransferDeps = {
+      fetchLocalHistory: vi.fn().mockResolvedValue(history),
+      replayEvents: vi.fn().mockResolvedValue({ sessionID: 'ses_a' }),
+      onProgress: (replayed, total) => progress.push([replayed, total]),
+    }
+
+    await transferSession(input, deps)
+
+    expect(progress).toEqual([[0, 25], [10, 25], [20, 25], [25, 25]])
+  })
+
   it('reports a missing session', async () => {
     const deps: TransferDeps = {
       fetchLocalHistory: vi.fn().mockResolvedValue([]),
@@ -315,5 +330,24 @@ describe('transferSession', () => {
 
     expect(result).toEqual({ kind: 'replay-failed', message: 'Replay diverged' })
     expect(callCount).toBe(2)
+  })
+})
+
+describe('moveReminderText', () => {
+  it('wraps the directory in a system-reminder block', () => {
+    const result = moveReminderText('/workspace/repos/repo')
+    expect(result).toContain('<system-reminder>')
+    expect(result).toContain('</system-reminder>')
+    expect(result).toContain('/workspace/repos/repo')
+  })
+
+  it('matches the native opencode wording byte-for-byte apart from the directory', () => {
+    const dir = '/some/path'
+    const result = moveReminderText(dir)
+    const prefix = '<system-reminder>The user has changed the current working directory to "'
+    expect(result.startsWith(prefix)).toBe(true)
+    expect(result).toBe(
+      `<system-reminder>The user has changed the current working directory to "${dir}". This is still the same project but at a possibly new location; take this into account when working with any files from now on.</system-reminder>`,
+    )
   })
 })

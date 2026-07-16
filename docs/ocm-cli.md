@@ -131,7 +131,7 @@ When the TUI plugin is installed, these internal child-process variables add a `
 
 ### TUI `/ocm-move`
 
-When the TUI plugin entry is installed, `/ocm-move` is available in local OpenCode sessions. It checks that the matching Manager repo has not diverged, pushes the local git state with the fast bundle + working-tree patch path, reads the active session history from the local OpenCode SQLite event database, rewrites local repo directories to the Manager repo directory, and replays the session through `/api/opencode-proxy/sync/replay`. The local session is retained.
+When the TUI plugin entry is installed, `/ocm-move` is available in local OpenCode sessions. It checks that the matching Manager repo has not diverged, pushes the local git state with the fast bundle + working-tree patch path, reads the active session history from the local OpenCode SQLite event database, rewrites local repo directories to the Manager repo directory, and replays the session through `/api/opencode-proxy/sync/replay`. The local session is retained. When multiple Manager repos match, a select dialog lets you pick the destination. A confirmation dialog gates the move before any push. On success, a synthetic `noReply` reminder prompt is sent to the remote session (best-effort, never fails the move). You can then choose to warp — exit the local TUI and attach to the moved session on the Manager immediately — or keep the local copy with the previous toast behavior.
 
 - `--force` skips the dirty-working-tree check on `pull` and the safety bail on `push`.
 - `--create` (on `push`) creates a new Manager repo when no `origin` match is found.

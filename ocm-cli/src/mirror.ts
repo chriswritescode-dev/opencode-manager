@@ -379,7 +379,17 @@ function applyPatch(repoRoot: string, patch: string): void {
 
 async function createLocalBundle(repoRoot: string): Promise<string> {
   const bundlePath = join(tmpdir(), `ocm-bundle-${Date.now()}-${Math.random().toString(36).slice(2)}.bundle`)
-  runGit(repoRoot, ['bundle', 'create', bundlePath, '--all'])
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn('git', ['bundle', 'create', bundlePath, '--all'], { cwd: repoRoot })
+    const stderrChunks: Buffer[] = []
+    child.stderr.on('data', (chunk: Buffer) => stderrChunks.push(chunk))
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) return resolve()
+      const stderr = Buffer.concat(stderrChunks).toString('utf-8').trim()
+      reject(new Error(`git bundle create failed${stderr ? `: ${stderr}` : ''}`))
+    })
+  })
   return bundlePath
 }
 
@@ -428,14 +438,34 @@ async function writeBundleStream(repoId: number, api: ManagerApi): Promise<strin
   return bundlePath
 }
 
+export type MirrorUpFastPhase =
+  | { kind: 'bundling' }
+  | { kind: 'uploading'; bytesSent: number; totalBytes: number }
+  | { kind: 'processing' }
+  | { kind: 'patching' }
+
 export async function mirrorUpFast(
   plan: MirrorPlan,
-  opts: Pick<MirrorUpOpts, 'api' | 'force'>,
+  opts: Pick<MirrorUpOpts, 'api' | 'force'> & { onPhase?: (phase: MirrorUpFastPhase) => void },
 ): Promise<{ repoId: number; branch: string | null; head: string | null; created: false }> {
   const repoId = plan.matched[0]!.repoId
+  const onPhase = opts.onPhase
+  onPhase?.({ kind: 'bundling' })
   const bundlePath = await createLocalBundle(plan.repoRoot)
   try {
-    await opts.api.mirrorUploadBundle(repoId, bundlePath, { branch: getBranchName(plan.repoRoot), force: opts.force })
+    const { size } = await fsp.stat(bundlePath)
+    onPhase?.({ kind: 'uploading', bytesSent: 0, totalBytes: size })
+    await opts.api.mirrorUploadBundle(repoId, bundlePath, {
+      branch: getBranchName(plan.repoRoot),
+      force: opts.force,
+      onProgress: onPhase
+        ? (bytesSent) => {
+            onPhase({ kind: 'uploading', bytesSent, totalBytes: size })
+            if (bytesSent >= size) onPhase({ kind: 'processing' })
+          }
+        : undefined,
+    })
+    onPhase?.({ kind: 'patching' })
     const patchResult = await mirrorUpPatch(plan, opts)
     return { repoId: patchResult.repoId, branch: patchResult.branch, head: patchResult.head, created: false }
   } finally {

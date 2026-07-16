@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, checkPushDivergence, checkPullDivergence } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 
@@ -769,6 +769,159 @@ describe('mirror patch helpers', () => {
     expect(body.patch).toContain('diff --git a/tracked.txt b/tracked.txt')
     expect(body.patch).toContain('-before')
     expect(body.patch).toContain('+after')
+  })
+})
+
+describe('mirrorUpFast targets the selected repo', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mirror-upfast-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('uses the repoId from plan.matched[0] for bundle upload and patch', async () => {
+    const repoRoot = join(tmpDir, 'repo-selected')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'content\n')
+    spawnSync('git', ['add', 'tracked.txt'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'initial'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'tracked.txt'), 'updated\n')
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 99, fullPath: '/tmp/x', branch: 'main', head: 'def', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [
+        { repoId: 10, name: 'first-repo', projectId: 'proj', branch: 'main' },
+        { repoId: 99, name: 'selected-repo', projectId: 'proj', branch: 'main' },
+      ],
+    }
+
+    const selectedPlan = { ...plan, matched: [plan.matched[1]!] }
+    const result = await mirrorUpFast(selectedPlan, { api: api as any, force: false })
+
+    expect(api.mirrorUploadBundle).toHaveBeenCalledTimes(1)
+    expect(api.mirrorUploadBundle.mock.calls[0]![0]).toBe(99)
+    expect(api.mirrorPatch).toHaveBeenCalledTimes(1)
+    expect(api.mirrorPatch.mock.calls[0]![0]).toBe(99)
+    expect(result.repoId).toBe(99)
+  })
+
+  it('reports bundling, uploading, and patching phases in order', async () => {
+    const repoRoot = join(tmpDir, 'repo-phases')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    const phases: MirrorUpFastPhase[] = []
+    await mirrorUpFast(plan, { api: api as any, force: false, onPhase: (p) => phases.push(p) })
+
+    expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'patching'])
+    const uploading = phases[1] as Extract<MirrorUpFastPhase, { kind: 'uploading' }>
+    expect(uploading.bytesSent).toBe(0)
+    expect(uploading.totalBytes).toBeGreaterThan(0)
+  })
+
+  it('emits cumulative upload progress and a processing phase when the api reports sent bytes', async () => {
+    const repoRoot = join(tmpDir, 'repo-upload-progress')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockImplementation(
+        async (_repoId: number, bundlePath: string, opts: { onProgress?: (bytesSent: number) => void }) => {
+          const { size } = statSync(bundlePath)
+          opts.onProgress?.(Math.floor(size / 2))
+          opts.onProgress?.(size)
+        },
+      ),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    const phases: MirrorUpFastPhase[] = []
+    await mirrorUpFast(plan, { api: api as any, force: false, onPhase: (p) => phases.push(p) })
+
+    expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'uploading', 'uploading', 'processing', 'patching'])
+    const sent = phases.filter((p): p is Extract<MirrorUpFastPhase, { kind: 'uploading' }> => p.kind === 'uploading').map((p) => p.bytesSent)
+    expect(sent[0]).toBe(0)
+    expect(sent[1]!).toBeGreaterThan(0)
+    expect(sent[2]!).toBeGreaterThan(sent[1]!)
+  })
+
+  it('narrows a multi-match plan so bundle goes to the chosen repo', async () => {
+    const repoRoot = join(tmpDir, 'repo-narrow')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a-updated\n')
+
+    const uploadCalls: number[] = []
+    const patchCalls: number[] = []
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockImplementation(async (repoId: number) => { uploadCalls.push(repoId) }),
+      mirrorPatch: vi.fn().mockImplementation(async (repoId: number) => {
+        patchCalls.push(repoId)
+        return { repoId, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }
+      }),
+    }
+
+    const multiPlan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [
+        { repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' },
+        { repoId: 2, name: 'repo-B', projectId: 'proj', branch: 'main' },
+        { repoId: 3, name: 'repo-C', projectId: 'proj', branch: 'main' },
+      ],
+    }
+
+    const selectedPlan = { ...multiPlan, matched: [multiPlan.matched[2]!] }
+    await mirrorUpFast(selectedPlan, { api: api as any, force: false })
+
+    expect(uploadCalls).toEqual([3])
+    expect(patchCalls).toEqual([3])
   })
 })
 
