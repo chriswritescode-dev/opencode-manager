@@ -52,6 +52,17 @@ export interface MirrorBundleResult {
   created: false
 }
 
+function createByteCounter(onProgress: (bytesSent: number) => void): TransformStream<Uint8Array, Uint8Array> {
+  let bytesSent = 0
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      bytesSent += chunk.byteLength
+      onProgress(bytesSent)
+      controller.enqueue(chunk)
+    },
+  })
+}
+
 export class ManagerApiError extends Error {
   constructor(
     message: string,
@@ -161,11 +172,16 @@ export class ManagerApi {
     return (await res.json()) as MirrorPatchResult
   }
 
-  async mirrorUploadBundle(repoId: number, bundlePath: string, opts: { branch: string | null; force?: boolean }): Promise<MirrorBundleResult> {
+  async mirrorUploadBundle(
+    repoId: number,
+    bundlePath: string,
+    opts: { branch: string | null; force?: boolean; onProgress?: (bytesSent: number) => void },
+  ): Promise<MirrorBundleResult> {
     const query = opts.force === true ? '?force=1' : ''
     const headers: Record<string, string> = { ...this.headers(), 'Content-Type': 'application/octet-stream' }
     if (opts.branch) headers['X-OCM-Branch'] = opts.branch
-    const body = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
+    const fileStream = Readable.toWeb(createReadStream(bundlePath)) as unknown as ReadableStream<Uint8Array>
+    const body = opts.onProgress ? fileStream.pipeThrough(createByteCounter(opts.onProgress)) : fileStream
     const res = await fetch(`${this.baseUrl}/api/internal/repos/${repoId}/mirror/bundle${query}`, {
       method: 'POST',
       headers,

@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync } from 'fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync, readdirSync, readFileSync, statSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
 import { spawnSync, execSync } from 'child_process'
-import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence } from '../src/mirror'
+import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
 
@@ -816,6 +816,73 @@ describe('mirrorUpFast targets the selected repo', () => {
     expect(api.mirrorPatch).toHaveBeenCalledTimes(1)
     expect(api.mirrorPatch.mock.calls[0]![0]).toBe(99)
     expect(result.repoId).toBe(99)
+  })
+
+  it('reports bundling, uploading, and patching phases in order', async () => {
+    const repoRoot = join(tmpDir, 'repo-phases')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockResolvedValue(undefined),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    const phases: MirrorUpFastPhase[] = []
+    await mirrorUpFast(plan, { api: api as any, force: false, onPhase: (p) => phases.push(p) })
+
+    expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'patching'])
+    const uploading = phases[1] as Extract<MirrorUpFastPhase, { kind: 'uploading' }>
+    expect(uploading.bytesSent).toBe(0)
+    expect(uploading.totalBytes).toBeGreaterThan(0)
+  })
+
+  it('emits cumulative upload progress and a processing phase when the api reports sent bytes', async () => {
+    const repoRoot = join(tmpDir, 'repo-upload-progress')
+    mkdirSync(repoRoot)
+    spawnSync('git', ['init'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.email', 'test@test.com'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot, stdio: 'ignore' })
+    writeFileSync(join(repoRoot, 'a.txt'), 'a\n')
+    spawnSync('git', ['add', '.'], { cwd: repoRoot, stdio: 'ignore' })
+    spawnSync('git', ['commit', '-m', 'init'], { cwd: repoRoot, stdio: 'ignore' })
+
+    const api = {
+      mirrorUploadBundle: vi.fn().mockImplementation(
+        async (_repoId: number, bundlePath: string, opts: { onProgress?: (bytesSent: number) => void }) => {
+          const { size } = statSync(bundlePath)
+          opts.onProgress?.(Math.floor(size / 2))
+          opts.onProgress?.(size)
+        },
+      ),
+      mirrorPatch: vi.fn().mockResolvedValue({ repoId: 1, fullPath: '/tmp/x', branch: 'main', head: 'abc', created: false, applied: true }),
+    }
+
+    const plan = {
+      repoRoot,
+      localProjectId: 'proj',
+      matched: [{ repoId: 1, name: 'repo-A', projectId: 'proj', branch: 'main' }],
+    }
+
+    const phases: MirrorUpFastPhase[] = []
+    await mirrorUpFast(plan, { api: api as any, force: false, onPhase: (p) => phases.push(p) })
+
+    expect(phases.map((p) => p.kind)).toEqual(['bundling', 'uploading', 'uploading', 'uploading', 'processing', 'patching'])
+    const sent = phases.filter((p): p is Extract<MirrorUpFastPhase, { kind: 'uploading' }> => p.kind === 'uploading').map((p) => p.bytesSent)
+    expect(sent[0]).toBe(0)
+    expect(sent[1]!).toBeGreaterThan(0)
+    expect(sent[2]!).toBeGreaterThan(sent[1]!)
   })
 
   it('narrows a multi-match plan so bundle goes to the chosen repo', async () => {

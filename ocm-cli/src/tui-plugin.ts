@@ -4,7 +4,8 @@ import { getToken } from './keychain.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
 import { prepareMirror, checkPushDivergence, mirrorUpFast } from './mirror.js'
-import type { MirrorPlan } from './mirror.js'
+import type { MirrorPlan, MirrorUpFastPhase } from './mirror.js'
+import { formatBytes } from './progress.js'
 import { transferSession, moveReminderText } from './session-move.js'
 import { createManagerReplay, createManagerPromptAsync } from './remote-replay.js'
 import { readSessionEvents } from './local-history.js'
@@ -41,6 +42,31 @@ function showInstallNotice(api: TuiPluginApi): void {
       : `Linked at ${notice.link}`,
     duration: 10000,
   })
+}
+
+function pushPhaseMessage(phase: MirrorUpFastPhase): string {
+  switch (phase.kind) {
+    case 'bundling':
+      return 'Pushing repo state: creating git bundle…'
+    case 'uploading':
+      return `Pushing repo state: uploading ${formatBytes(phase.bytesSent)} / ${formatBytes(phase.totalBytes)}…`
+    case 'processing':
+      return 'Pushing repo state: waiting for server to import bundle…'
+    case 'patching':
+      return 'Pushing repo state: applying local changes…'
+  }
+}
+
+function createPushPhaseToaster(api: TuiPluginApi): (phase: MirrorUpFastPhase) => void {
+  let lastUploadToastAt = 0
+  return (phase) => {
+    if (phase.kind === 'uploading') {
+      const now = Date.now()
+      if (now - lastUploadToastAt < 1000) return
+      lastUploadToastAt = now
+    }
+    api.ui.toast({ message: pushPhaseMessage(phase) })
+  }
 }
 
 async function runSessionMove(api: TuiPluginApi): Promise<void> {
@@ -103,9 +129,12 @@ async function runSessionMove(api: TuiPluginApi): Promise<void> {
       if (!(error instanceof ManagerApiError && error.status === 404)) throw error
     }
 
-    api.ui.toast({ message: 'Pushing repo state…' })
     const selectedPlan: MirrorPlan = { ...plan, matched: [matched] }
-    await mirrorUpFast(selectedPlan, { api: managerApi, force: false })
+    await mirrorUpFast(selectedPlan, {
+      api: managerApi,
+      force: false,
+      onPhase: createPushPhaseToaster(api),
+    })
 
     const result = await transferSession(
       { sessionID, localRoot: plan.repoRoot, remoteDirectory },
