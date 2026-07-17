@@ -8,15 +8,14 @@ const tui = async (api: TuiPluginApi): Promise<void> => {
   const remote = readRemoteContext(process.env)
   if (!remote) return
 
-  const label = remote.repoName ? `${remote.managerHost} · ${remote.repoName}` : remote.managerHost
   const indicator = (ctx: TuiSlotContext) => {
     const theme = ctx.theme.current
     return (
       <box flexDirection="row" flexShrink={0} gap={1}>
-        <text fg={theme.accent}>
-          <b>REMOTE</b>
-        </text>
-        <text fg={theme.textMuted}>{label}</text>
+        <text fg={theme.accent}>{remote.managerHost}</text>
+        {remote.repoName && (
+          <text fg={theme.textMuted}> · {remote.repoName}</text>
+        )}
       </box>
     )
   }
