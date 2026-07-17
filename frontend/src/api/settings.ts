@@ -15,8 +15,11 @@ import type {
   InstallSkillResponse,
   OpenCodeDirectoryFileInfo,
 } from './types/settings'
+import type { ManagerUpgradeJob, ManagerUpgradeStatusResponse } from '@opencode-manager/shared/types'
 import { API_BASE_URL } from '@/config'
 import { fetchWrapper, FetchError } from './fetchWrapper'
+
+export type { ManagerUpgradeJob, ManagerUpgradeStatusResponse }
 
 const DEFAULT_USER_ID = 'default'
 
@@ -381,6 +384,18 @@ export const settingsApi = {
       params: { kind, relativePath },
     })
   },
+
+  getManagerUpgradeStatus: async (): Promise<ManagerUpgradeStatusResponse> => {
+    return fetchWrapper(`${API_BASE_URL}/api/manager-upgrade/status`)
+  },
+
+  startManagerUpgrade: async (version?: string): Promise<{ job: ManagerUpgradeJob }> => {
+    return fetchWrapper(`${API_BASE_URL}/api/manager-upgrade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(version ? { version } : {}),
+    })
+  },
 }
 
 export interface VersionInfo {
@@ -421,3 +436,5 @@ export async function rotateManagerToken(): Promise<ManagerTokenResponse> {
     method: 'POST',
   })
 }
+
+

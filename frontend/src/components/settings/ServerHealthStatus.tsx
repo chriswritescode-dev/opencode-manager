@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Loader2, ArrowUpCircle, RotateCcw, History } from 'lucide-react'
 import { useServerHealth } from '@/hooks/useServerHealth'
+import { useManagerUpgrade } from '@/hooks/useManagerUpgrade'
 import { useOpenCodeServerActions } from '@/hooks/useOpenCodeServerActions'
 import { RestartServerDialog } from './RestartServerDialog'
 
@@ -12,6 +13,15 @@ interface ServerHealthStatusProps {
 
 export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusProps) {
   const { data: health } = useServerHealth()
+  const {
+    isSupported,
+    requestUpgrade,
+    confirmUpgrade,
+    confirmOpen: upgradeConfirmOpen,
+    setConfirmOpen: setUpgradeConfirmOpen,
+    activeSessionCount: upgradeActiveSessionCount,
+    isUpgrading,
+  } = useManagerUpgrade()
   const {
     restartServerMutation,
     upgradeOpenCodeMutation,
@@ -98,6 +108,21 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
               <History className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
               <span className="text-xs sm:text-sm">Versions</span>
             </Button>
+            {isSupported && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={requestUpgrade}
+                disabled={isUpgrading}
+              >
+                {isUpgrading ? (
+                  <Loader2 className="h-3 w-3 sm:h-4 sm:w-4 mr-1 animate-spin" />
+                ) : (
+                  <ArrowUpCircle className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+                )}
+                <span className="text-xs sm:text-sm">Upgrade Manager</span>
+              </Button>
+            )}
           </div>
         </div>
       </CardContent>
@@ -108,6 +133,17 @@ export function ServerHealthStatus({ onOpenVersionDialog }: ServerHealthStatusPr
         isRestarting={restartServerMutation.isPending}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={confirmRestart}
+      />
+      <RestartServerDialog
+        open={upgradeConfirmOpen}
+        onOpenChange={setUpgradeConfirmOpen}
+        isRestarting={isUpgrading}
+        onCancel={() => setUpgradeConfirmOpen(false)}
+        onConfirm={confirmUpgrade}
+        title="Upgrade Manager?"
+        description={`${upgradeActiveSessionCount} session${upgradeActiveSessionCount === 1 ? ' is' : 's are'} currently working. Upgrading recreates the container and will interrupt ${upgradeActiveSessionCount === 1 ? 'it' : 'them'}.`}
+        confirmLabel="Upgrade now"
+        pendingLabel="Upgrading..."
       />
     </Card>
   )

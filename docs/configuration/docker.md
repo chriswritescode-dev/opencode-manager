@@ -35,6 +35,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    image: ${OCM_IMAGE:-ghcr.io/chriswritescode-dev/opencode-manager:latest}
     container_name: opencode-manager
     ports:
       - "5003:5003"
@@ -50,6 +51,10 @@ services:
       - OPENCODE_HOST=127.0.0.1
       - DATABASE_PATH=/app/data/opencode.db
       - WORKSPACE_PATH=/workspace
+      - OCM_IMAGE=${OCM_IMAGE:-ghcr.io/chriswritescode-dev/opencode-manager:latest}
+      - OCM_MANAGER_UPGRADE_ENABLED=${OCM_MANAGER_UPGRADE_ENABLED:-true}
+      - OCM_UPGRADE_STRATEGY=${OCM_UPGRADE_STRATEGY:-pull}
+      - OCM_IN_DOCKER=true
       - PROCESS_START_WAIT_MS=2000
       - PROCESS_VERIFY_WAIT_MS=1000
       - HEALTH_CHECK_INTERVAL_MS=5000
@@ -78,6 +83,7 @@ services:
     volumes:
       - opencode-workspace:/workspace
       - opencode-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5003/api/health"]
@@ -347,6 +353,35 @@ git pull
 docker-compose build --no-cache
 docker-compose up -d
 ```
+
+## Manager Self-Upgrade
+
+The Settings → OpenCode page shows an **Upgrade Manager** button when the app runs in Docker with the docker socket mounted and `OCM_MANAGER_UPGRADE_ENABLED` is not `false`. Self-upgrade only works for **compose-managed** containers: the recreate step reads the container's `com.docker.compose.*` labels (project, service, and the host path of the compose working directory) and re-runs `docker compose up` there, so every volume, port, and environment entry is re-derived from your `docker-compose.yml` — mounts are never enumerated or copied. Containers started with plain `docker run` have no compose labels and are rejected with a clear error. If OpenCode sessions are actively working, the UI asks for confirmation first because the container recreate interrupts them.
+
+### Upgrade strategies
+
+`OCM_UPGRADE_STRATEGY` selects how the new image is produced:
+
+- **`pull`** (default): pulls the image referenced by `OCM_IMAGE` from the registry, then recreates the service on it. For deployments running the published image.
+- **`build`**: rebuilds the image from the compose project source directory using a helper container (`docker compose build <service>`), then recreates the service. For deployments built from source with `docker-compose build`. The source working tree is built **as-is** — run `git pull` on the host first; the helper deliberately does not touch git (it has no credentials or SSH keys). Targeted version upgrades (`{ "version": ... }`) are rejected in build mode.
+
+### Failure behavior
+
+The upgrade runs in two phases so the running instance survives every failure except one narrow case:
+
+1. **Acquire (pull or build)** — runs while the manager is alive and is awaited, so a registry error or compiler failure is captured into the upgrade job (`failed` + error text visible in the UI) and the running container is untouched. Builds only construct image layers; they never affect running containers.
+2. **Recreate** — a short-lived detached `docker:cli` helper runs `docker compose up -d --no-build <service>`. If the helper itself fails, the manager keeps running and the job is marked failed by a 10-minute staleness guard.
+
+The one unprotected case: an image that builds/pulls fine but **crashes at runtime**. Compose removes the old container before starting the new one and has no rollback, so a runtime-broken image means downtime until manual recovery — the previous image still exists in the local store (retag it, or point `OCM_IMAGE` at the old tag, or fix the source and rebuild).
+
+Upgrade progress is tracked as a job (`pulling` → `recreating` → `completed`/`failed`) surfaced through `GET /api/manager-upgrade/status`; the `pulling` phase covers the build step in build mode.
+
+Notes:
+
+- **Security**: mounting `/var/run/docker.sock` grants the container root-equivalent access to the host Docker daemon (the entrypoint adds the `node` user to the socket's group). Remove the socket volume from `docker-compose.yml` if you do not want any in-container Docker access; this disables self-upgrade and any other Docker usage from inside the container. Setting `OCM_MANAGER_UPGRADE_ENABLED=false` disables only the upgrade API, not socket access.
+- **Source builds with `pull` strategy**: `docker-compose build` tags your local build as the `OCM_IMAGE` reference, and a later self-upgrade **pull** overwrites that local tag with the registry image. Source-built deployments should set `OCM_UPGRADE_STRATEGY=build`.
+- **Build load**: the image builds on the same host, so a heavy build competes with the running app for CPU/RAM.
+- **Same-version rebuilds**: completion is detected by a version change after the restart. A `build` upgrade that does not bump the app version is marked failed by the staleness guard even when the recreate succeeded (known limitation).
 
 ### Debugging
 

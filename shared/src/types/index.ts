@@ -100,6 +100,13 @@ export interface SuccessResponse {
   success: boolean
 }
 
+export type {
+  ManagerUpgradeJobStatus,
+  ManagerUpgradeStrategy,
+  ManagerUpgradeJob,
+  ManagerUpgradeStatusResponse,
+} from './manager-upgrade'
+
 export type { SSHHostKeyRequest, SSHHostKeyResponse, TrustedSSHHost } from '../schemas/ssh'
 export type { GitCredential } from '../schemas/settings'
 export type {

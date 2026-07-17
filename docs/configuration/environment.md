@@ -108,6 +108,15 @@ When configured, users can enable push notifications in Settings → Notificatio
 | `OPENCODE_IMPORT_CONFIG_PATH` | Existing standalone OpenCode `opencode.json` to import on first startup | - |
 | `OPENCODE_IMPORT_STATE_PATH` | Existing standalone OpenCode state directory to import on first startup | - |
 
+## Manager Self-Upgrade (Docker)
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OCM_IMAGE` | Container image reference pulled during self-upgrade; also used as the compose `image:` tag | `ghcr.io/chriswritescode-dev/opencode-manager:latest` |
+| `OCM_MANAGER_UPGRADE_ENABLED` | Enable/disable the self-upgrade API (`false` disables) | `true` |
+| `OCM_UPGRADE_STRATEGY` | `pull` fetches `OCM_IMAGE` from the registry; `build` rebuilds the image from the compose project source directory (for source-built deployments) | `pull` |
+| `OCM_IN_DOCKER` | Marks the process as running inside Docker for runtimes without `/.dockerenv`; set automatically by docker-compose.yml | - |
+
 ## Timeouts
 
 | Variable | Description | Default |

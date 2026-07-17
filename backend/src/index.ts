@@ -13,16 +13,22 @@ import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
 import { createScheduleRoutes } from './routes/schedules'
+import { createManagerUpgradeRoutes } from './routes/manager-upgrade'
 
-async function getAppVersion(): Promise<string> {
-  try {
-    const packageUrl = new URL('../../package.json', import.meta.url)
-    const packageJsonRaw = await readFile(packageUrl, 'utf-8')
-    const packageJson = JSON.parse(packageJsonRaw) as { version?: string }
-    return packageJson.version ?? 'unknown'
-  } catch {
-    return 'unknown'
-  }
+let cachedAppVersion: Promise<string> | null = null
+
+function getAppVersion(): Promise<string> {
+  cachedAppVersion ??= (async () => {
+    try {
+      const packageUrl = new URL('../../package.json', import.meta.url)
+      const packageJsonRaw = await readFile(packageUrl, 'utf-8')
+      const packageJson = JSON.parse(packageJsonRaw) as { version?: string }
+      return packageJson.version ?? 'unknown'
+    } catch {
+      return 'unknown'
+    }
+  })()
+  return cachedAppVersion
 }
 import { createProvidersRoutes } from './routes/providers'
 import { createOAuthRoutes } from './routes/oauth'
@@ -51,6 +57,8 @@ import { migrateGlobalSkills } from './services/skills'
 import { installAssistantWorkspace } from './services/assistant-mode'
 import { getOpenCodeImportStatus, syncOpenCodeImport } from './services/opencode-import'
 import { OpenCodeSupervisor } from './services/opencode-supervisor'
+import { ManagerUpgradeService, createDockerRunner } from './services/manager-upgrade'
+import { isRunningInDocker, isDockerSocketAvailable } from './utils/runtime-env'
 import { OpenCodeRestartCoordinator } from './services/opencode-restart-coordinator'
 import { setOpenCodeRestartCoordinator } from './services/opencode-restart'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared/schemas'
@@ -344,6 +352,17 @@ void scheduleRunnerInstance.start()
 
 const settingsService = new SettingsService(db)
 
+const managerUpgradeService = new ManagerUpgradeService(db, {
+  runner: createDockerRunner(),
+  getCurrentVersion: () => getAppVersion(),
+  capability: () => ({
+    inDocker: isRunningInDocker(),
+    socket: isDockerSocketAvailable(),
+    enabled: process.env.OCM_MANAGER_UPGRADE_ENABLED !== 'false',
+    strategy: process.env.OCM_UPGRADE_STRATEGY === 'build' ? 'build' as const : 'pull' as const,
+  }),
+})
+
 app.route('/api/auth', createAuthRoutes(auth))
 app.route('/api/auth-info', createAuthInfoRoutes(auth, db))
 app.route('/api/health', createHealthRoutes(db, openCodeSupervisor))
@@ -368,6 +387,7 @@ protectedApi.route('/notifications', createNotificationRoutes(notificationServic
 protectedApi.route('/prompt-templates', createPromptTemplateRoutes(db))
 protectedApi.route('/session-pins', createSessionPinRoutes(db))
 protectedApi.route('/schedules', createScheduleRoutes(scheduleService))
+protectedApi.route('/manager-upgrade', createManagerUpgradeRoutes(managerUpgradeService))
 
 app.route('/api', protectedApi)
 
