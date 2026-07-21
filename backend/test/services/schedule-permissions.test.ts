@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_DESTRUCTIVE_BASH_PATTERNS, buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
+import {
+  DEFAULT_DESTRUCTIVE_BASH_PATTERNS,
+  buildSchedulePermissionRuleset,
+  evaluateSchedulePermission,
+} from '@opencode-manager/shared/schemas'
 
 describe('buildSchedulePermissionRuleset', () => {
   it('returns the allow-all baseline with default deny rules when given null', () => {
@@ -26,5 +30,36 @@ describe('buildSchedulePermissionRuleset', () => {
       { permission: 'external_directory', pattern: '*', action: 'deny' },
       { permission: 'bash', pattern: 'rm -rf *', action: 'deny' },
     ])
+  })
+})
+
+describe('evaluateSchedulePermission', () => {
+  it('denies bash sudo commands with the default ruleset', () => {
+    const ruleset = buildSchedulePermissionRuleset(null)
+    expect(evaluateSchedulePermission(ruleset, 'bash', ['sudo rm -rf /'])).toBe('deny')
+  })
+
+  it('allows benign bash commands with the default ruleset', () => {
+    const ruleset = buildSchedulePermissionRuleset(null)
+    expect(evaluateSchedulePermission(ruleset, 'bash', ['git status'])).toBe('allow')
+  })
+
+  it('denies external_directory access with the default ruleset', () => {
+    const ruleset = buildSchedulePermissionRuleset(null)
+    expect(evaluateSchedulePermission(ruleset, 'external_directory', ['/etc'])).toBe('deny')
+  })
+
+  it('allows external_directory when allowExternalDirectory is true', () => {
+    const ruleset = buildSchedulePermissionRuleset({ allowExternalDirectory: true, bashDenyPatterns: [] })
+    expect(evaluateSchedulePermission(ruleset, 'external_directory', ['/some/path'])).toBe('allow')
+  })
+
+  it('denies when at least one resource matches a deny pattern', () => {
+    const ruleset = buildSchedulePermissionRuleset(null)
+    expect(evaluateSchedulePermission(ruleset, 'bash', ['git status', 'sudo rm -rf /'])).toBe('deny')
+  })
+
+  it('asks for an unmatched action with an empty ruleset', () => {
+    expect(evaluateSchedulePermission([], 'bash', ['git status'])).toBe('ask')
   })
 })

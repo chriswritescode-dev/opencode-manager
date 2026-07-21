@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ScheduleJob, ScheduleRun } from '@opencode-manager/shared/types'
-import { buildSchedulePermissionRuleset } from '@opencode-manager/shared/schemas'
 
 const mocks = vi.hoisted(() => ({
   getRepoById: vi.fn(),
@@ -30,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   resolveOpenCodeModel: vi.fn(),
   forward: vi.fn(),
   onEvent: vi.fn(),
-  loggerError: vi.fn(),
+  loggerWarn: vi.fn(),
   updateScheduleRunWorktree: vi.fn(),
   stubWorktreeManager: {
     prepare: vi.fn().mockResolvedValue(null),
@@ -84,9 +83,9 @@ vi.mock('../../src/services/sse-aggregator', () => ({
 
 vi.mock('../../src/utils/logger', () => ({
   logger: {
-    error: mocks.loggerError,
+    error: vi.fn(),
     info: vi.fn(),
-    warn: vi.fn(),
+    warn: mocks.loggerWarn,
   },
 }))
 
@@ -108,6 +107,37 @@ function jsonResponse(body: unknown, status: number = 200): Response {
 
 function textResponse(body: string, status: number = 200): Response {
   return new Response(body, { status })
+}
+
+function promptReceipt(): Response {
+  return jsonResponse({
+    data: {
+      admittedSeq: 1,
+      id: 'msg-1',
+      sessionID: 'ses-test',
+      delivery: 'steer',
+      timeCreated: Math.floor(Date.now() / 1000),
+    },
+  })
+}
+
+function v2Messages(messages: Array<{
+  type: string
+  id?: string
+  content?: Array<{ type: string; text?: string }>
+  time?: { created?: number; completed?: number }
+  finish?: string
+  error?: { name?: string; data?: { message?: string } }
+}>): Response {
+  return jsonResponse(messages.map(m => ({
+    info: {
+      id: m.id ?? 'msg-1',
+      role: m.type,
+      time: m.time,
+      error: m.error,
+    },
+    parts: m.content,
+  })))
 }
 
 function createOpenCodeClientStub(): OpenCodeClient {
@@ -176,7 +206,7 @@ const baseRun: ScheduleRun = {
   workspaceId: null,
 }
 
-describe('ScheduleService permission ruleset in session creation', () => {
+describe('ScheduleService permission auto-responder', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     Reflect.get(ScheduleService, 'activeRuns').clear()
@@ -189,32 +219,46 @@ describe('ScheduleService permission ruleset in session creation', () => {
     mocks.onEvent.mockReturnValue(vi.fn())
     mocks.getScheduleRunById.mockReturnValue({
       ...baseRun,
-      sessionId: 'ses-perm-test',
+      sessionId: 'ses-perm-auto',
       sessionTitle: 'Scheduled: Weekly engineering summary',
       logText: 'Run started.',
     })
   })
 
-  it('sends default permission ruleset when job.permissionConfig is null', async () => {
+  it('denies dangerous bash command with default permission config', async () => {
     mocks.getScheduleJobById.mockReturnValue(baseJob)
 
     const runWithSession: ScheduleRun = {
       ...baseRun,
-      sessionId: 'ses-perm-1',
+      sessionId: 'ses-perm-auto',
       sessionTitle: 'Scheduled: Weekly engineering summary',
       logText: 'Run started.',
     }
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-perm-1' })
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
-        return textResponse('')
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
-        return jsonResponse([{ info: { role: 'assistant', time: { completed: Date.now() } }, parts: [] }])
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return jsonResponse({ data: [{ id: 'perm-1', action: 'bash', resources: ['sudo rm -rf /'] }] })
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return jsonResponse({ data: [] })
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
       }
       throw new Error(`Unexpected forward request: ${method} ${path}`)
     })
@@ -222,39 +266,61 @@ describe('ScheduleService permission ruleset in session creation', () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     await service.runJob(42, 7, 'manual')
 
-    const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
-    )
-    expect(sessionCall).toBeDefined()
-    const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
-    expect(body.title).toBe('Scheduled: Weekly engineering summary')
-    expect(body.agent).toBeUndefined()
+    await vi.waitFor(() => {
+      const replyCall = mocks.forward.mock.calls.find(
+        ([req]) => (req as ForwardRequest).path === `/api/session/ses-perm-auto/permission/perm-1/reply`
+          && (req as ForwardRequest).method === 'POST',
+      )
+      expect(replyCall).toBeDefined()
+      const body = JSON.parse((replyCall![0] as ForwardRequest).body!)
+      expect(body).toEqual({ reply: 'reject', message: 'Denied by schedule permission config' })
+    })
 
-    const expectedRules = buildSchedulePermissionRuleset(null)
-    expect(body.permission).toEqual(expectedRules)
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({ status: 'completed' }),
+      )
+    })
   })
 
-  it('sends custom permission ruleset when job has custom permissionConfig', async () => {
-    const customConfig = { allowExternalDirectory: true, bashDenyPatterns: [] }
-    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, permissionConfig: customConfig })
+  it('auto-approves benign bash command with reply: once', async () => {
+    mocks.getScheduleJobById.mockReturnValue(baseJob)
 
     const runWithSession: ScheduleRun = {
       ...baseRun,
-      sessionId: 'ses-perm-2',
+      sessionId: 'ses-perm-auto',
       sessionTitle: 'Scheduled: Weekly engineering summary',
       logText: 'Run started.',
     }
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-perm-2' })
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
-        return textResponse('')
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
-        return jsonResponse([{ info: { role: 'assistant', time: { completed: Date.now() } }, parts: [] }])
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return jsonResponse({ data: [{ id: 'perm-2', action: 'bash', resources: ['git status'] }] })
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return jsonResponse({ data: [] })
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
       }
       throw new Error(`Unexpected forward request: ${method} ${path}`)
     })
@@ -262,38 +328,51 @@ describe('ScheduleService permission ruleset in session creation', () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     await service.runJob(42, 7, 'manual')
 
-    const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
-    )
-    expect(sessionCall).toBeDefined()
-    const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
-    expect(body.title).toBe('Scheduled: Weekly engineering summary')
-    expect(body.agent).toBeUndefined()
-
-    const expectedRules = buildSchedulePermissionRuleset(customConfig)
-    expect(body.permission).toEqual(expectedRules)
+    await vi.waitFor(() => {
+      const replyCall = mocks.forward.mock.calls.find(
+        ([req]) => (req as ForwardRequest).path === `/api/session/ses-perm-auto/permission/perm-2/reply`
+          && (req as ForwardRequest).method === 'POST',
+      )
+      expect(replyCall).toBeDefined()
+      const body = JSON.parse((replyCall![0] as ForwardRequest).body!)
+      expect(body).toEqual({ reply: 'once' })
+    })
   })
 
-  it('preserves existing fields (title, agent) when permission is added', async () => {
-    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, agentSlug: 'my-agent' })
+  it('rejects external_directory with allowExternalDirectory: false', async () => {
+    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, permissionConfig: { allowExternalDirectory: false, bashDenyPatterns: [] } })
 
     const runWithSession: ScheduleRun = {
       ...baseRun,
-      sessionId: 'ses-perm-3',
+      sessionId: 'ses-perm-auto',
       sessionTitle: 'Scheduled: Weekly engineering summary',
       logText: 'Run started.',
     }
     mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
 
     routeForward(({ path, method }) => {
-      if (path === '/session' && method === 'POST') {
-        return jsonResponse({ id: 'ses-perm-3' })
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'POST') {
-        return textResponse('')
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
       }
-      if (path.match(/^\/session\/[\w-]+\/message$/) && method === 'GET') {
-        return jsonResponse([{ info: { role: 'assistant', time: { completed: Date.now() } }, parts: [] }])
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return jsonResponse({ data: [{ id: 'perm-3', action: 'external_directory', resources: ['/etc'] }] })
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return jsonResponse({ data: [] })
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
       }
       throw new Error(`Unexpected forward request: ${method} ${path}`)
     })
@@ -301,14 +380,223 @@ describe('ScheduleService permission ruleset in session creation', () => {
     const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
     await service.runJob(42, 7, 'manual')
 
-    const sessionCall = mocks.forward.mock.calls.find(
-      ([req]) => (req as ForwardRequest).path === '/session' && (req as ForwardRequest).method === 'POST',
-    )
-    expect(sessionCall).toBeDefined()
-    const body = JSON.parse((sessionCall![0] as ForwardRequest).body!)
-    expect(body.title).toBe('Scheduled: Weekly engineering summary')
-    expect(body.agent).toBe('my-agent')
-    expect(body.permission).toBeDefined()
-    expect(body.permission[0]).toEqual({ permission: '*', pattern: '*', action: 'allow' })
+    await vi.waitFor(() => {
+      const replyCall = mocks.forward.mock.calls.find(
+        ([req]) => (req as ForwardRequest).path === `/api/session/ses-perm-auto/permission/perm-3/reply`
+          && (req as ForwardRequest).method === 'POST',
+      )
+      expect(replyCall).toBeDefined()
+      const body = JSON.parse((replyCall![0] as ForwardRequest).body!)
+      expect(body).toEqual({ reply: 'reject', message: 'Denied by schedule permission config' })
+    })
+  })
+
+  it('approves external_directory with allowExternalDirectory: true', async () => {
+    mocks.getScheduleJobById.mockReturnValue({ ...baseJob, permissionConfig: { allowExternalDirectory: true, bashDenyPatterns: [] } })
+
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-perm-auto',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started.',
+    }
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
+      }
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
+      }
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return jsonResponse({ data: [{ id: 'perm-4', action: 'external_directory', resources: ['/some/path'] }] })
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return jsonResponse({ data: [] })
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
+      }
+      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    })
+
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      const replyCall = mocks.forward.mock.calls.find(
+        ([req]) => (req as ForwardRequest).path === `/api/session/ses-perm-auto/permission/perm-4/reply`
+          && (req as ForwardRequest).method === 'POST',
+      )
+      expect(replyCall).toBeDefined()
+      const body = JSON.parse((replyCall![0] as ForwardRequest).body!)
+      expect(body).toEqual({ reply: 'once' })
+    })
+  })
+
+  it('rejects pending questions', async () => {
+    mocks.getScheduleJobById.mockReturnValue(baseJob)
+
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-perm-auto',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started.',
+    }
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
+      }
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
+      }
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return jsonResponse({ data: [] })
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return jsonResponse({ data: [{ id: 'q-1' }] })
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
+      }
+      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    })
+
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.forward).toHaveBeenCalledWith(
+        expect.objectContaining({
+          method: 'POST',
+          path: `/api/session/ses-perm-auto/question/q-1/reject`,
+        }),
+      )
+    })
+  })
+
+  it('completes the run despite permission endpoint returning 500', async () => {
+    mocks.getScheduleJobById.mockReturnValue(baseJob)
+
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-perm-auto',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started.',
+    }
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
+      }
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
+      }
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return textResponse('Internal Server Error', 500)
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return textResponse('Internal Server Error', 500)
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
+      }
+      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    })
+
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(mocks.updateScheduleRun).toHaveBeenCalledWith(
+        expect.anything(),
+        42,
+        7,
+        5,
+        expect.objectContaining({ status: 'completed' }),
+      )
+    })
+  })
+
+  it('handles individual permission reply failure without affecting other replies', async () => {
+    mocks.getScheduleJobById.mockReturnValue(baseJob)
+
+    const runWithSession: ScheduleRun = {
+      ...baseRun,
+      sessionId: 'ses-perm-auto',
+      sessionTitle: 'Scheduled: Weekly engineering summary',
+      logText: 'Run started.',
+    }
+    let replyCount = 0
+    mocks.updateScheduleRunMetadata.mockReturnValue(runWithSession)
+
+    routeForward(({ path, method }) => {
+      if (path === '/api/session' && method === 'POST') {
+        return jsonResponse({ data: { id: 'ses-perm-auto' } })
+      }
+      if (path === `/session/ses-perm-auto/message` && method === 'POST') {
+        return promptReceipt()
+      }
+      if (path === `/api/session/ses-perm-auto/permission` && method === 'GET') {
+        return jsonResponse({ data: [
+          { id: 'perm-ok', action: 'bash', resources: ['git status'] },
+          { id: 'perm-fail', action: 'bash', resources: ['sudo rm -rf /'] },
+        ]})
+      }
+      if (path === `/api/session/ses-perm-auto/question` && method === 'GET') {
+        return jsonResponse({ data: [] })
+      }
+      if (path.match(/^\/api\/session\/ses-perm-auto\/permission\/[\w-]+\/reply$/) && method === 'POST') {
+        replyCount++
+        return jsonResponse({})
+      }
+      if (path.startsWith('/session/ses-perm-auto/message') && method === 'GET') {
+        return v2Messages([
+          { type: 'assistant', content: [{ type: 'text', text: 'Done.' }], time: { created: 1000, completed: 2000 }, finish: 'stop' },
+        ])
+      }
+      if (path === '/api/session/active' && method === 'GET') {
+        return jsonResponse({ data: {} })
+      }
+      if (path.match(/^\/session\/[\w-]+$/) && method === 'PATCH') {
+        return jsonResponse({})
+      }
+      throw new Error(`Unexpected forward request: ${method} ${path}`)
+    })
+
+    const service = new ScheduleService({} as never, createOpenCodeClientStub(), mocks.stubWorktreeManager as never)
+    await service.runJob(42, 7, 'manual')
+
+    await vi.waitFor(() => {
+      expect(replyCount).toBe(2)
+    })
   })
 })

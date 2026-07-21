@@ -52,14 +52,11 @@ export interface SchedulePermissionRule {
 export type SchedulePermissionRuleset = SchedulePermissionRule[]
 
 /**
- * Builds the OpenCode session permission ruleset for an unattended scheduled run.
+ * Builds the permission ruleset enforced by unattended scheduled runs.
  *
- * OpenCode's `POST /session` `permission` field expects an ordered array of
- * `{ permission, pattern, action }` rules (`PermissionV1.Ruleset`), evaluated
- * with last-match-wins semantics (see https://opencode.ai/docs/permissions).
- * A leading `*`/`*` allow rule sets the allow-all baseline; the trailing
- * `external_directory` and `bash` deny rules then override it for external
- * directory access and matching destructive command patterns.
+ * Rules use OpenCode's last-match-wins semantics. The leading allow rule sets
+ * the baseline and trailing rules deny external directory access and matching
+ * destructive commands.
  */
 export function buildSchedulePermissionRuleset(
   config: SchedulePermissionConfig | null | undefined,
@@ -73,6 +70,33 @@ export function buildSchedulePermissionRuleset(
     ruleset.push({ permission: 'bash', pattern, action: 'deny' })
   }
   return ruleset
+}
+
+function matchesPermissionPattern(pattern: string, value: string): boolean {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')
+  return new RegExp(`^${escaped}$`).test(value)
+}
+
+export function evaluateSchedulePermission(
+  ruleset: SchedulePermissionRuleset,
+  action: string,
+  resources: string[],
+): SchedulePermissionAction {
+  const targets = resources.length > 0 ? resources : ['*']
+
+  const verdicts = targets.map((resource) => {
+    let verdict: SchedulePermissionAction = 'ask'
+    for (const rule of ruleset) {
+      if (matchesPermissionPattern(rule.permission, action) && matchesPermissionPattern(rule.pattern, resource)) {
+        verdict = rule.action
+      }
+    }
+    return verdict
+  })
+
+  if (verdicts.some((v) => v === 'deny')) return 'deny'
+  if (verdicts.some((v) => v === 'ask')) return 'ask'
+  return 'allow'
 }
 
 export const ScheduleJobSchema = z.object({
