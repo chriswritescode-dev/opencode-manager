@@ -317,10 +317,9 @@ describe('PromptInput STT Gesture Tests', () => {
 
       fireEvent.click(queueButton)
 
-      expect(mocks.useSendPromptMutate).toHaveBeenCalledWith(
-        expect.objectContaining({ prompt: 'follow-up', queued: true }),
-        expect.any(Object),
-      )
+      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ prompt: string }, unknown]
+      expect(callArgs.prompt).toBe('follow-up')
+      expect('queued' in callArgs).toBe(false)
     })
 
     it('restores a failed queued prompt when the input is empty', async () => {
@@ -335,10 +334,9 @@ describe('PromptInput STT Gesture Tests', () => {
       fireEvent.change(input, { target: { value: 'queued message' } })
       fireEvent.click(screen.getByTitle('Queue message'))
 
-      expect(mocks.useSendPromptMutate).toHaveBeenCalledWith(
-        expect.objectContaining({ prompt: 'queued message', queued: true }),
-        expect.any(Object),
-      )
+      const [callArgs] = mocks.useSendPromptMutate.mock.calls[0] as [{ prompt: string }, unknown]
+      expect(callArgs.prompt).toBe('queued message')
+      expect('queued' in callArgs).toBe(false)
 
       await waitFor(() => {
         expect(input).toHaveValue('')

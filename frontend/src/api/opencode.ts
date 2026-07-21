@@ -8,7 +8,6 @@ type SessionListParams = NonNullable<paths['/session']['get']['parameters']['que
 }
 type CreateSessionRequest = NonNullable<paths['/session']['post']['requestBody']>['content']['application/json']
 type MessageListResponse = paths['/session/{sessionID}/message']['get']['responses']['200']['content']['application/json']
-type SendPromptRequest = NonNullable<paths['/session/{sessionID}/message']['post']['requestBody']>['content']['application/json']
 type SendPromptAsyncRequest = NonNullable<paths['/session/{sessionID}/prompt_async']['post']['requestBody']>['content']['application/json']
 type ConfigResponse = paths['/config']['get']['responses']['200']['content']['application/json']
 type CommandListResponse = paths['/command']['get']['responses']['200']['content']['application/json']
@@ -18,7 +17,6 @@ type ShellRequest = NonNullable<paths['/session/{sessionID}/shell']['post']['req
 type AgentListResponse = paths['/agent']['get']['responses']['200']['content']['application/json']
 type PermissionListResponse = paths['/permission']['get']['responses']['200']['content']['application/json']
 type QuestionListResponse = paths['/question']['get']['responses']['200']['content']['application/json']
-type SendPromptResponse = paths['/session/{sessionID}/message']['post']['responses']['200']['content']['application/json']
 type LspStatusResponse = paths['/lsp']['get']['responses']['200']['content']['application/json']
 type LspStatus = LspStatusResponse[number]
 
@@ -91,7 +89,7 @@ function toLegacySession(session: SessionV2Info, directory?: string): LegacySess
   } as LegacySession
 }
 
-export type { SendPromptResponse, SendCommandResponse, LspStatus }
+export type { SendCommandResponse, LspStatus }
 
 export class OpenCodeClient {
   private baseURL: string
@@ -194,19 +192,6 @@ export class OpenCodeClient {
     return fetchWrapper<MessageListResponse>(`${this.baseURL}/session/${sessionID}/message`, {
       params: this.getParams(),
     })
-  }
-
-  async sendPrompt(sessionID: string, data: SendPromptRequest): Promise<SendPromptResponse> {
-    return fetchWrapper<SendPromptResponse>(
-      `${this.baseURL}/session/${sessionID}/message`,
-      {
-        method: 'POST',
-        params: this.getParams(),
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-        timeout: 0,
-      }
-    )
   }
 
   async sendPromptAsync(sessionID: string, data: SendPromptAsyncRequest): Promise<void> {

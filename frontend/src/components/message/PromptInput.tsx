@@ -302,7 +302,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           model: currentModel,
           agent: agentUsed,
           variant: currentVariant,
-          queued: true
         },
         {
           onSuccess: () => clearSubmittedPrompt(submittedPrompt, submittedAttachedFiles, submittedImageAttachments)

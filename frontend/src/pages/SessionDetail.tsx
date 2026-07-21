@@ -548,7 +548,7 @@ export function SessionDetail() {
                   onMinimize={() => handleMinimizeQuestion(currentQuestion)}
                 />
               )}
-              <SessionSendErrorBanner sessionId={sessionId} />
+              <SessionSendErrorBanner sessionId={sessionId} isConnected={isConnected} isReconnecting={isReconnecting} />
               <PromptInput
                 ref={promptInputRef}
                 opcodeUrl={opcodeUrl}

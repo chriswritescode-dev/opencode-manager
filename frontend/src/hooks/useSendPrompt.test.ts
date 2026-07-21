@@ -6,7 +6,6 @@ import { useSendPrompt } from './useOpenCode'
 import { FetchError } from '../api/fetchWrapper'
 import { messagesQueryKey } from '../lib/queryInvalidation'
 
-const mockSendPrompt = vi.fn()
 const mockSendPromptAsync = vi.fn()
 const mockSetOptimisticActive = vi.fn()
 const mockClearStatus = vi.fn()
@@ -16,7 +15,6 @@ vi.mock('../api/opencode', async () => {
   return {
     ...actual,
     OpenCodeClient: vi.fn().mockImplementation(() => ({
-      sendPrompt: mockSendPrompt,
       sendPromptAsync: mockSendPromptAsync,
     })),
   }
@@ -78,10 +76,6 @@ describe('useSendPrompt', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     queryClient = createTestQueryClient()
-    mockSendPrompt.mockResolvedValue({
-      info: { id: 'test-response' },
-      parts: [],
-    })
     mockSendPromptAsync.mockResolvedValue(undefined)
   })
 
@@ -103,9 +97,12 @@ describe('useSendPrompt', () => {
         prompt: 'Hello',
         model: 'anthropic/claude-sonnet-4',
       })
-    ).resolves.toBeDefined()
+    ).resolves.toBeUndefined()
 
-    expect(mockSendPrompt).toHaveBeenCalled()
+    expect(mockSendPromptAsync).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({ parts: expect.any(Array) }),
+    )
   })
 
   it('throws FetchError with MODEL_UNAVAILABLE when model not in providers', async () => {
@@ -144,7 +141,7 @@ describe('useSendPrompt', () => {
     expect((error as FetchError).code).toBe('MODEL_UNAVAILABLE')
     expect((error as FetchError).statusCode).toBe(409)
     expect(error!.message).toBe('Selected model is no longer available. Pick a different model.')
-    expect(mockSendPrompt).not.toHaveBeenCalled()
+    expect(mockSendPromptAsync).not.toHaveBeenCalled()
   })
 
   it('proceeds when model exists in providers', async () => {
@@ -174,12 +171,18 @@ describe('useSendPrompt', () => {
         prompt: 'Hello',
         model: 'anthropic/claude-sonnet-4',
       })
-    ).resolves.toBeDefined()
+    ).resolves.toBeUndefined()
 
-    expect(mockSendPrompt).toHaveBeenCalled()
+    expect(mockSendPromptAsync).toHaveBeenCalledWith(
+      'test-session',
+      expect.objectContaining({
+        parts: expect.any(Array),
+        model: { providerID: 'anthropic', modelID: 'claude-sonnet-4' },
+      }),
+    )
   })
 
-  it('clears stored send error on successful queued retry', async () => {
+  it('clears stored send error on successful send', async () => {
     mockClearError.mockClear()
 
     const { result } = renderHookWithProviders()
@@ -188,15 +191,13 @@ describe('useSendPrompt', () => {
       result.current.mutateAsync({
         sessionID: 'session-1',
         prompt: 'Hello',
-        queued: true,
       })
-    ).resolves.toEqual(expect.objectContaining({ queued: true }))
+    ).resolves.toBeUndefined()
 
     expect(mockClearError).toHaveBeenCalledWith('session-1')
-    expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-1', 'Hello')
   })
 
-  it('stores the raw prompt for queued restoration when parts omit file mentions', async () => {
+  it('stores the raw prompt for restoration when parts omit file mentions', async () => {
     const { result } = renderHookWithProviders()
 
     await expect(
@@ -207,70 +208,39 @@ describe('useSendPrompt', () => {
           { type: 'text', content: 'please inspect ' },
           { type: 'file', path: '/repo/src/App.tsx', name: 'App.tsx' },
         ],
-        queued: true,
       })
-    ).resolves.toEqual(expect.objectContaining({ queued: true }))
+    ).resolves.toBeUndefined()
 
     expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-raw', 'please inspect @App.tsx')
   })
 
-  it('stores queued prompt before the async queue request resolves', async () => {
-    let resolveQueued: () => void = () => {}
+  it('stores queued prompt before the async request resolves', async () => {
+    let resolveAsync: () => void = () => {}
     mockSendPromptAsync.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      resolveQueued = resolve
+      resolveAsync = resolve
     }))
 
     const { result } = renderHookWithProviders()
 
-    const queued = result.current.mutateAsync({
+    const pending = result.current.mutateAsync({
       sessionID: 'session-pending',
       prompt: 'pending queued prompt',
-      queued: true,
     })
 
     await waitFor(() => {
       expect(mockSetQueuedPrompt).toHaveBeenCalledWith('session-pending', 'pending queued prompt')
     })
 
-    resolveQueued()
-    await expect(queued).resolves.toEqual(expect.objectContaining({ queued: true }))
+    resolveAsync()
+    await expect(pending).resolves.toBeUndefined()
   })
 
-  it('clears queued prompt when the async queue request fails', async () => {
-    mockSendPromptAsync.mockRejectedValueOnce(new Error('Queue failed'))
-
-    const { result } = renderHookWithProviders()
-
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-failed',
-        prompt: 'failed queued prompt',
-        queued: true,
-      })
-    ).rejects.toThrow('Queue failed')
-
-    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-failed')
-  })
-
-  it('clears stored send error on successful non-queued response', async () => {
-    mockClearError.mockClear()
-
-    const { result } = renderHookWithProviders()
-
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-2',
-        prompt: 'Hello',
-      })
-    ).resolves.toBeDefined()
-
-    expect(mockClearError).toHaveBeenCalledWith('session-2')
-  })
-
-  it('rolls back optimistic prompt and stores failed prompt on network failure', async () => {
+  it('clears queued prompt and stores failed prompt on network failure', async () => {
     const queryKey = messagesQueryKey('http://localhost:5551', 'session-lost', '/test')
-    queryClient.setQueryData(queryKey, [])
-    mockSendPrompt.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+    queryClient.setQueryData(queryKey, [
+      { info: { id: 'optimistic_user_1' }, parts: [] },
+    ])
+    mockSendPromptAsync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
 
     const { result } = renderHookWithProviders()
 
@@ -281,41 +251,22 @@ describe('useSendPrompt', () => {
       })
     ).rejects.toThrow('Failed to fetch')
 
+    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-lost')
     expect(mockClearStatus).toHaveBeenCalledWith('session-lost')
     expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
       sessionID: 'session-lost',
       failedPrompt: 'keep this prompt',
+      kind: 'network',
     }))
     expect(queryClient.getQueryData(queryKey)).toEqual([])
   })
 
-  it('stores failed prompt when queued async request fails before reaching OpenCode', async () => {
-    mockSendPromptAsync.mockRejectedValueOnce(new TypeError('Failed to fetch'))
-
-    const { result } = renderHookWithProviders()
-
-    await expect(
-      result.current.mutateAsync({
-        sessionID: 'session-queued-lost',
-        prompt: 'queued while disconnected',
-        queued: true,
-      })
-    ).rejects.toThrow('Failed to fetch')
-
-    expect(mockClearQueuedPrompt).toHaveBeenCalledWith('session-queued-lost')
-    expect(mockClearStatus).toHaveBeenCalledWith('session-queued-lost')
-    expect(mockSetError).toHaveBeenCalledWith(expect.objectContaining({
-      sessionID: 'session-queued-lost',
-      failedPrompt: 'queued while disconnected',
-    }))
-  })
-
-  it('rolls back optimistic message but keeps status and surfaces no error on gateway timeout', async () => {
+  it('surfaces no error on gateway timeout (524)', async () => {
     const queryKey = messagesQueryKey('http://localhost:5551', 'session-524', '/test')
     queryClient.setQueryData(queryKey, [
       { info: { id: 'optimistic_user_1' }, parts: [] },
     ])
-    mockSendPrompt.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
+    mockSendPromptAsync.mockRejectedValueOnce(new FetchError('Gateway timeout', 524))
 
     const { result } = renderHookWithProviders()
 
@@ -329,5 +280,23 @@ describe('useSendPrompt', () => {
     expect(queryClient.getQueryData(queryKey)).toEqual([])
     expect(mockClearStatus).not.toHaveBeenCalled()
     expect(mockSetError).not.toHaveBeenCalled()
+  })
+
+  it('invalidates the messages query on success', async () => {
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries')
+    const sessionID = 'session-invalidate'
+
+    const { result } = renderHookWithProviders()
+
+    await expect(
+      result.current.mutateAsync({
+        sessionID,
+        prompt: 'Hello',
+      })
+    ).resolves.toBeUndefined()
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: messagesQueryKey('http://localhost:5551', sessionID, '/test'),
+    })
   })
 })

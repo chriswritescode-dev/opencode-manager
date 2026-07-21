@@ -116,28 +116,28 @@ export function useRefreshMessage({ opcodeUrl, sessionId, directory }: UseRefres
         (old) => [...(old || []), optimisticMessageWithParts]
       )
       
-      interface SendPromptRequest {
+      interface RefreshPromptRequest {
         parts: Array<{ type: 'text'; text: string }>
         model?: { providerID: string; modelID: string }
         agent?: string
       }
-      
-      const requestData: SendPromptRequest = {
+
+      const requestData: RefreshPromptRequest = {
         parts: [{ type: 'text', text: userMessageContent }]
       }
-      
+
       if (model) {
         const [providerID, modelID] = model.split('/')
         if (providerID && modelID) {
           requestData.model = { providerID, modelID }
         }
       }
-      
+
       if (agent) {
         requestData.agent = agent
       }
-      
-      await client.sendPrompt(sessionId, requestData)
+
+      await client.sendPromptAsync(sessionId, requestData)
 
       return { optimisticUserID, userMessageContent }
     },

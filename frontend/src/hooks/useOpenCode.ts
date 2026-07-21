@@ -23,7 +23,7 @@ import type { SessionPin } from "@opencode-manager/shared/schemas";
 type AssistantMessage = components["schemas"]["AssistantMessage"];
 
 type SendPromptRequest = NonNullable<
-  paths["/session/{sessionID}/message"]["post"]["requestBody"]
+  paths["/session/{sessionID}/prompt_async"]["post"]["requestBody"]
 >["content"]["application/json"];
 
 type SendCommandResponse = paths["/session/{sessionID}/command"]["post"]["responses"]["200"]["content"]["application/json"];
@@ -418,7 +418,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       model,
       agent,
       variant,
-      queued,
     }: {
       sessionID: string;
       prompt?: string;
@@ -426,7 +425,6 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
       model?: string;
       agent?: string;
       variant?: string;
-      queued?: boolean;
     }) => {
       if (!client) throw new Error("No client available");
 
@@ -491,30 +489,14 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         requestData.variant = variant;
       }
 
-      if (queued) {
-        useSendErrorStore.getState().setQueuedPrompt(sessionID, getPromptText(prompt, parts));
-
-        try {
-          await client.sendPromptAsync(sessionID, requestData);
-        } catch (error) {
-          useSendErrorStore.getState().clearQueuedPrompt(sessionID);
-          throw error;
-        }
-
-        return { queued: true };
-      }
-
-      const response = await client.sendPrompt(sessionID, requestData);
-
-      return { response, queued: false };
+      useSendErrorStore.getState().setQueuedPrompt(sessionID, getPromptText(prompt, parts));
+      await client.sendPromptAsync(sessionID, requestData);
     },
     onError: (error, variables) => {
-      const { sessionID, queued, prompt, parts } = variables;
+      const { sessionID, prompt, parts } = variables;
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
-      if (queued) {
-        useSendErrorStore.getState().clearQueuedPrompt(sessionID);
-      }
+      useSendErrorStore.getState().clearQueuedPrompt(sessionID);
 
       queryClient.setQueryData<MessageWithParts[]>(
         queryKey,
@@ -538,33 +520,12 @@ export const useSendPrompt = (opcodeUrl: string | null | undefined, directory?: 
         kind: 'network',
       });
     },
-    onSuccess: async (data, variables) => {
+    onSuccess: async (_data, variables) => {
       const { sessionID } = variables;
-      const { response } = data;
       const queryKey = messagesQueryKey(opcodeUrl, sessionID, directory);
 
       useSendErrorStore.getState().clearError(sessionID);
-
-      if (data.queued || !response) {
-        queryClient.invalidateQueries({ queryKey });
-        return;
-      }
-
-      queryClient.setQueryData<MessageWithParts[]>(
-        queryKey,
-        (old) => {
-          if (!old) return old;
-
-          const existingIdx = old.findIndex(m => m.info.id === response.info.id);
-          if (existingIdx >= 0) {
-            const updated = [...old];
-            updated[existingIdx] = { info: response.info, parts: response.parts };
-            return updated;
-          }
-
-          return [...old, { info: response.info, parts: response.parts }];
-        },
-      );
+      await queryClient.invalidateQueries({ queryKey });
     },
   });
 };
