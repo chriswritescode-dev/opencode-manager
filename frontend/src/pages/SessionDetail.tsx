@@ -9,6 +9,7 @@ import { X, CornerUpLeft } from "lucide-react";
 import { Header } from "@/components/ui/header";
 import { SessionList } from "@/components/session/SessionList";
 import { getSessionListPath } from '@/lib/navigation'
+import { FetchError } from '@/api/fetchWrapper'
 
 import { FileBrowserSheet } from "@/components/file-browser/FileBrowserSheet";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -63,6 +64,18 @@ const compareMessageIds = (id1: string, id2: string): number => {
 const PENDING_ACTION_SYNC_INTERVAL_MS = 30000
 const PROMPT_OVERLAY_CLEARANCE_PX = 16
 
+function SessionRouteFallback({ message, backTo, backLabel }: { message: string; backTo: string; backLabel: string }) {
+  const navigate = useNavigate();
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
+      <div className="flex flex-col items-center gap-3 text-center">
+        <span className="text-muted-foreground">{message}</span>
+        <Button variant="outline" size="sm" onClick={() => navigate(backTo)}>{backLabel}</Button>
+      </div>
+    </div>
+  );
+}
+
 export function SessionDetail() {
   const { id, sessionId } = useParams<{ id: string; sessionId: string }>();
   const navigate = useNavigate();
@@ -112,6 +125,7 @@ export function SessionDetail() {
     queryKey: ["repo", repoId],
     queryFn: () => getRepo(repoId),
     enabled: id !== undefined,
+    retry: (failureCount, error) => !(error instanceof FetchError && error.statusCode === 404) && failureCount < 3,
   });
 
   useRepoActivity(repoId, Boolean(repo));
@@ -123,8 +137,8 @@ export function SessionDetail() {
 
   const { isConnected, isReconnecting } = useSSE(opcodeUrl, repoDirectory, sessionId);
 
-  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory);
-  const { data: session, isLoading: sessionLoading } = useSession(
+  const { data: rawMessages, isLoading: messagesLoading } = useMessages(opcodeUrl, sessionId, repoDirectory, { fallbackPoll: !isConnected });
+  const { data: session, isLoading: sessionLoading, error: sessionQueryError } = useSession(
     opcodeUrl,
     sessionId,
     repoDirectory,
@@ -408,7 +422,7 @@ export function SessionDetail() {
     return <Navigate to="/" replace />;
   }
 
-  if (!repo && !isAssistantSession) {
+  if (!isAssistantSession && repoLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-background via-background to-background">
         <div className="flex flex-col items-center gap-2">
@@ -416,6 +430,21 @@ export function SessionDetail() {
           <span className="text-muted-foreground">Loading repository...</span>
         </div>
       </div>
+    );
+  }
+
+  if (!isAssistantSession && !repo) {
+    return <SessionRouteFallback message="Repository not found" backTo="/" backLabel="Back to repositories" />;
+  }
+
+  if (sessionQueryError instanceof FetchError && sessionQueryError.statusCode === 404) {
+    const listTab = new URLSearchParams(location.search).get('repoTab') ?? undefined;
+    return (
+      <SessionRouteFallback
+        message="Session not found"
+        backTo={getSessionListPath(repoId, isAssistantSession, listTab)}
+        backLabel="Back to sessions"
+      />
     );
   }
 

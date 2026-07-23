@@ -62,7 +62,7 @@ export function AssistantRedirect() {
             <Plus className="w-4 h-4 mr-2" />
             <span>New Session</span>
           </Button>
-          <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} size="sm" className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
+          <Button onClick={() => handleCreateSession()} disabled={!opcodeUrl || !assistantDirectory || createSessionMutation.isPending} aria-label="New Session" size="sm" className="sm:hidden h-10 w-10 p-0 bg-blue-600 hover:bg-blue-700 text-white transition-all duration-200 hover:scale-105">
             <Plus className="w-5 h-5" />
           </Button>
         </Header.Actions>
