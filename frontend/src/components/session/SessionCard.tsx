@@ -57,6 +57,7 @@ export const SessionCard = ({
         }`}
       >
         <button
+          aria-label="Delete session"
           className="h-full w-full flex items-center justify-center text-white hover:bg-red-700"
           onClick={handleDeleteClick}
         >
@@ -174,6 +175,7 @@ export const SessionCard = ({
             )}
             {manageMode && (
               <button
+                aria-label="Delete session"
                 className="h-6 w-6 p-0 text-foreground hover:text-red-600 dark:hover:text-red-400 bg-transparent border-none cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation();

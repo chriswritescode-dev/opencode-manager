@@ -138,6 +138,7 @@ export const useSession = (opcodeUrl: string | null | undefined, sessionID: stri
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     staleTime: 15000,
+    retry: (failureCount, error) => !(error instanceof FetchError && error.statusCode === 404) && failureCount < 3,
   });
 };
 
@@ -158,6 +159,7 @@ export const useMessages = (opcodeUrl: string | null | undefined, sessionID: str
     staleTime: 30000,
     gcTime: 10 * 60 * 1000,
     refetchInterval: opts?.fallbackPoll ? 5000 : undefined,
+    retry: (failureCount, error) => !(error instanceof FetchError && error.statusCode === 404) && failureCount < 3,
   });
 };
 

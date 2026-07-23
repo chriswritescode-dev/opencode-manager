@@ -245,4 +245,24 @@ describe('SessionDetail pending-actions polling gating', () => {
     const query = findPendingActionsQuery(queryClient)
     expect((query?.options as { refetchInterval?: unknown }).refetchInterval).toBe(false)
   })
+
+  it('requests message fallback polling while the SSE stream is disconnected', async () => {
+    mocks.useSSE.mockReturnValue({ isConnected: false, isReconnecting: true })
+
+    const queryClient = createQueryClient()
+    renderSessionDetail(queryClient)
+
+    const calls = mocks.useMessages.mock.calls
+    expect(calls[calls.length - 1][3]).toEqual({ fallbackPoll: true })
+  })
+
+  it('does not request message fallback polling while the SSE stream is connected', async () => {
+    mocks.useSSE.mockReturnValue({ isConnected: true, isReconnecting: false })
+
+    const queryClient = createQueryClient()
+    renderSessionDetail(queryClient)
+
+    const calls = mocks.useMessages.mock.calls
+    expect(calls[calls.length - 1][3]).toEqual({ fallbackPoll: false })
+  })
 })
