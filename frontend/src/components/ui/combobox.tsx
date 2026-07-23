@@ -186,6 +186,7 @@ export function Combobox({
         {showClear && value && (
           <button
             type="button"
+            aria-label="Clear"
             onClick={() => {
               if (!disabled) {
                 onChange('')
@@ -201,6 +202,7 @@ export function Combobox({
         )}
         <button
           type="button"
+          aria-label="Toggle options"
           onClick={() => {
             if (!disabled) {
               setIsOpen(!isOpen)

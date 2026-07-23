@@ -159,9 +159,9 @@ function AppShell() {
       <EventProvider>
         <div ref={rootRef} className="flex h-dvh w-full min-w-0">
           <DesktopSidebar />
-          <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+          <main className="flex-1 min-w-0 min-h-0 flex flex-col">
             <Outlet />
-          </div>
+          </main>
         </div>
         <MobileTabBar />
         <MobileSheetHost />

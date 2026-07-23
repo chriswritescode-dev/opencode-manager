@@ -37,6 +37,7 @@ export function Repos() {
             variant="ghost"
             size="icon"
             onClick={() => setFileBrowserOpen(true)}
+            aria-label="Open files"
             className="hidden sm:flex text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
           >
             <FolderOpen className="w-4 h-4" />

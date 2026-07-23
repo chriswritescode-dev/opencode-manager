@@ -29,6 +29,8 @@ import { TimingTab } from './TimingTab'
 import { PromptTab } from './PromptTab'
 import { SkillsTab } from './SkillsTab'
 
+const EMPTY_TEMPLATES: PromptTemplate[] = []
+
 type ScheduleJobDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -68,7 +70,7 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
   const [editingTemplate, setEditingTemplate] = useState<PromptTemplate | undefined>(undefined)
   const [deletingTemplateId, setDeletingTemplateId] = useState<number | null>(null)
 
-  const { data: templates = [] } = usePromptTemplates()
+  const { data: templates = EMPTY_TEMPLATES } = usePromptTemplates()
   const deleteTemplateMutation = useDeletePromptTemplate()
 
   const { data: providerModels = [] } = useQuery({
@@ -212,8 +214,6 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setAgentSlug(job?.agentSlug ?? '')
     setModel(job?.model ?? '')
     setPrompt(job?.prompt ?? '')
-    const matchingTemplate = templates.find((template) => template.prompt === (job?.prompt ?? ''))
-    setSelectedPromptTemplateId(matchingTemplate ? matchingTemplate.id : null)
     const initialSkillSlugs = job?.skillMetadata?.skillSlugs ?? []
     const initialSkillNotes = job?.skillMetadata?.notes ?? ''
     setSkillSlugs(initialSkillSlugs)
@@ -223,7 +223,15 @@ export function ScheduleJobDialog({ open, onOpenChange, job, isSaving, onSubmit,
     setBranch(job?.branch ?? '')
     setAllowExternalDirectory(job?.permissionConfig?.allowExternalDirectory ?? false)
     setBashDenyPatterns(job?.permissionConfig?.bashDenyPatterns ?? [...DEFAULT_DESTRUCTIVE_BASH_PATTERNS])
-  }, [job, open, templates])
+  }, [job, open])
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const matchingTemplate = templates.find((template) => template.prompt === (job?.prompt ?? ''))
+    setSelectedPromptTemplateId(matchingTemplate ? matchingTemplate.id : null)
+  }, [templates, job, open])
 
   const applyPromptTemplate = (template: PromptTemplate) => {
     setSelectedPromptTemplateId(template.id)

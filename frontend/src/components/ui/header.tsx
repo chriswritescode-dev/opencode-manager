@@ -169,6 +169,7 @@ function HeaderSettingsButton() {
       variant="ghost"
       size="icon"
       onClick={open}
+      aria-label="Settings"
       className="text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-200 h-8 w-8"
     >
       <Settings className="w-4 h-4" />
