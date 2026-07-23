@@ -7,11 +7,12 @@ import { GitCredentialDialog, type GitCredentialSaveOptions } from './GitCredent
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { randomId } from '@/lib/utils'
 import type { GitCredential, GitIdentity } from '@/api/types/settings'
 import { listRepos, updateRepoGitCredential } from '@/api/repos'
 
 function ensureCredentialId(credential: GitCredential): GitCredential {
-  return credential.id ? credential : { ...credential, id: crypto.randomUUID() }
+  return credential.id ? credential : { ...credential, id: randomId() }
 }
 
 export function GitSettings() {
