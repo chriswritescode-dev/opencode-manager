@@ -325,6 +325,7 @@ export function GlobalSchedules() {
             <Button
               onClick={() => { openNewJob(); setSelectedRepoId(undefined) }}
               size="sm"
+              aria-label="New Schedule"
               className="sm:hidden h-10 w-10 p-0"
             >
               <Plus className="w-5 h-5" />
@@ -361,7 +362,7 @@ export function GlobalSchedules() {
               />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" className="sm:hidden h-8 w-8 shrink-0 relative">
+                  <Button variant="outline" size="icon" aria-label="Filters" className="sm:hidden h-8 w-8 shrink-0 relative">
                     <SlidersHorizontal className="h-3.5 w-3.5" />
                     {(statusFilter !== 'all' || scheduleModeFilter !== 'all') && (
                       <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary" />
@@ -615,6 +616,7 @@ export function GlobalSchedules() {
                           variant="outline"
                           size="sm"
                           className="h-8 w-8 p-0"
+                          aria-label={job.enabled ? 'Pause schedule' : 'Enable schedule'}
                           onClick={(e) => {
                             e.stopPropagation()
                             handleToggleEnabled(job)
@@ -630,6 +632,7 @@ export function GlobalSchedules() {
                           variant="outline"
                           size="sm"
                           className="h-8 w-8 p-0"
+                          aria-label="Edit schedule"
                           onClick={(e) => {
                             e.stopPropagation()
                             handleEdit(job)
@@ -641,6 +644,7 @@ export function GlobalSchedules() {
                           variant="outline"
                           size="sm"
                           className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                          aria-label="Delete schedule"
                             onClick={(e) => {
                               e.stopPropagation()
                               openDeleteJob(job.id)
@@ -670,7 +674,7 @@ export function GlobalSchedules() {
               />
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon" className="sm:hidden h-8 w-8 shrink-0 relative">
+                  <Button variant="outline" size="icon" aria-label="Filters" className="sm:hidden h-8 w-8 shrink-0 relative">
                     <SlidersHorizontal className="h-3.5 w-3.5" />
                     {(runStatusFilter !== 'all' || runTriggerFilter !== 'all' || runSortOption !== 'startedAt') && (
                       <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-primary" />

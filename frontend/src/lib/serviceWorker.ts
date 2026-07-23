@@ -32,8 +32,26 @@ export function offServiceWorkerUpdate(): void {
 
 const UPDATE_CHECK_INTERVAL_MS = 60 * 1000;
 
+async function unregisterServiceWorkerAndClearCaches(): Promise<void> {
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+    if ("caches" in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((key) => caches.delete(key)));
+    }
+  } catch {
+    return;
+  }
+}
+
 export function registerServiceWorker(): void {
   if (!("serviceWorker" in navigator)) return;
+
+  if (import.meta.env.DEV) {
+    void unregisterServiceWorkerAndClearCaches();
+    return;
+  }
 
   const hadController = !!navigator.serviceWorker.controller;
 
