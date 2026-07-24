@@ -40,6 +40,16 @@ bunx opencode-manager
 
 This installs prerequisites (Bun, OpenCode, Git), sets up `~/.opencode-manager/`, and starts the server. Open `http://localhost:5003`.
 
+### Bare metal (from git)
+
+```bash
+git clone https://github.com/chriswritescode-dev/opencode-manager.git
+cd opencode-manager
+./bin/opencode-manager
+```
+
+Same bootstrap as `bunx` — installs prereqs, creates `~/.opencode-manager/`, builds frontend, and starts the server. Edit `~/.opencode-manager/.env` to customize ports, auth, etc.
+
 ### Docker
 
 ```bash
