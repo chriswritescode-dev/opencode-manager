@@ -28,6 +28,7 @@ import { ModelQuickSelect } from '@/components/model/ModelQuickSelect'
 import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
+import { randomId } from '@/lib/utils'
 import { formatModelName, getProviders } from '@/api/providers'
 import { useQuery } from '@tanstack/react-query'
 
@@ -758,13 +759,6 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
   }, [isRecording, isProcessing, transcript, interimTranscript])
 
   const addImageAttachment = (file: File) => {
-    const generateId = () => {
-      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID()
-      }
-      return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`
-    }
-
     try {
       const reader = new FileReader()
       
@@ -777,7 +771,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           if (!dataUrl) {
             const blobUrl = URL.createObjectURL(file)
             const attachment: ImageAttachment = {
-              id: generateId(),
+              id: randomId(),
               filename: file.name,
               mime: file.type || 'image/png',
               dataUrl: blobUrl,
@@ -787,7 +781,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
           }
           
           const attachment: ImageAttachment = {
-            id: generateId(),
+            id: randomId(),
             filename: file.name,
             mime: file.type || 'image/png',
             dataUrl,

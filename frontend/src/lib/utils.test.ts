@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest'
-import { getRepoDisplayName, sanitizeForTTS } from './utils'
+import { describe, it, expect, afterEach } from 'vitest'
+import { getRepoDisplayName, sanitizeForTTS, randomId } from './utils'
 
 describe('sanitizeForTTS', () => {
   it('should handle headers', () => {
@@ -80,6 +80,41 @@ describe('sanitizeForTTS', () => {
 
   it('should handle HTML tags', () => {
     expect(sanitizeForTTS('Text with <tag>content</tag> here')).toBe('Text with content here')
+  })
+})
+
+describe('randomId', () => {
+  const originalRandomUUID = globalThis.crypto?.randomUUID
+
+  afterEach(() => {
+    if (globalThis.crypto) {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', {
+        value: originalRandomUUID,
+        configurable: true,
+        writable: true,
+      })
+    }
+  })
+
+  it('uses crypto.randomUUID when available', () => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: () => '11111111-2222-4333-8444-555555555555',
+      configurable: true,
+      writable: true,
+    })
+    expect(randomId()).toBe('11111111-2222-4333-8444-555555555555')
+  })
+
+  it('falls back to a unique id when crypto.randomUUID is unavailable (non-secure context)', () => {
+    Object.defineProperty(globalThis.crypto, 'randomUUID', {
+      value: undefined,
+      configurable: true,
+      writable: true,
+    })
+    const first = randomId()
+    const second = randomId()
+    expect(first).toMatch(/^[a-z0-9]+-[a-z0-9]+$/)
+    expect(first).not.toBe(second)
   })
 })
 
