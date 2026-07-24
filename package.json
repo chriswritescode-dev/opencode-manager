@@ -4,6 +4,21 @@
   "private": false,
   "type": "module",
   "packageManager": "pnpm@10.28.1",
+  "bin": {
+    "opencode-manager": "./bin/opencode-manager"
+  },
+  "files": [
+    "bin",
+    "backend/src",
+    "shared/src",
+    "frontend/dist",
+    "frontend/package.json",
+    "shared/package.json",
+    "backend/package.json",
+    "package.json",
+    "pnpm-workspace.yaml",
+    "pnpm-lock.yaml"
+  ],
   "scripts": {
     "predev": "bash scripts/setup-dev.sh",
     "dev": "concurrently \"pnpm:dev:backend\" \"pnpm:dev:frontend\"",
@@ -34,7 +49,8 @@
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down -v",
     "docker:logs": "docker-compose logs -f",
-    "docker:restart": "docker-compose restart"
+    "docker:restart": "docker-compose restart",
+    "prepack": "bun run scripts/build-npm.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
