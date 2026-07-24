@@ -48,6 +48,8 @@ ports:
 
 **Symptoms:** Container can't write to volumes
 
+Startup tolerates workspace directories that already exist with wrong ownership; permission errors then appear on the first write into the directory rather than at startup.
+
 **Solutions:**
 
 1. Fix ownership:

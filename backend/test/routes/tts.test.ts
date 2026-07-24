@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import * as fs from 'fs/promises'
 
 vi.mock('fs/promises', () => ({
-  mkdir: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
   readdir: vi.fn(),

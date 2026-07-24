@@ -16,19 +16,23 @@ const deleteRepo = vi.fn()
 const lstat = vi.fn()
 const stat = vi.fn()
 const readdir = vi.fn()
-const mkdir = vi.fn()
 const symlink = vi.fn()
 const readlink = vi.fn()
+const mkdirSafe = vi.fn()
 
 vi.mock('fs/promises', () => ({
   default: {
     lstat,
     stat,
     readdir,
-    mkdir,
     symlink,
     readlink,
   },
+}))
+
+vi.mock('../../src/utils/fs-safe', () => ({
+  mkdirSafe,
+  mkdirSyncSafe: vi.fn(),
 }))
 
 vi.mock('../../src/utils/process', () => ({
@@ -84,7 +88,7 @@ describe('repo service', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     ensureDirectoryExists.mockResolvedValue(undefined)
-    mkdir.mockResolvedValue(undefined)
+    mkdirSafe.mockResolvedValue(undefined)
     symlink.mockResolvedValue(undefined)
     readlink.mockResolvedValue('')
     readdir.mockResolvedValue([])

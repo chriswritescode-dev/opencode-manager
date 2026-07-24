@@ -9,11 +9,7 @@ import { mkdirSafe } from './fs-safe'
 const SSH_KEYS_DIR = join(getWorkspacePath(), '.ssh-keys')
 
 async function ensureSSHKeysDir(): Promise<void> {
-  try {
-    await fs.access(SSH_KEYS_DIR)
-  } catch {
-    await mkdirSafe(SSH_KEYS_DIR, { mode: 0o700 })
-  }
+  await mkdirSafe(SSH_KEYS_DIR, { mode: 0o700 })
 }
 
 async function validateSSHKey(keyPath: string): Promise<boolean> {
@@ -167,11 +163,7 @@ export function generateSSHConfig(entries: SSHConfigEntry[]): string {
 
 export async function writeSSHConfig(configPath: string, configContent: string): Promise<void> {
   const dir = join(getWorkspacePath(), 'config')
-  try {
-    await fs.access(dir)
-  } catch {
-    await mkdirSafe(dir, { mode: 0o700 })
-  }
+  await mkdirSafe(dir, { mode: 0o700 })
 
   await fs.writeFile(configPath, configContent, { mode: 0o600 })
 }
