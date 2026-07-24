@@ -169,7 +169,7 @@ useEffect(() => {
     setError(null)
     
     try {
-      const response = await fetch(getFileApiUrl(path))
+      const response = await fetch(getFileApiUrl(path), { credentials: 'include' })
       if (!response.ok) {
         throw new Error(`Failed to load files: ${response.statusText}`)
       }
@@ -251,7 +251,7 @@ useEffect(() => {
     // Fetch the full file content when selecting a file
     setLoading(true)
     try {
-      const response = await fetch(getFileApiUrl(file.path))
+      const response = await fetch(getFileApiUrl(file.path), { credentials: 'include' })
       if (!response.ok) {
         throw new Error(`Failed to load file: ${response.statusText}`)
       }
@@ -294,6 +294,7 @@ useEffect(() => {
     
     try {
       const response = await fetch(getFileApiUrl(currentPath), {
+        credentials: 'include',
         method: 'POST',
         body: formData,
       })
@@ -364,6 +365,7 @@ useEffect(() => {
   const handleCreateFile = useCallback(async (name: string, type: 'file' | 'folder') => {
     try {
       const response = await fetch(getFileApiUrl([currentPath, name].filter(Boolean).join('/')), {
+        credentials: 'include',
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type, content: type === 'file' ? '' : undefined }),
@@ -382,6 +384,7 @@ useEffect(() => {
   const handleDelete = useCallback(async (path: string) => {
     try {
       const response = await fetch(getFileApiUrl(path), {
+        credentials: 'include',
         method: 'DELETE',
       })
       
@@ -399,6 +402,7 @@ useEffect(() => {
   const handleRename = useCallback(async (oldPath: string, newPath: string) => {
     try {
       const response = await fetch(getFileApiUrl(oldPath), {
+        credentials: 'include',
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newPath }),
