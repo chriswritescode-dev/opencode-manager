@@ -8,6 +8,7 @@ import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { broadcastSSHHostKeyRequest } from '../services/sse-aggregator'
 import { executeCommand } from '../utils/process'
 import { parseSSHHost, normalizeHostPort } from '../utils/ssh-key-manager'
+import { mkdirSafe } from '../utils/fs-safe'
 
 interface SSHHostKeyRequest {
   id: string
@@ -40,7 +41,7 @@ export class SSHHostKeyHandler implements IPCHandler {
   private async ensureKnownHostsFile(): Promise<void> {
     try {
       const configDir = path.join(getWorkspacePath(), 'config')
-      await fs.mkdir(configDir, { recursive: true })
+      await mkdirSafe(configDir)
       try {
         await fs.access(this.knownHostsPath)
       } catch {

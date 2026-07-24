@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync } from 'node:fs'
+import { existsSync } from 'node:fs'
 import path from 'path'
 import type { Database } from 'bun:sqlite'
 import { getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
@@ -12,6 +12,7 @@ import { resolveGitIdentity, createGitIdentityEnv, isSSHUrl } from '../utils/git
 import { executeCommand } from '../utils/process'
 import { resolveDefaultBranch, createWorktreeSafely, removeWorktree } from './repo'
 import { logger } from '../utils/logger'
+import { mkdirSyncSafe } from '../utils/fs-safe'
 
 export interface ScheduleWorktreeContext {
   directory: string
@@ -115,7 +116,7 @@ export class ScheduleWorktreeManager {
 
       // Fallback: raw git worktree
       const worktreePath = path.join(getScheduleWorktreesPath(), `job-${job.id}-run-${runId}`)
-      mkdirSync(path.dirname(worktreePath), { recursive: true })
+      mkdirSyncSafe(path.dirname(worktreePath))
       await createWorktreeSafely(repo.fullPath, worktreePath, runBranch, env, baseRef)
 
       if (!existsSync(worktreePath)) {

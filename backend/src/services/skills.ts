@@ -11,6 +11,7 @@ import { ensureDirectoryExists, fileExists, readFileContent, writeFileContent, d
 import type { OpenCodeClient } from './opencode/client'
 import { logger } from '../utils/logger'
 import { githubFetchJson, githubFetchBinary, type GithubFetchFn } from '../utils/github'
+import { mkdirSafe } from '../utils/fs-safe'
 
 interface OpenCodeSkillInfo {
   name: string
@@ -135,13 +136,13 @@ async function installSkillFiles(
     throw new Error(`Skill "${prepared.skillName}" already exists in ${input.scope} scope`)
   }
 
-  await fs.mkdir(targetRoot, { recursive: true })
+  await mkdirSafe(targetRoot)
   const stagingDir = await fs.mkdtemp(path.join(targetRoot, `.${prepared.skillName}-install-`))
 
   try {
     for (const file of prepared.files) {
       const targetFilePath = resolveWithinDirectory(stagingDir, file.relativePath, 'staging directory')
-      await fs.mkdir(path.dirname(targetFilePath), { recursive: true })
+      await mkdirSafe(path.dirname(targetFilePath))
       await fs.writeFile(targetFilePath, file.content)
     }
 

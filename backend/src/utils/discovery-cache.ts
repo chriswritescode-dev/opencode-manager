@@ -1,7 +1,8 @@
 import { createHash } from 'crypto'
-import { mkdir, readFile, writeFile, stat, unlink } from 'fs/promises'
+import { readFile, writeFile, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { logger } from './logger'
+import { mkdirSafe } from './fs-safe'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 const DISCOVERY_CACHE_DIR = join(getWorkspacePath(), 'cache', 'discovery')
@@ -17,7 +18,7 @@ export function normalizeToBaseUrl(endpoint: string): string {
 }
 
 async function ensureDiscoveryCacheDir(): Promise<void> {
-  await mkdir(DISCOVERY_CACHE_DIR, { recursive: true })
+  await mkdirSafe(DISCOVERY_CACHE_DIR)
 }
 
 async function getCachedDiscovery<T>(cacheKey: string): Promise<T | null> {

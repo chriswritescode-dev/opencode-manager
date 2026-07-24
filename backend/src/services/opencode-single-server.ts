@@ -26,6 +26,7 @@ import { writeFileContent } from './file-operations'
 import { getOrCreateInternalToken } from './internal-token'
 import { installGhEnvPlugin } from './opencode-gh-env-plugin'
 import { CredentialProvider } from './credential-provider'
+import { mkdirSafe } from '../utils/fs-safe'
 
 
 const MIN_OPENCODE_VERSION = '1.0.137'
@@ -495,7 +496,7 @@ class OpenCodeServerManager {
     const packageJsonPath = path.join(binDir, 'package.json')
 
     try {
-      await fs.mkdir(binDir, { recursive: true })
+      await mkdirSafe(binDir)
 
       const packageJsonExists = await fs.access(packageJsonPath)
         .then(() => true)
@@ -600,7 +601,7 @@ class OpenCodeServerManager {
         }
       }
 
-      await fs.mkdir(installDir, { recursive: true })
+      await mkdirSafe(installDir)
       if (!await fs.access(path.join(installDir, 'package.json')).then(() => true).catch(() => false)) {
         const init = spawnSync('bun', ['init', '-y'], { cwd: installDir, encoding: 'utf8', timeout: 30000 })
         if (init.status !== 0) {

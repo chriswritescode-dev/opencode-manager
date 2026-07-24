@@ -4,6 +4,7 @@ import { getAuthPath } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
 import { AuthCredentialsSchema } from '../../../shared/src/schemas/auth'
 import type { z } from 'zod'
+import { mkdirSafe } from '../utils/fs-safe'
 
 type AuthCredentials = z.infer<typeof AuthCredentialsSchema>
 
@@ -58,7 +59,7 @@ export class AuthService {
       key: apiKey,
     }
 
-    await fs.mkdir(path.dirname(this.authPath), { recursive: true })
+    await mkdirSafe(path.dirname(this.authPath))
     await fs.writeFile(this.authPath, JSON.stringify(auth, null, 2), { mode: 0o600 })
     
     logger.info(`Set credentials for provider: ${providerId}`)

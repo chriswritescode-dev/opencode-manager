@@ -2,10 +2,11 @@ import { Hono } from 'hono'
 import { z } from 'zod'
 import { Database } from 'bun:sqlite'
 import { createHash } from 'crypto'
-import { mkdir, readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
+import { readFile, writeFile, readdir, stat, unlink } from 'fs/promises'
 import { join } from 'path'
 import { SettingsService } from '../services/settings'
 import { logger } from '../utils/logger'
+import { mkdirSafe } from '../utils/fs-safe'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import {
   normalizeToBaseUrl,
@@ -29,7 +30,7 @@ function generateCacheKey(text: string, voice: string, model: string, speed: num
 }
 
 async function ensureCacheDir(): Promise<void> {
-  await mkdir(TTS_CACHE_DIR, { recursive: true })
+  await mkdirSafe(TTS_CACHE_DIR)
 }
 
 async function getCachedAudio(cacheKey: string): Promise<Buffer | null> {
