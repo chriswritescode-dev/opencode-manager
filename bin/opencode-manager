@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Resolve the directory of this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Find bun
+if command -v bun &>/dev/null; then
+  exec bun run "$SCRIPT_DIR/opencode-manager.ts" "$@"
+elif command -v node &>/dev/null; then
+  echo "opencode-manager: Bun is required but not found. Installing..."
+  curl -fsSL https://bun.sh/install | bash
+  export PATH="$HOME/.bun/bin:$PATH"
+  exec bun run "$SCRIPT_DIR/opencode-manager.ts" "$@"
+else
+  echo "opencode-manager: Neither bun nor node found. Please install Bun: https://bun.sh" >&2
+  exit 1
+fi

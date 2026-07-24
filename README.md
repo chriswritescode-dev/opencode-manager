@@ -32,6 +32,16 @@
 
 ## Quick Start
 
+### One-liner (bunx)
+
+```bash
+bunx opencode-manager
+```
+
+This installs prerequisites (Bun, OpenCode, Git), sets up `~/.opencode-manager/`, and starts the server. Open `http://localhost:5003`.
+
+### Docker
+
 ```bash
 git clone https://github.com/chriswritescode-dev/opencode-manager.git
 cd opencode-manager
