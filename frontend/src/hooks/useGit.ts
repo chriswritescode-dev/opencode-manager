@@ -22,7 +22,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
       showToast.success('Fetch completed')
     },
     onError: handleError,
@@ -35,7 +35,7 @@ export function useGit(repoId: number | undefined, onError?: (error: unknown) =>
     },
     onSuccess: (data) => {
       if (repoId) setRepoGitStatusCaches(queryClient, repoId, data)
-      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false, invalidateRepoMeta: false })
+      invalidateRepoGitCaches(queryClient, repoId, { invalidateStatus: false })
       showToast.success('Pull completed')
     },
     onError: handleError,
