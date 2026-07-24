@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { logger } from './logger'
+import { mkdirSafe } from './fs-safe'
 
 const fileLockPromises = new Map<string, Promise<unknown>>()
 
@@ -20,7 +21,7 @@ export async function readJsonSafe<T>(filePath: string, fallback: T): Promise<T>
 export async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
   const tmpPath = `${filePath}.tmp.${process.pid}.${Date.now()}.${randomBytes(4).toString('hex')}`
   try {
-    await fs.mkdir(filePath.substring(0, filePath.lastIndexOf('/')), { recursive: true })
+    await mkdirSafe(filePath.substring(0, filePath.lastIndexOf('/')))
     await fs.writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf8')
     await fs.rename(tmpPath, filePath)
   } catch (error) {

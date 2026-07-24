@@ -9,6 +9,11 @@ vi.mock('fs/promises', () => ({
   unlink: vi.fn(),
 }))
 
+vi.mock('../../src/utils/fs-safe', () => ({
+  mkdirSafe: vi.fn().mockResolvedValue(undefined),
+  mkdirSyncSafe: vi.fn(),
+}))
+
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
 }))

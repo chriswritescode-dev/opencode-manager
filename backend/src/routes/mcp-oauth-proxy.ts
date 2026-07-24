@@ -3,9 +3,10 @@ import type { OpenCodeClient } from '../services/opencode/client'
 import { z } from 'zod'
 import crypto from 'crypto'
 import path from 'path'
-import { readFile, writeFile, mkdir } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import { storeMcpOAuthFlow, consumeMcpOAuthFlow, deleteMcpOAuthFlow, markMcpOAuthFlowCompleted, markMcpOAuthFlowFailed, getMcpOAuthFlowResult } from '../services/mcp-oauth-state'
 import { logger } from '../utils/logger'
+import { mkdirSafe } from '../utils/fs-safe'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 
 const StartSchema = z.object({
@@ -32,7 +33,7 @@ async function readMcpAuth(): Promise<Record<string, unknown>> {
 
 async function writeMcpAuth(data: Record<string, unknown>): Promise<void> {
   const filePath = getMcpAuthPath()
-  await mkdir(path.dirname(filePath), { recursive: true })
+  await mkdirSafe(path.dirname(filePath))
   await writeFile(filePath, JSON.stringify(data, null, 2), { mode: 0o600 })
 }
 

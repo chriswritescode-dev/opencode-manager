@@ -2,6 +2,7 @@ import path from 'path'
 import { promises as fs } from 'fs'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
 import { normalizeUploadRelativePath, resolveWithinDirectory } from './file-operations'
+import { mkdirSafe } from '../utils/fs-safe'
 
 export type OpenCodeDirectoryFileKind = 'agents' | 'commands'
 
@@ -82,11 +83,11 @@ export async function installOpenCodeDirectoryFiles(
     targetFilePath: resolveWithinDirectory(targetRoot, file.relativePath, `${kind} directory`),
   }))
 
-  await fs.mkdir(targetRoot, { recursive: true })
+  await mkdirSafe(targetRoot)
 
   await Promise.all(
     targets.map(async target => {
-      await fs.mkdir(path.dirname(target.targetFilePath), { recursive: true })
+      await mkdirSafe(path.dirname(target.targetFilePath))
       await fs.writeFile(target.targetFilePath, target.content)
     }),
   )

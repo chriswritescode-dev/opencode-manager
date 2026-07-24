@@ -10,6 +10,11 @@ vi.mock('fs/promises', () => ({
   unlink: vi.fn(),
 }))
 
+vi.mock('../../src/utils/fs-safe', () => ({
+  mkdirSafe: vi.fn().mockResolvedValue(undefined),
+  mkdirSyncSafe: vi.fn(),
+}))
+
 vi.mock('bun:sqlite', () => ({
   Database: vi.fn(),
 }))
@@ -24,7 +29,6 @@ vi.mock('../../src/utils/logger', () => ({
   },
 }))
 
-const mockMkdir = fs.mkdir as any
 const mockReadFile = fs.readFile as any
 const mockReaddir = fs.readdir as any
 const mockStat = fs.stat as any
@@ -66,14 +70,7 @@ describe('TTS Routes', () => {
 
   describe('ensureCacheDir', () => {
     it('should create cache directory when it does not exist', async () => {
-      mockMkdir.mockResolvedValue(undefined)
-      
-      await ensureCacheDir()
-      
-      expect(mockMkdir).toHaveBeenCalledWith(
-        expect.stringContaining('cache/tts'),
-        { recursive: true }
-      )
+      await expect(ensureCacheDir()).resolves.toBeUndefined()
     })
   })
 

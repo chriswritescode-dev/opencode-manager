@@ -19,6 +19,7 @@ import { listRepos } from '../db/queries'
 import { listActiveScheduleRunWorkspaces } from '../db/schedules'
 import { SettingsService } from './settings'
 import type { OpenCodeClient } from './opencode/client'
+import { mkdirSafe } from '../utils/fs-safe'
 
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
@@ -186,7 +187,7 @@ async function createWorkspaceLink(alias: string, sourcePath: string): Promise<v
     return
   }
 
-  await fs.mkdir(path.dirname(aliasPath), { recursive: true })
+  await mkdirSafe(path.dirname(aliasPath))
   await fs.symlink(sourcePath, aliasPath, process.platform === 'win32' ? 'junction' : 'dir')
 }
 

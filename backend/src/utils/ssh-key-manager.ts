@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { getWorkspacePath } from '@opencode-manager/shared/config/env'
+import { mkdirSafe } from './fs-safe'
 
 const SSH_KEYS_DIR = join(getWorkspacePath(), '.ssh-keys')
 
@@ -11,7 +12,7 @@ async function ensureSSHKeysDir(): Promise<void> {
   try {
     await fs.access(SSH_KEYS_DIR)
   } catch {
-    await fs.mkdir(SSH_KEYS_DIR, { mode: 0o700, recursive: true })
+    await mkdirSafe(SSH_KEYS_DIR, { mode: 0o700 })
   }
 }
 
@@ -169,7 +170,7 @@ export async function writeSSHConfig(configPath: string, configContent: string):
   try {
     await fs.access(dir)
   } catch {
-    await fs.mkdir(dir, { mode: 0o700, recursive: true })
+    await mkdirSafe(dir, { mode: 0o700 })
   }
 
   await fs.writeFile(configPath, configContent, { mode: 0o600 })

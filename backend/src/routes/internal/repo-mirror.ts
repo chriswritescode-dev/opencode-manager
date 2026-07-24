@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'bun:sqlite'
 import { spawn } from 'child_process'
 import { copyFileSync, createReadStream, createWriteStream, existsSync } from 'fs'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'fs'
+import { mkdtempSync, writeFileSync } from 'fs'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
 import { join } from 'path'
@@ -12,6 +12,7 @@ import { getRepoById, updateLastPulled, updateRepoBranch, deleteRepo } from '../
 import { ensureMirrorTargetPath, createRepoRow, isRepoInUse } from '../../services/repo'
 import { logger } from '../../utils/logger'
 import { getErrorMessage } from '../../utils/error-utils'
+import { mkdirSyncSafe } from '../../utils/fs-safe'
 import { safeGitOut, gitOut } from './repo-sync-helpers'
 import {
   MIRROR_CHUNK_SIZE,
@@ -129,7 +130,7 @@ async function importBundle(fullPath: string, bundlePath: string, branch: string
 
 async function createBundle(fullPath: string): Promise<string> {
   const stagingRoot = getStagingRoot()
-  mkdirSync(stagingRoot, { recursive: true })
+  mkdirSyncSafe(stagingRoot)
   const bundleDir = mkdtempSync(join(stagingRoot, 'bundle-'))
   const bundlePath = join(bundleDir, 'repo.bundle')
   await gitRaw(fullPath, ['bundle', 'create', bundlePath, '--all'])
@@ -344,7 +345,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
     if (!rawBody) return c.json({ error: 'no body provided' }, 400)
 
     const stagingRoot = getStagingRoot()
-    mkdirSync(stagingRoot, { recursive: true })
+    mkdirSyncSafe(stagingRoot)
     const bundleDir = mkdtempSync(join(stagingRoot, 'bundle-upload-'))
     const bundlePath = join(bundleDir, 'repo.bundle')
     const branch = c.req.header('x-ocm-branch')?.trim() || null
@@ -497,7 +498,7 @@ export function createInternalRepoMirrorRoutes(db: Database) {
       const ignored = await gitOut(fullPath, ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory'])
       if (ignored.trim()) {
         const excludeParent = getStagingRoot()
-        mkdirSync(excludeParent, { recursive: true })
+        mkdirSyncSafe(excludeParent)
         ignoreFile = mkdtempSync(join(excludeParent, 'exclude-'))
         writeFileSync(join(ignoreFile, '.gitignore'), ignored)
         excludeArgs.push('--exclude-from', join(ignoreFile, '.gitignore'))

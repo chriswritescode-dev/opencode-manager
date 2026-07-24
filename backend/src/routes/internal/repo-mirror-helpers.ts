@@ -1,11 +1,12 @@
 import { spawn, spawnSync } from 'child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, statSync } from 'fs'
+import { existsSync, mkdtempSync, readdirSync, statSync } from 'fs'
 import * as fsp from 'fs/promises'
 import { createReadStream } from 'fs'
 import { dirname, join } from 'path'
 import { pipeline } from 'stream/promises'
 import { randomUUID } from 'crypto'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import { mkdirSafe, mkdirSyncSafe } from '../../utils/fs-safe'
 
 export const MIRROR_CHUNK_SIZE = 8 * 1024 * 1024
 const STALE_UPLOAD_MS = 24 * 60 * 60 * 1000
@@ -52,7 +53,7 @@ export function getPartPath(uploadId: string, index: number): string {
 
 export async function createUploadSession(meta: Omit<UploadMeta, 'uploadId' | 'startedAt'>): Promise<UploadMeta> {
   const uploadId = randomUUID()
-  mkdirSync(getPartsDir(uploadId), { recursive: true })
+  mkdirSyncSafe(getPartsDir(uploadId))
   const full: UploadMeta = { ...meta, uploadId, startedAt: Date.now() }
   await fsp.writeFile(getMetaPath(uploadId), JSON.stringify(full), 'utf-8')
   return full
@@ -99,7 +100,7 @@ export async function extractPartsToStaging(uploadId: string, totalParts: number
   }
 
   const stagingParent = getStagingRoot()
-  mkdirSync(stagingParent, { recursive: true })
+  mkdirSyncSafe(stagingParent)
   const staging = mkdtempSync(join(stagingParent, 'recv-'))
 
   const tarArgs = ['-x', '-f', '-', '-C', staging]
@@ -154,7 +155,7 @@ export interface SwapResult {
 }
 
 export async function atomicSwapIntoPlace(extractedRoot: string, fullPath: string): Promise<SwapResult> {
-  await fsp.mkdir(dirname(fullPath), { recursive: true })
+  await mkdirSafe(dirname(fullPath))
 
   let backupDir: string | undefined
   if (existsSync(fullPath)) {
@@ -191,7 +192,7 @@ export async function carryOverIgnoredFiles(backupDir: string | undefined, fullP
     const src = join(backupDir, clean)
     const dest = join(fullPath, clean)
     if (!existsSync(src) || existsSync(dest)) continue
-    await fsp.mkdir(dirname(dest), { recursive: true })
+    await mkdirSafe(dirname(dest))
     await fsp.rename(src, dest).catch(() => {})
   }
 }

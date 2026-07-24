@@ -2,6 +2,7 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import { logger } from '../utils/logger'
 import { getReposPath } from '@opencode-manager/shared/config/env'
+import { mkdirSafe } from '../utils/fs-safe'
 
 export async function readFileContent(filePath: string): Promise<string> {
   try {
@@ -29,7 +30,7 @@ export async function writeFileContent(
   try {
     const fullPath = path.isAbsolute(filePath) ? filePath : path.join(getReposPath(), filePath)
     
-    await fs.mkdir(path.dirname(fullPath), { recursive: true })
+    await mkdirSafe(path.dirname(fullPath))
     
     await fs.writeFile(fullPath, Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8'))
     logger.info(`Wrote file to: ${fullPath}`)
@@ -41,7 +42,7 @@ export async function writeFileContent(
 export async function ensureDirectoryExists(dirPath: string): Promise<void> {
   try {
     const fullPath = path.isAbsolute(dirPath) ? dirPath : path.resolve(dirPath)
-    await fs.mkdir(fullPath, { recursive: true })
+    await mkdirSafe(fullPath)
   } catch (error) {
     throw new Error(`Failed to create directory ${dirPath}: ${error}`)
   }
