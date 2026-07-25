@@ -72,7 +72,7 @@ When configured, users can enable push notifications in Settings → Notificatio
 | `PORT` | Server port | `5003` |
 | `HOST` | Server bind address | `0.0.0.0` |
 | `NODE_ENV` | Environment (`development` or `production`) | `development` |
-| `CORS_ORIGIN` | CORS origin for frontend | `http://localhost:5173` |
+| `CORS_ORIGIN` | **Unused / deprecated.** Parsed by `shared/src/config` but consumed nowhere; the effective CORS control is `AUTH_TRUSTED_ORIGINS` (see [Authentication](./authentication.md)). Kept for backwards compatibility — do not rely on it. | `http://localhost:5173` |
 | `LOG_LEVEL` | Logging level | `info` |
 | `DEBUG` | Enable debug logging | `false` |
 
@@ -128,7 +128,7 @@ When configured, users can enable push notifications in Settings → Notificatio
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `VITE_API_URL` | Backend API URL for frontend | `http://localhost:5003` |
+| `VITE_API_URL` | Backend API URL for frontend. Defaults to `''` (empty), making the app same-origin — the backend serves the built frontend (`backend/src/index.ts`) and dev uses the Vite `/api` proxy (`frontend/vite.config.ts`). Setting it to a different host puts the app in an **unsupported split-origin mode**; see the open question in `Decisions.md` ("is split-origin deployment supported?") before doing so. | `''` |
 | `VITE_SERVER_PORT` | Backend port hint for frontend | `5003` |
 | `VITE_OPENCODE_PORT` | OpenCode server port hint | `5551` |
 | `VITE_MAX_FILE_SIZE_MB` | File size limit for frontend | `50` |

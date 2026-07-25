@@ -1,34 +1,12 @@
 import { redirect } from 'react-router-dom'
 import { getSession } from './auth-client'
+import { getAuthConfig, type AuthConfig } from '@/api/authInfo'
 
-export interface AuthConfig {
-  enabledProviders: string[]
-  registrationEnabled: boolean
-  isFirstUser: boolean
-  adminConfigured: boolean
-}
-
-async function fetchAuthConfig(): Promise<AuthConfig> {
-  const defaultConfig: AuthConfig = {
-    enabledProviders: ['credentials'],
-    registrationEnabled: true,
-    isFirstUser: false,
-    adminConfigured: false,
-  }
-  const response = await fetch('/api/auth-info/config')
-  if (!response.ok) {
-    return defaultConfig
-  }
-  try {
-    return await response.json()
-  } catch {
-    return defaultConfig
-  }
-}
+export type { AuthConfig }
 
 export async function loginLoader() {
   const [config, session] = await Promise.all([
-    fetchAuthConfig(),
+    getAuthConfig(),
     getSession(),
   ])
 
@@ -45,7 +23,7 @@ export async function loginLoader() {
 
 export async function setupLoader() {
   const [config, session] = await Promise.all([
-    fetchAuthConfig(),
+    getAuthConfig(),
     getSession(),
   ])
 
@@ -62,7 +40,7 @@ export async function setupLoader() {
 
 export async function registerLoader() {
   const [config, session] = await Promise.all([
-    fetchAuthConfig(),
+    getAuthConfig(),
     getSession(),
   ])
 
