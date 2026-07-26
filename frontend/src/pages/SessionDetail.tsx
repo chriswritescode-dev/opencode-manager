@@ -462,7 +462,7 @@ export function SessionDetail() {
         data-testid="session-header-region"
         className="flex-shrink-0 overflow-hidden bg-background max-h-72 sm:max-h-80"
       >
-        <Header className="bg-background [&_button]:bg-black [&_button]:text-white [&_button]:border-zinc-700 [&_button:hover]:bg-zinc-900">
+        <Header className="bg-background">
           <div className="flex items-center gap-1.5 sm:gap-3 min-w-0 flex-1">
             {session?.parentID ? (
               <>
@@ -489,7 +489,7 @@ export function SessionDetail() {
               subtitle={<span className="text-orange-600 dark:text-orange-400">{workspaceDisplayName}</span>}
             />
           </div>
-          <Header.Actions className="gap-2 sm:gap-4">
+          <Header.Actions className="gap-2 sm:gap-4 [&_button]:bg-secondary [&_button]:text-secondary-foreground [&_button]:border-border [&_button:hover]:bg-accent">
             <div className="flex items-center gap-1">
               <PendingActionsGroup />
             </div>

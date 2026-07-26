@@ -46,7 +46,7 @@ html {
   overscroll-behavior-x: none;
 }
 
-:root:not(.dark) html {
+html:not(.dark) {
   background-color: #ffffff;
 }
 
@@ -147,7 +147,7 @@ body {
 }
 
 .shine-loading {
-  background: linear-gradient(90deg, 
+  background: linear-gradient(90deg,
     rgba(255, 255, 255, 0.2) 0%,
     rgba(255, 255, 255, 0.2) 40%,
     rgba(255, 255, 255, 0.4) 50%,
@@ -155,6 +155,23 @@ body {
     rgba(255, 255, 255, 0.8) 70%,
     rgba(255, 255, 255, 1) 80%,
     rgba(255, 255, 255, 0.2) 100%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: shine-loading 3s linear infinite;
+}
+
+:root:not(.dark) .shine-loading {
+  background: linear-gradient(90deg,
+    rgba(0, 0, 0, 0.3) 0%,
+    rgba(0, 0, 0, 0.3) 40%,
+    rgba(0, 0, 0, 0.5) 50%,
+    rgba(0, 0, 0, 0.7) 60%,
+    rgba(0, 0, 0, 0.85) 70%,
+    rgba(0, 0, 0, 1) 80%,
+    rgba(0, 0, 0, 0.3) 100%
   );
   background-size: 200% 100%;
   background-clip: text;
