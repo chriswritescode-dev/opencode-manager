@@ -12,6 +12,7 @@ import { createHealthRoutes } from './routes/health'
 import { createTTSRoutes, cleanupExpiredCache } from './routes/tts';
 import { createSTTRoutes } from './routes/stt'
 import { createFileRoutes } from './routes/files'
+import { createFilesystemRoutes } from './routes/filesystem'
 import { createScheduleRoutes } from './routes/schedules'
 
 async function getAppVersion(): Promise<string> {
@@ -357,7 +358,8 @@ protectedApi.use('/*', requireAuth)
 
 protectedApi.route('/repos', createRepoRoutes(db, gitAuthService, scheduleService, openCodeClient, openCodeSupervisor))
 protectedApi.route('/settings', createSettingsRoutes(db, gitAuthService, openCodeClient, openCodeSupervisor))
-protectedApi.route('/files', createFileRoutes())
+  protectedApi.route('/files', createFileRoutes())
+  protectedApi.route('/filesystem', createFilesystemRoutes())
 protectedApi.route('/providers', createProvidersRoutes(db, openCodeClient, openCodeSupervisor))
 protectedApi.route('/oauth', createOAuthRoutes(openCodeClient, openCodeSupervisor))
 protectedApi.route('/tts', createTTSRoutes(db))

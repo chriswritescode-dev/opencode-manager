@@ -37,6 +37,11 @@ import {
   MessageSchema,
 } from '../schemas/opencode'
 import {
+  DirectoryEntrySchema,
+  BrowseDirectoryResponseSchema,
+  BrowseDirectoryRequestSchema,
+} from '../schemas/filesystem'
+import {
   NotificationPreferencesSchema,
   PushSubscriptionRequestSchema,
   PushSubscriptionRecordSchema,
@@ -81,6 +86,10 @@ export type FilePatchRequest = z.infer<typeof FilePatchRequestSchema>
 
 export type Session = z.infer<typeof SessionSchema>
 export type Message = z.infer<typeof MessageSchema>
+
+export type DirectoryEntry = z.infer<typeof DirectoryEntrySchema>
+export type BrowseDirectoryResponse = z.infer<typeof BrowseDirectoryResponseSchema>
+export type BrowseDirectoryRequest = z.infer<typeof BrowseDirectoryRequestSchema>
 
 export type NotificationPreferences = z.infer<typeof NotificationPreferencesSchema>
 export type PushSubscriptionRequest = z.infer<typeof PushSubscriptionRequestSchema>
