@@ -158,6 +158,7 @@ interface EventContextValue {
     reject: (requestID: string) => Promise<void>
     dismiss: (requestID: string, sessionID?: string) => void
     getForCallID: (callID: string, sessionID: string) => QuestionRequest | null
+    getForSession: (sessionID: string) => QuestionRequest | null
     hasForSession: (sessionID: string) => boolean
     navigateToCurrent: () => void
     syncForSession: (directory: string, sessionID: string) => Promise<void>
@@ -404,6 +405,10 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     return (permissionsBySession[sessionID]?.length ?? 0) > 0
   }, [permissionsBySession])
 
+  const getQuestionForSession = useCallback((sessionID: string): QuestionRequest | null => {
+    return questionsBySession[sessionID]?.[0] ?? null
+  }, [questionsBySession])
+
   const hasQuestionsForSession = useCallback((sessionID: string): boolean => {
     return (questionsBySession[sessionID]?.length ?? 0) > 0
   }, [questionsBySession])
@@ -597,6 +602,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
       reject: rejectQuestion,
       dismiss: removeQuestion,
       getForCallID: getQuestionForCallID,
+      getForSession: getQuestionForSession,
       hasForSession: hasQuestionsForSession,
       navigateToCurrent: navigateToCurrentQuestion,
       syncForSession: syncQuestionsForSession,
@@ -622,6 +628,7 @@ export function EventProvider({ children }: { children: React.ReactNode }) {
     rejectQuestion,
     removeQuestion,
     getQuestionForCallID,
+    getQuestionForSession,
     hasQuestionsForSession,
     navigateToCurrentQuestion,
     syncQuestionsForSession,
