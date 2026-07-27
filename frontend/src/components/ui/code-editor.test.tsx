@@ -16,11 +16,6 @@ describe('CodeEditor', () => {
     expect(screen.getByText('2')).toBeInTheDocument()
   })
 
-  it('omits the gutter when showLineNumbers is false', () => {
-    const { container } = render(<CodeEditor value={'a\nb'} onChange={vi.fn()} showLineNumbers={false} ariaLabel="config" />)
-    expect(container.querySelectorAll('[data-line-number]')).toHaveLength(0)
-  })
-
   it('reports edits through onChange', async () => {
     const onChange = vi.fn()
     const user = userEvent.setup()
@@ -33,7 +28,7 @@ describe('CodeEditor', () => {
     const { container } = render(<CodeEditor value={'a'} onChange={vi.fn()} ariaLabel="config" />)
     const textarea = screen.getByLabelText('config')
     const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
-    for (const token of ['font-mono', 'text-[16px]', 'md:text-sm', 'leading-6', '[tab-size:2]', 'whitespace-pre-wrap', '[overflow-wrap:anywhere]', 'py-2', 'pr-3', 'pl-10', '[scrollbar-gutter:stable]']) {
+    for (const token of ['font-mono', 'text-[16px]', 'min-[769px]:text-sm', 'leading-6', '[tab-size:2]', 'whitespace-pre-wrap', '[overflow-wrap:anywhere]', 'py-2', 'pr-3', 'pl-10', '[scrollbar-gutter:stable]']) {
       expect(textarea.className).toContain(token)
       expect(mirror.className).toContain(token)
     }
@@ -203,7 +198,7 @@ describe('CodeEditor', () => {
         highlights={[
           { startIndex: startIdx, endIndex: startEnd },
           { startIndex: endIdx, endIndex: endEnd },
-        ]} activeHighlightIndex={1} />,
+        ]} activeHighlightIndex={1} revealNonce={1} />,
     )
     expect(textarea.scrollTop).toBe(1400)
     expect(mirror.scrollTop).toBe(1400)
@@ -238,7 +233,7 @@ describe('CodeEditor', () => {
         highlights={[
           { startIndex: startIdx, endIndex: startEnd },
           { startIndex: endIdx, endIndex: endEnd },
-        ]} activeHighlightIndex={0} />,
+        ]} activeHighlightIndex={0} revealNonce={1} />,
     )
     expect(textarea.scrollTop).toBe(0)
     expect(mirror.scrollTop).toBe(0)
@@ -263,8 +258,34 @@ describe('CodeEditor', () => {
 
     rerender(
       <CodeEditor value={longValue} onChange={vi.fn()} ariaLabel="config"
-        highlights={[{ startIndex: startIdx, endIndex: startEnd }]} activeHighlightIndex={0} />,
+        highlights={[{ startIndex: startIdx, endIndex: startEnd }]} activeHighlightIndex={0} revealNonce={1} />,
     )
     expect(textarea.scrollTop).toBe(0)
+  })
+
+  it('leaves the scroll position alone while typing away from the active match', () => {
+    const value = 'needle\n' + Array.from({ length: 40 }, (_, i) => `line ${i}`).join('\n')
+
+    const { container, rerender } = render(
+      <CodeEditor value={value} onChange={vi.fn()} ariaLabel="config"
+        highlights={[{ startIndex: 0, endIndex: 6 }]} activeHighlightIndex={0} />,
+    )
+    const textarea = screen.getByLabelText('config') as HTMLTextAreaElement
+    Object.defineProperty(textarea, 'clientHeight', { configurable: true, value: 200 })
+    Object.defineProperty(textarea, 'scrollHeight', { configurable: true, value: 960 })
+    const mirror = container.querySelector('[data-editor-mirror]') as HTMLElement
+    patchRect(mirror, rect(0, 960))
+    patchRect(container.querySelectorAll('mark')[0], rect(0, 24))
+
+    textarea.scrollTop = 500
+    mirror.scrollTop = 500
+
+    rerender(
+      <CodeEditor value={`${value}\ntrailing`} onChange={vi.fn()} ariaLabel="config"
+        highlights={[{ startIndex: 0, endIndex: 6 }]} activeHighlightIndex={0} />,
+    )
+
+    expect(textarea.scrollTop).toBe(500)
+    expect(mirror.scrollTop).toBe(500)
   })
 })

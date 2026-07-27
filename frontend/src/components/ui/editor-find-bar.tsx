@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
-export interface EditorFindBarProps {
+interface EditorFindBarProps {
   query: string
   onQueryChange: (query: string) => void
   matchCount: number

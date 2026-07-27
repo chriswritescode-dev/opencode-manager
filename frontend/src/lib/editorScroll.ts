@@ -1,4 +1,4 @@
-export interface RowScrollInput {
+interface RowScrollInput {
   rowTop: number
   rowHeight: number
   viewportHeight: number

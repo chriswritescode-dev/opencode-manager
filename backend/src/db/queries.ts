@@ -291,20 +291,6 @@ export function getRepoName(repo: Repo): string {
   return getRepoDisplayName(repo)
 }
 
-/**
- * Atomically claim a repo row for retry by flipping clone_status
- * error -> cloning in a single UPDATE. Returns true only when this caller
- * performed the transition, so concurrent retry requests for the same repo
- * cannot both proceed to delete and re-clone the same path.
- */
-export function claimRepoForRetry(db: Database, id: number): boolean {
-  const stmt = db.prepare(
-    'UPDATE repos SET clone_status = ? WHERE id = ? AND clone_status = ?'
-  )
-  const result = stmt.run('cloning', id, 'error')
-  return result.changes > 0
-}
-
 export function updateRepoStatus(db: Database, id: number, cloneStatus: Repo['cloneStatus']): void {
   const stmt = db.prepare('UPDATE repos SET clone_status = ? WHERE id = ?')
   const result = stmt.run(cloneStatus, id)

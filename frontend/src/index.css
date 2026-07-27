@@ -319,8 +319,8 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Prevent iOS zoom on all input elements — must end below Tailwind's 768px `md` breakpoint */
-@media (max-width: 767px) {
+/* Prevent iOS zoom on all input elements */
+@media (max-width: 768px) {
   input[type="text"],
   input[type="email"],
   input[type="password"],

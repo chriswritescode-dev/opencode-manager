@@ -359,36 +359,6 @@ app.get('/', async (c) => {
     }
   })
 
-
-  app.post('/:id/retry-clone', async (c) => {
-    try {
-      const id = parseInt(c.req.param('id'))
-      if (Number.isNaN(id)) return c.json({ error: 'Invalid repo id' }, 400)
-      if (id === ASSISTANT_REPO_ID) {
-        return c.json({ error: 'Assistant repository cannot be retried' }, 400)
-      }
-
-      const repo = getRepoById(database, id)
-      if (!repo) {
-        return c.json({ error: 'Repo not found' }, 404)
-      }
-      if (!repo.repoUrl) {
-        return c.json({ error: 'Only remote repositories can be retried' }, 400)
-      }
-      if (repo.cloneStatus !== 'error' && repo.cloneStatus !== 'cloning') {
-        return c.json({ error: 'Repo is not in a retryable state' }, 409)
-      }
-
-      const retried = await repoService.retryCloneRepo(database, gitAuthService, id)
-      const currentBranch = await repoService.getCurrentBranch(retried, gitAuthService.getGitEnvironment())
-
-      return c.json({ ...withRepoSettings(database, retried), currentBranch })
-    } catch (error: unknown) {
-      logger.error('Failed to retry clone:', error)
-      return c.json({ error: getErrorMessage(error) }, getStatusCode(error) as ContentfulStatusCode)
-    }
-  })
-
   app.post('/:id/config/switch', async (c) => {
     try {
       const id = parseInt(c.req.param('id'))

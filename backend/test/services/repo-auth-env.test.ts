@@ -24,16 +24,11 @@ vi.mock('node:fs', () => ({
   rmSync: vi.fn(),
 }))
 
-const setRepoSetting = vi.fn()
-const getRepoSetting = vi.fn()
-
 vi.mock('../../src/db/queries', () => ({
   getRepoByUrlAndBranch,
   createRepo,
   updateRepoStatus,
   deleteRepo,
-  setRepoSetting,
-  getRepoSetting,
 }))
 
 vi.mock('../../src/services/settings', () => ({
@@ -69,7 +64,6 @@ const mockGitAuthService = {
 describe('repoService.cloneRepo auth env', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    getRepoSetting.mockReturnValue(null)
   })
 
   it('passes github extraheader env to git clone', async () => {
@@ -102,56 +96,5 @@ describe('repoService.cloneRepo auth env', () => {
     expect(ensureDirectoryExists).toHaveBeenCalledWith(getReposPath())
     expect(updateRepoStatus).toHaveBeenCalledWith(database, 1, 'ready')
     expect(deleteRepo).not.toHaveBeenCalled()
-  })
-
-  it('persists the skipSSHVerification flag at create time so retry can preserve it', async () => {
-    const { cloneRepo } = await import('../../src/services/repo')
-
-    const database = {} as any
-    const repoUrl = 'ssh://git@example.com/acme/forge.git'
-
-    getRepoByUrlAndBranch.mockReturnValue(null)
-    createRepo.mockReturnValue({
-      id: 7,
-      repoUrl,
-      localPath: 'forge',
-      defaultBranch: 'main',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
-    })
-    existsSync.mockReturnValue(false)
-    executeCommand.mockResolvedValue('')
-
-    await cloneRepo(database, mockGitAuthService, repoUrl, { skipSSHVerification: true })
-
-    expect(setRepoSetting).toHaveBeenCalledWith(database, 7, 'skipSSHVerification', 'true')
-  })
-
-  it('does not persist a skipSSHVerification row when the flag is false (default)', async () => {
-    const { cloneRepo } = await import('../../src/services/repo')
-
-    const database = {} as any
-    const repoUrl = 'https://github.com/acme/forge.git'
-
-    getRepoByUrlAndBranch.mockReturnValue(null)
-    createRepo.mockReturnValue({
-      id: 8,
-      repoUrl,
-      localPath: 'forge',
-      defaultBranch: 'main',
-      cloneStatus: 'cloning',
-      clonedAt: Date.now(),
-    })
-    existsSync.mockReturnValue(false)
-    executeCommand.mockResolvedValue('')
-
-    await cloneRepo(database, mockGitAuthService, repoUrl)
-
-    expect(setRepoSetting).not.toHaveBeenCalledWith(
-      database,
-      8,
-      'skipSSHVerification',
-      expect.anything()
-    )
   })
 })

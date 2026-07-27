@@ -1,20 +1,19 @@
-import { useMemo, useRef, useEffect, forwardRef, useCallback } from 'react'
+import { useMemo, useRef, useEffect, forwardRef, useCallback, memo, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 import { computeScrollTopForRow } from '@/lib/editorScroll'
 
-export interface CodeEditorHighlight {
+interface CodeEditorHighlight {
   startIndex: number
   endIndex: number
 }
 
-export interface CodeEditorProps {
+interface CodeEditorProps {
   value: string
   onChange: (value: string) => void
   highlights?: CodeEditorHighlight[]
   activeHighlightIndex?: number
   activeLine?: number | null
   revealNonce?: number
-  showLineNumbers?: boolean
   autoFocus?: boolean
   disabled?: boolean
   placeholder?: string
@@ -24,7 +23,7 @@ export interface CodeEditorProps {
 }
 
 const SURFACE_CLASS =
-  'font-mono text-[16px] md:text-sm leading-6 [tab-size:2] whitespace-pre-wrap [overflow-wrap:anywhere] py-2 pr-3 pl-10 [scrollbar-gutter:stable]'
+  'font-mono text-[16px] min-[769px]:text-sm leading-6 [tab-size:2] whitespace-pre-wrap [overflow-wrap:anywhere] py-2 pr-3 pl-10 [scrollbar-gutter:stable]'
 
 interface RowHighlight {
   start: number
@@ -32,6 +31,8 @@ interface RowHighlight {
   index: number
   first: boolean
 }
+
+const EMPTY_ROW_HIGHLIGHTS: RowHighlight[] = []
 
 function lineNumberForOffset(lineStarts: number[], offset: number): number {
   let lo = 0
@@ -44,6 +45,71 @@ function lineNumberForOffset(lineStarts: number[], offset: number): number {
   return lo + 1
 }
 
+interface EditorRowProps {
+  line: string
+  lineNumber: number
+  isActiveLine: boolean
+  highlights: RowHighlight[]
+  activeHighlightIndex?: number
+}
+
+const EditorRow = memo(function EditorRow({
+  line,
+  lineNumber,
+  isActiveLine,
+  highlights,
+  activeHighlightIndex,
+}: EditorRowProps) {
+  return (
+    <div data-line={lineNumber} className="relative">
+      <span
+        data-line-number
+        className={cn(
+          'pointer-events-none absolute -left-10 top-0 w-10 select-none pr-2 text-right',
+          isActiveLine ? 'text-destructive font-semibold' : 'text-muted-foreground',
+        )}
+      >
+        {lineNumber}
+      </span>
+      {isActiveLine && (
+        <span
+          data-active-line
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 -left-10 -right-3 bg-destructive/15"
+        />
+      )}
+      {highlights.length === 0
+        ? line.length > 0
+          ? line
+          : '\u200b'
+        : highlights.map((h, i) => {
+            const previous = i === 0 ? 0 : highlights[i - 1].end
+            const nodes: ReactNode[] = []
+            if (h.start > previous) {
+              nodes.push(line.substring(previous, h.start))
+            }
+            nodes.push(
+              <mark
+                key={h.index}
+                data-active-match={h.first && h.index === activeHighlightIndex ? 'true' : undefined}
+                className={
+                  h.index === activeHighlightIndex
+                    ? 'rounded-sm bg-orange-400 text-black'
+                    : 'rounded-sm bg-yellow-300/60 text-black'
+                }
+              >
+                {line.substring(h.start, h.end)}
+              </mark>,
+            )
+            if (i === highlights.length - 1 && h.end < line.length) {
+              nodes.push(line.substring(h.end))
+            }
+            return <span key={`frag-${h.index}`}>{nodes}</span>
+          })}
+    </div>
+  )
+})
+
 export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(function CodeEditor(
   {
     value,
@@ -52,7 +118,6 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(funct
     activeHighlightIndex,
     activeLine,
     revealNonce = 0,
-    showLineNumbers = true,
     autoFocus,
     disabled,
     placeholder,
@@ -74,9 +139,9 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(funct
     return starts
   }, [lines])
 
-  const rowHighlights = useMemo<RowHighlight[][]>(() => {
+  const rowHighlights = useMemo<RowHighlight[][] | null>(() => {
+    if (!highlights?.length) return null
     const buckets: RowHighlight[][] = lines.map(() => [])
-    if (!highlights?.length) return buckets
     const ordered = highlights
       .map((h, index) => ({ startIndex: h.startIndex, endIndex: h.endIndex, index }))
       .sort((a, b) => a.startIndex - b.startIndex)
@@ -167,68 +232,17 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(funct
     revealLine(activeLine)
   }, [activeLine, revealNonce, revealLine])
 
-  useEffect(() => {
-    if (activeHighlightIndex == null) return
-    const highlight = highlights?.[activeHighlightIndex]
-    if (!highlight) return
-    if (revealActiveMark()) return
-    revealLine(lineNumberForOffset(lineStarts, highlight.startIndex))
-  }, [activeHighlightIndex, highlights, lineStarts, revealLine, revealActiveMark])
+  const activeHighlightStart =
+    activeHighlightIndex == null ? null : highlights?.[activeHighlightIndex]?.startIndex ?? null
 
-  const renderRow = (line: string, index: number) => {
-    const isActiveLine = activeLine === index + 1
-    const highlightsForRow = rowHighlights[index]
-    return (
-      <div key={index} data-line={index + 1} className="relative">
-        {showLineNumbers && (
-          <span
-            data-line-number
-            className={cn(
-              'pointer-events-none absolute -left-10 top-0 w-10 select-none pr-2 text-right',
-              isActiveLine ? 'text-destructive font-semibold' : 'text-muted-foreground',
-            )}
-          >
-            {index + 1}
-          </span>
-        )}
-        {isActiveLine && (
-          <span
-            data-active-line
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 -left-10 -right-3 bg-destructive/15"
-          />
-        )}
-        {highlightsForRow.length === 0
-          ? line.length > 0
-            ? line
-            : '\u200b'
-          : highlightsForRow.map((h, i) => {
-              const previous = i === 0 ? 0 : highlightsForRow[i - 1].end
-              const nodes: React.ReactNode[] = []
-              if (h.start > previous) {
-                nodes.push(line.substring(previous, h.start))
-              }
-              nodes.push(
-                <mark
-                  key={h.index}
-                  data-active-match={h.first && h.index === activeHighlightIndex ? 'true' : undefined}
-                  className={
-                    h.index === activeHighlightIndex
-                      ? 'rounded-sm bg-orange-400 text-black'
-                      : 'rounded-sm bg-yellow-300/60 text-black'
-                  }
-                >
-                  {line.substring(h.start, h.end)}
-                </mark>,
-              )
-              if (i === highlightsForRow.length - 1 && h.end < line.length) {
-                nodes.push(line.substring(h.end))
-              }
-              return <span key={`frag-${h.index}`}>{nodes}</span>
-            })}
-      </div>
-    )
-  }
+  const lineStartsRef = useRef(lineStarts)
+  lineStartsRef.current = lineStarts
+
+  useEffect(() => {
+    if (activeHighlightStart == null) return
+    if (revealActiveMark()) return
+    revealLine(lineNumberForOffset(lineStartsRef.current, activeHighlightStart))
+  }, [activeHighlightStart, revealNonce, revealLine, revealActiveMark])
 
   return (
     <div className={cn('relative h-full w-full overflow-hidden', className)}>
@@ -242,7 +256,16 @@ export const CodeEditor = forwardRef<HTMLTextAreaElement, CodeEditorProps>(funct
           hasHighlights ? 'text-foreground' : 'text-transparent',
         )}
       >
-        {lines.map(renderRow)}
+        {lines.map((line, index) => (
+          <EditorRow
+            key={index}
+            line={line}
+            lineNumber={index + 1}
+            isActiveLine={activeLine === index + 1}
+            highlights={rowHighlights?.[index] ?? EMPTY_ROW_HIGHLIGHTS}
+            activeHighlightIndex={activeHighlightIndex}
+          />
+        ))}
       </div>
       <textarea
         id={id}

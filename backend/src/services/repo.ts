@@ -2,12 +2,12 @@ import fs from 'fs/promises'
 import { existsSync, rmSync, realpathSync } from 'node:fs'
 import { executeCommand } from '../utils/process'
 import { ensureDirectoryExists } from './file-operations'
-import { createRepo, getRepoByLocalPath, getRepoBySourcePath, getRepoById, updateRepoStatus, updateRepoBranch, updateLastPulled, deleteRepo, getRepoByUrlAndBranch, claimRepoForRetry, getRepoSetting, setRepoSetting } from '../db/queries'
+import { createRepo, getRepoByLocalPath, getRepoBySourcePath, getRepoById, updateRepoStatus, updateRepoBranch, updateLastPulled, deleteRepo, getRepoByUrlAndBranch } from '../db/queries'
 import type { Database } from 'bun:sqlite'
 import type { Repo, CreateRepoInput } from '../types/repo'
 import { logger } from '../utils/logger'
 import { getReposPath, getScheduleWorktreesPath } from '@opencode-manager/shared/config/env'
-import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare, getRepoBaseDirectoryName } from '@opencode-manager/shared/utils'
+import { normalizeRepoDirectoryName, sanitizeRepoDirectoryName, sanitizeBranchForDirectory, normalizeRepoUrlForCompare } from '@opencode-manager/shared/utils'
 import type { GitAuthService } from './git-auth'
 import { isGitHubHttpsUrl, isSSHUrl, normalizeSSHUrl } from '../utils/git-auth'
 import path from 'path'
@@ -24,9 +24,6 @@ import { mkdirSafe } from '../utils/fs-safe'
 const GIT_CLONE_TIMEOUT = 300000
 const DEFAULT_DISCOVERY_MAX_DEPTH = 4
 const DISCOVERY_SKIP_DIRECTORIES = new Set(['.git', 'node_modules'])
-
-const REPO_WORKTREE_BASE_BRANCH_SETTING_KEY = 'worktreeBaseBranch'
-const REPO_SKIP_SSH_VERIFICATION_SETTING_KEY = 'skipSSHVerification'
 
 function canonical(dir: string): string {
   try {
@@ -638,18 +635,6 @@ export async function cloneRepo(
   
   const repo = createRepo(database, createRepoInput)
 
-  if (shouldUseWorktree && baseBranch) {
-    setRepoSetting(database, repo.id, REPO_WORKTREE_BASE_BRANCH_SETTING_KEY, baseBranch)
-  }
-
-  // Persist the original SSH-verification preference so retryCloneRepo can
-  // re-establish the same trust posture (host-verification skipped or not)
-  // without the caller re-supplying it. Only persisted when truthy so the
-  // default (verify hosts) stays the implicit baseline.
-  if (skipSSHVerification) {
-    setRepoSetting(database, repo.id, REPO_SKIP_SSH_VERIFICATION_SETTING_KEY, 'true')
-  }
-
   try {
     await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
 
@@ -849,151 +834,8 @@ export async function cloneRepo(
     return { ...repo, cloneStatus: 'ready' }
   } catch (error: unknown) {
     logger.error(`Failed to create repo: ${normalizedRepoUrl}${branch ? `#${branch}` : ''}`, error)
-    updateRepoStatus(database, repo.id, 'error')
+    deleteRepo(database, repo.id)
     throw error
-  } finally {
-    await gitAuthService.cleanupSSHKey()
-  }
-}
-
-
-/**
- * Atomically re-run the remote clone for an existing repository row.
- *
- * Preserves the repository record (id, localPath, branch, defaultBranch,
- * stored repoUrl, git credential association) and only mutates cloneStatus:
- * 'cloning' while the clone is in flight, 'ready' on success, 'error' on
- * failure. The stored row is never deleted and never recreated, so the
- * identity/configuration captured at create time stays stable across retries.
- */
-export async function retryCloneRepo(
-  database: Database,
-  gitAuthService: GitAuthService,
-  repoId: number
-): Promise<Repo> {
-  const repo = getRepoById(database, repoId)
-  if (!repo) {
-    throw new Error(`Repo not found: ${repoId}`)
-  }
-  if (!repo.repoUrl) {
-    throw new Error('Only remote repositories with a stored clone URL can be retried')
-  }
-  if (repo.cloneStatus !== 'error' && repo.cloneStatus !== 'cloning') {
-    throw new Error(`Repo is not in a retryable state: ${repo.cloneStatus}`)
-  }
-
-  // Concurrency guard: only the caller that atomically flips error -> cloning
-  // proceeds. A second concurrent retry request loses the CAS and short-
-  // circuits before touching the filesystem or the row. This prevents the
-  // double-tap race where two retries delete + clone the same path and one
-  // failure clobbers a ready success with error.
-  if (!claimRepoForRetry(database, repoId)) {
-    throw new Error('Repo retry is already in progress')
-  }
-
-  const effectiveUrl = normalizeSSHUrl(repo.repoUrl)
-  const isSSH = isSSHUrl(effectiveUrl)
-  const branch = repo.branch
-  const localPath = repo.localPath
-  const isWorktree = repo.isWorktree === true
-  // Preserve the original create-time SSH-verification posture. Hard-coding
-  // false here would silently downgrade a repo whose first clone succeeded
-  // only because host verification was skipped (host not yet in known_hosts);
-  // its retry would then fail with a host-key prompt instead of recovering.
-  const skipSSHVerification = getRepoSetting(database, repoId, REPO_SKIP_SSH_VERIFICATION_SETTING_KEY) === 'true'
-
-  logger.info(
-    `Retrying clone for repo ${repoId}: ${repo.repoUrl}${branch ? `#${branch}` : ''}${isWorktree ? ' (worktree)' : ''}`
-  )
-
-  try {
-    await gitAuthService.setupSSHForRepoUrl(effectiveUrl, database, skipSSHVerification)
-
-    const env = {
-      ...gitAuthService.getGitEnvironment(),
-      ...(isSSH ? gitAuthService.getSSHEnvironment() : {})
-    }
-
-    const targetPath = path.join(getReposPath(), localPath)
-    if (existsSync(targetPath)) {
-      logger.info(`Removing stale partial directory before retry: ${localPath}`)
-      rmSync(targetPath, { recursive: true, force: true })
-    }
-
-    if (isWorktree) {
-      // A worktree must be re-created as a worktree off its base repo, not as
-      // a standalone clone. Recreating it via `git clone` would leave the row
-      // flagged isWorktree=true while pointing at a non-worktree checkout,
-      // breaking worktree-aware teardown and the segmented-spine UI contract.
-      if (!branch) {
-        throw new Error('Worktree retry requires a stored branch')
-      }
-      const baseDirName = getRepoBaseDirectoryName(repo)
-      const baseRepoPath = path.resolve(getReposPath(), baseDirName)
-      if (!existsSync(baseRepoPath)) {
-        throw new Error(`Base repository for worktree retry not found: ${baseDirName}`)
-      }
-      const worktreePath = path.resolve(getReposPath(), localPath)
-
-      await executeCommand(['git', '-C', baseRepoPath, 'fetch', '--all'], {
-        cwd: getReposPath(),
-        env
-      })
-      const baseBranchSetting = getRepoSetting(database, repoId, REPO_WORKTREE_BASE_BRANCH_SETTING_KEY) ?? undefined
-      await createWorktreeSafely(baseRepoPath, worktreePath, branch, env, baseBranchSetting)
-
-      if (!existsSync(worktreePath)) {
-        throw new Error(`Worktree directory was not created at: ${worktreePath}`)
-      }
-    } else {
-      const cloneCmd = branch
-        ? ['git', 'clone', '-b', branch, effectiveUrl, localPath]
-        : ['git', 'clone', effectiveUrl, localPath]
-      try {
-        await executeCommand(cloneCmd, { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
-      } catch (error: unknown) {
-        const message = getErrorMessage(error)
-        // Mirror the create-time clone fallback: if the stored branch does
-        // not exist on the remote (e.g. it was created locally and never
-        // pushed, or the remote pruned it), a retry that re-runs `git clone
-        // -b <branch>` would fail forever. Recover by cloning the default
-        // branch and creating/checking out the requested branch locally so
-        // the row can transition to 'ready' instead of being stuck in
-        // 'error' across every retry.
-        if (branch && (message.includes('Remote branch') || message.includes('not found'))) {
-          logger.info(`Retry clone: branch '${branch}' not found on remote, cloning default branch and creating '${branch}' locally`)
-          try {
-            await executeCommand(['git', 'clone', effectiveUrl, localPath], { cwd: getReposPath(), env, timeout: GIT_CLONE_TIMEOUT })
-          } catch (cloneError: unknown) {
-            throw enhanceCloneError(cloneError, repo.repoUrl, getErrorMessage(cloneError))
-          }
-          const resolvedWorktreePath = path.resolve(getReposPath(), localPath)
-          let localBranchExists = 'missing'
-          try {
-            await executeCommand(['git', '-C', resolvedWorktreePath, 'rev-parse', '--verify', `refs/heads/${branch}`])
-            localBranchExists = 'exists'
-          } catch {
-            localBranchExists = 'missing'
-          }
-          if (localBranchExists.trim() === 'missing') {
-            await executeCommand(['git', '-C', resolvedWorktreePath, 'checkout', '-b', branch])
-          } else {
-            await executeCommand(['git', '-C', resolvedWorktreePath, 'checkout', branch])
-          }
-        } else {
-          throw enhanceCloneError(error, repo.repoUrl, message)
-        }
-      }
-    }
-
-    updateRepoStatus(database, repoId, 'ready')
-    updateLastPulled(database, repoId)
-    logger.info(`Retry clone succeeded for repo ${repoId}`)
-    return { ...repo, cloneStatus: 'ready' }
-  } catch (error: unknown) {
-    logger.error(`Retry clone failed for repo ${repoId}:`, error)
-    updateRepoStatus(database, repoId, 'error')
-    throw enhanceCloneError(error, repo.repoUrl, getErrorMessage(error))
   } finally {
     await gitAuthService.cleanupSSHKey()
   }

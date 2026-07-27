@@ -82,7 +82,8 @@ describe('SkillsEditor', () => {
     await user.click(screen.getByText('Install Skill'))
 
     const urlInput = screen.getByPlaceholderText('Paste a GitHub skill URL')
-    await user.type(urlInput, 'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach')
+    await user.click(urlInput)
+    await user.paste('https://github.com/mattpocock/skills/tree/main/skills/productivity/teach')
 
     await user.click(screen.getByText('Install'))
 
@@ -143,7 +144,8 @@ describe('SkillsEditor', () => {
     await user.click(screen.getByText('Install Skill'))
 
     const urlInput = screen.getByPlaceholderText('Paste a GitHub skill URL')
-    await user.type(urlInput, 'https://github.com/mattpocock/skills/tree/main/skills/productivity/teach')
+    await user.click(urlInput)
+    await user.paste('https://github.com/mattpocock/skills/tree/main/skills/productivity/teach')
 
     await user.click(screen.getByText('Install'))
 

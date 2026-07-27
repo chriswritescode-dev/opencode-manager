@@ -76,7 +76,7 @@ describe('AgentsMdEditor', () => {
     render(<AgentsMdEditor />, { wrapper: createWrapper() })
     const textarea = await screen.findByLabelText('AGENTS.md content')
     expect(textarea.className).toContain('text-[16px]')
-    expect(textarea.className).toContain('md:text-sm')
+    expect(textarea.className).toContain('min-[769px]:text-sm')
     expect(textarea.className).not.toContain('text-xs')
   })
 

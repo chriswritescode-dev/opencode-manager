@@ -63,10 +63,6 @@ export function AgentsMdEditor() {
 
   const isSaving = updateMutation.isPending || resetToDefaultMutation.isPending
 
-  const handleContentChange = (value: string) => {
-    setContent(value)
-  }
-
   const handleSave = () => {
     updateMutation.mutate(content)
   }
@@ -148,7 +144,7 @@ export function AgentsMdEditor() {
         <CodeEditor
           ariaLabel="AGENTS.md content"
           value={content}
-          onChange={handleContentChange}
+            onChange={setContent}
           highlights={matches}
           activeHighlightIndex={currentMatchIndex}
           disabled={isSaving}
