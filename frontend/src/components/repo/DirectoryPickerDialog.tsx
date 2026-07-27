@@ -44,7 +44,7 @@ export function DirectoryPickerDialog({ open, onOpenChange, onSelect, title = 'S
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent mobileFullscreen className="content-start gap-0 sm:max-w-[560px] sm:max-h-[80vh]">
+      <DialogContent mobileFullscreen className="grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-0 sm:max-w-[560px] sm:max-h-[80vh]">
         <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-6 pb-2 h-fit">
           <DialogTitle className="text-lg">{title}</DialogTitle>
         </DialogHeader>
@@ -55,7 +55,7 @@ export function DirectoryPickerDialog({ open, onOpenChange, onSelect, title = 'S
           </p>
         </div>
 
-        <div className="mx-4 sm:mx-6 mb-4 min-h-[240px] flex-1 overflow-y-auto rounded border border-border bg-muted">
+        <div className="mx-4 sm:mx-6 mb-4 min-h-0 overflow-y-auto rounded border border-border bg-muted">
           {isLoading ? (
             <div className="flex h-[240px] items-center justify-center text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" />
