@@ -36,6 +36,17 @@ const resolveWorkspacePath = (): string => {
   return path.resolve(DEFAULTS.WORKSPACE.BASE_PATH)
 }
 
+const resolveBrowseRoot = (): string => {
+  const envPath = process.env.REPO_BROWSE_ROOT
+  if (!envPath) {
+    return ''
+  }
+  if (envPath.startsWith('~')) {
+    return path.join(os.homedir(), envPath.slice(1))
+  }
+  return path.resolve(envPath)
+}
+
 const generateDefaultSecret = (): string => {
   return randomBytes(32).toString('base64').slice(0, 32)
 }
@@ -69,6 +80,7 @@ export const ENV = {
 
   WORKSPACE: {
     get BASE_PATH() { return resolveWorkspacePath() },
+    get BROWSE_ROOT() { return resolveBrowseRoot() },
     REPOS_DIR: DEFAULTS.WORKSPACE.REPOS_DIR,
     SCHEDULE_WORKTREES_DIR: DEFAULTS.WORKSPACE.SCHEDULE_WORKTREES_DIR,
     CONFIG_DIR: DEFAULTS.WORKSPACE.CONFIG_DIR,
@@ -119,6 +131,7 @@ export const ENV = {
 } as const
 
 export const getWorkspacePath = () => ENV.WORKSPACE.BASE_PATH
+export const getBrowseRootPath = () => ENV.WORKSPACE.BROWSE_ROOT
 export const getReposPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.REPOS_DIR)
 export const getScheduleWorktreesPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.SCHEDULE_WORKTREES_DIR)
 export const getConfigPath = () => path.join(ENV.WORKSPACE.BASE_PATH, ENV.WORKSPACE.CONFIG_DIR)
