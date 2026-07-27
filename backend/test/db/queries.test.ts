@@ -199,6 +199,32 @@ describe('Database Queries', () => {
     })
   })
 
+  describe('claimRepoForRetry', () => {
+    it('atomically flips error -> cloning and returns true when it wins', () => {
+      const stmt = {
+        run: vi.fn().mockReturnValue({ changes: 1 })
+      }
+      mockDb.prepare.mockReturnValue(stmt)
+
+      const claimed = db.claimRepoForRetry(mockDb, 7)
+
+      expect(claimed).toBe(true)
+      expect(mockDb.prepare).toHaveBeenCalledWith(
+        'UPDATE repos SET clone_status = ? WHERE id = ? AND clone_status = ?'
+      )
+      expect(stmt.run).toHaveBeenCalledWith('cloning', 7, 'error')
+    })
+
+    it('returns false when another caller already flipped the row (changes == 0)', () => {
+      const stmt = {
+        run: vi.fn().mockReturnValue({ changes: 0 })
+      }
+      mockDb.prepare.mockReturnValue(stmt)
+
+      expect(db.claimRepoForRetry(mockDb, 7)).toBe(false)
+    })
+  })
+
   describe('updateRepoConfigName', () => {
     it('should update repo OpenCode config name', () => {
       const stmt = {

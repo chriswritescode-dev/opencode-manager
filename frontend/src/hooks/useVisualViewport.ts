@@ -7,10 +7,18 @@ const isTextInputFocused = () => {
   return tag === 'TEXTAREA' || tag === 'INPUT' || (el as HTMLElement).isContentEditable
 }
 
-export function useVisualViewport() {
+interface UseVisualViewportOptions {
+  enabled?: boolean
+}
+
+export function useVisualViewport({ enabled = true }: UseVisualViewportOptions = {}) {
   const [keyboardHeight, setKeyboardHeight] = useState(0)
 
   useEffect(() => {
+    if (!enabled) {
+      setKeyboardHeight(0)
+      return
+    }
     const viewport = window.visualViewport
     if (!viewport) return
 
@@ -27,6 +35,7 @@ export function useVisualViewport() {
 
     viewport.addEventListener('resize', update)
     viewport.addEventListener('scroll', update)
+    window.addEventListener('focusin', update)
     window.addEventListener('focusout', update)
     window.addEventListener('pageshow', update)
     document.addEventListener('visibilitychange', update)
@@ -35,11 +44,12 @@ export function useVisualViewport() {
     return () => {
       viewport.removeEventListener('resize', update)
       viewport.removeEventListener('scroll', update)
+      window.removeEventListener('focusin', update)
       window.removeEventListener('focusout', update)
       window.removeEventListener('pageshow', update)
       document.removeEventListener('visibilitychange', update)
     }
-  }, [])
+  }, [enabled])
 
   return { keyboardHeight }
 }

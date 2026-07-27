@@ -1,18 +1,21 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
-import { Loader2, Search, ChevronUp, ChevronDown } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
+import { CodeEditor } from '@/components/ui/code-editor'
+import { EditorFindBar } from '@/components/ui/editor-find-bar'
+import { UnsavedChangesDialog } from '@/components/ui/unsaved-changes-dialog'
+import { useMobile } from '@/hooks/useMobile'
 import { useFindInText } from '@/lib/useFindInText'
-import type { OpenCodeConfig } from '@/api/types/settings'
-import { parseJsonc } from '@/lib/jsonc'
+import { parseJsonc, parseJsoncErrorLine, resolveJsoncIssueLine } from '@/lib/jsonc'
 import { FetchError } from '@/api/fetchWrapper'
 import { OpenCodeConfigSchema } from '@opencode-manager/shared'
+import type { OpenCodeConfig } from '@/api/types/settings'
 
 type ValidationIssue = {
   path: string
   message: string
+  line: number | null
 }
 
 interface OpenCodeConfigEditorProps {
@@ -20,7 +23,6 @@ interface OpenCodeConfigEditorProps {
   isOpen: boolean
   onClose: () => void
   onUpdate: (content: string) => Promise<void>
-  isUpdating: boolean
 }
 
 export function OpenCodeConfigEditor({
@@ -28,101 +30,77 @@ export function OpenCodeConfigEditor({
   isOpen,
   onClose,
   onUpdate,
-  isUpdating
 }: OpenCodeConfigEditorProps) {
   const [editConfigContent, setEditConfigContent] = useState('')
+  const [initialContent, setInitialContent] = useState('')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDiscardPromptOpen, setIsDiscardPromptOpen] = useState(false)
   const [editError, setEditError] = useState('')
   const [editErrorLine, setEditErrorLine] = useState<number | null>(null)
   const [validationIssues, setValidationIssues] = useState<ValidationIssue[]>([])
   const [removedFields, setRemovedFields] = useState<string[]>([])
-  const [isTextareaFocused, setIsTextareaFocused] = useState(false)
-  const editTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const backdropRef = useRef<HTMLDivElement>(null)
+  const [activeLine, setActiveLine] = useState<number | null>(null)
+  const [revealNonce, setRevealNonce] = useState(0)
+  const isMobile = useMobile()
+  const isDirty = editConfigContent !== initialContent
   const { query, setQuery, matches, currentMatchIndex, hasMatches, next, prev } = useFindInText(editConfigContent)
 
-  useEffect(() => {
-    if (config && isOpen) {
-      setEditConfigContent(config.rawContent || JSON.stringify(config.content, null, 2))
-      setEditError('')
-      setEditErrorLine(null)
-      setValidationIssues([])
-      setRemovedFields([])
-    }
-  }, [config, isOpen])
-
-  useEffect(() => {
-    if (isOpen && editTextareaRef.current) {
-      editTextareaRef.current.focus()
-    }
-  }, [isOpen])
-
-  useEffect(() => {
-    const textarea = editTextareaRef.current
-    if (!textarea || matches.length === 0) return
-    const match = matches[currentMatchIndex]
-    if (match) {
-      const textBefore = editConfigContent.substring(0, match.startIndex)
-      const lineNumber = textBefore.split('\n').length
-      const lineHeight = textarea.scrollHeight / textarea.value.split('\n').length
-      textarea.scrollTop = lineHeight * (lineNumber - 1) - textarea.clientHeight / 2 + lineHeight / 2
-      syncBackdropScroll()
-    }
-  }, [currentMatchIndex, matches, editConfigContent])
-
-  const syncBackdropScroll = () => {
-    const textarea = editTextareaRef.current
-    const backdrop = backdropRef.current
-    if (textarea && backdrop) {
-      backdrop.scrollTop = textarea.scrollTop
-      backdrop.scrollLeft = textarea.scrollLeft
-    }
-  }
-
-  const handleFindKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      if (e.shiftKey) prev()
-      else next()
-    }
-  }
-
-  const renderHighlightedContent = (focused: boolean) => {
-    if (matches.length === 0 || focused) {
-      return editConfigContent
-    }
-    const segments: React.ReactNode[] = []
-    let lastIndex = 0
-    matches.forEach((match, index) => {
-      if (match.startIndex > lastIndex) {
-        segments.push(editConfigContent.substring(lastIndex, match.startIndex))
-      }
-      const isCurrent = index === currentMatchIndex
-      segments.push(
-        <mark
-          key={index}
-          className={isCurrent ? 'bg-orange-400 text-black rounded-sm' : 'bg-yellow-300/60 text-black rounded-sm'}
-        >
-          {editConfigContent.substring(match.startIndex, match.endIndex)}
-        </mark>
-      )
-      lastIndex = match.endIndex
-    })
-    if (lastIndex < editConfigContent.length) {
-      segments.push(editConfigContent.substring(lastIndex))
-    }
-    return segments
-  }
+  const revealLine = useCallback((line: number | null) => {
+    setActiveLine(line)
+    setRevealNonce((n) => n + 1)
+  }, [])
 
   const resetErrors = () => {
     setEditError('')
     setEditErrorLine(null)
     setValidationIssues([])
     setRemovedFields([])
+    setActiveLine(null)
   }
 
-  const getIssueText = (issue: ValidationIssue) => {
-    return `${issue.path}: ${issue.message}`
+  useEffect(() => {
+    if (config && isOpen) {
+      const next = config.rawContent || JSON.stringify(config.content, null, 2)
+      setEditConfigContent(next)
+      setInitialContent(next)
+      resetErrors()
+      setIsSaving(false)
+      setIsDiscardPromptOpen(false)
+    }
+  }, [config, isOpen])
+
+  const requestClose = () => {
+    if (isSaving) return
+    if (isDirty) {
+      setIsDiscardPromptOpen(true)
+      return
+    }
+    onClose()
   }
+
+  const discardAndClose = () => {
+    setIsDiscardPromptOpen(false)
+    onClose()
+  }
+
+  const getIssueText = (issue: ValidationIssue) => `${issue.path}: ${issue.message}`
+
+  const resolveIssues = (
+    issues: Array<{ path: PropertyKey[] | string; message: string }>,
+  ): ValidationIssue[] =>
+    issues.map((issue) => {
+      const path = issue.path
+      const isStructured = Array.isArray(path)
+      const displaySegments = isStructured
+        ? path.map(String)
+        : String(path).split('.').filter((segment) => segment.length > 0)
+      const displayPath = displaySegments.length > 0 ? displaySegments.join('.') : 'root'
+      return {
+        path: displayPath,
+        message: issue.message,
+        line: resolveJsoncIssueLine(editConfigContent, path),
+      }
+    })
 
   const updateConfig = async () => {
     if (!config) return
@@ -132,171 +110,155 @@ export function OpenCodeConfigEditor({
       const parsedConfig = parseJsonc<Record<string, unknown>>(editConfigContent)
       const validationResult = OpenCodeConfigSchema.safeParse(parsedConfig)
       if (!validationResult.success) {
-        const issues = validationResult.error.issues.map((issue) => ({
-          path: issue.path.length > 0 ? issue.path.map(String).join('.') : 'root',
-          message: issue.message,
-        }))
+        const issues = resolveIssues(validationResult.error.issues)
         setValidationIssues(issues)
         setEditError(`Configuration validation failed: ${issues.map(getIssueText).join('; ')}`)
         return
       }
 
+      setIsSaving(true)
       await onUpdate(editConfigContent)
       onClose()
     } catch (error) {
       if (error instanceof SyntaxError) {
-        const lineMatch = error.message.match(/line\s+(\d+)/i)
-        const line = lineMatch ? parseInt(lineMatch[1]) : null
+        const line = parseJsoncErrorLine(error)
         setEditErrorLine(line)
-        if (line && editTextareaRef.current) {
-          highlightErrorLine(editTextareaRef.current, line)
-        }
+        revealLine(line)
         setEditError(`Invalid JSON/JSONC: ${error.message}`)
       } else if (error instanceof FetchError) {
-        setValidationIssues(error.validationIssues || [])
-        setRemovedFields(error.removedFields || [])
+        const issues = resolveIssues(error.validationIssues ?? [])
+        setValidationIssues(issues)
+        setRemovedFields(error.removedFields ?? [])
         setEditError(error.detail || error.message)
       } else if (error instanceof Error) {
         setEditError(error.message)
       } else {
         setEditError('Failed to save configuration')
       }
+    } finally {
+      setIsSaving(false)
     }
-  }
-
-  const highlightErrorLine = (textarea: HTMLTextAreaElement, line: number) => {
-    const lines = textarea.value.split('\n')
-    if (line > lines.length) return
-    
-    let charIndex = 0
-    for (let i = 0; i < line - 1; i++) {
-      charIndex += lines[i].length + 1
-    }
-    
-    textarea.focus()
-    textarea.setSelectionRange(charIndex, charIndex + lines[line - 1].length)
-    
-    // Scroll to make the error line visible
-    const lineHeight = textarea.scrollHeight / lines.length
-    const targetPosition = lineHeight * (line - 1)
-    textarea.scrollTop = targetPosition - textarea.clientHeight / 2 + lineHeight / 2
   }
 
   if (!config) return null
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent mobileFullscreen className="gap-0 flex flex-col p-0 md:p-6 w-full min-w-0 sm:max-w-4xl max-h-[90vh] sm:max-h-[85vh]">
-        <DialogHeader className="p-4 sm:p-6 border-b flex flex-row items-center justify-between space-y-0">
-          <DialogTitle className="text-lg sm:text-xl font-semibold">
-            {`Edit Config: ${config.name}`}
-          </DialogTitle>
-        </DialogHeader>
+    <>
+      <Dialog open={isOpen} onOpenChange={(open) => { if (!open) requestClose() }}>
+        <DialogContent
+          mobileFullscreen
+          keyboardAware
+          onOpenAutoFocus={(event) => {
+            if (isMobile) event.preventDefault()
+          }}
+          className="flex w-full min-w-0 flex-col gap-0 p-0 sm:max-h-[85vh] sm:max-w-4xl sm:p-6"
+        >
+          <DialogHeader className="flex shrink-0 flex-row items-center justify-between space-y-0 border-b p-4 sm:p-6">
+            <DialogTitle className="text-lg font-semibold sm:text-xl">
+              {`Edit Config: ${config.name}`}
+            </DialogTitle>
+          </DialogHeader>
 
-        <div className="flex items-center gap-2 px-4 py-2 border-b bg-muted/30">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={handleFindKeyDown}
-              placeholder="Find in config..."
-              className="pl-9 h-9 text-[16px] sm:text-xs md:text-sm"
-              autoComplete="off"
-              name="config-find"
-            />
-          </div>
-          {query && (
-            <span className="text-xs text-muted-foreground whitespace-nowrap">
-              {hasMatches
-                ? `${currentMatchIndex + 1} of ${matches.length}`
-                : '0 matches'}
-            </span>
-          )}
-          <button
-            onClick={prev}
-            disabled={!hasMatches}
-            className="p-1 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Previous match"
-          >
-            <ChevronUp className="h-4 w-4" />
-          </button>
-          <button
-            onClick={next}
-            disabled={!hasMatches}
-            className="p-1 rounded hover:bg-accent disabled:opacity-30 disabled:cursor-not-allowed"
-            title="Next match"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
-        </div>
+          <EditorFindBar
+            query={query}
+            onQueryChange={setQuery}
+            matchCount={matches.length}
+            currentMatch={hasMatches ? currentMatchIndex + 1 : 0}
+            onPrev={prev}
+            onNext={next}
+            inputName="config-find"
+            placeholder="Find in config..."
+          />
 
-        <div className="flex-1 p-0 sm:p-4 overflow-hidden relative w-full">
-          <div className="relative h-full w-full">
-            <div
-              ref={backdropRef}
-              aria-hidden="true"
-              className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-[16px] sm:text-xs md:text-sm px-3 py-2 border border-transparent rounded-none sm:rounded-md ${hasMatches && !isTextareaFocused ? 'text-foreground' : 'text-transparent'}`}
-            >
-              {renderHighlightedContent(isTextareaFocused)}
-            </div>
-            <Textarea
+          <div className="min-h-0 flex-1 overflow-hidden sm:p-4">
+            <CodeEditor
               id="edit-config-content"
-              ref={editTextareaRef}
+              ariaLabel="Config content"
               value={editConfigContent}
-              onChange={(e) => {
-                setEditConfigContent(e.target.value)
+              onChange={(next) => {
+                setEditConfigContent(next)
                 resetErrors()
               }}
-              onScroll={syncBackdropScroll}
-              onFocus={() => setIsTextareaFocused(true)}
-              onBlur={() => setIsTextareaFocused(false)}
-              spellCheck={false}
-              className={`relative bg-transparent font-mono text-[16px] sm:text-xs md:text-sm resize-none h-full w-full rounded-none sm:rounded-md ${hasMatches && !isTextareaFocused ? 'text-transparent caret-foreground' : ''} ${editErrorLine ? 'error-highlight' : ''}`}
+              highlights={matches}
+              activeHighlightIndex={currentMatchIndex}
+              activeLine={activeLine}
+              revealNonce={revealNonce}
+              autoFocus={!isMobile}
+              disabled={isSaving}
+              className="sm:rounded-md sm:border sm:border-input"
             />
           </div>
+
           {editError && (
-            <div className="absolute bottom-0 left-0 right-0 bg-background/95 border-t p-2 sm:p-3 space-y-2">
-              <p className="text-xs sm:text-sm text-red-500 break-words">
+            <div className="max-h-40 shrink-0 space-y-2 overflow-y-auto border-t bg-background p-3">
+              <p className="break-words text-xs text-red-500 sm:text-sm">
                 {editError}
-                {editErrorLine && (
-                  <span className="ml-2 text-xs">(Line {editErrorLine})</span>
+                {editErrorLine != null && (
+                  <button
+                    type="button"
+                    onClick={() => revealLine(editErrorLine)}
+                    className="ml-2 h-10 rounded px-2 text-xs underline underline-offset-2 md:h-8"
+                  >
+                    Go to line {editErrorLine}
+                  </button>
                 )}
               </p>
               {validationIssues.length > 0 && (
-                <ul className="max-h-28 overflow-auto space-y-1 text-xs sm:text-sm text-red-500 list-disc pl-4">
+                <ul className="max-h-28 space-y-1 pl-4 text-xs text-red-500 list-disc sm:text-sm">
                   {validationIssues.map((issue) => (
-                    <li key={getIssueText(issue)}>{getIssueText(issue)}</li>
+                    <li key={getIssueText(issue)}>
+                      {issue.line != null ? (
+                        <button
+                          type="button"
+                          onClick={() => revealLine(issue.line)}
+                          className="min-h-10 w-full text-left underline underline-offset-2 md:min-h-0"
+                        >
+                          {getIssueText(issue)}{' '}
+                          <span className="text-muted-foreground">(line {issue.line})</span>
+                        </button>
+                      ) : (
+                        getIssueText(issue)
+                      )}
+                    </li>
                   ))}
                 </ul>
               )}
               {removedFields.length > 0 && (
-                <p className="text-xs sm:text-sm text-amber-600 break-words">
+                <p className="break-words text-xs text-amber-600 sm:text-sm">
                   Removed invalid fields: {removedFields.join(', ')}
                 </p>
               )}
             </div>
           )}
-        </div>
 
-        <DialogFooter className="p-3 sm:p-4 border-t gap-2">
-          <Button 
-            variant="outline" 
-            onClick={onClose}
-            className="flex-1 sm:flex-none"
-          >
-            Cancel
-          </Button>
-          <Button 
-            onClick={updateConfig} 
-            disabled={isUpdating || !editConfigContent.trim()}
-            className="flex-1 sm:flex-none"
-          >
-            {isUpdating && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            Update
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter data-editor-footer className="shrink-0 gap-2 border-t p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] sm:p-4 sm:pb-4">
+            <Button
+              variant="outline"
+              onClick={requestClose}
+              disabled={isSaving}
+              className="flex-1 sm:flex-none"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={updateConfig}
+              disabled={isSaving || !editConfigContent.trim()}
+              className="flex-1 sm:flex-none"
+            >
+              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Update
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <UnsavedChangesDialog
+        open={isDiscardPromptOpen}
+        onOpenChange={(open) => !open && setIsDiscardPromptOpen(false)}
+        onDiscard={discardAndClose}
+        onKeepEditing={() => setIsDiscardPromptOpen(false)}
+        itemName={config.name}
+      />
+    </>
   )
 }

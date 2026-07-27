@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { SettingsDialog } from './SettingsDialog'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 
 vi.mock('@/components/settings/GeneralSettings', () => ({
   GeneralSettings: () => <div data-testid="general-settings">General Settings Content</div>,
@@ -118,5 +119,38 @@ describe('SettingsDialog', () => {
     expect(screen.getAllByText('Shortcuts').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('OpenCode').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Providers').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('keeps Settings open when Escape fires inside a nested dialog', () => {
+    function TestWrapper() {
+      const location = useLocation()
+      const settingsOpen = new URLSearchParams(location.search).get('settings') === 'open'
+      return (
+        <>
+          {settingsOpen && <span data-testid="settings-open" />}
+          <SettingsDialog />
+          <Dialog open>
+            <DialogContent data-testid="nested-dialog">
+              <DialogTitle className="sr-only">Nested</DialogTitle>
+              <textarea data-testid="nested-input" />
+            </DialogContent>
+          </Dialog>
+        </>
+      )
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/?settings=open']}>
+        <TestWrapper />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId('settings-open')).toBeInTheDocument()
+
+    const nestedInput = screen.getByTestId('nested-input')
+    nestedInput.focus()
+    fireEvent.keyDown(nestedInput, { key: 'Escape' })
+
+    expect(screen.getByTestId('settings-open')).toBeInTheDocument()
   })
 })

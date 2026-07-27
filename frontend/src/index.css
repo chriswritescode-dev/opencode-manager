@@ -319,8 +319,8 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Prevent iOS zoom on all input elements */
-@media (max-width: 768px) {
+/* Prevent iOS zoom on all input elements — must end below Tailwind's 768px `md` breakpoint */
+@media (max-width: 767px) {
   input[type="text"],
   input[type="email"],
   input[type="password"],
@@ -413,25 +413,4 @@ input:-webkit-autofill:active {
 
 .animate-progress {
   animation: progress 2s ease-in-out infinite;
-}
-
-/* Error line highlighting - red-orange selection color */
-.error-highlight::selection {
-  background-color: #fecaca;
-  color: #991b1b;
-}
-
-.dark .error-highlight::selection {
-  background-color: #7f1d1d;
-  color: #fecaca;
-}
-
-.error-highlight::-moz-selection {
-  background-color: #fecaca;
-  color: #991b1b;
-}
-
-.dark .error-highlight::-moz-selection {
-  background-color: #7f1d1d;
-  color: #fecaca;
 }

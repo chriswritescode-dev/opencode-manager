@@ -15,11 +15,13 @@ vi.mock('bun:sqlite', () => ({
 
 vi.mock('../../src/db/queries', () => ({
   getRepoById: vi.fn(),
-  updateLastAccessed: vi.fn()
+  updateLastAccessed: vi.fn(),
+  getRepoGitCredentialId: vi.fn()
 }))
 
 vi.mock('../../src/services/repo', () => ({
-  getCurrentBranch: vi.fn()
+  getCurrentBranch: vi.fn(),
+  retryCloneRepo: vi.fn()
 }))
 
 vi.mock('../../src/services/assistant-mode', () => ({
@@ -43,6 +45,7 @@ import type { GitAuthService } from '../../src/services/git-auth'
 import type { ScheduleService } from '../../src/services/schedules'
 import type { AssistantModeStatus } from '@opencode-manager/shared/types'
 import { getAssistantModeStatus, ensureAssistantMode } from '../../src/services/assistant-mode'
+import { retryCloneRepo } from '../../src/services/repo'
 
 const mockGitAuthService = {
   getGitEnvironment: vi.fn().mockReturnValue({})
@@ -320,4 +323,73 @@ describe('Repo Routes', () => {
       })
     })
   })
+
+describe('POST /:id/retry-clone', () => {
+  function makeErrorRepo(overrides: Partial<Record<string, unknown>> = {}) {
+    return {
+      id: 7,
+      repoUrl: 'https://github.com/acme/forge',
+      localPath: 'forge',
+      fullPath: '/tmp/repos/forge',
+      branch: 'feature/x',
+      defaultBranch: 'main',
+      cloneStatus: 'error' as const,
+      clonedAt: Date.now(),
+      ...overrides,
+    }
+  }
+
+  it('returns 404 when repo not found', async () => {
+    vi.mocked(db.getRepoById).mockReturnValue(null)
+    const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient())
+    const res = await app.request('/7/retry-clone', { method: 'POST' })
+    expect(res.status).toBe(404)
+    expect(retryCloneRepo).not.toHaveBeenCalled()
+  })
+
+  it('returns 400 when repo has no stored clone URL (local-only)', async () => {
+    vi.mocked(db.getRepoById).mockReturnValue(makeErrorRepo({ repoUrl: undefined, isLocal: true }))
+    const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient())
+    const res = await app.request('/7/retry-clone', { method: 'POST' })
+    expect(res.status).toBe(400)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Only remote repositories can be retried')
+    expect(retryCloneRepo).not.toHaveBeenCalled()
+  })
+
+  it('returns 409 when repo is not in a retryable state', async () => {
+    vi.mocked(db.getRepoById).mockReturnValue(makeErrorRepo({ cloneStatus: 'ready' as const }))
+    const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient())
+    const res = await app.request('/7/retry-clone', { method: 'POST' })
+    expect(res.status).toBe(409)
+    expect(retryCloneRepo).not.toHaveBeenCalled()
+  })
+
+  it('preserves the row id and stored config and returns the retried repo with settings', async () => {
+    const repo = makeErrorRepo()
+    vi.mocked(db.getRepoById).mockReturnValue(repo)
+    const retried = { ...repo, cloneStatus: 'ready' as const, lastPulled: Date.now() }
+    vi.mocked(retryCloneRepo).mockResolvedValue(retried)
+    vi.mocked(db.getRepoGitCredentialId).mockReturnValue(null)
+
+    const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient())
+    const res = await app.request('/7/retry-clone', { method: 'POST' })
+
+    expect(res.status).toBe(200)
+    expect(retryCloneRepo).toHaveBeenCalledWith(mockDb, mockGitAuthService, 7)
+    const body = await res.json() as { id: number; cloneStatus: string; currentBranch: string | null }
+    expect(body.id).toBe(7)
+    expect(body.cloneStatus).toBe('ready')
+  })
+
+  it('propagates service failures as 500 without destroying the row', async () => {
+    vi.mocked(db.getRepoById).mockReturnValue(makeErrorRepo())
+    vi.mocked(retryCloneRepo).mockRejectedValue(new Error('Authentication failed'))
+    const app = createRepoRoutes(mockDb, mockGitAuthService, mockScheduleService, createStubOpenCodeClient())
+    const res = await app.request('/7/retry-clone', { method: 'POST' })
+    expect(res.status).toBe(500)
+    const body = await res.json() as { error: string }
+    expect(body.error).toBe('Authentication failed')
+  })
+})
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { OpenCodeConfigManager } from './OpenCodeConfigManager'
@@ -175,5 +175,47 @@ describe('OpenCodeConfigManager', () => {
     expect(screen.getByText('GPT-4o')).toBeInTheDocument()
 
     expect(screen.queryByText('Restart OpenCode Server?')).not.toBeInTheDocument()
+  })
+
+  it('anchors the AGENTS.md card to the settings dialog scrollport', async () => {
+    renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+    const header = await screen.findByRole('button', { name: /Global Agent Instructions/i })
+    const card = header.parentElement
+    expect(card?.className).toContain('overflow-clip')
+    expect(card?.className).not.toContain('overflow-hidden')
+  })
+
+  it('keeps the editor mounted while the post-save config refresh is in flight', async () => {
+    const configWithRaw: OpenCodeConfig = {
+      ...defaultConfig,
+      rawContent: '{\n  "theme": "system"\n}',
+    }
+    mockGetOpenCodeConfigs.mockResolvedValueOnce({ configs: [configWithRaw] })
+    let resolveRefresh!: () => void
+    mockGetOpenCodeConfigs.mockReturnValueOnce(
+      new Promise<{ configs: OpenCodeConfig[] }>((resolve) => {
+        resolveRefresh = () => resolve({ configs: [configWithRaw] })
+      }),
+    )
+    mockUpdateOpenCodeConfig.mockResolvedValue(configWithRaw)
+
+    const user = userEvent.setup()
+    const { container } = renderWithQuery(<OpenCodeConfigManager hideHealthStatus />)
+
+    await screen.findByText('GPT-4o')
+    const editIcon = container.querySelector('.lucide-square-pen') as SVGElement
+    const editButton = editIcon.closest('button') as HTMLButtonElement
+    await user.click(editButton)
+
+    const textarea = await screen.findByLabelText('Config content') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: configWithRaw.rawContent! + ' ' } })
+    await user.click(screen.getByRole('button', { name: 'Update' }))
+
+    await waitFor(() => expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(1))
+    expect(screen.getByText('Edit Config: default')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Update' })).toBeDisabled()
+
+    resolveRefresh()
+    await waitFor(() => expect(screen.queryByText('Edit Config: default')).not.toBeInTheDocument())
   })
 })
