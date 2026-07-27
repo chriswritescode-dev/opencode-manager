@@ -83,6 +83,18 @@ describe('browseDirectory', () => {
     await expect(browseDirectory(path.join(tmpRoot, '..'))).rejects.toMatchObject({ statusCode: 403 })
   })
 
+  it('rejects a symlink inside the root that escapes the root with 403', async () => {
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'ocm-outside-'))
+    try {
+      const linkPath = path.join(tmpRoot, 'escape-link')
+      await fs.symlink(outside, linkPath)
+
+      await expect(browseDirectory(linkPath)).rejects.toMatchObject({ statusCode: 403 })
+    } finally {
+      await fs.rm(outside, { recursive: true, force: true })
+    }
+  })
+
   it('returns 404 for a non-existent directory', async () => {
     await expect(browseDirectory(path.join(tmpRoot, 'nope'))).rejects.toMatchObject({ statusCode: 404 })
   })

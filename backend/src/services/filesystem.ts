@@ -14,13 +14,23 @@ function getRoot(): string {
   return path.resolve(configured)
 }
 
-function resolveWithinRoot(root: string, requestedPath?: string): string {
-  if (!requestedPath || requestedPath.trim() === '') {
-    return root
+async function resolveWithinRoot(root: string, requestedPath?: string): Promise<string> {
+  const resolved = (!requestedPath || requestedPath.trim() === '') ? root : path.resolve(requestedPath)
+
+  const realRoot = await fs.realpath(root)
+  let realResolved: string
+  try {
+    realResolved = await fs.realpath(resolved)
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException | undefined)?.code
+    if (code === 'ENOENT' || code === 'ENOTDIR') {
+      throw { message: 'Directory not found', statusCode: 404 }
+    }
+    throw err
   }
 
-  const resolved = path.resolve(requestedPath)
-  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
+  const rel = path.relative(realRoot, realResolved)
+  if (rel === '..' || rel.startsWith(`..${path.sep}`)) {
     throw { message: 'Path is outside the allowed browse root', statusCode: 403 }
   }
 
@@ -38,7 +48,7 @@ async function isGitRepo(entryPath: string): Promise<boolean> {
 
 export async function browseDirectory(requestedPath?: string): Promise<BrowseDirectoryResponse> {
   const root = getRoot()
-  const targetPath = resolveWithinRoot(root, requestedPath)
+  const targetPath = await resolveWithinRoot(root, requestedPath)
 
   let stats
   try {
