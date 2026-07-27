@@ -154,15 +154,15 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
     return getApiErrorMessage(error, 'Failed to import existing OpenCode host data')
   }
 
-  const fetchConfigs = async () => {
+  const fetchConfigs = async (silent = false) => {
     try {
-      setIsLoading(true)
+      if (!silent) setIsLoading(true)
       const data = await settingsApi.getOpenCodeConfigs()
       setConfigs(data.configs)
     } catch (error) {
       console.error('Failed to fetch configs:', error)
     } finally {
-      setIsLoading(false)
+      if (!silent) setIsLoading(false)
     }
   }
 
@@ -677,7 +677,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
           showToast.loading('Saving configuration...', { id: 'edit-config' })
           try {
             const result = await settingsApi.updateOpenCodeConfig(editingConfig.name, { content: rawContent })
-            await fetchConfigs()
+            await fetchConfigs(true)
             const successMsg = result.restartRequired
               ? 'Configuration saved. Restart the server to apply changes.'
               : 'Configuration saved'
@@ -688,13 +688,12 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
             throw error
           }
         }}
-        isUpdating={isUpdating}
       />
 
       {/* Global AGENTS.md Section */}
       <div className="mt-8 space-y-6">
         <div className="border-t border-border pt-6">
-          <div className="bg-card border border-border rounded-lg overflow-hidden min-w-0 mb-6">
+          <div className="bg-card border border-border rounded-lg overflow-clip min-w-0 mb-6">
             <button
               ref={agentsMdRef}
               className={cn("w-full px-4 py-3 flex items-center justify-between transition-colors min-w-0", expandedSections.agentsMd ? "bg-muted/40 hover:bg-muted/50" : "hover:bg-muted/50")}

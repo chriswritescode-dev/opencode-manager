@@ -67,6 +67,13 @@ export function SettingsDialog() {
     }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && !isVersionDialogOpen) {
+        const target = e.target
+        if (target instanceof Element) {
+          const closestDialog = target.closest('[role="dialog"]')
+          if (closestDialog && !closestDialog.hasAttribute('data-settings-dialog')) {
+            return
+          }
+        }
         close()
       }
     }
@@ -100,7 +107,7 @@ export function SettingsDialog() {
 
    return (
       <Dialog open={isOpen} modal={false} onOpenChange={(open) => !open && close()}>
-        <DialogContent 
+         <DialogContent
           className="inset-0 w-full h-full max-w-none max-h-none p-0 rounded-none bg-gradient-to-br from-background via-background to-background border-border overflow-hidden !flex !flex-col !gap-0"
           fullscreen
           canSwipeBack={() => mobileView !== 'menu'}
@@ -108,6 +115,7 @@ export function SettingsDialog() {
           onInteractOutside={(e) => e.preventDefault()}
           onFocusOutside={(e) => e.preventDefault()}
           onPointerDownOutside={(e) => e.preventDefault()}
+          data-settings-dialog
         >
          <DialogTitle className="sr-only">Settings</DialogTitle>
          <div className="hidden sm:flex sm:flex-col sm:h-full sm:min-h-0">

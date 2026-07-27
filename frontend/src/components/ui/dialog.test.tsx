@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, act } from "@testing-library/react";
 import {
   Dialog,
   DialogContent,
@@ -381,4 +381,88 @@ describe("DialogContent", () => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
   });
+});
+
+function stubVisualViewport(height: number) {
+  const listeners = new Set<() => void>()
+  Object.defineProperty(window, 'visualViewport', {
+    configurable: true,
+    writable: true,
+    value: {
+      height,
+      offsetTop: 0,
+      addEventListener: (_: string, fn: () => void) => listeners.add(fn),
+      removeEventListener: (_: string, fn: () => void) => listeners.delete(fn),
+    },
+  })
+  return listeners
+}
+
+describe('keyboardAware', () => {
+  const originalInnerHeight = window.innerHeight
+  const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport')
+
+  afterEach(() => {
+    if (originalVisualViewport) {
+      Object.defineProperty(window, 'visualViewport', originalVisualViewport)
+    } else {
+      // @ts-expect-error allow delete
+      delete window.visualViewport
+    }
+    Object.defineProperty(window, 'innerHeight', {
+      writable: true,
+      configurable: true,
+      value: originalInnerHeight,
+    })
+  })
+
+  it('applies keyboard inset as bottom padding when keyboardAware and a text input is focused', () => {
+    window.innerHeight = 800
+    const listeners = stubVisualViewport(500)
+    render(
+      <Dialog open>
+        <DialogContent keyboardAware mobileFullscreen data-testid="dialog-content">
+          <textarea autoFocus data-testid="dialog-input" />
+        </DialogContent>
+      </Dialog>
+    );
+    screen.getByTestId('dialog-input').focus()
+    act(() => {
+      listeners.forEach((fn) => fn())
+    })
+    const content = screen.getByTestId('dialog-content')
+    expect(content).toHaveStyle({ paddingBottom: '300px' })
+  })
+
+  it('does not set inline bottom padding when no keyboard is present', () => {
+    window.innerHeight = 800
+    const listeners = stubVisualViewport(800)
+    render(
+      <Dialog open>
+        <DialogContent keyboardAware mobileFullscreen data-testid="dialog-content">
+          <textarea autoFocus data-testid="dialog-input" />
+        </DialogContent>
+      </Dialog>
+    );
+    screen.getByTestId('dialog-input').focus()
+    listeners.forEach((fn) => fn())
+    const content = screen.getByTestId('dialog-content')
+    expect(content.style.paddingBottom).toBe('')
+  })
+
+  it('does not set inline bottom padding when keyboardAware is omitted', () => {
+    window.innerHeight = 800
+    const listeners = stubVisualViewport(500)
+    render(
+      <Dialog open>
+        <DialogContent mobileFullscreen data-testid="dialog-content">
+          <textarea autoFocus data-testid="dialog-input" />
+        </DialogContent>
+      </Dialog>
+    );
+    screen.getByTestId('dialog-input').focus()
+    listeners.forEach((fn) => fn())
+    const content = screen.getByTestId('dialog-content')
+    expect(content.style.paddingBottom).toBe('')
+  })
 });

@@ -1,7 +1,5 @@
-import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertTriangle } from 'lucide-react'
+import type { ReactNode } from 'react'
+import { ConfirmDestructiveDialog } from '@/components/ui/confirm-destructive-dialog'
 
 interface DeleteDialogProps {
   open: boolean
@@ -9,55 +7,35 @@ interface DeleteDialogProps {
   onConfirm: () => void
   onCancel: () => void
   title: string
-  description: React.ReactNode
+  description: ReactNode
   itemName?: string
   isDeleting?: boolean
 }
 
-export function DeleteDialog({ 
-  open, 
-  onOpenChange, 
-  onConfirm, 
-  onCancel, 
-  title, 
-  description, 
+export function DeleteDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+  onCancel,
+  title,
+  description,
   itemName,
-  isDeleting = false 
+  isDeleting = false
 }: DeleteDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-w-[90%] sm:max-w-sm'>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>
-            {description}
-          </DialogDescription>
-        </DialogHeader>
-        
-        {itemName && (
-          <Alert className="overflow-hidden">
-            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-            <AlertDescription className="break-all">
-              This will permanently delete "<span className="font-medium">{itemName}</span>". This action cannot be undone.
-            </AlertDescription>
-          </Alert>
-        )}
-        
-        <DialogFooter className='gap-2'>
-          <Button variant="outline" onClick={onCancel} disabled={isDeleting}>
-            Cancel
-          </Button>
-          <Button 
-            variant="destructive" 
-            onClick={onConfirm} 
-            disabled={isDeleting}
-            className="bg-red-600 hover:bg-red-700 text-white font-semibold border-red-600"
-          >
-            {isDeleting && 'Deleting...'}
-            {!isDeleting && (title.includes('Configuration') ? 'Delete Configuration' : 'Delete')}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <ConfirmDestructiveDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      title={title}
+      description={description}
+      warning={itemName ? (
+        <>This will permanently delete "<span className="font-medium">{itemName}</span>". This action cannot be undone.</>
+      ) : undefined}
+      confirmLabel={title.includes('Configuration') ? 'Delete Configuration' : 'Delete'}
+      pendingLabel="Deleting..."
+      isPending={isDeleting}
+    />
   )
 }

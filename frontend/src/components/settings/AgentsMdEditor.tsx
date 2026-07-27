@@ -1,15 +1,22 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Save, RotateCcw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { CodeEditor } from '@/components/ui/code-editor'
+import { EditorFindBar } from '@/components/ui/editor-find-bar'
+import { useFindInText } from '@/lib/useFindInText'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
 
 export function AgentsMdEditor() {
   const queryClient = useQueryClient()
   const [content, setContent] = useState('')
-  const [hasChanges, setHasChanges] = useState(false)
+  const [savedContent, setSavedContent] = useState('')
+  const hasChanges = content !== savedContent
+  const hasChangesRef = useRef(false)
+  hasChangesRef.current = hasChanges
+  const savedContentRef = useRef('')
+  savedContentRef.current = savedContent
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['agents-md'],
@@ -17,18 +24,19 @@ export function AgentsMdEditor() {
   })
 
   useEffect(() => {
-    if (data?.content !== undefined) {
-      setContent(data.content)
-      setHasChanges(false)
-    }
+    if (data?.content === undefined) return
+    if (hasChangesRef.current) return
+    if (data.content === savedContentRef.current) return
+    setContent(data.content)
+    setSavedContent(data.content)
   }, [data?.content])
 
   const updateMutation = useMutation({
     mutationFn: (newContent: string) => settingsApi.updateAgentsMd(newContent),
-    onSuccess: () => {
+    onSuccess: (_data, newContent) => {
+      setSavedContent(newContent)
       queryClient.invalidateQueries({ queryKey: ['agents-md'] })
       queryClient.invalidateQueries({ queryKey: ['opencode', 'agents'] })
-      setHasChanges(false)
       showToast.success('AGENTS.md saved and server restarted')
     },
     onError: () => {
@@ -45,7 +53,7 @@ export function AgentsMdEditor() {
     onSuccess: (defaultContent) => {
       queryClient.invalidateQueries({ queryKey: ['agents-md'] })
       setContent(defaultContent)
-      setHasChanges(false)
+      setSavedContent(defaultContent)
       showToast.success('AGENTS.md reset to default and server restarted')
     },
     onError: () => {
@@ -53,10 +61,7 @@ export function AgentsMdEditor() {
     },
   })
 
-  const handleContentChange = (value: string) => {
-    setContent(value)
-    setHasChanges(value !== data?.content)
-  }
+  const isSaving = updateMutation.isPending || resetToDefaultMutation.isPending
 
   const handleSave = () => {
     updateMutation.mutate(content)
@@ -65,6 +70,8 @@ export function AgentsMdEditor() {
   const handleResetToDefault = () => {
     resetToDefaultMutation.mutate()
   }
+
+  const { query, setQuery, matches, currentMatchIndex, hasMatches, next, prev } = useFindInText(content)
 
   if (isLoading) {
     return (
@@ -84,18 +91,19 @@ export function AgentsMdEditor() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="sticky top-0 z-10 flex flex-col gap-3 bg-background py-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-sm text-muted-foreground">
             Global instructions for AI agents. This file is merged with repository-specific AGENTS.md files.
           </p>
         </div>
-        <div className="flex gap-2 flex-shrink-0">
+        <div className="flex flex-shrink-0 gap-2">
           <Button
             variant="outline"
             size="sm"
             onClick={handleResetToDefault}
-            disabled={updateMutation.isPending || resetToDefaultMutation.isPending}
+            disabled={isSaving}
+            className="flex-1 sm:flex-none"
           >
             {resetToDefaultMutation.isPending ? (
               <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -107,7 +115,8 @@ export function AgentsMdEditor() {
           <Button
             size="sm"
             onClick={handleSave}
-            disabled={!hasChanges || updateMutation.isPending || resetToDefaultMutation.isPending}
+            disabled={!hasChanges || isSaving}
+            className="flex-1 sm:flex-none"
           >
             {updateMutation.isPending ? (
               <Loader2 className="h-4 w-4 mr-1 animate-spin" />
@@ -118,14 +127,31 @@ export function AgentsMdEditor() {
           </Button>
         </div>
       </div>
-      
-      <Textarea
-        value={content}
-        onChange={(e) => handleContentChange(e.target.value)}
-        className="font-mono text-xs sm:text-sm min-h-[300px] resize-y"
-        placeholder="# Agent Instructions&#10;&#10;Add global instructions for AI agents here..."
+
+      <EditorFindBar
+        query={query}
+        onQueryChange={setQuery}
+        matchCount={matches.length}
+        currentMatch={hasMatches ? currentMatchIndex + 1 : 0}
+        onPrev={prev}
+        onNext={next}
+        inputName="agents-md-find"
+        placeholder="Find in AGENTS.md..."
+        className="rounded-t-md border-x border-t"
       />
-      
+
+      <div className="h-[55vh] min-h-[300px] overflow-hidden rounded-b-md border border-input">
+        <CodeEditor
+          ariaLabel="AGENTS.md content"
+          value={content}
+            onChange={setContent}
+          highlights={matches}
+          activeHighlightIndex={currentMatchIndex}
+          disabled={isSaving}
+          placeholder="# Agent Instructions&#10;&#10;Add global instructions for AI agents here..."
+        />
+      </div>
+
       {hasChanges && (
         <p className="text-xs text-amber-500">You have unsaved changes</p>
       )}

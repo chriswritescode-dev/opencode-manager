@@ -16,12 +16,14 @@ interface UseFindInTextReturn {
   clear: () => void
 }
 
+const EMPTY_MATCHES: FindMatch[] = []
+
 export function useFindInText(text: string): UseFindInTextReturn {
   const [query, setQueryState] = useState('')
   const [currentMatchIndex, setCurrentMatchIndex] = useState(0)
 
   const matches = useMemo(() => {
-    if (!query.trim()) return []
+    if (!query.trim()) return EMPTY_MATCHES
     const results: FindMatch[] = []
     const lowerText = text.toLowerCase()
     const lowerQuery = query.toLowerCase()

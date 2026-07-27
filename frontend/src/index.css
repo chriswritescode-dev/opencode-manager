@@ -414,24 +414,3 @@ input:-webkit-autofill:active {
 .animate-progress {
   animation: progress 2s ease-in-out infinite;
 }
-
-/* Error line highlighting - red-orange selection color */
-.error-highlight::selection {
-  background-color: #fecaca;
-  color: #991b1b;
-}
-
-.dark .error-highlight::selection {
-  background-color: #7f1d1d;
-  color: #fecaca;
-}
-
-.error-highlight::-moz-selection {
-  background-color: #fecaca;
-  color: #991b1b;
-}
-
-.dark .error-highlight::-moz-selection {
-  background-color: #7f1d1d;
-  color: #fecaca;
-}

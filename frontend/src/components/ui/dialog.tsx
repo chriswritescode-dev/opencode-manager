@@ -4,6 +4,7 @@ import { X } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { useSwipeBack } from '@/hooks/useMobile'
+import { useVisualViewport } from '@/hooks/useVisualViewport'
 
 const DialogOpenContext = React.createContext<boolean>(true)
 
@@ -42,6 +43,7 @@ interface DialogContentProps
   fullscreen?: boolean
   mobileFullscreen?: boolean
   mobileSwipeToClose?: boolean
+  keyboardAware?: boolean
   canSwipeBack?: () => boolean
   onSwipeBack?: () => void
   onOpenChange?: (open: boolean) => void
@@ -51,17 +53,18 @@ interface DialogContentProps
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, canSwipeBack, onSwipeBack, overlayClassName, style, ...props }, ref) => {
+>(({ className, children, hideCloseButton, fullscreen, mobileFullscreen, mobileSwipeToClose, keyboardAware, canSwipeBack, onSwipeBack, overlayClassName, style, ...props }, ref) => {
   const isMobileFullscreenMode = fullscreen || mobileFullscreen
   const isDialogOpen = React.useContext(DialogOpenContext)
   const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' ? window.innerWidth < 768 : false)
   const shouldEnableMobileSwipe = mobileSwipeToClose !== false && isMobile && isDialogOpen
   const shouldAnimateSwipe = shouldEnableMobileSwipe && isMobileFullscreenMode
-  const swipeContainerRef = React.useRef<HTMLDivElement>(null)
+  const { keyboardHeight } = useVisualViewport({ enabled: keyboardAware === true && isDialogOpen })
+  const [swipeContainer, setSwipeContainer] = React.useState<HTMLDivElement | null>(null)
   const closeTriggerRef = React.useRef<HTMLButtonElement>(null)
   
   const combinedRef = React.useCallback((node: HTMLDivElement | null) => {
-    swipeContainerRef.current = node
+    setSwipeContainer(node)
     if (typeof ref === 'function') {
       ref(node)
     } else if (ref) {
@@ -81,10 +84,10 @@ const DialogContent = React.forwardRef<
   
   React.useEffect(() => {
     if (shouldEnableMobileSwipe) {
-      return swipeBind(swipeContainerRef.current)
+      return swipeBind(swipeContainer)
     }
     return undefined
-  }, [shouldEnableMobileSwipe, swipeBind])
+  }, [shouldEnableMobileSwipe, swipeBind, swipeContainer])
   
   const baseStyle = isMobileFullscreenMode
     ? { paddingTop: 'env(safe-area-inset-top, 0px)' }
@@ -94,6 +97,7 @@ const DialogContent = React.forwardRef<
     ...baseStyle,
     ...style,
     ...(shouldAnimateSwipe ? swipeStyles : undefined),
+    ...(keyboardAware && keyboardHeight > 0 ? { paddingBottom: `${keyboardHeight}px` } : undefined),
   }
 
   return (
