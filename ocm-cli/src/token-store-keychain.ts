@@ -17,9 +17,20 @@ export type SecurityRunner = (args: string[]) => Promise<SecurityResult>
 
 type ExecFileFailure = Error & { code?: number | string }
 
+export function formatSecurityCommand(args: string[]): string {
+  const quoted = args.map((arg) => {
+    if (/[\r\n]/.test(arg)) {
+      throw new TokenStoreError('keychain service, account and token values cannot contain line breaks', 'keychain')
+    }
+    return `"${arg.replace(/[\\"]/g, '\\$&')}"`
+  })
+  return `${quoted.join(' ')}\n`
+}
+
 function runSecurity(args: string[]): Promise<SecurityResult> {
   return new Promise<SecurityResult>((resolve, reject) => {
-    execFile(SECURITY_BIN, args, { encoding: 'utf-8' }, (err, stdout, stderr) => {
+    const command = formatSecurityCommand(args)
+    const child = execFile(SECURITY_BIN, ['-i'], { encoding: 'utf-8' }, (err, stdout, stderr) => {
       const exitCode = (err as ExecFileFailure | null)?.code ?? (err ? null : 0)
       if (typeof exitCode !== 'number') {
         reject(new TokenStoreError(`cannot run the macOS 'security' CLI: ${(err as Error).message}`, 'keychain'))
@@ -27,6 +38,8 @@ function runSecurity(args: string[]): Promise<SecurityResult> {
       }
       resolve({ stdout: stdout ?? '', stderr: stderr ?? '', code: exitCode })
     })
+    child.stdin?.on('error', () => undefined)
+    child.stdin?.end(command)
   })
 }
 

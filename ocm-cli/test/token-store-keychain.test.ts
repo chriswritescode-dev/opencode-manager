@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { createKeychainTokenStore, KEYCHAIN_SERVICE } from '../src/token-store-keychain.js'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { createKeychainTokenStore, formatSecurityCommand, KEYCHAIN_SERVICE } from '../src/token-store-keychain.js'
 import type { SecurityResult } from '../src/token-store-keychain.js'
 import { TokenStoreError } from '../src/token-store.js'
 
@@ -140,6 +140,17 @@ describe('keychain token store', () => {
     await expectStoreError(() => store.delete(ACCOUNT), { message: 'keychain locked' })
   })
 
+  it('quotes every security argument and escapes backslashes and quotes', () => {
+    expect(formatSecurityCommand(['add-generic-password', '-a', 'a"b\\c', '-w', 'tok en'])).toBe(
+      '"add-generic-password" "-a" "a\\"b\\\\c" "-w" "tok en"\n',
+    )
+  })
+
+  it('refuses arguments containing line breaks so they cannot inject extra security commands', () => {
+    expect(() => formatSecurityCommand(['add-generic-password', '-w', 'tok\ndelete-generic-password']))
+      .toThrow(TokenStoreError)
+  })
+
   it('describes itself as a keychain store with the service name', () => {
     const run = vi.fn()
     const store = createKeychainTokenStore(run)
@@ -149,5 +160,32 @@ describe('keychain token store', () => {
       location: `macOS Keychain (service ${KEYCHAIN_SERVICE})`,
     })
     expect(run).not.toHaveBeenCalled()
+  })
+})
+
+describe('keychain token store process arguments', () => {
+  afterEach(() => {
+    vi.doUnmock('child_process')
+    vi.resetModules()
+  })
+
+  it('sends the token on stdin and never puts it in the security argv', async () => {
+    const end = vi.fn()
+    const execFile = vi.fn((_bin: string, _args: string[], _opts: unknown, cb: (err: null, stdout: string, stderr: string) => void) => {
+      cb(null, '', '')
+      return { stdin: { on: vi.fn(), end } }
+    })
+    vi.doMock('child_process', () => ({ execFile }))
+    vi.resetModules()
+    const { createKeychainTokenStore: create } = await import('../src/token-store-keychain.js')
+
+    await create().set('https://m', 'sup3r-secret')
+
+    expect(execFile).toHaveBeenCalledOnce()
+    expect(execFile.mock.calls[0]![0]).toBe('/usr/bin/security')
+    expect(execFile.mock.calls[0]![1]).toEqual(['-i'])
+    expect(end).toHaveBeenCalledWith(
+      `"add-generic-password" "-s" "${KEYCHAIN_SERVICE}" "-a" "https://m" "-w" "sup3r-secret" "-U"\n`,
+    )
   })
 })

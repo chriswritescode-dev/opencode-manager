@@ -31,12 +31,8 @@ export function getStatePath(): string {
 }
 
 export function readState(): OcmState | null {
-  try {
-    const parsed = readJsonFile<OcmState>(STATE_FILE)
-    return parsed?.managerUrl ? parsed : null
-  } catch {
-    return null
-  }
+  const parsed = readJsonFile<OcmState>(STATE_FILE)
+  return parsed?.managerUrl ? parsed : null
 }
 
 export function writeState(state: OcmState): void {
@@ -50,14 +46,14 @@ export function clearState(): void {
 }
 
 export function readInstallNotice(): InstallNotice | null {
+  let parsed: InstallNotice | null
   try {
-    const parsed = readJsonFile<InstallNotice>(INSTALL_NOTICE_FILE)
-    return parsed?.link && parsed.binDir ? parsed : null
+    parsed = readJsonFile<InstallNotice>(INSTALL_NOTICE_FILE)
   } catch {
     return null
-  } finally {
-    deleteInstallNotice()
   }
+  deleteInstallNotice()
+  return parsed?.link && parsed.binDir ? parsed : null
 }
 
 function deleteInstallNotice(): void {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
@@ -88,6 +88,15 @@ describe('cli state file', () => {
     expect(readState()).toBeNull()
   })
 
+  it('surfaces an unreadable state file instead of reporting no manager', async () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return
+    const { readState, writeState, getStatePath } = await loadState()
+    writeState({ managerUrl: 'https://manager.example.com' })
+    chmodSync(getStatePath(), 0o000)
+
+    expect(() => readState()).toThrow(/EACCES|EPERM/)
+  })
+
   it('clearState empties an existing state file without recreating a missing one', async () => {
     const { readState, writeState, clearState, getStatePath } = await loadState()
 
@@ -110,6 +119,18 @@ describe('cli state file', () => {
     expect(readInstallNotice()).toEqual({ link: '~/.local/bin/ocm', binDir: '~/.local/bin', pathMissing: true })
     expect(existsSync(noticeFile)).toBe(false)
     expect(readInstallNotice()).toBeNull()
+  })
+
+  it('keeps an unreadable install notice instead of consuming it', async () => {
+    if (process.platform === 'win32' || process.getuid?.() === 0) return
+    const { readInstallNotice } = await loadState()
+    mkdirSync(configDir, { recursive: true })
+    const noticeFile = join(configDir, 'install-notice.json')
+    writeFileSync(noticeFile, JSON.stringify({ link: '~/.local/bin/ocm', binDir: '~/.local/bin', pathMissing: true }))
+    chmodSync(noticeFile, 0o000)
+
+    expect(readInstallNotice()).toBeNull()
+    expect(existsSync(noticeFile)).toBe(true)
   })
 
   it('ignores an incomplete install notice', async () => {
