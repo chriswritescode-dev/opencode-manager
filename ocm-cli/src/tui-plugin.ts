@@ -1,6 +1,7 @@
 import type { TuiPluginApi } from './tui-types.js'
 import { readInstallNotice, readState } from './state.js'
-import { getToken } from './keychain.js'
+import { getToken } from './internal-token-store.js'
+import { TokenStoreError } from './token-store.js'
 import { fetchRepos, toRemoteRepoSummaries } from './manager-repos.js'
 import { ManagerApi, ManagerApiError } from './manager-api.js'
 import { prepareMirror, checkPushDivergence, mirrorUpFast } from './mirror.js'
@@ -90,9 +91,16 @@ async function runSessionMove(api: TuiPluginApi): Promise<void> {
       return
     }
 
-    const token = getToken(state.managerUrl)
+    let token: string | null
+    try {
+      token = await getToken(state.managerUrl)
+    } catch (err) {
+      const reason = err instanceof TokenStoreError ? err.message : String(err)
+      api.ui.toast({ variant: 'error', message: `Token store unavailable: ${reason}` })
+      return
+    }
     if (!token) {
-      api.ui.toast({ variant: 'error', message: `No token in Keychain. Run \`ocm login ${state.managerUrl}\`.` })
+      api.ui.toast({ variant: 'error', message: `No token stored. Run \`ocm login ${state.managerUrl}\`.` })
       return
     }
 

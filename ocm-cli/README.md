@@ -22,10 +22,24 @@ also create a best-effort `~/.local/bin/ocm` symlink.
 ocm login <manager-url> [token]
 ```
 
-The token is stored in macOS Keychain under the `opencode-manager` service. CLI
-state is stored at `~/.config/opencode-manager/state.json`.
+The token is stored in a platform-specific token store:
 
-If `[token]` is omitted, `ocm login` reads it from hidden TTY input or stdin.
+| Platform | Store |
+|---|---|
+| macOS | Keychain, service `opencode-manager`, account = manager URL |
+| Linux | `~/.config/opencode-manager/credentials.json`, mode `0600` |
+
+On Linux the token is stored as plaintext JSON protected only by file
+permissions. CLI state is stored at `~/.config/opencode-manager/state.json`.
+Windows is unsupported: the same file store is used, but the `0600` mode is not
+enforced there.
+
+`OCM_TOKEN` overrides the token store for reads; `ocm login` always writes to
+the platform store and `ocm logout` cannot remove the override. Run `ocm status`
+to see the active store.
+
+If `[token]` is omitted, `ocm login` reads it from hidden TTY input (requires
+`bash`) or stdin.
 
 ## Commands
 
@@ -92,7 +106,9 @@ global installs); the plugin surface is TUI-only.
 
 ## Requirements
 
+- macOS or Linux (Windows is unsupported)
 - `opencode` available on `PATH`
 - `git` and `tar` (with gzip support, i.e. the `-z` flag) available on `PATH`
-- macOS `security` CLI for Keychain-backed token storage
+- `bash`, used for hidden token entry and interactive confirmations
+- macOS only: `/usr/bin/security`, used for Keychain-backed token storage (Linux uses a mode-`0600` file under the user config dir `~/.config/opencode-manager`)
 - An OpenCode Manager URL and bearer token

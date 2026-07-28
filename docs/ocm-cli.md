@@ -76,7 +76,9 @@ ocm login https://your-manager-url
 # paste your Manager internal token when prompted
 ```
 
-The token is stored in the macOS Keychain under the manager URL. The manager URL is persisted to `~/.config/opencode-manager/state.json`.
+The token is stored in a platform-specific token store: the macOS Keychain (service `opencode-manager`, account = manager URL) on macOS, or `~/.config/opencode-manager/credentials.json` at mode `0600` on Linux. On Linux the token is plaintext JSON protected only by file permissions. Run `ocm status` to see the active store. The manager URL itself is persisted to `~/.config/opencode-manager/state.json`.
+
+Windows is not supported: the CLI falls back to the same file store, but the `0600` mode is not enforced there and hidden token entry requires `bash`.
 
 Generate or rotate your internal token from **Settings → Manager Token** in the Manager web UI (Settings cog in the sidebar, then **Manager Token**).
 
@@ -88,7 +90,7 @@ Generate or rotate your internal token from **Settings → Manager Token** in th
 ocm                       Attach to the Manager repo matching $PWD's git origin,
                           or fall back to the last selected repo
 ocm login <url> [token]   Save manager URL + token (token via stdin if omitted)
-ocm logout                Forget saved token (Keychain) and state
+ocm logout                Forget saved token and state
 ocm status                Show current manager URL, repo, and whether token is set
 ocm list                  List ready repos from the manager
 ocm use <repoId|name>     Attach to a specific repo and remember it as last
@@ -141,14 +143,15 @@ When the TUI plugin entry is installed, `/ocm-move` is available in local OpenCo
 
 ## 4. Environment variables
 
-Both can be used in place of `ocm login`:
+The CLI's environment and token inputs:
 
 | Variable | Description |
 |---|---|
 | `OPENCODE_MANAGER_URL` | Manager base URL (e.g., `https://manager.example.com`). Not currently consumed by the CLI — use `ocm login`. |
 | `OCM_REMOTE_MANAGER_URL` | Internal child-process context set by `ocm attach`; controls the remote TUI indicator. Not a login setting. |
 | `OCM_REMOTE_REPO_NAME` | Internal child-process context set by `ocm attach`; labels the remote TUI indicator. Not a login setting. |
-| Keychain entry under `https://manager.example.com` | Token used for Bearer auth on Manager API calls and Basic auth on the OpenCode proxy. |
+| `OCM_TOKEN` | Read-only override for the stored token; takes priority over the platform token store. `ocm login` never writes it, and `ocm logout` cannot remove it. Because the manager URL still comes from `state.json`, CI must run `ocm login` first, so this override does not yet avoid writing a token to disk. |
+| Token store entry under `<manager url>` | Token used for Bearer auth on Manager API calls and Basic auth on the OpenCode proxy. macOS Keychain (service `opencode-manager`) or `~/.config/opencode-manager/credentials.json` (mode `0600`) on Linux. |
 
 ---
 

@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'child_process'
 import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
-import { getToken, setToken, deleteToken, KeychainError } from '../src/keychain.js'
+import { getToken, setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
@@ -22,7 +22,7 @@ Usage:
                             fall back to the last selected repo, or launch local
                             opencode when no Manager target applies
   ocm login <url> [token]   Save manager URL + token (token via stdin if omitted)
-  ocm logout                Forget saved token (Keychain) and state
+  ocm logout                Forget saved token and state
   ocm status                Show current manager URL, repo, and whether token is set
   ocm list                  List ready repos from the manager
   ocm use <repoId|name>     Attach to a specific repo and remember it as last
@@ -108,10 +108,17 @@ function requireState(): OcmState {
   return state
 }
 
-function requireToken(state: OcmState): string {
-  const token = getToken(state.managerUrl)
+async function requireToken(state: OcmState): Promise<string> {
+  const store = describeTokenStore()
+  let token: string | null
+  try {
+    token = await getToken(state.managerUrl)
+  } catch (err) {
+    if (!(err instanceof TokenStoreError)) throw err
+    die(`token store error (${store.kind}: ${store.location}): ${err.message}. Run \`ocm login ${state.managerUrl}\` after fixing the store.`)
+  }
   if (!token) {
-    die(`no token in Keychain for ${state.managerUrl}. Run \`ocm login ${state.managerUrl}\`.`)
+    die(`no token stored for ${state.managerUrl} (${store.kind}: ${store.location}). Run \`ocm login ${state.managerUrl}\`.`)
   }
   return token
 }
@@ -164,7 +171,7 @@ function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | 
   return repos.find((r) => r.name === needle) ?? repos.find((r) => r.name.toLowerCase() === needle.toLowerCase())
 }
 
-async function cmdLogin(args: string[]): Promise<void> {
+export async function cmdLogin(args: string[]): Promise<void> {
   const url = args[0]
   if (!url) die('usage: ocm login <url> [token]')
   const normalisedUrl = url.replace(/\/+$/, '')
@@ -190,9 +197,9 @@ async function cmdLogin(args: string[]): Promise<void> {
   if (!token) die('no token provided')
 
   try {
-    setToken(normalisedUrl, token)
+    await setToken(normalisedUrl, token)
   } catch (err) {
-    if (err instanceof KeychainError) die(`Keychain error: ${err.message}`)
+    if (err instanceof TokenStoreError) die(`token store error: ${err.message}`)
     throw err
   }
 
@@ -202,32 +209,65 @@ async function cmdLogin(args: string[]): Promise<void> {
     managerUrl: normalisedUrl,
   })
 
-  info(`Saved token for ${normalisedUrl} in Keychain.`)
+  const store = describeTokenWriteTarget()
+  info(`Saved token for ${normalisedUrl} (${store.kind}: ${store.location}).`)
   info(`State file: ${getStatePath()}`)
+  warnEnvTokenPrecedence()
 }
 
-async function cmdLogout(): Promise<void> {
+export async function cmdLogout(): Promise<void> {
   const state = readState()
   if (!state || !state.managerUrl) {
     info('Nothing to log out from.')
     return
   }
-  const deleted = deleteToken(state.managerUrl)
+  let deleted = false
+  let storeError: TokenStoreError | undefined
+  try {
+    deleted = await deleteToken(state.managerUrl)
+  } catch (err) {
+    if (!(err instanceof TokenStoreError)) throw err
+    storeError = err
+  }
   clearState()
-  info(deleted ? `Removed Keychain entry for ${state.managerUrl}.` : `No Keychain entry found.`)
+  if (storeError) {
+    info('State cleared.')
+    die(`token store error: ${storeError.message}. The stored token may still exist.`)
+  }
+  info(deleted ? `Removed stored token for ${state.managerUrl}.` : 'No stored token found.')
   info('State cleared.')
+  warnEnvTokenPrecedence()
 }
 
-async function cmdStatus(): Promise<void> {
+function warnEnvTokenPrecedence(): void {
+  if (envToken()) {
+    info(`note: ${TOKEN_ENV} is set and takes precedence over the stored token; unset it to use the token store.`)
+  }
+}
+
+async function describeTokenPresence(account: string | undefined): Promise<string> {
+  try {
+    return (await hasStoredToken(account)) ? 'yes' : 'no'
+  } catch (err) {
+    if (!(err instanceof TokenStoreError)) throw err
+    return `unavailable (${err.message})`
+  }
+}
+
+export async function cmdStatus(): Promise<void> {
+  const store = describeTokenStore()
   const state = readState()
   if (!state) {
     info(`version:      ${VERSION}`)
+    info(`token store:  ${store.kind} (${store.location})`)
+    info(`token:        ${await describeTokenPresence(undefined)}`)
     info('no state. run: ocm login <url>')
     return
   }
   info(`version:      ${VERSION}`)
   info(`manager url:  ${state.managerUrl}`)
-  info(`token in kc:  ${getToken(state.managerUrl) ? 'yes' : 'no'}`)
+  info(`token:        ${await describeTokenPresence(state.managerUrl)}`)
+  info(`token store:  ${store.kind} (${store.location})`)
   if (state.lastRepoId !== undefined) {
     info(`last repo:    ${state.lastRepoName} (id=${state.lastRepoId}, branch=${state.lastRepoBranch ?? 'n/a'})`)
     info(`last repo dir: ${state.lastRepoDir}`)
@@ -239,7 +279,7 @@ async function cmdStatus(): Promise<void> {
 
 async function cmdList(): Promise<void> {
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const repos = await fetchRepos(state.managerUrl, token)
   if (repos.length === 0) {
     info('No ready repos.')
@@ -259,7 +299,7 @@ async function cmdUse(args: string[]): Promise<void> {
   const needle = args[0]
   if (!needle) die('usage: ocm use <repoId|name>')
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const repos = await fetchRepos(state.managerUrl, token)
   const repo = findRepo(repos, needle)
   if (!repo) die(`repo not found: ${needle}`)
@@ -278,7 +318,7 @@ async function cmdUse(args: string[]): Promise<void> {
 async function cmdDefault(): Promise<void> {
   info(`ocm v${VERSION}`)
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
 
   const last = state.lastRepoId !== undefined && state.lastRepoDir
     ? {
@@ -361,7 +401,7 @@ export async function cmdPush(args: string[]): Promise<void> {
   }
 
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 
@@ -439,7 +479,7 @@ async function cmdPull(args: string[]): Promise<void> {
   }
 
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 
