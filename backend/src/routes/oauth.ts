@@ -5,10 +5,23 @@ import { logger } from '../utils/logger'
 import {
   OAuthAuthorizeRequestSchema,
   OAuthAuthorizeResponseSchema,
-  OAuthCallbackRequestSchema
+  OAuthCallbackRequestSchema,
+  OAUTH_ERROR_CATEGORIES
 } from '../../../shared/src/schemas/auth'
 import { reloadOpenCodeConfig } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
+
+type OAuthPhase = 'authorize' | 'callback'
+
+export function classifyOAuthError(text: string, phase: OAuthPhase): string {
+  const lower = text.toLowerCase()
+  for (const category of OAUTH_ERROR_CATEGORIES) {
+    if (lower.includes(category)) {
+      return category
+    }
+  }
+  return phase === 'authorize' ? 'OAuth authorization failed' : 'OAuth callback failed'
+}
 
 export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
   const app = new Hono()
@@ -29,7 +42,7 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSuperv
       if (!response.ok) {
         const error = await response.text()
         logger.error(`OAuth authorize failed for ${providerId}:`, error)
-        return c.json({ error: 'OAuth authorization failed' }, 500)
+        return c.json({ error: classifyOAuthError(error, 'authorize') }, 500)
       }
 
       const data = await response.json()
@@ -61,7 +74,7 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSuperv
       if (!response.ok) {
         const error = await response.text()
         logger.error(`OAuth callback failed for ${providerId}:`, error)
-        return c.json({ error: 'OAuth callback failed' }, 500)
+        return c.json({ error: classifyOAuthError(error, 'callback') }, 500)
       }
 
       const data = await response.json()

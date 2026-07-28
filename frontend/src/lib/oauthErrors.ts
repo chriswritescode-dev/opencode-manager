@@ -1,4 +1,6 @@
-const ERROR_MAPPINGS: Record<string, string> = {
+import { OAUTH_ERROR_CATEGORIES, type OAuthErrorCategory } from '@opencode-manager/shared/schemas'
+
+const ERROR_MAPPINGS: Record<OAuthErrorCategory, string> = {
   'invalid code': 'Invalid authorization code. Please try the OAuth flow again.',
   'expired': 'Authorization code has expired. Please try the OAuth flow again.',
   'access denied': 'Access was denied. Please check the permissions and try again.',
@@ -14,9 +16,10 @@ export function mapOAuthError(err: unknown, context: 'authorize' | 'callback'): 
 
   if (!(err instanceof Error)) return defaultMessage
 
-  for (const [key, message] of Object.entries(ERROR_MAPPINGS)) {
-    if (err.message.toLowerCase().includes(key)) {
-      return message
+  const lower = err.message.toLowerCase()
+  for (const category of OAUTH_ERROR_CATEGORIES) {
+    if (lower.includes(category)) {
+      return ERROR_MAPPINGS[category]
     }
   }
 

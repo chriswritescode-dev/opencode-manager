@@ -71,3 +71,14 @@ export const OAuthCallbackRequestSchema = z.object({
 export const ProviderAuthMethodsResponseSchema = z.object({
   providers: z.record(z.string(), z.array(ProviderAuthMethodSchema)),
 }).or(ProviderAuthMethodsSchema);
+
+export const OAUTH_ERROR_CATEGORIES = [
+  "invalid code",
+  "expired",
+  "access denied",
+  "server error",
+  "provider not found",
+  "invalid method",
+] as const;
+
+export type OAuthErrorCategory = (typeof OAUTH_ERROR_CATEGORIES)[number];
