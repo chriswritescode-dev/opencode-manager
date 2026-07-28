@@ -425,6 +425,122 @@ describe('Settings Routes - OpenCode Upgrade', () => {
       )
       expect(json.removedFields).toEqual(['command.review'])
     })
+
+    it('persists recovery-cleaned content back to the DB after a default-config PUT with removedFields (audit regression)', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'cleaned',
+        content: {},
+        rawContent: '{}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      const firstConfig = {
+        id: 2,
+        name: 'cleaned',
+        content: { command: { review: true }, theme: 'dark' },
+        rawContent: '{"command":{"review":true},"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      }
+      const persistedConfig = {
+        ...firstConfig,
+        content: { theme: 'dark' },
+        rawContent: '{\n  "theme": "dark"\n}',
+        updatedAt: 3,
+      }
+      mockUpdateOpenCodeConfig
+        .mockReturnValueOnce(firstConfig)
+        .mockReturnValueOnce(persistedConfig)
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { theme: 'dark' },
+        removedFields: ['command.review'],
+      })
+
+      const req = new Request('http://localhost/opencode-configs/cleaned', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: '{"command":{"review":true},"theme":"dark"}',
+          isDefault: true,
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(200)
+      expect(json.removedFields).toEqual(['command.review'])
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2)
+      expect(mockUpdateOpenCodeConfig).toHaveBeenNthCalledWith(
+        2,
+        'cleaned',
+        { content: '{\n  "theme": "dark"\n}' },
+        'default',
+      )
+      expect(mockWriteFileContent).toHaveBeenCalledWith(
+        '/tmp/test-workspace/.config/opencode.json',
+        '{\n  "theme": "dark"\n}',
+      )
+    })
+
+    it('returns 409 instead of 200 when the recovery persistence write reports the config row was removed concurrently (audit regression)', async () => {
+      mockGetOpenCodeConfigByName.mockReturnValue({
+        id: 2,
+        name: 'cleaned',
+        content: {},
+        rawContent: '{}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      const firstConfig = {
+        id: 2,
+        name: 'cleaned',
+        content: { command: { review: true }, theme: 'dark' },
+        rawContent: '{"command":{"review":true},"theme":"dark"}',
+        isValid: true,
+        isDefault: true,
+        createdAt: 1,
+        updatedAt: 2,
+      }
+      mockUpdateOpenCodeConfig
+        .mockReturnValueOnce(firstConfig)
+        .mockReturnValueOnce(null)
+      mockPatchConfigWithRecovery.mockResolvedValueOnce({
+        success: true,
+        appliedConfig: { theme: 'dark' },
+        removedFields: ['command.review'],
+      })
+
+      const req = new Request('http://localhost/opencode-configs/cleaned', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: '{"command":{"review":true},"theme":"dark"}',
+          isDefault: true,
+        }),
+      })
+      const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
+
+      expect(res.status).toBe(409)
+      expect(json.error).toBe(
+        'OpenCode config was removed while applying recovered fields',
+      )
+      expect(mockUpdateOpenCodeConfig).toHaveBeenCalledTimes(2)
+      expect(mockUpdateOpenCodeConfig).toHaveBeenNthCalledWith(
+        2,
+        'cleaned',
+        { content: '{\n  "theme": "dark"\n}' },
+        'default',
+      )
+    })
   })
 
   describe('OpenCode import routes', () => {
