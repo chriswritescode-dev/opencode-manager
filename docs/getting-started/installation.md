@@ -55,7 +55,6 @@ docker exec -it opencode-manager sh
 | `opencode-workspace` | `/workspace` | Repository storage |
 | `opencode-data` | `/app/data` | Database and config |
 
-
 ## Local Development
 
 For contributors who want to develop locally instead of using Docker.

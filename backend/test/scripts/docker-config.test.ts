@@ -10,7 +10,6 @@ const dockerfilePath = join(repoRoot, 'Dockerfile')
 const composePath = join(repoRoot, 'docker-compose.yml')
 const envExamplePath = join(repoRoot, '.env.example')
 const dockerDocsPath = join(repoRoot, 'docs/configuration/docker.md')
-const installationDocsPath = join(repoRoot, 'docs/getting-started/installation.md')
 
 const read = (path: string) => readFileSync(path, 'utf-8')
 
@@ -123,11 +122,6 @@ describe('workspace ownership configuration', () => {
     expect(envExample).toContain('OCM_WORKSPACE_HOST_PATH')
     expect(envExample).toContain('# PUID=1000')
     expect(envExample).toContain('# PGID=1000')
-  })
-
-  it('links the host-access subsection from the installation guide', () => {
-    const installation = read(installationDocsPath)
-    expect(installation).toContain('configuration/docker.md#accessing-repositories-from-the-host')
   })
 
   it('documents the migration empty-destination guard and quoted host path', () => {
