@@ -49,7 +49,7 @@ afterEach(() => {
 })
 
 const runScript = (snippet: string, env: Record<string, string> = {}) =>
-  spawnSync('bash', ['-c', `set -e\nsource "${libPath}"\n${snippet}`], {
+  spawnSync('bash', ['-c', 'set -e\nsource "$1"\n$2', '--', libPath, snippet], {
     encoding: 'utf-8',
     env: {
       ...process.env,
