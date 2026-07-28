@@ -106,6 +106,7 @@ COPY package.json pnpm-workspace.yaml ./
 RUN mkdir -p /app/backend/node_modules/@opencode-manager && \
     ln -sfn /app/shared /app/backend/node_modules/@opencode-manager/shared
 
+COPY scripts/lib/container-user.sh /usr/local/lib/ocm/container-user.sh
 COPY scripts/docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
 
