@@ -1,4 +1,8 @@
 import { z } from "zod";
+import type {
+  ProviderOauthAuthorizeErrors,
+  ProviderOauthCallbackErrors,
+} from "@opencode-ai/sdk/v2/types";
 
 export const AuthEntrySchema = z.object({
   type: z.enum(["api", "oauth"]),
@@ -72,13 +76,58 @@ export const ProviderAuthMethodsResponseSchema = z.object({
   providers: z.record(z.string(), z.array(ProviderAuthMethodSchema)),
 }).or(ProviderAuthMethodsSchema);
 
-export const OAUTH_ERROR_CATEGORIES = [
-  "invalid code",
-  "expired",
-  "access denied",
-  "server error",
-  "provider not found",
-  "invalid method",
+export const PROVIDER_AUTH_ERROR_NAMES = [
+  "BadRequest",
+  "ProviderAuthOauthMissing",
+  "ProviderAuthOauthCodeMissing",
+  "ProviderAuthOauthCallbackFailed",
+  "ProviderAuthValidationFailed",
 ] as const;
 
-export type OAuthErrorCategory = (typeof OAUTH_ERROR_CATEGORIES)[number];
+export type ProviderAuthErrorName = (typeof PROVIDER_AUTH_ERROR_NAMES)[number];
+
+export const ProviderAuthErrorSchema = z.object({
+  name: z.enum(PROVIDER_AUTH_ERROR_NAMES),
+  data: z.object({
+    providerID: z.string().optional(),
+    field: z.string().optional(),
+    message: z.string().optional(),
+    kind: z.string().optional(),
+  }),
+});
+
+export const InvalidRequestErrorSchema = z.object({
+  _tag: z.literal("InvalidRequestError"),
+  message: z.string(),
+  kind: z.string().optional(),
+  field: z.string().optional(),
+});
+
+export const OpenCodeOAuthErrorSchema = z.union([
+  ProviderAuthErrorSchema,
+  InvalidRequestErrorSchema,
+]);
+
+export type OpenCodeOAuthError = z.infer<typeof OpenCodeOAuthErrorSchema>;
+
+export const OAUTH_ERROR_CODES = [
+  ...PROVIDER_AUTH_ERROR_NAMES,
+  "InvalidRequestError",
+] as const;
+
+export type OAuthErrorCode = (typeof OAUTH_ERROR_CODES)[number];
+
+export function oauthErrorCode(error: OpenCodeOAuthError): OAuthErrorCode {
+  return "_tag" in error ? error._tag : error.name;
+}
+
+type MutuallyAssignable<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type Assert<T extends true> = T;
+
+export type OpenCodeOAuthErrorMatchesAuthorize = Assert<
+  MutuallyAssignable<OpenCodeOAuthError, ProviderOauthAuthorizeErrors[400]>
+>;
+
+export type OpenCodeOAuthErrorMatchesCallback = Assert<
+  MutuallyAssignable<OpenCodeOAuthError, ProviderOauthCallbackErrors[400]>
+>;

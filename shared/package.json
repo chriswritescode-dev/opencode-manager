@@ -29,6 +29,7 @@
     "dotenv": "^17.2.3"
   },
   "devDependencies": {
+    "@opencode-ai/sdk": "1.18.8",
     "typescript": "^5"
   }
 }

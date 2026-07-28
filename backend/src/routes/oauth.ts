@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { OpenCodeClient } from '../services/opencode/client'
 import { z } from 'zod'
 import { logger } from '../utils/logger'
@@ -6,21 +7,57 @@ import {
   OAuthAuthorizeRequestSchema,
   OAuthAuthorizeResponseSchema,
   OAuthCallbackRequestSchema,
-  OAUTH_ERROR_CATEGORIES
+  OpenCodeOAuthErrorSchema,
+  oauthErrorCode
 } from '../../../shared/src/schemas/auth'
+import type { OAuthErrorCode } from '../../../shared/src/schemas/auth'
 import { reloadOpenCodeConfig } from '../services/opencode-restart'
 import type { OpenCodeSupervisor } from '../services/opencode-supervisor'
 
 type OAuthPhase = 'authorize' | 'callback'
 
-export function classifyOAuthError(text: string, phase: OAuthPhase): string {
-  const lower = text.toLowerCase()
-  for (const category of OAUTH_ERROR_CATEGORIES) {
-    if (lower.includes(category)) {
-      return category
-    }
+const PHASE_FALLBACK: Record<OAuthPhase, string> = {
+  authorize: 'OAuth authorization failed',
+  callback: 'OAuth callback failed',
+}
+
+interface OAuthFailure {
+  payload: { error: string; code?: OAuthErrorCode; detail?: string }
+  status: ContentfulStatusCode
+}
+
+export function buildOAuthFailure(body: string, upstreamStatus: number, phase: OAuthPhase): OAuthFailure {
+  const status: ContentfulStatusCode =
+    upstreamStatus >= 400 && upstreamStatus <= 599 ? (upstreamStatus as ContentfulStatusCode) : 502
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return { payload: { error: PHASE_FALLBACK[phase] }, status }
   }
-  return phase === 'authorize' ? 'OAuth authorization failed' : 'OAuth callback failed'
+
+  const result = OpenCodeOAuthErrorSchema.safeParse(parsed)
+  if (!result.success) {
+    return { payload: { error: PHASE_FALLBACK[phase] }, status }
+  }
+
+  const error = result.data
+  const isTagged = '_tag' in error
+  const message = isTagged ? error.message : error.data.message
+  const field = isTagged ? error.field : error.data.field
+  const detail = [message?.replace(/\s+/g, ' ').trim(), field ? `field: ${field}` : undefined]
+    .filter(Boolean)
+    .join(' — ')
+
+  return {
+    payload: {
+      error: PHASE_FALLBACK[phase],
+      code: oauthErrorCode(error),
+      ...(detail ? { detail } : {}),
+    },
+    status,
+  }
 }
 
 export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSupervisor?: OpenCodeSupervisor) {
@@ -42,7 +79,8 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSuperv
       if (!response.ok) {
         const error = await response.text()
         logger.error(`OAuth authorize failed for ${providerId}:`, error)
-        return c.json({ error: classifyOAuthError(error, 'authorize') }, 500)
+        const failure = buildOAuthFailure(error, response.status, 'authorize')
+        return c.json(failure.payload, failure.status)
       }
 
       const data = await response.json()
@@ -74,7 +112,8 @@ export function createOAuthRoutes(openCodeClient: OpenCodeClient, openCodeSuperv
       if (!response.ok) {
         const error = await response.text()
         logger.error(`OAuth callback failed for ${providerId}:`, error)
-        return c.json({ error: classifyOAuthError(error, 'callback') }, 500)
+        const failure = buildOAuthFailure(error, response.status, 'callback')
+        return c.json(failure.payload, failure.status)
       }
 
       const data = await response.json()
