@@ -320,6 +320,9 @@ importers:
         specifier: ^4.1.12
         version: 4.3.2
     devDependencies:
+      '@opencode-ai/sdk':
+        specifier: 1.18.8
+        version: 1.18.8
       typescript:
         specifier: ^5
         version: 5.9.3
@@ -1080,6 +1083,9 @@ packages:
   '@noble/hashes@2.0.1':
     resolution: {integrity: sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==}
     engines: {node: '>= 20.19.0'}
+
+  '@opencode-ai/sdk@1.18.8':
+    resolution: {integrity: sha512-8vi5UBKFFgc+fnyKhZhGUxiIWMtUuN00VAInnK9JO6g6EC8WvWefP+ccTBQD023zod69JaEoAzGgO8hdxXHUaw==}
 
   '@opentui/core-darwin-arm64@0.1.107':
     resolution: {integrity: sha512-Yqt2/9Ntw0IdtPA/qmHvXCE16y4Jq5/btCmuzN9/opzqZ5rYGYYVtiBii3LezGcTZYuJQZthjvh8MLPXXwA2EQ==}
@@ -5620,6 +5626,10 @@ snapshots:
   '@noble/ciphers@2.1.1': {}
 
   '@noble/hashes@2.0.1': {}
+
+  '@opencode-ai/sdk@1.18.8':
+    dependencies:
+      cross-spawn: 7.0.6
 
   '@opentui/core-darwin-arm64@0.1.107':
     optional: true

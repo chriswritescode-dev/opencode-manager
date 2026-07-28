@@ -301,6 +301,10 @@ export const ProviderConfigSchema = z.object({
   source: ProviderSourceSchema.optional(),
   env: z.array(z.string()).optional().default([]),
   key: z.string().optional(),
+  api: z.string().optional(),
+  npm: z.string().optional(),
+  whitelist: z.array(z.string()).optional(),
+  blacklist: z.array(z.string()).optional(),
   options: z.record(z.string(), z.any()).optional(),
   models: z.record(z.string(), ModelConfigSchema).optional(),
 });

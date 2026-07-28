@@ -578,20 +578,27 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
             }, 500)
           }
           
-          const contentToWrite = patchResult.removedFields && patchResult.removedFields.length > 0
+          const removedFields = patchResult.removedFields ?? []
+          const contentToWrite = removedFields.length > 0
             ? JSON.stringify(patchResult.appliedConfig ?? config.content, null, 2)
             : config.rawContent
-          
+
           await writeFileContent(configPath, contentToWrite)
           logger.info(`Wrote default config to: ${configPath}`)
-          
-          if (patchResult.removedFields && patchResult.removedFields.length > 0) {
-            logger.info(`Config applied with auto-removed fields: ${patchResult.removedFields.join(', ')}`)
-            return c.json({ ...config, removedFields: patchResult.removedFields })
+
+          if (removedFields.length > 0) {
+            logger.info(`Config applied with auto-removed fields: ${removedFields.join(', ')}`)
+            const persisted = settingsService.updateOpenCodeConfig(configName, { content: contentToWrite }, userId)
+            if (!persisted) {
+              return c.json({
+                error: 'OpenCode config was removed while applying recovered fields',
+              }, 409)
+            }
+            return c.json({ ...persisted, removedFields })
           }
         }
       }
-      
+
       return c.json(config)
     } catch (error) {
       logger.error('Failed to update OpenCode config:', error)
