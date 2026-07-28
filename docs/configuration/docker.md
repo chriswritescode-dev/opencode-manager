@@ -35,6 +35,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        TOOLS_CACHEBUST: ${TOOLS_CACHEBUST:-0}
     container_name: opencode-manager
     ports:
       - "5003:5003"
@@ -44,6 +46,8 @@ services:
       - "5103:5103"
     environment:
       - NODE_ENV=${NODE_ENV:-production}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
       - HOST=0.0.0.0
       - PORT=5003
       - OPENCODE_SERVER_PORT=5551
@@ -76,7 +80,7 @@ services:
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY:-}
       - VAPID_SUBJECT=${VAPID_SUBJECT:-}
     volumes:
-      - opencode-workspace:/workspace
+      - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
       - opencode-data:/app/data
     restart: unless-stopped
     healthcheck:
@@ -127,6 +131,7 @@ The container entrypoint (`scripts/docker-entrypoint.sh`) automatically:
 2. **Verifies OpenCode** is installed (installed at build time, fallback install if missing)
 3. **Upgrades OpenCode** if below minimum version (1.0.137)
 4. **Validates AUTH_SECRET** is set (required for startup)
+5. **Aligns the `node` account** to `PUID`/`PGID` (default `1000`) before chowning the workspace, the `/app/data` directory, and the `node` home directory. If `PUID`/`PGID` are already used by another account in the image, startup aborts with an explicit error. Group alignment runs first, so a free `PGID` combined with an occupied `PUID` mutates `/etc/group` before the UID collision is detected and aborts startup; realign to the original ids or pick a free pair before retrying.
 
 ## Port Configuration
 
@@ -192,10 +197,54 @@ Repository storage:
 
 ```yaml
 volumes:
-  - opencode-workspace:/workspace
+  - ${OCM_WORKSPACE_HOST_PATH:-opencode-workspace}:/workspace
 ```
 
-All cloned repositories are stored here. Uses a named volume for data persistence across container recreations.
+All cloned repositories are stored here. Defaults to a named volume for data persistence across container recreations.
+
+#### Accessing Repositories From the Host
+
+To work in the cloned repositories from the host instead of through `docker exec`, bind `/workspace` to a host directory and run the container as your host user so the files stay usable from the host without root. Add to `.env`:
+
+```bash
+# Output of `id -u` and `id -g` on the host
+PUID=1000
+PGID=1000
+OCM_WORKSPACE_HOST_PATH=/absolute/path/to/opencode-workspace
+```
+
+`OCM_WORKSPACE_HOST_PATH` is consumed verbatim as the compose mount source, so an absolute or `./`-relative path becomes a bind mount while the default value (`opencode-workspace`) stays a named volume. `PUID`/`PGID` are applied before the workspace is chowned, so agent-created files are host-owned and both sides share one uid &mdash; which also avoids git's "dubious ownership" warning.
+
+To migrate an existing named volume to a bind mount without losing data, copy the volume contents into the host directory with a one-off container &mdash; this works whether `<host path>` already exists or not, and avoids depending on Docker's internal storage path (`/var/lib/docker/...` differs on Docker Desktop, rootless Docker, and custom data roots). The destination must be empty; if it is not, the recipe aborts without copying anything so existing files are never overwritten:
+
+```bash
+docker compose stop
+mkdir -p "<host path>"
+# Abort if the destination is non-empty so we never overwrite existing files.
+if [ -n "$(ls -A "<host path>")" ]; then
+  echo "destination '<host path>' is not empty; aborting migration" >&2
+  exit 1
+fi
+# `<project>` is the Compose project name, usually the directory containing docker-compose.yml.
+docker run --rm \
+  -v <project>_opencode-workspace:/from:ro \
+  -v "<host path>":/to alpine sh -c 'cp -a /from/. /to/'
+sudo chown -R "$(id -u):$(id -g)" "<host path>"
+docker compose up -d
+# After confirming /workspace contains your repositories, remove the old volume:
+docker volume rm <project>_opencode-workspace
+```
+
+The quoted `"<host path>"` keeps paths containing spaces (for example `/Users/name/My Repositories`) intact across `mkdir`, the Docker `-v` argument, and `chown`. With the empty-destination guard in place, `cp -a /from/. /to/` copies the volume's *contents* (not its `_data` directory) directly into the bind-mount root, so repositories land directly beneath the mounted `/workspace`. The named volume is left in place until you confirm the migration succeeded.
+
+!!! warning "Set PUID before switching to a bind mount"
+    A wrong `PUID` makes startup chown the whole host directory. The entrypoint prints a warning naming both uids, but it does not block the chown.
+
+!!! warning "Concurrent git access"
+    Editing a repository from the host while an agent works in the same repository or worktree can collide on `index.lock` and branch state.
+
+!!! note "/app keeps the build-time uid"
+    `/app` and its `node_modules` are chowned to uid 1000 at build time. When `PUID` differs, the entrypoint re-chowns `/app` on startup, which costs one extra recursive walk per container start.
 
 ### Data
 

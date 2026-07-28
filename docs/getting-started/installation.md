@@ -55,6 +55,8 @@ docker exec -it opencode-manager sh
 | `opencode-workspace` | `/workspace` | Repository storage |
 | `opencode-data` | `/app/data` | Database and config |
 
+To work in the cloned repositories from the host instead of through `docker exec`, see [Accessing Repositories From the Host](../configuration/docker.md#accessing-repositories-from-the-host).
+
 ## Local Development
 
 For contributors who want to develop locally instead of using Docker.

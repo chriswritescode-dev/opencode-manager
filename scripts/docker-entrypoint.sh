@@ -5,6 +5,8 @@ export HOME=/home/node
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$HOME/.opencode/bin:/usr/local/bin:$PATH"
 
+source /usr/local/lib/ocm/container-user.sh
+
 install_opencode() {
   echo "Installing OpenCode latest..."
   curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-$(uname -m | sed 's/x86_64/x64/; s/aarch64/arm64/').tar.gz" \
@@ -86,7 +88,18 @@ if [ -z "$AUTH_SECRET" ]; then
   exit 1
 fi
 
+if ! align_container_user node; then
+  exit 1
+fi
+
+warn_if_workspace_owner_differs /workspace "$OCM_TARGET_UID"
+
 mkdir -p /app/data /workspace /home/node/.cache /home/node/.opencode
 chown -R node:node /app/data /workspace /home/node
+
+if [ "$OCM_UID_CHANGED" = "1" ] || [ "$OCM_GID_CHANGED" = "1" ]; then
+  echo "Realigning /app ownership after id change"
+  chown -R node:node /app
+fi
 
 exec runuser -u node -- "$@"
