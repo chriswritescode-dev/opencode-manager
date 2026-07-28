@@ -81,15 +81,18 @@ align_container_user() {
 }
 
 warn_if_workspace_owner_differs() {
-  local path="$1" target_uid="$2" current_uid
+  local path="$1" target_uid="$2" target_gid="$3" owner current_uid current_gid
 
   [ -d "$path" ] || return 0
   [ -n "$(ls -A "$path" 2>/dev/null)" ] || return 0
 
-  current_uid="$(stat -c %u "$path" 2>/dev/null)" || return 0
-  if [ "$current_uid" != "$target_uid" ]; then
-    echo "WARNING: $path is owned by uid $current_uid but the container will run as uid $target_uid" >&2
-    echo "WARNING: startup is about to chown $path to uid $target_uid, rewriting ownership of existing files" >&2
+  owner="$(stat -c '%u %g' "$path" 2>/dev/null)" || return 0
+  current_uid="${owner%% *}"
+  current_gid="${owner##* }"
+
+  if [ "$current_uid" != "$target_uid" ] || [ "$current_gid" != "$target_gid" ]; then
+    echo "WARNING: $path is owned by uid $current_uid/gid $current_gid but the container will run as uid $target_uid/gid $target_gid" >&2
+    echo "WARNING: startup is about to chown $path to uid $target_uid/gid $target_gid, rewriting ownership of existing files" >&2
     echo "WARNING: stop the container now and set PUID/PGID from 'id -u' and 'id -g' if that is not intended" >&2
   fi
 }

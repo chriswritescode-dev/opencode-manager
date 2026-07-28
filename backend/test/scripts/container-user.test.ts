@@ -41,7 +41,10 @@ exit 2`)
 
   writeStub('groupmod', `echo "groupmod $*" >> "$OCM_STUB_LOG"`)
   writeStub('usermod', `echo "usermod $*" >> "$OCM_STUB_LOG"`)
-  writeStub('stat', `echo "${'${OCM_STUB_OWNER_UID:-0}'}"`)
+  writeStub('stat', `case "$2" in
+  '%u %g') echo "${'${OCM_STUB_OWNER_UID:-0}'} ${'${OCM_STUB_OWNER_GID:-0}'}" ;;
+  *) echo "${'${OCM_STUB_OWNER_UID:-0}'}" ;;
+esac`)
 })
 
 afterEach(() => {
@@ -267,7 +270,7 @@ describe('align_container_user id collisions', () => {
 
 describe('warn_if_workspace_owner_differs', () => {
   it('is silent when the path does not exist', () => {
-    const res = runScript(`warn_if_workspace_owner_differs "${join(stubDir, 'does-not-exist')}" 1000`)
+    const res = runScript(`warn_if_workspace_owner_differs "${join(stubDir, 'does-not-exist')}" 1000 1000`)
     expect(res.status).toBe(0)
     expect(res.stderr).toBe('')
   })
@@ -275,25 +278,47 @@ describe('warn_if_workspace_owner_differs', () => {
   it('is silent when the directory is empty', () => {
     const ws = join(stubDir, 'ws')
     mkdirSync(ws, { recursive: true })
-    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000`, { OCM_STUB_OWNER_UID: '0' })
+    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000 1000`, { OCM_STUB_OWNER_UID: '0' })
     expect(res.status).toBe(0)
     expect(res.stderr).toBe('')
   })
 
-  it('is silent when the directory is non-empty and the owner matches', () => {
+  it('is silent when the directory is non-empty and both uid and gid match', () => {
     const ws = join(stubDir, 'ws')
     mkdirSync(ws, { recursive: true })
     writeFileSync(join(ws, 'repo.txt'), 'data')
-    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000`, { OCM_STUB_OWNER_UID: '1000' })
+    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000 1000`, {
+      OCM_STUB_OWNER_UID: '1000',
+      OCM_STUB_OWNER_GID: '1000',
+    })
     expect(res.status).toBe(0)
     expect(res.stderr).toBe('')
   })
 
-  it('warns non-fatally when a non-empty directory has a mismatched owner', () => {
+  it('warns non-fatally when a non-empty directory has a mismatched uid', () => {
     const ws = join(stubDir, 'ws')
     mkdirSync(ws, { recursive: true })
     writeFileSync(join(ws, 'repo.txt'), 'data')
-    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000`, { OCM_STUB_OWNER_UID: '1001' })
+    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000 1000`, {
+      OCM_STUB_OWNER_UID: '1001',
+      OCM_STUB_OWNER_GID: '1000',
+    })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toContain('1001')
+    expect(res.stderr).toContain('1000')
+    expect(res.stderr).toContain('WARNING')
+    expect(res.stderr).toContain(ws)
+    expect(res.stderr).toMatch(/rewriting ownership/)
+  })
+
+  it('warns non-fatally when a non-empty directory has a mismatched gid', () => {
+    const ws = join(stubDir, 'ws')
+    mkdirSync(ws, { recursive: true })
+    writeFileSync(join(ws, 'repo.txt'), 'data')
+    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000 1000`, {
+      OCM_STUB_OWNER_UID: '1000',
+      OCM_STUB_OWNER_GID: '1001',
+    })
     expect(res.status).toBe(0)
     expect(res.stderr).toContain('1001')
     expect(res.stderr).toContain('1000')
@@ -306,7 +331,7 @@ describe('warn_if_workspace_owner_differs', () => {
     const ws = join(stubDir, 'ws')
     mkdirSync(ws, { recursive: true })
     writeFileSync(join(ws, 'repo.txt'), 'data')
-    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000`, { OCM_STUB_OWNER_UID: '1001' })
+    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000 1000`, { OCM_STUB_OWNER_UID: '1001' })
     expect(res.status).toBe(0)
     expect(res.stderr).toMatch(/id -u/)
     expect(res.stderr).toMatch(/id -g/)
@@ -317,7 +342,7 @@ describe('warn_if_workspace_owner_differs', () => {
     mkdirSync(ws, { recursive: true })
     writeFileSync(join(ws, 'repo.txt'), 'data')
     writeStub('stat', `exit 1`)
-    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000; echo "status=$?"`, {
+    const res = runScript(`warn_if_workspace_owner_differs "${ws}" 1000 1000; echo "status=$?"`, {
       OCM_STUB_OWNER_UID: '1001',
     })
     expect(res.status).toBe(0)

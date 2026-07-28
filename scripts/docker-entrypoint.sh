@@ -92,7 +92,7 @@ if ! align_container_user node; then
   exit 1
 fi
 
-warn_if_workspace_owner_differs /workspace "$OCM_TARGET_UID"
+warn_if_workspace_owner_differs /workspace "$OCM_TARGET_UID" "$OCM_TARGET_GID"
 
 mkdir -p /app/data /workspace /home/node/.cache /home/node/.opencode
 chown -R node:node /app/data /workspace /home/node
