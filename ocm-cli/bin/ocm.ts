@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'child_process'
 import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
-import { getToken, setToken, deleteToken, describeCredentialStore, describeBackendStore, CredentialStoreError } from '../src/credentials.js'
+import { getToken, setToken, deleteToken, hasStoredToken, describeTokenStore, describeTokenWriteTarget, envToken, TOKEN_ENV, TokenStoreError } from '../src/internal-token-store.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
@@ -108,10 +108,16 @@ function requireState(): OcmState {
   return state
 }
 
-function requireToken(state: OcmState): string {
-  const token = getToken(state.managerUrl)
+async function requireToken(state: OcmState): Promise<string> {
+  const store = describeTokenStore()
+  let token: string | null
+  try {
+    token = await getToken(state.managerUrl)
+  } catch (err) {
+    if (!(err instanceof TokenStoreError)) throw err
+    die(`token store error (${store.kind}: ${store.location}): ${err.message}. Run \`ocm login ${state.managerUrl}\` after fixing the store.`)
+  }
   if (!token) {
-    const store = describeCredentialStore()
     die(`no token stored for ${state.managerUrl} (${store.kind}: ${store.location}). Run \`ocm login ${state.managerUrl}\`.`)
   }
   return token
@@ -191,9 +197,9 @@ export async function cmdLogin(args: string[]): Promise<void> {
   if (!token) die('no token provided')
 
   try {
-    setToken(normalisedUrl, token)
+    await setToken(normalisedUrl, token)
   } catch (err) {
-    if (err instanceof CredentialStoreError) die(`credential store error: ${err.message}`)
+    if (err instanceof TokenStoreError) die(`token store error: ${err.message}`)
     throw err
   }
 
@@ -203,9 +209,10 @@ export async function cmdLogin(args: string[]): Promise<void> {
     managerUrl: normalisedUrl,
   })
 
-  const store = describeBackendStore()
+  const store = describeTokenWriteTarget()
   info(`Saved token for ${normalisedUrl} (${store.kind}: ${store.location}).`)
   info(`State file: ${getStatePath()}`)
+  warnEnvTokenPrecedence()
 }
 
 export async function cmdLogout(): Promise<void> {
@@ -214,32 +221,52 @@ export async function cmdLogout(): Promise<void> {
     info('Nothing to log out from.')
     return
   }
-  let deleted: boolean
+  let deleted = false
+  let storeError: TokenStoreError | undefined
   try {
-    deleted = deleteToken(state.managerUrl)
+    deleted = await deleteToken(state.managerUrl)
   } catch (err) {
-    if (err instanceof CredentialStoreError) die(`credential store error: ${err.message}`)
-    throw err
+    if (!(err instanceof TokenStoreError)) throw err
+    storeError = err
   }
   clearState()
+  if (storeError) {
+    info('State cleared.')
+    die(`token store error: ${storeError.message}. The stored token may still exist.`)
+  }
   info(deleted ? `Removed stored token for ${state.managerUrl}.` : 'No stored token found.')
   info('State cleared.')
+  warnEnvTokenPrecedence()
+}
+
+function warnEnvTokenPrecedence(): void {
+  if (envToken()) {
+    info(`note: ${TOKEN_ENV} is set and takes precedence over the stored token; unset it to use the token store.`)
+  }
+}
+
+async function describeTokenPresence(account: string | undefined): Promise<string> {
+  try {
+    return (await hasStoredToken(account)) ? 'yes' : 'no'
+  } catch (err) {
+    if (!(err instanceof TokenStoreError)) throw err
+    return `unavailable (${err.message})`
+  }
 }
 
 export async function cmdStatus(): Promise<void> {
-  const store = describeCredentialStore()
+  const store = describeTokenStore()
   const state = readState()
   if (!state) {
-    const hasEnvToken = store.kind === 'env'
     info(`version:      ${VERSION}`)
     info(`token store:  ${store.kind} (${store.location})`)
-    info(`token:        ${hasEnvToken ? 'yes' : 'no'}`)
+    info(`token:        ${await describeTokenPresence(undefined)}`)
     info('no state. run: ocm login <url>')
     return
   }
   info(`version:      ${VERSION}`)
   info(`manager url:  ${state.managerUrl}`)
-  info(`token:        ${getToken(state.managerUrl) ? 'yes' : 'no'}`)
+  info(`token:        ${await describeTokenPresence(state.managerUrl)}`)
   info(`token store:  ${store.kind} (${store.location})`)
   if (state.lastRepoId !== undefined) {
     info(`last repo:    ${state.lastRepoName} (id=${state.lastRepoId}, branch=${state.lastRepoBranch ?? 'n/a'})`)
@@ -252,7 +279,7 @@ export async function cmdStatus(): Promise<void> {
 
 async function cmdList(): Promise<void> {
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const repos = await fetchRepos(state.managerUrl, token)
   if (repos.length === 0) {
     info('No ready repos.')
@@ -272,7 +299,7 @@ async function cmdUse(args: string[]): Promise<void> {
   const needle = args[0]
   if (!needle) die('usage: ocm use <repoId|name>')
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const repos = await fetchRepos(state.managerUrl, token)
   const repo = findRepo(repos, needle)
   if (!repo) die(`repo not found: ${needle}`)
@@ -291,7 +318,7 @@ async function cmdUse(args: string[]): Promise<void> {
 async function cmdDefault(): Promise<void> {
   info(`ocm v${VERSION}`)
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
 
   const last = state.lastRepoId !== undefined && state.lastRepoDir
     ? {
@@ -374,7 +401,7 @@ export async function cmdPush(args: string[]): Promise<void> {
   }
 
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 
@@ -452,7 +479,7 @@ async function cmdPull(args: string[]): Promise<void> {
   }
 
   const state = requireState()
-  const token = requireToken(state)
+  const token = await requireToken(state)
   const api = new ManagerApi(state.managerUrl, token)
   const repos = await fetchRepos(state.managerUrl, token)
 

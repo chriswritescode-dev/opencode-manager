@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs'
+import { existsSync, unlinkSync } from 'fs'
 import { homedir } from 'os'
-import { dirname, join } from 'path'
+import { join } from 'path'
+import { readJsonFile, writeJsonFileAtomic } from './json-store.js'
 
 export interface OcmState {
   managerUrl: string
@@ -30,36 +31,28 @@ export function getStatePath(): string {
 }
 
 export function readState(): OcmState | null {
-  if (!existsSync(STATE_FILE)) return null
   try {
-    const raw = readFileSync(STATE_FILE, 'utf-8')
-    const parsed = JSON.parse(raw) as OcmState
-    if (!parsed.managerUrl) return null
-    return parsed
+    const parsed = readJsonFile<OcmState>(STATE_FILE)
+    return parsed?.managerUrl ? parsed : null
   } catch {
     return null
   }
 }
 
 export function writeState(state: OcmState): void {
-  mkdirSync(dirname(STATE_FILE), { recursive: true })
-  const next: OcmState = { ...state, updatedAt: Date.now() }
-  writeFileSync(STATE_FILE, JSON.stringify(next, null, 2), { mode: 0o600 })
+  writeJsonFileAtomic(STATE_FILE, { ...state, updatedAt: Date.now() })
 }
 
 export function clearState(): void {
   if (existsSync(STATE_FILE)) {
-    writeFileSync(STATE_FILE, '{}', { mode: 0o600 })
+    writeJsonFileAtomic(STATE_FILE, {})
   }
 }
 
 export function readInstallNotice(): InstallNotice | null {
-  if (!existsSync(INSTALL_NOTICE_FILE)) return null
   try {
-    const raw = readFileSync(INSTALL_NOTICE_FILE, 'utf-8')
-    const parsed = JSON.parse(raw) as InstallNotice
-    if (!parsed.link || !parsed.binDir) return null
-    return parsed
+    const parsed = readJsonFile<InstallNotice>(INSTALL_NOTICE_FILE)
+    return parsed?.link && parsed.binDir ? parsed : null
   } catch {
     return null
   } finally {

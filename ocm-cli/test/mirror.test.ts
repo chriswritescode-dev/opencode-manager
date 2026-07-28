@@ -7,6 +7,7 @@ import { spawnSync, execSync } from 'child_process'
 import { prepareMirror, MirrorAbort, mirrorDown, mirrorUp, mirrorUpPatch, mirrorUpFast, checkPushDivergence, checkPullDivergence, type MirrorUpFastPhase } from '../src/mirror'
 import { getBranchName } from '../src/local-repo'
 import { gitRemoteProjectId } from '@opencode-manager/shared/project-id'
+import { mockStateModule, mockTokenStoreModule } from './helpers/token-store-mocks.js'
 
 const ME_REPO_ID = gitRemoteProjectId('https://github.com/me/repo.git')!
 const OTHER_REPO_ID = gitRemoteProjectId('https://github.com/other/repo.git')!
@@ -127,20 +128,8 @@ describe('cmdPush', () => {
       throw new Error(stderrOutput.trim())
     })
 
-    const mockState = { managerUrl: 'http://localhost:5003' }
-    vi.doMock('../src/state.js', () => ({
-      readState: () => mockState,
-      writeState: () => {},
-      clearState: () => {},
-      getStatePath: () => '/tmp/state.json',
-    }))
-    vi.doMock('../src/credentials.js', () => ({
-      getToken: () => 'test-token',
-      setToken: () => {},
-      deleteToken: () => true,
-      describeCredentialStore: () => ({ kind: 'file', location: '/tmp/credentials.json' }),
-      CredentialStoreError: class extends Error {},
-    }))
+    mockStateModule({ managerUrl: 'http://localhost:5003' })
+    mockTokenStoreModule({ token: 'test-token' })
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ workspaces: [] }),

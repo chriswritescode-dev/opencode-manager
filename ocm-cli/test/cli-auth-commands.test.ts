@@ -1,33 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { OcmState } from '../src/state.js'
+import {
+  MockTokenStoreError,
+  mockStateModule,
+  mockTokenStoreModule,
+  unmockTokenStoreModules,
+  type TokenStoreMockOptions,
+} from './helpers/token-store-mocks.js'
 
-type StoreOverride = { kind: string; location: string }
-type CliOverrides = {
-  token?: string | null
-  store?: StoreOverride
-  backendStore?: StoreOverride
-  setTokenImpl?: (url: string, token: string) => void
-  deleteTokenImpl?: () => boolean
+type CliOverrides = TokenStoreMockOptions & {
+  state?: OcmState | null
 }
 
 async function loadCli(overrides: CliOverrides = {}) {
   vi.resetModules()
-  const setToken = vi.fn(overrides.setTokenImpl ?? (() => {}))
-  const deleteToken = vi.fn(overrides.deleteTokenImpl ?? (() => true))
-  vi.doMock('../src/state.js', () => ({
-    readState: () => ({ managerUrl: 'https://manager.example.com' }),
-    writeState: () => {},
-    clearState: () => {},
-    getStatePath: () => '/tmp/state.json',
-    getConfigDir: () => '/tmp',
-  }))
-  vi.doMock('../src/credentials.js', () => ({
-    getToken: () => overrides.token ?? null,
-    setToken,
-    deleteToken,
-    describeCredentialStore: () => overrides.store ?? { kind: 'file', location: '/tmp/credentials.json' },
-    describeBackendStore: () => overrides.backendStore ?? overrides.store ?? { kind: 'file', location: '/tmp/credentials.json' },
-    CredentialStoreError: class extends Error {},
-  }))
+  const state = 'state' in overrides ? overrides.state : { managerUrl: 'https://manager.example.com' }
+  const { clearState } = mockStateModule(state ?? null)
+  const { getToken, setToken, deleteToken } = mockTokenStoreModule(overrides)
   const written: string[] = []
   const stderr: string[] = []
   const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => {
@@ -43,8 +32,10 @@ async function loadCli(overrides: CliOverrides = {}) {
     cli,
     written,
     stderr,
+    getToken,
     setToken,
     deleteToken,
+    clearState,
     restore: () => {
       stdoutSpy.mockRestore()
       stderrSpy.mockRestore()
@@ -62,8 +53,7 @@ describe('cli auth commands', () => {
 
   afterEach(() => {
     process.argv = originalArgv
-    vi.doUnmock('../src/state.js')
-    vi.doUnmock('../src/credentials.js')
+    unmockTokenStoreModules()
   })
 
   it('ocm status reports the store kind and location', async () => {
@@ -88,7 +78,7 @@ describe('cli auth commands', () => {
   })
 
   it('ocm status reports the env store', async () => {
-    const { cli, written, restore } = await loadCli({ store: { kind: 'env', location: 'OCM_TOKEN' } })
+    const { cli, written, restore } = await loadCli({ env: 'tok_env' })
     await cli.cmdStatus()
     const out = written.join('')
     expect(out).toContain('env (OCM_TOKEN)')
@@ -96,61 +86,34 @@ describe('cli auth commands', () => {
   })
 
   it('ocm status reports the store in the no-state branch', async () => {
-    vi.resetModules()
-    vi.doMock('../src/state.js', () => ({
-      readState: () => null,
-      writeState: () => {},
-      clearState: () => {},
-      getStatePath: () => '/tmp/state.json',
-      getConfigDir: () => '/tmp',
-    }))
-    vi.doMock('../src/credentials.js', () => ({
-      getToken: () => null,
-      setToken: () => {},
-      deleteToken: () => true,
-      describeCredentialStore: () => ({ kind: 'file', location: '/tmp/credentials.json' }),
-      CredentialStoreError: class extends Error {},
-    }))
-    const written: string[] = []
-    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true })
-    const cli = await import('../bin/ocm')
+    const { cli, written, restore } = await loadCli({ state: null, token: null })
     await cli.cmdStatus()
     const out = written.join('')
     expect(out).toContain('token store:')
     expect(out).toContain('file (/tmp/credentials.json)')
     expect(out).toMatch(/^token:\s+no/m)
-    spy.mockRestore()
-    vi.doUnmock('../src/state.js')
-    vi.doUnmock('../src/credentials.js')
+    restore()
   })
 
   it('ocm status reports a token is present in the no-state branch when OCM_TOKEN is active', async () => {
-    vi.resetModules()
-    vi.doMock('../src/state.js', () => ({
-      readState: () => null,
-      writeState: () => {},
-      clearState: () => {},
-      getStatePath: () => '/tmp/state.json',
-      getConfigDir: () => '/tmp',
-    }))
-    vi.doMock('../src/credentials.js', () => ({
-      getToken: () => 'tok_env',
-      setToken: () => {},
-      deleteToken: () => true,
-      describeCredentialStore: () => ({ kind: 'env', location: 'OCM_TOKEN' }),
-      CredentialStoreError: class extends Error {},
-    }))
-    const written: string[] = []
-    const spy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk) => { written.push(String(chunk)); return true })
-    const cli = await import('../bin/ocm')
+    const { cli, written, restore } = await loadCli({ state: null, env: 'tok_env' })
     await cli.cmdStatus()
     const out = written.join('')
     expect(out).toContain('token store:')
     expect(out).toContain('env (OCM_TOKEN)')
     expect(out).toMatch(/^token:\s+yes/m)
-    spy.mockRestore()
-    vi.doUnmock('../src/state.js')
-    vi.doUnmock('../src/credentials.js')
+    restore()
+  })
+
+  it('ocm status reports an unavailable token store instead of exiting', async () => {
+    const { cli, written, restore } = await loadCli({
+      getTokenImpl: () => Promise.reject(new MockTokenStoreError('keychain locked', 'keychain')),
+    })
+    await cli.cmdStatus()
+    const out = written.join('')
+    expect(out).toMatch(/^token:\s+unavailable \(keychain locked\)/m)
+    expect(out).toContain('manager url:')
+    restore()
   })
 
   it('ocm login stores the token verbatim', async () => {
@@ -167,59 +130,67 @@ describe('cli auth commands', () => {
     restore()
   })
 
-  it('ocm login reports the persisted backend even when OCM_TOKEN is set', async () => {
+  it('ocm login reports the persisted store and warns that OCM_TOKEN wins', async () => {
     const { cli, written, restore } = await loadCli({
-      store: { kind: 'env', location: 'OCM_TOKEN' },
-      backendStore: { kind: 'file', location: '/tmp/credentials.json' },
+      env: 'tok_env',
+      writeTarget: { kind: 'file', location: '/tmp/credentials.json' },
     })
     await cli.cmdLogin(['https://manager.example.com', 'tok_xyz'])
     const out = written.join('')
     expect(out).toContain('Saved token for https://manager.example.com (file: /tmp/credentials.json).')
-    expect(out).not.toContain('env (OCM_TOKEN)')
-    expect(out).not.toContain('env: OCM_TOKEN')
+    expect(out).toContain('note: OCM_TOKEN is set and takes precedence over the stored token')
+    restore()
+  })
+
+  it('ocm login does not mention OCM_TOKEN when it is unset', async () => {
+    const { cli, written, restore } = await loadCli()
+    await cli.cmdLogin(['https://manager.example.com', 'tok_xyz'])
+    expect(written.join('')).not.toContain('OCM_TOKEN')
     restore()
   })
 
   it('ocm login surfaces a store failure', async () => {
-    class TestCredentialStoreError extends Error {}
-    vi.resetModules()
-    vi.doMock('../src/state.js', () => ({
-      readState: () => ({ managerUrl: 'https://manager.example.com' }),
-      writeState: () => {},
-      clearState: () => {},
-      getStatePath: () => '/tmp/state.json',
-      getConfigDir: () => '/tmp',
-    }))
-    const setToken = vi.fn(() => { throw new TestCredentialStoreError('disk full') })
-    vi.doMock('../src/credentials.js', () => ({
-      getToken: () => null,
-      setToken,
-      deleteToken: () => true,
-      describeCredentialStore: () => ({ kind: 'file', location: '/tmp/credentials.json' }),
-      CredentialStoreError: TestCredentialStoreError,
-    }))
-    const storeErr: string[] = []
-    vi.spyOn(process.stderr, 'write').mockImplementation((chunk) => { storeErr.push(String(chunk)); return true })
+    const { cli, stderr, restore } = await loadCli({
+      setTokenImpl: () => Promise.reject(new MockTokenStoreError('disk full')),
+    })
     const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit') })
-    const cli = await import('../bin/ocm')
     await expect(cli.cmdLogin(['https://manager.example.com', 'tok_xyz'])).rejects.toThrow('exit')
-    expect(storeErr.join('')).toContain('credential store error: disk full')
+    expect(stderr.join('')).toContain('token store error: disk full')
     expect(exitSpy).toHaveBeenCalledWith(1)
-    vi.doUnmock('../src/state.js')
-    vi.doUnmock('../src/credentials.js')
+    restore()
   })
 
   it('ocm logout reports removal', async () => {
-    const { cli, written, restore } = await loadCli({ deleteTokenImpl: () => true })
+    const { cli, written, restore } = await loadCli({ deleteTokenImpl: () => Promise.resolve(true) })
     await cli.cmdLogout()
     expect(written.join('')).toContain('Removed stored token for')
     restore()
   })
 
   it('ocm logout reports nothing stored', async () => {
-    const { cli, written, restore } = await loadCli({ deleteTokenImpl: () => false })
+    const { cli, written, restore } = await loadCli({ deleteTokenImpl: () => Promise.resolve(false) })
     await cli.cmdLogout()
     expect(written.join('')).toContain('No stored token found.')
+    restore()
+  })
+
+  it('ocm logout clears state even when the store delete fails', async () => {
+    const { cli, written, stderr, clearState, restore } = await loadCli({
+      deleteTokenImpl: () => Promise.reject(new MockTokenStoreError('keychain locked', 'keychain')),
+    })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => { throw new Error('exit') })
+    await expect(cli.cmdLogout()).rejects.toThrow('exit')
+    expect(clearState).toHaveBeenCalledOnce()
+    expect(written.join('')).toContain('State cleared.')
+    expect(stderr.join('')).toContain('token store error: keychain locked')
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    restore()
+  })
+
+  it('ocm logout warns that OCM_TOKEN still authenticates', async () => {
+    const { cli, written, restore } = await loadCli({ env: 'tok_env' })
+    await cli.cmdLogout()
+    expect(written.join('')).toContain('note: OCM_TOKEN is set and takes precedence over the stored token')
     restore()
   })
 })
