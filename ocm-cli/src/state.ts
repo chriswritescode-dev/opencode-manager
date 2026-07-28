@@ -21,6 +21,10 @@ const STATE_DIR = join(homedir(), '.config', 'opencode-manager')
 const STATE_FILE = join(STATE_DIR, 'state.json')
 const INSTALL_NOTICE_FILE = join(STATE_DIR, 'install-notice.json')
 
+export function getConfigDir(): string {
+  return STATE_DIR
+}
+
 export function getStatePath(): string {
   return STATE_FILE
 }

@@ -134,11 +134,12 @@ describe('cmdPush', () => {
       clearState: () => {},
       getStatePath: () => '/tmp/state.json',
     }))
-    vi.doMock('../src/keychain.js', () => ({
+    vi.doMock('../src/credentials.js', () => ({
       getToken: () => 'test-token',
       setToken: () => {},
       deleteToken: () => true,
-      KeychainError: class extends Error {},
+      describeCredentialStore: () => ({ kind: 'file', location: '/tmp/credentials.json' }),
+      CredentialStoreError: class extends Error {},
     }))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

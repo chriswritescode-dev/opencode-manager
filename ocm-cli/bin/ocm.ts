@@ -1,7 +1,7 @@
 import { spawn, spawnSync } from 'child_process'
 import { basename } from 'path'
 import { readState, writeState, clearState, getStatePath, type OcmState } from '../src/state.js'
-import { getToken, setToken, deleteToken, KeychainError } from '../src/keychain.js'
+import { getToken, setToken, deleteToken, describeCredentialStore, describeBackendStore, CredentialStoreError } from '../src/credentials.js'
 import { ManagerApi, ManagerApiError } from '../src/manager-api.js'
 import { mirrorUp, mirrorDown, mirrorUpFast, mirrorDownFast, prepareMirror, MirrorAbort, checkPushDivergence, checkPullDivergence } from '../src/mirror.js'
 import type { RemoteRepoSummary, MirrorProgress, PushDivergence, PullDivergence } from '../src/mirror.js'
@@ -22,7 +22,7 @@ Usage:
                             fall back to the last selected repo, or launch local
                             opencode when no Manager target applies
   ocm login <url> [token]   Save manager URL + token (token via stdin if omitted)
-  ocm logout                Forget saved token (Keychain) and state
+  ocm logout                Forget saved token and state
   ocm status                Show current manager URL, repo, and whether token is set
   ocm list                  List ready repos from the manager
   ocm use <repoId|name>     Attach to a specific repo and remember it as last
@@ -111,7 +111,8 @@ function requireState(): OcmState {
 function requireToken(state: OcmState): string {
   const token = getToken(state.managerUrl)
   if (!token) {
-    die(`no token in Keychain for ${state.managerUrl}. Run \`ocm login ${state.managerUrl}\`.`)
+    const store = describeCredentialStore()
+    die(`no token stored for ${state.managerUrl} (${store.kind}: ${store.location}). Run \`ocm login ${state.managerUrl}\`.`)
   }
   return token
 }
@@ -164,7 +165,7 @@ function findRepo(repos: ManagerRepo[], needle: string | number): ManagerRepo | 
   return repos.find((r) => r.name === needle) ?? repos.find((r) => r.name.toLowerCase() === needle.toLowerCase())
 }
 
-async function cmdLogin(args: string[]): Promise<void> {
+export async function cmdLogin(args: string[]): Promise<void> {
   const url = args[0]
   if (!url) die('usage: ocm login <url> [token]')
   const normalisedUrl = url.replace(/\/+$/, '')
@@ -192,7 +193,7 @@ async function cmdLogin(args: string[]): Promise<void> {
   try {
     setToken(normalisedUrl, token)
   } catch (err) {
-    if (err instanceof KeychainError) die(`Keychain error: ${err.message}`)
+    if (err instanceof CredentialStoreError) die(`credential store error: ${err.message}`)
     throw err
   }
 
@@ -202,32 +203,44 @@ async function cmdLogin(args: string[]): Promise<void> {
     managerUrl: normalisedUrl,
   })
 
-  info(`Saved token for ${normalisedUrl} in Keychain.`)
+  const store = describeBackendStore()
+  info(`Saved token for ${normalisedUrl} (${store.kind}: ${store.location}).`)
   info(`State file: ${getStatePath()}`)
 }
 
-async function cmdLogout(): Promise<void> {
+export async function cmdLogout(): Promise<void> {
   const state = readState()
   if (!state || !state.managerUrl) {
     info('Nothing to log out from.')
     return
   }
-  const deleted = deleteToken(state.managerUrl)
+  let deleted: boolean
+  try {
+    deleted = deleteToken(state.managerUrl)
+  } catch (err) {
+    if (err instanceof CredentialStoreError) die(`credential store error: ${err.message}`)
+    throw err
+  }
   clearState()
-  info(deleted ? `Removed Keychain entry for ${state.managerUrl}.` : `No Keychain entry found.`)
+  info(deleted ? `Removed stored token for ${state.managerUrl}.` : 'No stored token found.')
   info('State cleared.')
 }
 
-async function cmdStatus(): Promise<void> {
+export async function cmdStatus(): Promise<void> {
+  const store = describeCredentialStore()
   const state = readState()
   if (!state) {
+    const hasEnvToken = store.kind === 'env'
     info(`version:      ${VERSION}`)
+    info(`token store:  ${store.kind} (${store.location})`)
+    info(`token:        ${hasEnvToken ? 'yes' : 'no'}`)
     info('no state. run: ocm login <url>')
     return
   }
   info(`version:      ${VERSION}`)
   info(`manager url:  ${state.managerUrl}`)
-  info(`token in kc:  ${getToken(state.managerUrl) ? 'yes' : 'no'}`)
+  info(`token:        ${getToken(state.managerUrl) ? 'yes' : 'no'}`)
+  info(`token store:  ${store.kind} (${store.location})`)
   if (state.lastRepoId !== undefined) {
     info(`last repo:    ${state.lastRepoName} (id=${state.lastRepoId}, branch=${state.lastRepoBranch ?? 'n/a'})`)
     info(`last repo dir: ${state.lastRepoDir}`)
