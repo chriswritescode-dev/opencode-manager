@@ -164,6 +164,7 @@ describe('SessionDetail pending-actions polling gating', () => {
     })
     mocks.useQuestions.mockReturnValue({
       current: null,
+      getForSession: vi.fn(() => null),
       pendingCount: 0,
       hasQuestionsForSession: vi.fn(() => false),
       reply: vi.fn(),

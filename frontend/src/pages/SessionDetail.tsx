@@ -173,7 +173,8 @@ export function SessionDetail() {
   const { isEnabled: ttsEnabled } = useTTS();
   const sessionStatus = useSessionStatusForSession(sessionId);
   const { syncForSession: syncPermissionsForSession } = usePermissions();
-  const { current: currentQuestion, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
+  const { getForSession: getQuestionForSession, reply: replyToQuestion, reject: rejectQuestion, syncForSession: syncQuestionsForSession } = useQuestions();
+  const currentQuestion = sessionId ? getQuestionForSession(sessionId) : null;
 
   const lastAssistantMessage = messages?.filter(m => m.info.role === 'assistant').at(-1);
   const lastAssistantText = getAssistantText(lastAssistantMessage);
@@ -568,7 +569,7 @@ export function SessionDetail() {
                   onDismiss={() => rejectQuestion(minimizedQuestion.id)}
                 />
               )}
-              {!minimizedQuestion && currentQuestion && currentQuestion.sessionID === sessionId && (
+              {!minimizedQuestion && currentQuestion && (
                 <QuestionPrompt
                   key={currentQuestion.id}
                   question={currentQuestion}

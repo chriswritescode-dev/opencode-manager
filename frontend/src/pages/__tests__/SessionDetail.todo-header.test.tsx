@@ -197,6 +197,7 @@ describe('SessionDetail todo-header integration', () => {
     })
     mocks.useQuestions.mockReturnValue({
       current: null,
+      getForSession: vi.fn(() => null),
       pendingCount: 0,
       hasQuestionsForSession: vi.fn(() => false),
       reply: vi.fn(),
