@@ -94,7 +94,7 @@ const pendingPermission: PermissionRequest = {
 }
 
 function Harness() {
-  const { current, pendingCount, syncForSession, navigateToCurrent, reject, reply } = useQuestions()
+  const { current, pendingCount, syncForSession, navigateToCurrent, reject, reply, getForSession } = useQuestions()
   const permissions = usePermissions()
   const permissionForCall = permissions.getForCallID('call-1', 'session-1')
   const location = useLocation()
@@ -103,6 +103,9 @@ function Harness() {
     <div>
       <div data-testid="count">{pendingCount}</div>
       <div data-testid="current">{current?.id ?? 'none'}</div>
+      <div data-testid="for-session-1">{getForSession('session-1')?.id ?? 'none'}</div>
+      <div data-testid="for-session-2">{getForSession('session-2')?.id ?? 'none'}</div>
+      <div data-testid="for-session-unknown">{getForSession('session-unknown')?.id ?? 'none'}</div>
       <div data-testid="permission-count">{permissions.pendingCount}</div>
       <div data-testid="permission-current">{permissions.current?.id ?? 'none'}</div>
       <div data-testid="permission-call">{permissionForCall?.id ?? 'none'}</div>
@@ -237,6 +240,23 @@ describe('EventProvider questions', () => {
       expect(screen.getByTestId('count')).toHaveTextContent('1')
       expect(screen.getByTestId('current')).toHaveTextContent('question-1')
     })
+  })
+
+  it('resolves pending questions per session independently of the global current', async () => {
+    mocks.listPendingQuestions.mockResolvedValue([pendingQuestion, secondPendingQuestion])
+
+    render(<Harness />, { wrapper: createWrapper() })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sync' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('count')).toHaveTextContent('2')
+    })
+
+    expect(screen.getByTestId('current')).toHaveTextContent('question-1')
+    expect(screen.getByTestId('for-session-1')).toHaveTextContent('question-1')
+    expect(screen.getByTestId('for-session-2')).toHaveTextContent('question-2')
+    expect(screen.getByTestId('for-session-unknown')).toHaveTextContent('none')
   })
 
   it('reconciles stale pending questions after reconnect', async () => {
