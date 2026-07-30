@@ -45,8 +45,7 @@ export class OpenCodeRestartCoordinator {
         try {
           await this.client.forward({
             method: 'POST',
-            path: `/session/${s.sessionID}/abort`,
-            directory: s.directory,
+            path: `/api/session/${s.sessionID}/interrupt`,
           })
         } catch (error) {
           logger.warn(`Failed to abort session ${s.sessionID}: ${error}`)
@@ -61,7 +60,7 @@ export class OpenCodeRestartCoordinator {
         try {
           const response = await this.client.forward({
             method: 'POST',
-            path: `/session/${s.sessionID}/prompt_async`,
+            path: `/session/${s.sessionID}/message`,
             directory: s.directory,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),

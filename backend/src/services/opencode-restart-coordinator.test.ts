@@ -116,23 +116,21 @@ describe('OpenCodeRestartCoordinator', () => {
 
       // Assert interleaved ordering: aborts → restart → resumes
       expect(events).toEqual([
-        'forward:/session/s1/abort',
-        'forward:/session/s2/abort',
+        'forward:/api/session/s1/interrupt',
+        'forward:/api/session/s2/interrupt',
         'restart',
-        'forward:/session/s1/prompt_async',
-        'forward:/session/s2/prompt_async',
+        'forward:/session/s1/message',
+        'forward:/session/s2/message',
       ])
 
       // Aborts called first for both sessions
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/s1/abort',
-        directory: '/a',
+        path: '/api/session/s1/interrupt',
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/session/s2/abort',
-        directory: '/b',
+        path: '/api/session/s2/interrupt',
       })
 
       expect(restart).toHaveBeenCalledOnce()
@@ -141,18 +139,22 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(4)
       expect(forward).toHaveBeenNthCalledWith(3, {
         method: 'POST',
-        path: '/session/s1/prompt_async',
+        path: '/session/s1/message',
         directory: '/a',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
       })
       expect(forward).toHaveBeenNthCalledWith(4, {
         method: 'POST',
-        path: '/session/s2/prompt_async',
+        path: '/session/s2/message',
         directory: '/b',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
       })
+
+      // Verify resume body deserializes correctly
+      const resumeBody = JSON.parse(forward.mock.calls[2]![0].body as string)
+      expect(resumeBody).toEqual({ parts: [{ type: 'text', text: 'continue' }] })
 
       expect(result).toEqual({ healthy: true, resumedSessionIDs: ['s1', 's2'] })
     })
@@ -172,16 +174,15 @@ describe('OpenCodeRestartCoordinator', () => {
       // Aborts still happen
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/s1/abort',
-        directory: '/a',
+        path: '/api/session/s1/interrupt',
       })
       expect(restart).toHaveBeenCalledOnce()
 
-      // No prompt_async calls
-      const promptAsyncCalls = forward.mock.calls.filter(
-        (call: unknown[]) => (call[0] as { path: string }).path.includes('prompt_async'),
+      // No resume calls
+      const resumeCalls = forward.mock.calls.filter(
+        (call: unknown[]) => (call[0] as { path: string }).path.includes('/message'),
       )
-      expect(promptAsyncCalls).toHaveLength(0)
+      expect(resumeCalls).toHaveLength(0)
 
       expect(result).toEqual({ healthy: false, resumedSessionIDs: [] })
     })
@@ -219,12 +220,11 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(2)
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/manual1/abort',
-        directory: '/a',
+        path: '/api/session/manual1/interrupt',
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/session/manual1/prompt_async',
+        path: '/session/manual1/message',
         directory: '/a',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ parts: [{ type: 'text', text: 'continue' }] }),
@@ -274,13 +274,11 @@ describe('OpenCodeRestartCoordinator', () => {
       expect(forward).toHaveBeenCalledTimes(2)
       expect(forward).toHaveBeenNthCalledWith(1, {
         method: 'POST',
-        path: '/session/s1/abort',
-        directory: '/a',
+        path: '/api/session/s1/interrupt',
       })
       expect(forward).toHaveBeenNthCalledWith(2, {
         method: 'POST',
-        path: '/session/s2/abort',
-        directory: '/b',
+        path: '/api/session/s2/interrupt',
       })
     })
   })
