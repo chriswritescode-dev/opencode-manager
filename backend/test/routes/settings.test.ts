@@ -684,7 +684,7 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     describe('successful upgrade scenarios', () => {
       it('should upgrade OpenCode successfully and respond with success', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
-          .mockReturnValueOnce('1.0.1')
+        mockFetchVersion.mockResolvedValueOnce('1.0.1')
         mockExecSync.mockReturnValueOnce('Upgrade successful\n')
 
         const req = new Request('http://localhost/opencode-upgrade', {
@@ -698,11 +698,31 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(json.upgraded).toBe(true)
         expect(json.oldVersion).toBe('1.0.0')
         expect(json.newVersion).toBe('1.0.1')
+        expect(json.message).toBe('OpenCode upgraded from v1.0.0 to v1.0.1 and restarted')
+      })
+
+      it('should use a freshly fetched version and restart when the cached version is stale after upgrade', async () => {
+        mockGetVersion.mockReturnValue('1.0.0')
+        mockFetchVersion.mockResolvedValueOnce('1.0.1')
+        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
+
+        const req = new Request('http://localhost/opencode-upgrade', {
+          method: 'POST'
+        })
+        const res = await settingsApp.fetch(req)
+        const json = await res.json() as Record<string, unknown>
+
+        expect(res.status).toBe(200)
+        expect(json.upgraded).toBe(true)
+        expect(json.newVersion).toBe('1.0.1')
+        expect(mockFetchVersion).toHaveBeenCalledTimes(1)
+        expect(mockRestart).toHaveBeenCalledTimes(1)
+        expect(mockReloadConfig).not.toHaveBeenCalled()
       })
 
       it('should return already up to date when version unchanged', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
-          .mockReturnValueOnce('1.0.0')
+        mockFetchVersion.mockResolvedValueOnce('1.0.0')
         mockExecSync.mockReturnValueOnce('Already up to date\n')
 
         const req = new Request('http://localhost/opencode-upgrade', {
@@ -715,36 +735,21 @@ describe('Settings Routes - OpenCode Upgrade', () => {
         expect(json.success).toBe(true)
         expect(json.upgraded).toBe(false)
         expect(json.message).toContain('already up to date')
+        expect(mockFetchVersion).toHaveBeenCalledTimes(1)
       })
 
-      it('should try reloadConfig first then restart on success', async () => {
+      it('should restart directly after a successful upgrade', async () => {
         mockGetVersion.mockReturnValueOnce('1.0.0')
-          .mockReturnValueOnce('1.0.1')
+        mockFetchVersion.mockResolvedValueOnce('1.0.1')
         mockExecSync.mockReturnValueOnce('Upgrade successful\n')
-        mockReloadConfig.mockResolvedValueOnce(undefined)
 
         const req = new Request('http://localhost/opencode-upgrade', {
           method: 'POST'
         })
         await settingsApp.fetch(req)
 
-        expect(mockReloadConfig).toHaveBeenCalled()
-        expect(mockRestart).not.toHaveBeenCalled()
-      })
-
-      it('should fall back to restart if reloadConfig fails', async () => {
-        mockGetVersion.mockReturnValueOnce('1.0.0')
-          .mockReturnValueOnce('1.0.1')
-        mockExecSync.mockReturnValueOnce('Upgrade successful\n')
-        mockReloadConfig.mockRejectedValueOnce(new Error('Reload failed'))
-
-        const req = new Request('http://localhost/opencode-upgrade', {
-          method: 'POST'
-        })
-        await settingsApp.fetch(req)
-
-        expect(mockReloadConfig).toHaveBeenCalled()
-        expect(mockRestart).toHaveBeenCalled()
+        expect(mockRestart).toHaveBeenCalledTimes(1)
+        expect(mockReloadConfig).not.toHaveBeenCalled()
       })
     })
 
@@ -825,7 +830,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
     describe('version handling', () => {
       it('should use fetched version when getVersion returns null', async () => {
         mockGetVersion.mockReturnValueOnce(null)
-            .mockReturnValueOnce(null)
         mockFetchVersion.mockResolvedValueOnce('1.0.1')
         mockExecSync.mockReturnValueOnce('Upgrade successful\n')
 
@@ -842,7 +846,6 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
       it('should handle both getVersion and fetchVersion returning null', async () => {
         mockGetVersion.mockReturnValueOnce(null)
-          .mockReturnValueOnce(null)
         mockFetchVersion.mockResolvedValueOnce(null)
         mockExecSync.mockReturnValueOnce('Upgrade successful\n')
 
@@ -1030,17 +1033,19 @@ describe('Settings Routes - OpenCode Upgrade', () => {
 
     it('should handle fetchVersion throwing error during normal upgrade', async () => {
       mockGetVersion.mockReturnValueOnce('1.0.0')
-        .mockReturnValueOnce('1.0.1')
+        .mockReturnValueOnce('1.0.0')
+      mockFetchVersion.mockRejectedValueOnce(new Error('Fetch version failed'))
       mockExecSync.mockReturnValueOnce('Upgrade successful\n')
-      mockReloadConfig.mockResolvedValue(undefined)
 
       const req = new Request('http://localhost/opencode-upgrade', {
         method: 'POST'
       })
       const res = await settingsApp.fetch(req)
+      const json = await res.json() as Record<string, unknown>
 
-      expect(res.status).toBe(200)
-      await expect(res.json()).resolves.toBeDefined()
+      expect(res.status).toBe(400)
+      expect(json.recovered).toBe(true)
+      expect(mockRestart).toHaveBeenCalledTimes(1)
     })
 
     it('should not leave server in broken state when upgrade times out', async () => {

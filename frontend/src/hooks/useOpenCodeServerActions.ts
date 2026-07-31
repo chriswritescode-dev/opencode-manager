@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { settingsApi } from '@/api/settings'
 import { showToast } from '@/lib/toast'
-import { invalidateConfigCaches } from '@/lib/queryInvalidation'
+import { invalidateConfigCaches, updateOpenCodeVersionCaches } from '@/lib/queryInvalidation'
 import { getOpenCodeApiErrorMessage } from '@/lib/opencode-errors'
 
 const RESTART_TOAST_ID = 'opencode-restart'
@@ -30,10 +30,7 @@ export function useOpenCodeServerActions() {
     mutationFn: async () => settingsApi.upgradeOpenCode(),
     onSuccess: (data) => {
       if (data.upgraded && data.newVersion) {
-        queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-          if (!old) return old
-          return { ...old, opencodeVersion: data.newVersion }
-        })
+        updateOpenCodeVersionCaches(queryClient, data.newVersion)
       }
       invalidateConfigCaches(queryClient)
       if (data.upgraded) {
@@ -50,10 +47,7 @@ export function useOpenCodeServerActions() {
         const data = response?.data
 
         if (data?.recovered && data.newVersion) {
-          queryClient.setQueryData(['health'], (old: Record<string, unknown> | undefined) => {
-            if (!old) return old
-            return { ...old, opencodeVersion: data.newVersion }
-          })
+          updateOpenCodeVersionCaches(queryClient, data.newVersion)
           showToast.success(`Upgrade failed but server recovered at v${data.newVersion}`, { id: UPGRADE_TOAST_ID })
         } else {
           showToast.error(data?.recoveryMessage || defaultMessage, { id: UPGRADE_TOAST_ID })

@@ -906,7 +906,7 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
         throw new Error('Upgrade command timed out after 90 seconds')
       }
 
-      const newVersion = opencodeServerManager.getVersion() || await opencodeServerManager.fetchVersion()
+      const newVersion = await opencodeServerManager.fetchVersion()
       logger.info(`New OpenCode version: ${newVersion}`)
 
       const upgraded = oldVersion && newVersion && compareVersions(newVersion, oldVersion) > 0
@@ -914,18 +914,12 @@ export function createSettingsRoutes(db: Database, gitAuthService: GitAuthServic
       if (upgraded) {
         logger.info(`OpenCode upgraded from v${oldVersion} to v${newVersion}`)
         opencodeServerManager.clearStartupError()
-        try {
-          await reloadOpenCodeConfig(openCodeSupervisor)
-          logger.info('OpenCode server reloaded after upgrade')
-        } catch (reloadError) {
-          logger.warn('Config reload after upgrade failed, attempting full restart:', reloadError)
-          await restartOpenCode(openCodeSupervisor)
-          logger.info('OpenCode server restarted after upgrade')
-        }
+        await restartOpenCode(openCodeSupervisor)
+        logger.info('OpenCode server restarted after upgrade')
 
         return c.json({
           success: true,
-          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and configuration reloaded`,
+          message: `OpenCode upgraded from v${oldVersion} to v${newVersion} and restarted`,
           oldVersion,
           newVersion,
           upgraded: true
