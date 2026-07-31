@@ -429,7 +429,7 @@ describe('OpenCodeModelDialog — model discovery', () => {
       expect(screen.getByText(/1 model found/i)).toBeInTheDocument()
     })
 
-    const providerModelInput = screen.getByPlaceholderText('e.g., MiniMax-M2.7')
+    const providerModelInput = screen.getByPlaceholderText('e.g., MiniMax-M3')
     fireEvent.focus(providerModelInput)
 
     const option = await screen.findByRole('button', { name: 'gpt-4o' })
