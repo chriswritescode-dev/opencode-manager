@@ -24,6 +24,7 @@ vi.mock('bun:sqlite', () => ({
 
 import { opencodeServerManager } from '../../src/services/opencode-single-server'
 import { createHealthRoutes } from '../../src/routes/health'
+import type { OpenCodeSupervisor } from '../../src/services/opencode-supervisor'
 
 describe('Health Routes', () => {
   let healthApp: ReturnType<typeof createHealthRoutes>
@@ -112,6 +113,39 @@ describe('Health Routes', () => {
       expect(res.status).toBe(503)
       expect(json.status).toBe('unhealthy')
       expect(json.error).toBe('Database error')
+    })
+
+    it('reads the supervisor status without triggering recovery', async () => {
+      mockDb.prepare().get.mockReturnValue({ 1: 1 })
+      ;(opencodeServerManager.checkHealth as ReturnType<typeof vi.fn>).mockResolvedValue(true)
+      const supervisor = {
+        getStatus: vi.fn(() => ({
+          state: 'healthy',
+          healthy: true,
+          port: 5551,
+          version: '1.0.0',
+          minVersion: '1.0.137',
+          versionSupported: true,
+          lastError: null,
+          activeRecoveryAction: null,
+          attemptedRecoveryActions: [],
+          nextRecoveryAction: null,
+          failureCount: 0,
+          watching: true,
+          updatedAt: new Date().toISOString(),
+        })),
+        checkNow: vi.fn(),
+      } as unknown as OpenCodeSupervisor
+      healthApp = createHealthRoutes(mockDb, supervisor)
+
+      const res = await healthApp.fetch(new Request('http://localhost/'))
+      const processesRes = await healthApp.fetch(new Request('http://localhost/processes'))
+
+      expect(res.status).toBe(200)
+      expect(processesRes.status).toBe(200)
+      expect(supervisor.getStatus).toHaveBeenCalledTimes(2)
+      expect(supervisor.checkNow).not.toHaveBeenCalled()
+      expect(opencodeServerManager.checkHealth).toHaveBeenCalledTimes(2)
     })
   })
 })

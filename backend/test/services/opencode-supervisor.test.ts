@@ -132,7 +132,7 @@ describe('OpenCodeSupervisor', () => {
 
     manager.checkHealth.mockResolvedValueOnce(false)
 
-    const status = await supervisor.checkNow('api_probe')
+    const status = await supervisor.checkNow('manual')
 
     expect(status.state).toBe('unhealthy')
     expect(status.failureCount).toBe(1)
@@ -152,7 +152,7 @@ describe('OpenCodeSupervisor', () => {
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true)
 
-    const status = await supervisor.checkNow('api_probe')
+    const status = await supervisor.checkNow('manual')
 
     expect(status.healthy).toBe(true)
     expect(ensureDirectoryExists).toHaveBeenCalled()
@@ -167,7 +167,7 @@ describe('OpenCodeSupervisor', () => {
 
     manager.isOperationInProgress.mockReturnValue(true)
 
-    await supervisor.checkNow('api_probe')
+    await supervisor.checkNow('manual')
 
     expect(manager.checkHealth).not.toHaveBeenCalled()
   })

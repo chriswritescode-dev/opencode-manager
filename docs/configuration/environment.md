@@ -114,8 +114,7 @@ When configured, users can enable push notifications in Settings → Notificatio
 |----------|-------------|---------|
 | `PROCESS_START_WAIT_MS` | Wait time for OpenCode process to start | `2000` |
 | `PROCESS_VERIFY_WAIT_MS` | Wait time for process health verification | `1000` |
-| `HEALTH_CHECK_INTERVAL_MS` | Health check polling interval | `5000` |
-| `HEALTH_CHECK_TIMEOUT_MS` | Health check timeout | `30000` |
+| `HEALTH_CHECK_TIMEOUT_MS` | OpenCode liveness probe timeout | `30000` |
 
 ## File Limits
 

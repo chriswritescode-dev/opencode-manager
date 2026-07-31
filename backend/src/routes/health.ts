@@ -70,9 +70,9 @@ export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSu
       const opencodeManagerVersion = await opencodeManagerVersionPromise
       const dbCheck = db.prepare('SELECT 1').get()
       const lifecycle = openCodeSupervisor
-        ? await openCodeSupervisor.checkNow('api_probe')
+        ? openCodeSupervisor.getStatus()
         : null
-      const opencodeHealthy = lifecycle?.healthy ?? await opencodeServerManager.checkHealth()
+      const opencodeHealthy = await opencodeServerManager.checkHealth()
       const startupError = lifecycle?.lastError ?? opencodeServerManager.getLastStartupError()
 
       const status = lifecycle?.state === 'recovering'
@@ -117,9 +117,9 @@ export function createHealthRoutes(db: Database, openCodeSupervisor?: OpenCodeSu
   app.get('/processes', async (c) => {
     try {
       const lifecycle = openCodeSupervisor
-        ? await openCodeSupervisor.checkNow('api_probe')
+        ? openCodeSupervisor.getStatus()
         : null
-      const opencodeHealthy = lifecycle?.healthy ?? await opencodeServerManager.checkHealth()
+      const opencodeHealthy = await opencodeServerManager.checkHealth()
        
       return c.json({
         opencode: {

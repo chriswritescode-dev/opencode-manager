@@ -35,6 +35,7 @@ vi.mock('@opencode-manager/shared/config/env', () => ({
     AUTH: { TRUSTED_ORIGINS: 'http://localhost:5173', SECRET: 'test-secret-for-encryption-key-32c' },
     WORKSPACE: { BASE_PATH: '/test/workspace', REPOS_DIR: 'repos', CONFIG_DIR: 'config', AUTH_FILE: 'auth.json' },
     OPENCODE: { PORT: 5551, HOST: '127.0.0.1', SERVER_PASSWORD: '', SERVER_USERNAME: 'opencode', PUBLIC_URL: '' },
+    TIMEOUTS: { HEALTH_CHECK_TIMEOUT_MS: 50 },
     DATABASE: { PATH: ':memory:' },
     FILE_LIMITS: {
       MAX_SIZE_BYTES: 1024 * 1024,
@@ -394,6 +395,23 @@ describe('OpenCodeServerManager - reloadConfig', () => {
 })
 
 describe('OpenCodeServerManager - checkHealth', () => {
+  it('uses the OpenCode liveness endpoint', async () => {
+    const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
+    const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')
+    const forward = vi.fn(async () => new Response(JSON.stringify({ healthy: true }), { status: 200 }))
+    const timeout = vi.spyOn(AbortSignal, 'timeout')
+    opencodeServerManager.setOpenCodeClient(createStubOpenCodeClient({ forward }))
+
+    await opencodeServerManager.checkHealth()
+
+    expect(forward).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'GET',
+      path: '/global/health',
+      signal: expect.any(AbortSignal),
+    }))
+    expect(timeout).toHaveBeenCalledWith(ENV.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS)
+  })
+
   it('returns false when the upstream times out and aborts the upstream fetch', async () => {
     const { opencodeServerManager } = await import('../../src/services/opencode-single-server')
     const { createStubOpenCodeClient } = await import('../helpers/stub-opencode-client')

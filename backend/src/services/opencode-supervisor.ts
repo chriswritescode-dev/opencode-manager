@@ -30,7 +30,6 @@ export type OpenCodeRecoveryAction = (typeof OPENCODE_RECOVERY_ACTIONS)[number]
 export type OpenCodeOperationReason =
   | 'backend_startup'
   | 'health_poll'
-  | 'api_probe'
   | 'settings_restart'
   | 'settings_reload'
   | 'manual'

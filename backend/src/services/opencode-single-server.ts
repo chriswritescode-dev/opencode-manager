@@ -31,7 +31,6 @@ import { mkdirSafe } from '../utils/fs-safe'
 
 const MIN_OPENCODE_VERSION = '1.0.137'
 const MAX_STDERR_SIZE = 10240
-const HEALTH_CHECK_TIMEOUT_MS = 3000
 const PLUGIN_INSTALL_TIMEOUT_MS = 120000
 const PROCESS_EXIT_GRACE_MS = 2000
 const PROCESS_EXIT_POLL_MS = 50
@@ -734,8 +733,8 @@ class OpenCodeServerManager {
     try {
       const response = await this.openCodeClient.forward({
         method: 'GET',
-        path: '/doc',
-        signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),
+        path: '/global/health',
+        signal: AbortSignal.timeout(ENV.TIMEOUTS.HEALTH_CHECK_TIMEOUT_MS),
       })
       return response.ok
     } catch {
