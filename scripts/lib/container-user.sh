@@ -2,8 +2,6 @@
 
 OCM_TARGET_UID=""
 OCM_TARGET_GID=""
-OCM_UID_CHANGED=0
-OCM_GID_CHANGED=0
 
 resolve_target_ids() {
   OCM_TARGET_UID="${PUID:-1000}"
@@ -49,7 +47,6 @@ align_group_id() {
 
   echo "Aligning $account group to gid $target_gid"
   groupmod -g "$target_gid" "$account" || return 1
-  OCM_GID_CHANGED=1
 }
 
 align_user_id() {
@@ -69,7 +66,6 @@ align_user_id() {
 
   echo "Aligning $account user to uid $target_uid"
   usermod -u "$target_uid" "$account" || return 1
-  OCM_UID_CHANGED=1
 }
 
 align_container_user() {

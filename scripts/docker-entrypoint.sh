@@ -97,9 +97,4 @@ warn_if_workspace_owner_differs /workspace "$OCM_TARGET_UID" "$OCM_TARGET_GID"
 mkdir -p /app/data /workspace /home/node/.cache /home/node/.opencode
 chown -R node:node /app/data /workspace /home/node
 
-if [ "$OCM_UID_CHANGED" = "1" ] || [ "$OCM_GID_CHANGED" = "1" ]; then
-  echo "Realigning /app ownership after id change"
-  chown -R node:node /app
-fi
-
 exec runuser -u node -- "$@"

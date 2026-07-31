@@ -107,43 +107,35 @@ describe('resolve_target_ids', () => {
 
 describe('align_container_user', () => {
   it('is a no-op when ids already match', () => {
-    const res = runScript(
-      'align_container_user node; echo "uidChanged=$OCM_UID_CHANGED gidChanged=$OCM_GID_CHANGED"',
-      { OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1000', PGID: '1000' },
-    )
+    const res = runScript('align_container_user node', {
+      OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1000', PGID: '1000',
+    })
     expect(res.status).toBe(0)
     expect(stubCalls()).toEqual([])
-    expect(res.stdout).toContain('uidChanged=0 gidChanged=0')
   })
 
-  it('aligns both ids and records the change, group before user', () => {
-    const res = runScript(
-      'align_container_user node; echo "uidChanged=$OCM_UID_CHANGED gidChanged=$OCM_GID_CHANGED"',
-      { OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1001', PGID: '1002' },
-    )
+  it('aligns both ids, group before user', () => {
+    const res = runScript('align_container_user node', {
+      OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1001', PGID: '1002',
+    })
     expect(res.status).toBe(0)
     expect(stubCalls()).toEqual(['groupmod -g 1002 node', 'usermod -u 1001 node'])
-    expect(res.stdout).toContain('uidChanged=1 gidChanged=1')
   })
 
   it('aligns only the gid when the uid already matches', () => {
-    const res = runScript(
-      'align_container_user node; echo "uidChanged=$OCM_UID_CHANGED gidChanged=$OCM_GID_CHANGED"',
-      { OCM_STUB_NODE_UID: '1001', PUID: '1001', PGID: '1002' },
-    )
+    const res = runScript('align_container_user node', {
+      OCM_STUB_NODE_UID: '1001', PUID: '1001', PGID: '1002',
+    })
     expect(res.status).toBe(0)
     expect(stubCalls()).toEqual(['groupmod -g 1002 node'])
-    expect(res.stdout).toContain('uidChanged=0 gidChanged=1')
   })
 
   it('aligns only the uid when the gid already matches', () => {
-    const res = runScript(
-      'align_container_user node; echo "uidChanged=$OCM_UID_CHANGED gidChanged=$OCM_GID_CHANGED"',
-      { OCM_STUB_NODE_GID: '1002', PUID: '1001', PGID: '1002' },
-    )
+    const res = runScript('align_container_user node', {
+      OCM_STUB_NODE_GID: '1002', PUID: '1001', PGID: '1002',
+    })
     expect(res.status).toBe(0)
     expect(stubCalls()).toEqual(['usermod -u 1001 node'])
-    expect(res.stdout).toContain('uidChanged=1 gidChanged=0')
   })
 
   it('defaults the account name to node', () => {
@@ -165,26 +157,24 @@ describe('align_container_user', () => {
     expect(res.stdout).toMatch(/Aligning node user to uid 1001/)
   })
 
-  it('propagates groupmod failure without setting the gid change flag', () => {
+  it('propagates groupmod failure', () => {
     writeStub('groupmod', `echo "groupmod $*" >> "$OCM_STUB_LOG"\nexit 1`)
-    const res = runScript(
-      'align_container_user node || echo "uidChanged=$OCM_UID_CHANGED gidChanged=$OCM_GID_CHANGED"',
-      { OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1001', PGID: '1002' },
-    )
+    const res = runScript('align_container_user node || echo "failed"', {
+      OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1001', PGID: '1002',
+    })
     expect(res.status).toBe(0)
     expect(stubCalls()).toEqual(['groupmod -g 1002 node'])
-    expect(res.stdout).toContain('uidChanged=0 gidChanged=0')
+    expect(res.stdout).toContain('failed')
   })
 
-  it('propagates usermod failure without setting the uid change flag', () => {
+  it('propagates usermod failure', () => {
     writeStub('usermod', `echo "usermod $*" >> "$OCM_STUB_LOG"\nexit 1`)
-    const res = runScript(
-      'align_container_user node || echo "uidChanged=$OCM_UID_CHANGED gidChanged=$OCM_GID_CHANGED"',
-      { OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1001', PGID: '1002' },
-    )
+    const res = runScript('align_container_user node || echo "failed"', {
+      OCM_STUB_NODE_UID: '1000', OCM_STUB_NODE_GID: '1000', PUID: '1001', PGID: '1002',
+    })
     expect(res.status).toBe(0)
     expect(stubCalls()).toEqual(['groupmod -g 1002 node', 'usermod -u 1001 node'])
-    expect(res.stdout).toContain('uidChanged=0 gidChanged=1')
+    expect(res.stdout).toContain('failed')
   })
 })
 

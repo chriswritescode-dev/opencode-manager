@@ -243,7 +243,7 @@ The quoted `"<host path>"` keeps paths containing spaces (for example `/Users/na
     Editing a repository from the host while an agent works in the same repository or worktree can collide on `index.lock` and branch state.
 
 !!! note "/app keeps the build-time uid"
-    `/app` and its `node_modules` are chowned to uid 1000 at build time. When `PUID` differs, the entrypoint re-chowns `/app` on startup, which costs one extra recursive walk per container start.
+    `/app` and its `node_modules` are chowned to uid 1000 at build time and are read-only at runtime. When `PUID` differs, the container runs the code as a different uid, but since `/app` is only read (never written) at runtime, it is left untouched and startup stays fast.
 
 ### Data
 

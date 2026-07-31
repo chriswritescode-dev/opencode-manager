@@ -49,23 +49,14 @@ describe('entrypoint library wiring', () => {
     expect(warnIndex).toBeLessThan(chownIndex)
   })
 
-  it('realigns /app only when ids changed', () => {
+  it('does not re-chown /app when ids change', () => {
     const entrypoint = read(entrypointPath)
 
-    expect(entrypoint).toContain('OCM_UID_CHANGED')
-    expect(entrypoint).toContain('OCM_GID_CHANGED')
+    expect(entrypoint).not.toContain('OCM_UID_CHANGED')
+    expect(entrypoint).not.toContain('OCM_GID_CHANGED')
+    expect(entrypoint).not.toMatch(/chown -R node:node \/app(?:\s|\n|$)/)
 
-    const conditionalBlockMatch = entrypoint.match(
-      /if \[ "\$OCM_UID_CHANGED" = "1" \] \|\| \[ "\$OCM_GID_CHANGED" = "1" \]; then[\s\S]*?chown -R node:node \/app\nfi/,
-    )
-    expect(conditionalBlockMatch, 'conditional /app realign block must exist').not.toBeNull()
-
-    const workspaceChownMatch = entrypoint.match(/chown -R node:node [^\n]*\/workspace/)
-    expect(workspaceChownMatch, 'pre-existing unconditional workspace chown must remain').not.toBeNull()
-    const conditionalChownIndex = entrypoint.indexOf('chown -R node:node /app\n', conditionalBlockMatch!.index!)
-    const workspaceChownIndex = entrypoint.indexOf(workspaceChownMatch![0])
-    expect(conditionalChownIndex).toBeGreaterThan(workspaceChownIndex)
-
+    expect(entrypoint).toContain('chown -R node:node /app/data /workspace /home/node')
     expect(entrypoint).toContain('mkdir -p /app/data /workspace /home/node/.cache /home/node/.opencode')
   })
 
