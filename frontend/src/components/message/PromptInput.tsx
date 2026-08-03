@@ -29,6 +29,7 @@ import { AgentQuickSelect } from '@/components/agent/AgentQuickSelect'
 import { VoiceStatusOverlay, type VoiceStatusOverlayState } from './VoiceStatusOverlay'
 import { detectMentionTrigger, parsePromptToParts, getFilename, filterAgentsByQuery } from '@/lib/promptParser'
 import { randomId } from '@/lib/utils'
+import { showToast } from '@/lib/toast'
 import { formatModelName, getProviders } from '@/api/providers'
 import { useQuery } from '@tanstack/react-query'
 
@@ -812,6 +813,14 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     })
   }
 
+  const addFileAttachment = (file: File) => {
+    if (ACCEPTED_FILE_TYPES.includes(file.type)) {
+      addImageAttachment(file)
+    } else {
+      showToast.error(`Only images and PDFs can be attached (${file.name})`)
+    }
+  }
+
   const handlePaste = async (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const clipboardData = event.clipboardData
     if (!clipboardData) return
@@ -839,7 +848,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
               try {
                 const blob = await item.getType(type)
                 const file = new File([blob], `pasted-${Date.now()}.${type.split('/')[1]}`, { type })
-                addImageAttachment(file)
+                addFileAttachment(file)
               } catch (err) {
                 console.error('Failed to read clipboard item type:', err)
               }
@@ -853,30 +862,15 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
 
     const items = Array.from(clipboardData.items)
-    
-    const imageItems = items.filter((item) => {
-      if (item.kind !== 'file') return false
-      
-      const hasKnownType = ACCEPTED_FILE_TYPES.includes(item.type)
-      const isLikelyImage = item.type.startsWith('image/')
-      const hasNoType = !item.type || item.type === ''
-      
-      return hasKnownType || isLikelyImage || hasNoType
-    })
 
-    if (imageItems.length > 0) {
+    const fileItems = items.filter((item) => item.kind === 'file')
+
+    if (fileItems.length > 0) {
       event.preventDefault()
-      for (const item of imageItems) {
+      for (const item of fileItems) {
         const file = item.getAsFile()
         if (file) {
-          const isValidImageFile = 
-            ACCEPTED_FILE_TYPES.includes(file.type) ||
-            file.type.startsWith('image/') ||
-            file.size > 0
-          
-          if (isValidImageFile) {
-            addImageAttachment(file)
-          }
+          addFileAttachment(file)
         }
       }
     }
@@ -904,17 +898,15 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     const files = event.dataTransfer?.files
     if (files) {
       for (const file of Array.from(files)) {
-        if (ACCEPTED_FILE_TYPES.includes(file.type)) {
-          addImageAttachment(file)
-        }
+        addFileAttachment(file)
       }
     }
   }
 
   const handleFileInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.currentTarget.files?.[0]
-    if (file && ACCEPTED_FILE_TYPES.includes(file.type)) {
-      addImageAttachment(file)
+    if (file) {
+      addFileAttachment(file)
     }
     event.currentTarget.value = ''
   }
@@ -1368,7 +1360,7 @@ return (
           <input
             ref={fileInputRef}
             type="file"
-            accept="*/*"
+            accept={ACCEPTED_FILE_TYPES.join(',')}
             className="hidden"
             onChange={handleFileInputChange}
           />
