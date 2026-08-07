@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { fetchWrapper, fetchWrapperBlob } from './fetchWrapper'
+import { fetchWrapper, fetchWrapperBlob, fetchWrapperVoid } from './fetchWrapper'
 import { API_BASE_URL } from '@/config'
 import type { FileInfo, ChunkedFileInfo, PatchOperation } from '@/types/files'
 
@@ -22,14 +22,14 @@ export function getFileApiUrl(path: string, options: FileApiUrlOptions = {}): st
   return `${API_BASE_URL}/api/files${routePath}${query ? `?${query}` : ''}`
 }
 
-async function fetchFile(path: string): Promise<FileInfo> {
+export async function fetchFileInfo(path: string): Promise<FileInfo> {
   return fetchWrapper(getFileApiUrl(path))
 }
 
 export function useFile(path: string | undefined) {
   return useQuery({
     queryKey: ['file', path],
-    queryFn: () => path ? fetchFile(path) : Promise.reject(new Error('No file path provided')),
+    queryFn: () => path ? fetchFileInfo(path) : Promise.reject(new Error('No file path provided')),
     enabled: !!path,
   })
 }
@@ -74,6 +74,35 @@ export async function applyFilePatches(path: string, patches: PatchOperation[]):
   const url = getFileApiUrl(path)
   return fetchWrapper(url, {
     method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ patches }),
+  })
+}
+
+export async function uploadFileEntry(directoryPath: string, formData: FormData): Promise<void> {
+  await fetchWrapperVoid(getFileApiUrl(directoryPath), {
+    method: 'POST',
+    body: formData,
+    timeout: 0,
+  })
+}
+
+export async function writeFileEntry(path: string, type: 'file' | 'folder', content?: string): Promise<void> {
+  await fetchWrapperVoid(getFileApiUrl(path), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ type, content }),
+  })
+}
+
+export async function deleteFileEntry(path: string): Promise<void> {
+  await fetchWrapperVoid(getFileApiUrl(path), { method: 'DELETE', timeout: 0 })
+}
+
+export async function renameFileEntry(oldPath: string, newPath: string): Promise<void> {
+  await fetchWrapperVoid(getFileApiUrl(oldPath), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ newPath }),
   })
 }

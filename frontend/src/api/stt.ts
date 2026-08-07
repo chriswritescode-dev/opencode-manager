@@ -1,5 +1,5 @@
 import { API_BASE_URL } from '@/config'
-import { fetchWrapper, FetchError } from './fetchWrapper'
+import { fetchWrapper } from './fetchWrapper'
 
 export interface STTModelsResponse {
   models: string[]
@@ -50,49 +50,12 @@ export const sttApi = {
       type.includes('mp4') ? 'm4a' : 'wav'
     formData.append('audio', audioBlob, `recording.${extension}`)
 
-    const urlObj = new URL(`${API_BASE_URL}/api/stt/transcribe`, window.location.origin)
-    urlObj.searchParams.set('userId', userId)
-
-    const controller = new AbortController()
-    let timeoutFired = false
-    const timeoutId = setTimeout(() => {
-      timeoutFired = true
-      controller.abort()
-    }, 60000)
-
-    if (signal?.aborted) {
-      controller.abort()
-    }
-    const onAbort = () => controller.abort()
-    signal?.addEventListener('abort', onAbort, { once: true })
-
-    try {
-      const response = await fetch(urlObj.toString(), {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal,
-      })
-
-      clearTimeout(timeoutId)
-      signal?.removeEventListener('abort', onAbort)
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({ error: 'Transcription failed' }))
-        throw new FetchError(data.error || 'Transcription failed', response.status)
-      }
-
-      return response.json()
-    } catch (error) {
-      clearTimeout(timeoutId)
-      signal?.removeEventListener('abort', onAbort)
-
-      if (error instanceof Error && error.name === 'AbortError') {
-        if (signal?.aborted && !timeoutFired) {
-          throw new FetchError('Transcription canceled', 499, 'CANCELED')
-        }
-        throw new FetchError('Transcription timeout', 408, 'TIMEOUT')
-      }
-      throw error
-    }
+    return fetchWrapper<STTTranscribeResponse>(`${API_BASE_URL}/api/stt/transcribe`, {
+      method: 'POST',
+      params: { userId },
+      body: formData,
+      timeout: 60000,
+      signal,
+    })
   },
 }

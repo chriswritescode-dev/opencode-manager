@@ -2,13 +2,7 @@
 import { createContext, useEffect, useMemo, useState, useCallback, type ReactNode } from 'react'
 import { useSession, signIn, signUp, signOut, authClient, type AuthUser } from '@/lib/auth-client'
 import { useNavigate, useLocation } from 'react-router-dom'
-
-interface AuthConfig {
-  enabledProviders: string[]
-  registrationEnabled: boolean
-  isFirstUser: boolean
-  adminConfigured: boolean
-}
+import { getAuthConfig, type AuthConfig } from '@/api/authInfo'
 
 interface AuthContextValue {
   user: AuthUser | null
@@ -39,23 +33,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const location = useLocation()
 
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const response = await fetch('/api/auth-info/config')
-        if (response.ok) {
-          const data = await response.json()
-          setConfig(data)
-        }
-      } catch {
-        setConfig({
-          enabledProviders: ['credentials'],
-          registrationEnabled: true,
-          isFirstUser: true,
-          adminConfigured: false,
-        })
-      }
-    }
-    fetchConfig()
+    void getAuthConfig().then(setConfig)
   }, [])
 
   const signInWithEmail = useCallback(async (email: string, password: string) => {
