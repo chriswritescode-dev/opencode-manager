@@ -62,7 +62,7 @@ export function useSessionAgent(
   sessionID: string | undefined,
   directory?: string
 ) {
-  const { data: messages, isLoading: messagesLoading, isFetching: messagesFetching } = useMessages(opcodeUrl, sessionID, directory)
+  const { data: messages } = useMessages(opcodeUrl, sessionID, directory)
   const { data: config } = useConfig(opcodeUrl, directory)
   const { data: agents, isSuccess: agentsLoaded } = useAgents(opcodeUrl, directory)
   const storedAgent = useSessionAgentStore((s) => s.agents[sessionID ?? ''] ?? null)
@@ -75,12 +75,34 @@ export function useSessionAgent(
   )
 
   const result = useMemo(() => {
-    if (messagesLoading || messagesFetching) {
-      return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
+    const stabilize = (next: SessionAgentResult): SessionAgentResult => {
+      const prev = prevRef.current
+      if (
+        prev.agent === next.agent &&
+        prev.variant === next.variant &&
+        prev.fromMessage === next.fromMessage &&
+        prev.model?.providerID === next.model?.providerID &&
+        prev.model?.modelID === next.model?.modelID
+      ) {
+        return prev
+      }
+
+      prevRef.current = next
+      return next
     }
 
+    const withoutMessageAgent = (
+      model: SessionAgentResult['model'],
+      variant: string | undefined
+    ): SessionAgentResult => stabilize({
+      agent: resolveAvailableAgentName(storedAgent, agents, agentsLoaded) ?? defaultAgent,
+      model,
+      variant,
+      fromMessage: false,
+    })
+
     if (!messages || messages.length === 0) {
-      return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
+      return withoutMessageAgent(undefined, undefined)
     }
 
     let latestAgent: string | undefined
@@ -101,46 +123,17 @@ export function useSessionAgent(
     }
 
     const resolvedLatestAgent = resolveAvailableAgentName(latestAgent, agents, agentsLoaded)
-    if (resolvedLatestAgent) {
-      const prev = prevRef.current
-      if (
-        prev.agent === resolvedLatestAgent &&
-        prev.variant === latestVariant &&
-        prev.model?.providerID === latestModel?.providerID &&
-        prev.model?.modelID === latestModel?.modelID
-      ) {
-        return { ...prev, fromMessage: true }
-      }
-
-      const next: SessionAgentResult = {
-        agent: resolvedLatestAgent,
-        model: latestModel,
-        variant: latestVariant,
-        fromMessage: true,
-      }
-      prevRef.current = next
-      return next
+    if (!resolvedLatestAgent) {
+      return withoutMessageAgent(latestModel, latestVariant)
     }
 
-    const resolvedStoredAgent = resolveAvailableAgentName(storedAgent, agents, agentsLoaded)
-    if (resolvedStoredAgent) {
-      const prev = prevRef.current
-      if (
-        prev.agent === resolvedStoredAgent &&
-        prev.variant === latestVariant &&
-        prev.model?.providerID === latestModel?.providerID &&
-        prev.model?.modelID === latestModel?.modelID
-      ) {
-        return { ...prev, fromMessage: false }
-      }
-
-      const next: SessionAgentResult = { agent: resolvedStoredAgent, model: latestModel, variant: latestVariant, fromMessage: false }
-      prevRef.current = next
-      return next
-    }
-
-    return { agent: defaultAgent, model: undefined, variant: undefined, fromMessage: false }
-  }, [messages, messagesLoading, messagesFetching, storedAgent, defaultAgent, agents, agentsLoaded])
+    return stabilize({
+      agent: resolvedLatestAgent,
+      model: latestModel,
+      variant: latestVariant,
+      fromMessage: true,
+    })
+  }, [messages, storedAgent, defaultAgent, agents, agentsLoaded])
 
   useEffect(() => {
     if (result.agent && sessionID && result.fromMessage) {
@@ -149,21 +142,4 @@ export function useSessionAgent(
   }, [result.agent, result.fromMessage, sessionID, setAgent])
 
   return { agent: result.agent, model: result.model, variant: result.variant }
-}
-
-export function getSessionAgentFromMessages(
-  messages: Array<{ role: string; agent?: string }> | undefined
-): string | undefined {
-  if (!messages || messages.length === 0) {
-    return undefined
-  }
-
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i]
-    if (msg.role === 'user' && 'agent' in msg && msg.agent) {
-      return msg.agent
-    }
-  }
-
-  return undefined
 }

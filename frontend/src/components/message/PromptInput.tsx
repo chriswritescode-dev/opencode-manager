@@ -212,6 +212,9 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
       fileInputRef.current?.click()
     }
   }), [imageAttachments, clearSTT, isRecording, abortRecording, resetVoiceGestureState])
+  const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
+  const currentMode = localMode ?? sessionAgent.agent
+  const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
   const sendPrompt = useSendPrompt(opcodeUrl, directory)
   const sendShell = useSendShell(opcodeUrl, directory)
   const isPromptSubmitPending = sendPrompt.isPending || sendShell.isPending
@@ -226,7 +229,7 @@ export const PromptInput = memo(forwardRef<PromptInputHandle, PromptInputProps>(
     onShowHelpDialog,
     onToggleDetails,
     onExportSession,
-    currentAgent: localMode || undefined
+    currentAgent: currentMode
   })
   
   const { files: searchResults } = useFileSearch(
@@ -1058,10 +1061,7 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
     }
   }
 
-  const sessionAgent = useSessionAgent(opcodeUrl, sessionID, directory)
-  const currentMode = localMode ?? sessionAgent.agent
-  const setStoredAgent = useSessionAgentStore((s) => s.setAgent)
-  const syncedSessionModelRef = useRef<string | undefined>(undefined)
+  const appliedSessionModelRef = useRef<string | undefined>(undefined)
 
   const client = useOpenCodeClient(opcodeUrl, directory)
   const { data: providersData } = useQuery({
@@ -1079,12 +1079,14 @@ if (isIOS && isSecureContext && navigator.clipboard && navigator.clipboard.read)
 
   useEffect(() => {
     if (!sessionModelSyncKey) return
-    if (syncedSessionModelRef.current === sessionModelSyncKey) return
     if (!sessionAgent.model) return
 
-    restoreSessionModel(sessionAgent.model)
+    const sessionSelectionKey = `${sessionModelSyncKey}|${sessionAgent.model.providerID}/${sessionAgent.model.modelID}|${sessionAgent.variant ?? ''}`
+    if (appliedSessionModelRef.current === sessionSelectionKey) return
 
-    syncedSessionModelRef.current = sessionModelSyncKey
+    appliedSessionModelRef.current = sessionSelectionKey
+
+    restoreSessionModel(sessionAgent.model)
 
     if (sessionAgent.variant) {
       setStoreVariant(sessionAgent.model, sessionAgent.variant)

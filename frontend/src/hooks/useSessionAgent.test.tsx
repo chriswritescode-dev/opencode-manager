@@ -175,15 +175,15 @@ describe('useSessionAgent', () => {
     })
   })
 
-  it('does not restore model from cached messages while refetching', async () => {
+  it('keeps the cached conversation selection while messages refetch in the background', async () => {
     vi.mocked(useMessages).mockReturnValue({
       data: [
         {
           info: {
             role: 'user',
             agent: 'assistant',
-            model: { providerID: 'provider', modelID: 'stale-model' },
-            variant: 'stale-variant',
+            model: { providerID: 'provider', modelID: 'session-model' },
+            variant: 'session-variant',
           },
         },
       ],
@@ -194,7 +194,10 @@ describe('useSessionAgent', () => {
       data: { default_agent: 'code' },
     } as ReturnType<typeof useConfig>)
     vi.mocked(useAgents).mockReturnValue({
-      data: [{ name: 'code', mode: 'primary' }],
+      data: [
+        { name: 'code', mode: 'primary' },
+        { name: 'assistant', mode: 'primary' },
+      ],
       isSuccess: true,
     } as ReturnType<typeof useAgents>)
 
@@ -203,9 +206,36 @@ describe('useSessionAgent', () => {
     )
 
     await waitFor(() => {
-      expect(result.current.agent).toBe('code')
-      expect(result.current.model).toBeUndefined()
-      expect(result.current.variant).toBeUndefined()
+      expect(result.current.agent).toBe('assistant')
+      expect(result.current.model).toEqual({ providerID: 'provider', modelID: 'session-model' })
+      expect(result.current.variant).toBe('session-variant')
+    })
+  })
+
+  it('falls back to the stored session agent instead of the default while messages load', async () => {
+    useSessionAgentStore.setState({ agents: { 'session-1': 'assistant' } })
+    vi.mocked(useMessages).mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isFetching: true,
+    } as ReturnType<typeof useMessages>)
+    vi.mocked(useConfig).mockReturnValue({
+      data: { default_agent: 'code' },
+    } as ReturnType<typeof useConfig>)
+    vi.mocked(useAgents).mockReturnValue({
+      data: [
+        { name: 'code', mode: 'primary' },
+        { name: 'assistant', mode: 'primary' },
+      ],
+      isSuccess: true,
+    } as ReturnType<typeof useAgents>)
+
+    const { result } = renderHook(() =>
+      useSessionAgent('http://localhost:5551', 'session-1', '/assistant')
+    )
+
+    await waitFor(() => {
+      expect(result.current.agent).toBe('assistant')
     })
   })
 
