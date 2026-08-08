@@ -19,7 +19,6 @@ interface AddRepoDialogProps {
 }
 
 export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
-  const isMobile = useMobile()
   const [repoType, setRepoType] = useState<'remote' | 'local' | 'folder'>('remote')
   const [repoUrl, setRepoUrl] = useState('')
   const [localPath, setLocalPath] = useState('')
@@ -300,10 +299,8 @@ export function AddRepoDialog({ open, onOpenChange }: AddRepoDialogProps) {
                   Auto-accept the SSH host key for self-hosted or internal servers
                 </p>
               </div>
-            </label>
+            </div>
           )}
-        </div>
-      </div>
 
           <Button 
             type="submit" 

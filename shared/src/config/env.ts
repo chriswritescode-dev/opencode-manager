@@ -5,7 +5,9 @@ import { DEFAULTS } from './defaults'
 
 try {
   const { config } = await import('dotenv')
-  config({ path: path.resolve(process.cwd(), '.env') })
+  const cwd = process.cwd()
+  config({ path: path.resolve(cwd, '.env') })
+  config({ path: path.resolve(cwd, '.env.local'), override: true })
 } catch {
   // dotenv not available (e.g., in production Docker), env vars already set
 }

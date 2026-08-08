@@ -7,6 +7,7 @@ import { swPrecacheManifest } from "./plugins/sw-precache-manifest";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, ".."), "");
   const backendPort = env.PORT || 5001;
+  const frontendPort = Number(env.VITE_DEV_PORT || env.FRONTEND_PORT || 5173);
 
   return {
     envDir: path.resolve(__dirname, ".."),
@@ -22,7 +23,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       host: "0.0.0.0",
-      port: 5173,
+      port: frontendPort,
       proxy: {
         "/api": {
           target: `http://localhost:${backendPort}`,

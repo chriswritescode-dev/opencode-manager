@@ -52,7 +52,7 @@ export const SessionCard = ({
   return (
     <div className="relative" onClick={close}>
       <div
-        className={`absolute top-0.5 right-0 bottom-0.5 flex w-20 items-center justify-center rounded-r-lg bg-destructive transition-opacity ${
+        className={`absolute top-0.5 right-0 bottom-0.5 w-20 bg-red-600 flex items-center justify-center rounded-r-lg transition-opacity ${
           !isSwipingBack && (isOpen || swipeOffset > 40) ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
       >
@@ -70,12 +70,12 @@ export const SessionCard = ({
             isOpen
               ? "rounded-none"
               : "rounded-r-lg"
-            } ${
-              isSelected
-                ? "border-primary/50 bg-accent shadow-lg shadow-primary/15"
-                : isActive
-                  ? "bg-accent border-border"
-                  : "bg-card border-border hover:bg-accent hover:border-border"
+          } ${
+            isSelected
+              ? "border-blue-500 shadow-lg shadow-blue-900/30 dark:shadow-blue-900/30 bg-accent"
+              : isActive
+                ? "bg-accent border-border"
+                : "bg-card border-border hover:bg-accent hover:border-border"
           } hover:shadow-lg`}
           onClick={() => {
             if (!isOpen) {

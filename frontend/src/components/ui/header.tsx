@@ -48,7 +48,7 @@ function HeaderTitle({ children, logo, className }: HeaderTitleProps) {
           className="h-6 w-auto sm:h-8"
         />
       ) : (
-        <h1 className="truncate text-sm font-semibold tracking-[0.02em] text-foreground sm:text-base">
+        <h1 className="text-xl font-semibold bg-gradient-to-r from-foreground to-muted-foreground bg-clip-text text-transparent truncate">
           {children}
         </h1>
       )}
@@ -159,60 +159,6 @@ function HeaderEditableTitle({ value, onChange, subtitle, className }: HeaderEdi
 
 function HeaderActions({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("flex items-center gap-2", className)}>{children}</div>;
-}
-
-function HeaderMobileDropdown({ children, className }: { children: ReactNode; className?: string }) {
-  const isMobile = useMobile();
-  const { pendingCount: permissionCount, setShowDialog, navigateToCurrent: navigateToPermission } = usePermissions();
-  const { pendingCount: questionCount, navigateToCurrent } = useQuestions();
-  const { open } = useSettingsDialog();
-
-  const totalPending = permissionCount + questionCount;
-
-  if (!isMobile) return null;
-
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="icon"
-          className={cn("text-foreground border-border hover:bg-accent transition-all duration-200 h-8 w-8 relative", className)}
-          title={totalPending > 0 ? `${totalPending} pending notification${totalPending > 1 ? 's' : ''}` : "Options"}
-        >
-          {totalPending > 0 ? (
-            <>
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-warning animate-pulse" />
-            </>
-          ) : (
-            <MoreVertical className="w-4 h-4" />
-          )}
-        </Button>
-      </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          {permissionCount > 0 && (
-            <DropdownMenuItem onClick={() => { navigateToPermission(); setShowDialog(true); }} className="gap-2">
-              <Bell className="w-4 h-4 text-warning" />
-            <span>{permissionCount} pending permission{permissionCount > 1 ? 's' : ''}</span>
-          </DropdownMenuItem>
-        )}
-        {questionCount > 0 && (
-          <DropdownMenuItem onClick={navigateToCurrent} className="gap-2">
-            <HelpCircle className="w-4 h-4 text-info" />
-            <span>{questionCount} pending question{questionCount > 1 ? 's' : ''}</span>
-          </DropdownMenuItem>
-        )}
-        {totalPending > 0 && children && <DropdownMenuSeparator />}
-        {children}
-        {children && <DropdownMenuSeparator />}
-        <DropdownMenuItem onClick={open} className="gap-2 bg-muted">
-          <Settings className="w-4 h-4" />
-          <span>Settings</span>
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
 }
 
 function HeaderSettingsButton() {

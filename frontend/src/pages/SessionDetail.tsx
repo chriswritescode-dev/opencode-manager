@@ -98,14 +98,6 @@ export function SessionDetail() {
   const [hasPromptContent, setHasPromptContent] = useState(false);
   const [minimizedQuestion, setMinimizedQuestion] = useState<QuestionRequest | null>(null);
 
-  const handleSwipeBack = useCallback(() => {
-    navigate(`/repos/${repoId}`);
-  }, [navigate, repoId]);
-
-  const { bind: bindSwipe, swipeStyles } = useSwipeBack(handleSwipeBack, {
-    enabled: !fileBrowserOpen && !modelDialogOpen && !sessionsDialogOpen,
-  });
-
   const isMobile = useMobile();
   const { keyboardHeight } = useVisualViewport();
   const inputBottomOffset = isMobile ? keyboardHeight : 0;
@@ -220,7 +212,7 @@ export function SessionDetail() {
   const handleMinimizeQuestion = useCallback((question: QuestionRequest) => {
     setMinimizedQuestion(question)
   }, [])
-
+  
   const handleRestoreQuestion = useCallback(() => {
     setMinimizedQuestion(null)
   }, [])
@@ -569,9 +561,6 @@ export function SessionDetail() {
                 <div className="absolute -top-12 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-primary/90 text-primary-foreground border border-primary shadow-lg backdrop-blur-md animate-pulse">
                   <span className="text-sm font-medium">Waiting for shortcut key...</span>
                 </div>
-              )}
-              {ttsEnabled && lastAssistantText && !hasPromptContent && !hasActiveStream && (
-                <FloatingTTSButton content={lastAssistantText} />
               )}
               {minimizedQuestion && minimizedQuestion.sessionID === sessionId && (
                 <MinimizedQuestionIndicator
