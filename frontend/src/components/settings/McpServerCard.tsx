@@ -23,7 +23,7 @@ interface McpServerCardProps {
 function getStatusBadge(status: McpStatus) {
   switch (status.status) {
     case 'connected':
-      return <Badge variant="default" className="text-xs bg-green-600">Connected</Badge>
+      return <Badge variant="success" className="text-xs">Connected</Badge>
     case 'disabled':
       return <Badge variant="secondary" className="text-xs">Disabled</Badge>
     case 'failed':
@@ -35,14 +35,14 @@ function getStatusBadge(status: McpStatus) {
       )
     case 'needs_auth':
       return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-yellow-500 text-yellow-600">
+        <Badge variant="warning" className="text-xs flex items-center gap-1">
           <Key className="h-3 w-3" />
           Auth Required
         </Badge>
       )
     case 'needs_client_registration':
       return (
-        <Badge variant="outline" className="text-xs flex items-center gap-1 border-orange-500 text-orange-600">
+        <Badge variant="info" className="text-xs flex items-center gap-1">
           <AlertCircle className="h-3 w-3" />
           Registration Required
         </Badge>

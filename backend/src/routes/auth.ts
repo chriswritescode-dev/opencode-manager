@@ -5,12 +5,42 @@ import { ENV } from '@opencode-manager/shared/config/env'
 import { logger } from '../utils/logger'
 import { hashPassword } from 'better-auth/crypto'
 
-export function createAuthRoutes(auth: AuthInstance): Hono {
+type PasskeyRow = {
+  credentialID: string
+  transports: string | null
+}
+
+function withAllowCredentials(body: string, passkeys: PasskeyRow[]): string {
+  try {
+    const options = JSON.parse(body) as {
+      allowCredentials?: Array<{ id: string; type?: string; transports?: string[] }>
+      [key: string]: unknown
+    }
+    if (options.allowCredentials?.length) {
+      return body
+    }
+    if (!passkeys.length) {
+      return body
+    }
+    options.allowCredentials = passkeys.map((pk) => ({
+      id: pk.credentialID,
+      type: 'public-key',
+      transports: pk.transports
+        ? pk.transports.split(',').map((t) => t.trim()).filter(Boolean)
+        : undefined,
+    }))
+    return JSON.stringify(options)
+  } catch {
+    return body
+  }
+}
+
+export function createAuthRoutes(auth: AuthInstance, db?: Database): Hono {
   const app = new Hono()
 
   app.all('/*', async (c) => {
     const response = await auth.handler(c.req.raw)
-    
+
     const setCookie = response.headers.get('set-cookie')
     if (c.req.path.includes('sign-in')) {
       logger.info(`Sign-in response - Status: ${response.status}, Set-Cookie: ${setCookie ? 'present' : 'missing'}`)
@@ -18,7 +48,33 @@ export function createAuthRoutes(auth: AuthInstance): Hono {
         logger.debug(`Set-Cookie header: ${setCookie.substring(0, 100)}...`)
       }
     }
-    
+
+    // better-auth only includes allowCredentials when a session exists.
+    // Discoverable (empty) options often make Windows Hello cancel immediately.
+    // Inject stored credential IDs so the authenticator can match the passkey.
+    if (
+      db &&
+      response.ok &&
+      c.req.method === 'GET' &&
+      c.req.path.includes('generate-authenticate-options')
+    ) {
+      const contentType = response.headers.get('content-type') || ''
+      if (contentType.includes('application/json')) {
+        const passkeys = db
+          .prepare('SELECT credentialID, transports FROM passkey')
+          .all() as PasskeyRow[]
+        const body = await response.text()
+        const nextBody = withAllowCredentials(body, passkeys)
+        const headers = new Headers(response.headers)
+        headers.delete('content-length')
+        return new Response(nextBody, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        })
+      }
+    }
+
     return response
   })
 
@@ -91,6 +147,7 @@ export function createAuthInfoRoutes(auth: AuthInstance, db: Database) {
       registrationEnabled: !adminConfigured,
       isFirstUser: hasUsers.count === 0,
       adminConfigured,
+      passkeyRpId: ENV.AUTH.PASSKEY_RP_ID,
     })
   })
 

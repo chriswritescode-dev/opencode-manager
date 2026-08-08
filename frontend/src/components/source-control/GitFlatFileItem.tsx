@@ -70,10 +70,10 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
       {(file.additions !== undefined || file.deletions !== undefined) && (
         <div className="flex items-center gap-1 text-xs flex-shrink-0">
           {file.additions !== undefined && file.additions > 0 && (
-            <span className="text-green-500">+{file.additions}</span>
+            <span className="text-success">+{file.additions}</span>
           )}
           {file.deletions !== undefined && file.deletions > 0 && (
-            <span className="text-red-500">-{file.deletions}</span>
+            <span className="text-destructive">-{file.deletions}</span>
           )}
         </div>
       )}
@@ -99,7 +99,7 @@ export function GitFlatFileItem({ file, isSelected, onSelect, onStage, onUnstage
           onClick={handleDiscard}
           title="Discard changes"
         >
-          <RotateCcw className="w-3 h-3 text-rose-500" />
+          <RotateCcw className="w-3 h-3 text-destructive" />
         </Button>
       )}
     </div>

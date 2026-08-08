@@ -6,6 +6,7 @@ export interface AuthConfig {
   registrationEnabled: boolean
   isFirstUser: boolean
   adminConfigured: boolean
+  passkeyRpId?: string
 }
 
 async function fetchAuthConfig(): Promise<AuthConfig> {

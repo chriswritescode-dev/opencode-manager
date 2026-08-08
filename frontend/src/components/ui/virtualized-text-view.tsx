@@ -84,7 +84,7 @@ const VirtualizedLine = memo(function VirtualizedLine({
 }: VirtualizedLineProps) {
   return (
     <div
-      className={`absolute flex overflow-hidden ${isHighlighted ? 'bg-yellow-500/30' : 'bg-background'}`}
+      className={`absolute flex overflow-hidden ${isHighlighted ? 'bg-warning/20' : 'bg-background'}`}
       style={{
         transform: `translate3d(0, ${top}px, 0)`,
         height,
@@ -112,7 +112,7 @@ const VirtualizedLine = memo(function VirtualizedLine({
           value={content}
           onChange={(e) => onLineChange(lineNum, e.target.value)}
           className={`flex-1 bg-transparent outline-none pl-2 text-[16px] md:text-sm ${
-            isEdited ? 'bg-yellow-500/10' : ''
+            isEdited ? 'bg-warning/10' : ''
           } ${
             lineWrap ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'
           }`}

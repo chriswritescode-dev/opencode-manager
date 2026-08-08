@@ -2,6 +2,8 @@ node_modules/
 *.log
 .env
 .env.local
+.env.*.local
+workspace-dev/
 dist/
 build/
 coverage/

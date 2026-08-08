@@ -346,7 +346,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
           <CardContent className="p-3">
             <div className="flex flex-col sm:flex-row sm:items-center items-center justify-center gap-3">
               <div className="flex items-center gap-2 flex-wrap justify-center ">
-                <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-green-500'}`} />
+                <div className={`h-3 w-3 rounded-full ${isUnhealthy ? 'bg-destructive animate-pulse' : 'bg-success'}`} />
                 <p className="font-medium text-sm sm:text-base">
                   Server Status: {isUnhealthy ? 'Unhealthy' : 'Healthy'}
                 </p>
@@ -706,7 +706,7 @@ export function OpenCodeConfigManager({ hideHealthStatus = false }: OpenCodeConf
               }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <FileText className="h-4 w-4 text-blue-500" />
+                <FileText className="h-4 w-4 text-info" />
                 <h4 className="text-sm font-medium truncate">Global Agent Instructions (AGENTS.md)</h4>
               </div>
               <ChevronDown className={`h-4 w-4 transition-transform ${expandedSections.agentsMd ? 'rotate-90' : ''}`} />

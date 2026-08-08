@@ -2,18 +2,18 @@ import { type LucideIcon } from 'lucide-react'
 import { Button } from './button'
 import { cn } from '@/lib/utils'
 
-type BadgeColor = 'orange' | 'blue'
+type BadgeColor = 'warning' | 'info'
 
 const colorStyles: Record<BadgeColor, { bg: string; hover: string; text: string }> = {
-  orange: {
-    bg: 'bg-orange-500/10',
-    hover: 'hover:bg-orange-500/20',
-    text: 'text-orange-500',
+  warning: {
+    bg: 'bg-warning/10',
+    hover: 'hover:bg-warning/18',
+    text: 'text-warning',
   },
-  blue: {
-    bg: 'bg-blue-500/10',
-    hover: 'hover:bg-blue-500/20',
-    text: 'text-blue-500',
+  info: {
+    bg: 'bg-info/10',
+    hover: 'hover:bg-info/18',
+    text: 'text-info',
   },
 }
 
@@ -53,12 +53,12 @@ export function PendingActionBadge({
       title={`${count} pending ${label}${count > 1 ? 's' : ''}`}
     >
       <Icon className="w-4 h-4" />
-      <span
-        className={cn(
-          'absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse',
-          color === 'orange' ? 'bg-orange-500' : 'bg-blue-500'
-        )}
-      />
-    </Button>
+        <span
+          className={cn(
+            'absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full animate-pulse',
+            color === 'warning' ? 'bg-warning' : 'bg-info'
+          )}
+        />
+      </Button>
   )
 }
