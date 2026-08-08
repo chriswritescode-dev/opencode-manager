@@ -115,6 +115,7 @@ export function TTSProvider({ children }: TTSProviderProps) {
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/tts/synthesize`, {
+        credentials: 'include',
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text }),
